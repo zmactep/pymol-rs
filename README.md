@@ -13,6 +13,7 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#usage">Usage</a> •
   <a href="#architecture">Architecture</a> •
+  <a href="#not-implemented-yet">Roadmap</a> •
   <a href="#license">License</a>
 </p>
 
@@ -163,6 +164,30 @@ executor.do_(&mut viewer, "color green, chain A")?;
 executor.do_(&mut viewer, "zoom")?;
 ```
 
+### Interactive Command Line
+
+Run the interactive viewer and use PyMOL-style commands:
+
+```bash
+cargo run --example interactive -- 1IGT.cif
+```
+
+```
+PyMOL> as cartoon
+PyMOL> color by_chain
+PyMOL> bg_color black
+PyMOL> show sticks, chain A and resi 1-100
+PyMOL> show surface, chain C
+PyMOL> color atomic, rep sticks
+PyMOL> hide cartoon, rep sticks
+PyMOL> png output.png, 1920, 1080
+PyMOL> quit
+```
+
+<p align="center">
+  <img src="images/output.png" alt="PyMOL-RS Example Output" width="800">
+</p>
+
 ## Controls
 
 ### Mouse
@@ -224,6 +249,20 @@ pymol-rs/
 │         pymol-io, pymol-settings        │
 └─────────────────────────────────────────┘
 ```
+
+## Not Implemented Yet
+
+PyMOL-RS is in active development. The following features are planned but not yet available:
+
+- **GUI** - End-user PyMOL-like graphical interface
+- **Labels** - Text labels for atoms and residues
+- **Measurements** - Distance, angle, and dihedral measurements
+- **Symmetry mates** - Crystallographic symmetry display
+- **Electron density maps** - Map visualization and contouring
+- **Movie export** - Video rendering
+- **Session files** - Save/load PyMOL sessions (.pse)
+- **Plugins** - Python plugin system
+- **Ray tracing** - High-quality offline rendering
 
 ## License
 
