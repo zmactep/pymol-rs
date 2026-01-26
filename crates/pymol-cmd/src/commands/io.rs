@@ -512,18 +512,20 @@ DESCRIPTION
 
 USAGE
 
-    fetch code [, name [, type [, async ]]]
+    fetch code [, name [, type ]]
 
 ARGUMENTS
 
     code = string: PDB ID (e.g., "1ubq")
     name = string: object name (default: PDB ID)
-    type = string: file type to fetch (default: pdb)
+    type = string: file type to fetch (default: cif)
+           Supported: "pdb", "cif" (or "mmcif")
 
 EXAMPLES
 
     fetch 1ubq
     fetch 4hhb, name=hemoglobin
+    fetch 1crn, type=pdb
 "#
     }
 
@@ -538,9 +540,20 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .unwrap_or(code);
 
+        // Parse the type argument (default: cif)
+        let format = args
+            .get_str(2)
+            .or_else(|| args.get_named_str("type"))
+            .map(|s| match s.to_lowercase().as_str() {
+                "pdb" => pymol_io::FetchFormat::Pdb,
+                "cif" | "mmcif" => pymol_io::FetchFormat::Cif,
+                _ => pymol_io::FetchFormat::default(),
+            })
+            .unwrap_or_default();
+
         // Fetch the structure
         #[cfg(feature = "fetch")]
-        let mol = pymol_io::fetch(code, pymol_io::FetchFormat::default())
+        let mol = pymol_io::fetch(code, format)
             .map_err(|e| CmdError::FileFormat(e.to_string()))?;
 
         #[cfg(all(feature = "fetch-async", not(feature = "fetch")))]
