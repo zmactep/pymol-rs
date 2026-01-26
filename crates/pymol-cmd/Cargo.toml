@@ -1,0 +1,35 @@
+[package]
+name = "pymol-cmd"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PyMOL command parsing and execution system"
+
+[features]
+default = []
+fetch = ["pymol-io/fetch"]
+fetch-async = ["pymol-io/fetch-async"]
+
+[dependencies]
+# Internal crates
+pymol-scene = { workspace = true }
+pymol-select = { workspace = true }
+pymol-io = { workspace = true }
+pymol-settings = { workspace = true }
+pymol-mol = { workspace = true }
+pymol-color = { workspace = true }
+
+# External dependencies
+nom = { workspace = true }
+thiserror = { workspace = true }
+ahash = { workspace = true }
+log = { workspace = true }
+lin_alg = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+winit = { workspace = true }
+pollster = "0.4"
+rustyline = { workspace = true }

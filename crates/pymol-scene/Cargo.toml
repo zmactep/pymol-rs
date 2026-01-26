@@ -1,0 +1,31 @@
+[package]
+name = "pymol-scene"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Scene management, camera, and window handling for PyMOL-RS"
+
+[dependencies]
+# Internal crates
+pymol-mol.workspace = true
+pymol-render.workspace = true
+pymol-color.workspace = true
+pymol-settings.workspace = true
+pymol-io.workspace = true
+
+# External dependencies
+lin_alg.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+thiserror.workspace = true
+log.workspace = true
+ahash.workspace = true
+bitflags.workspace = true
+parking_lot.workspace = true
+pollster = "0.4"
+image.workspace = true
+
+[dev-dependencies]
+env_logger.workspace = true

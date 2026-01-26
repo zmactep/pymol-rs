@@ -1,0 +1,11 @@
+[package]
+name = "pymol-settings"
+description = "Configuration and settings system for PyMOL-RS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+ahash = { workspace = true }

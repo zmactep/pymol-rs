@@ -1,0 +1,10 @@
+[package]
+name = "pymol-color"
+description = "Color system for PyMOL-RS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+ahash = { workspace = true }

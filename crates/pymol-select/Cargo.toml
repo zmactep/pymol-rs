@@ -1,0 +1,19 @@
+[package]
+name = "pymol-select"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PyMOL selection language parser and evaluator"
+
+[dependencies]
+pymol-mol = { workspace = true }
+lin_alg = { workspace = true }
+nom = { workspace = true }
+thiserror = { workspace = true }
+ahash = { workspace = true }
+bitvec = { workspace = true }
+phf = { workspace = true }
+
+[dev-dependencies]

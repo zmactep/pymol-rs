@@ -1,0 +1,29 @@
+[package]
+name = "pymol-io"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "File format parsers and writers for molecular structures"
+
+[features]
+default = []
+fetch = ["dep:ureq"]
+fetch-async = ["dep:reqwest"]
+
+[dependencies]
+pymol-mol = { path = "../pymol-mol" }
+nom = { workspace = true }
+thiserror = { workspace = true }
+flate2 = { workspace = true }
+memmap2 = { workspace = true }
+lin_alg = { workspace = true }
+
+# Optional fetch dependencies
+ureq = { version = "2", optional = true }
+reqwest = { version = "0.12", features = ["gzip"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,37 @@
+//! Command implementations
+//!
+//! This module contains all built-in command implementations organized by category.
+
+pub mod control;
+pub mod display;
+pub mod io;
+pub mod objects;
+pub mod selecting;
+pub mod settings;
+pub mod viewing;
+
+use crate::command::CommandRegistry;
+
+/// Register all built-in commands with the registry
+pub fn register_all(registry: &mut CommandRegistry) {
+    // File I/O commands
+    io::register(registry);
+
+    // Viewing commands
+    viewing::register(registry);
+
+    // Display commands
+    display::register(registry);
+
+    // Selection commands
+    selecting::register(registry);
+
+    // Object commands
+    objects::register(registry);
+
+    // Settings commands
+    settings::register(registry);
+
+    // Control commands
+    control::register(registry);
+}

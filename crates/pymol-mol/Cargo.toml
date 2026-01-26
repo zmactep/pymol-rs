@@ -1,0 +1,16 @@
+[package]
+name = "pymol-mol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Molecular data structures for PyMOL-RS"
+
+[dependencies]
+lin_alg = { workspace = true }
+pymol-settings = { workspace = true }
+thiserror = { workspace = true }
+bitflags = { workspace = true }
+ahash = { workspace = true }
+smallvec = { workspace = true }

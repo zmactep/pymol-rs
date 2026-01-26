@@ -1,0 +1,24 @@
+[package]
+name = "pymol-render"
+description = "wgpu-based rendering engine for PyMOL-RS molecular visualization"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pymol-mol = { workspace = true }
+pymol-color = { workspace = true }
+pymol-settings = { workspace = true }
+wgpu = { workspace = true }
+lin_alg = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+pymol-io = { workspace = true }
