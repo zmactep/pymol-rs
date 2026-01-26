@@ -128,8 +128,8 @@ EXAMPLES
             ctx.print(&format!(" Loaded \"{}\" as \"{}\"", filename, object_name));
         }
 
-        // Center on loaded molecule
-        ctx.viewer.center_on(&object_name);
+        // Zoom to loaded molecule (preserves rotation)
+        ctx.viewer.zoom_on(&object_name);
 
         Ok(())
     }
@@ -571,8 +571,8 @@ EXAMPLES
 
         ctx.print(&format!(" Fetched {} as \"{}\"", code, name));
 
-        // Center on fetched molecule
-        ctx.viewer.center_on(name);
+        // Zoom to fetched molecule (preserves rotation)
+        ctx.viewer.zoom_on(name);
 
         Ok(())
     }

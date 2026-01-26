@@ -250,28 +250,49 @@ impl Viewer {
         self.registry.add(obj)
     }
 
-    /// Center the camera on all objects
-    pub fn center_all(&mut self) {
+    /// Zoom the camera to fit all objects while preserving rotation
+    pub fn zoom_all(&mut self) {
         if let Some((min, max)) = self.registry.extent() {
-            self.camera.reset_view(min, max);
+            self.camera.zoom_to(min, max);
             self.needs_redraw = true;
         }
     }
 
-    /// Center the camera on a specific object
-    pub fn center_on(&mut self, name: &str) {
+    /// Zoom the camera to fit a specific object while preserving rotation
+    pub fn zoom_on(&mut self, name: &str) {
         if let Some(obj) = self.registry.get(name) {
             if let Some((min, max)) = obj.extent() {
-                self.camera.reset_view(min, max);
+                self.camera.zoom_to(min, max);
                 self.needs_redraw = true;
             }
         }
     }
 
-    /// Reset the camera to default view
+    /// Center the camera on all objects without changing zoom or rotation
+    pub fn center_all(&mut self) {
+        if let Some((min, max)) = self.registry.extent() {
+            self.camera.center_to(min, max);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Center the camera on a specific object without changing zoom or rotation
+    pub fn center_on(&mut self, name: &str) {
+        if let Some(obj) = self.registry.get(name) {
+            if let Some((min, max)) = obj.extent() {
+                self.camera.center_to(min, max);
+                self.needs_redraw = true;
+            }
+        }
+    }
+
+    /// Reset the camera to default view (resets everything including rotation)
     pub fn reset_view(&mut self) {
         self.camera = Camera::new();
-        self.center_all();
+        if let Some((min, max)) = self.registry.extent() {
+            self.camera.reset_view(min, max);
+            self.needs_redraw = true;
+        }
     }
 
     /// Set the background color

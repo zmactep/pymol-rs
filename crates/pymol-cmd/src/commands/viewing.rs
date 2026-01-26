@@ -75,9 +75,9 @@ EXAMPLES
             .or_else(|| args.get_named_float("animate"))
             .unwrap_or(0.0);
 
-        // For "all", zoom to all objects
+        // For "all", zoom to all objects (preserves rotation)
         if selection == "all" || selection == "*" {
-            ctx.viewer.center_all();
+            ctx.viewer.zoom_all();
             if !ctx.quiet {
                 ctx.print(" Zoomed to all objects");
             }
@@ -86,7 +86,7 @@ EXAMPLES
 
         // Try to zoom to a specific object by name
         if ctx.viewer.objects().contains(selection) {
-            ctx.viewer.center_on(selection);
+            ctx.viewer.zoom_on(selection);
             if !ctx.quiet {
                 ctx.print(&format!(" Zoomed to \"{}\"", selection));
             }
@@ -97,9 +97,9 @@ EXAMPLES
         let matches: Vec<String> = ctx.viewer.objects().matching(selection)
             .iter().map(|s| s.to_string()).collect();
         if !matches.is_empty() {
-            // For now, center on first match
+            // For now, zoom on first match
             if let Some(name) = matches.first() {
-                ctx.viewer.center_on(name);
+                ctx.viewer.zoom_on(name);
                 if !ctx.quiet {
                     ctx.print(&format!(" Zoomed to \"{}\"", name));
                 }
@@ -219,12 +219,9 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .unwrap_or("all");
 
-        // For now, just center - TODO: implement proper orientation
-        if selection == "all" || selection == "*" {
-            ctx.viewer.center_all();
-        } else if ctx.viewer.objects().contains(selection) {
-            ctx.viewer.center_on(selection);
-        }
+        // Reset view which includes resetting rotation
+        // TODO: implement proper principal axis orientation
+        ctx.viewer.reset_view();
 
         if !ctx.quiet {
             ctx.print(&format!(" Oriented to \"{}\"", selection));

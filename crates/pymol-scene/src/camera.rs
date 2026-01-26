@@ -406,6 +406,7 @@ impl Camera {
     }
 
     /// Reset the camera to view all (requires bounding box)
+    /// This resets the rotation to identity.
     pub fn reset_view(&mut self, bbox_min: Vec3, bbox_max: Vec3) {
         self.animation = None;
 
@@ -438,6 +439,55 @@ impl Camera {
         // Adjust clipping planes
         self.view.clip_front = (distance - radius).max(0.1);
         self.view.clip_back = distance + radius + radius;
+    }
+
+    /// Zoom to fit the bounding box while preserving the current rotation
+    pub fn zoom_to(&mut self, bbox_min: Vec3, bbox_max: Vec3) {
+        self.animation = None;
+
+        // Calculate center
+        let center = Vec3::new(
+            (bbox_min.x + bbox_max.x) * 0.5,
+            (bbox_min.y + bbox_max.y) * 0.5,
+            (bbox_min.z + bbox_max.z) * 0.5,
+        );
+
+        // Calculate bounding sphere radius
+        let extent = Vec3::new(
+            bbox_max.x - bbox_min.x,
+            bbox_max.y - bbox_min.y,
+            bbox_max.z - bbox_min.z,
+        );
+        let radius = (extent.x * extent.x + extent.y * extent.y + extent.z * extent.z).sqrt() * 0.5;
+
+        // Set origin to center
+        self.view.origin = center;
+
+        // Set distance to fit the bounding sphere
+        let fov_rad = self.view.fov * PI / 180.0;
+        let distance = radius / (fov_rad * 0.5).sin();
+        self.view.position.z = distance.max(10.0);
+
+        // Preserve rotation - do not reset it
+
+        // Adjust clipping planes
+        self.view.clip_front = (distance - radius).max(0.1);
+        self.view.clip_back = distance + radius + radius;
+    }
+
+    /// Center on a bounding box without changing zoom level or rotation
+    pub fn center_to(&mut self, bbox_min: Vec3, bbox_max: Vec3) {
+        self.animation = None;
+
+        // Calculate center
+        let center = Vec3::new(
+            (bbox_min.x + bbox_max.x) * 0.5,
+            (bbox_min.y + bbox_max.y) * 0.5,
+            (bbox_min.z + bbox_max.z) * 0.5,
+        );
+
+        // Only update the origin - preserve rotation and distance
+        self.view.origin = center;
     }
 
     /// Start an animated transition to a target view
