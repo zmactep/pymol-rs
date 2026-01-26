@@ -791,12 +791,12 @@ mod tests {
             },
         ];
 
-        let initial_y_variance: f32 = points.iter().map(|p| p.position.y.abs()).sum();
+        let _initial_y_variance: f32 = points.iter().map(|p| p.position.y.abs()).sum();
 
         refine_interpolated_points(&mut points, 2);
 
         // After refinement, the variance in Y should be reduced
-        let final_y_variance: f32 = points.iter().map(|p| p.position.y.abs()).sum();
+        let _final_y_variance: f32 = points.iter().map(|p| p.position.y.abs()).sum();
 
         // Endpoints should be unchanged
         assert!((points[0].position.y - 0.0).abs() < 1e-6);

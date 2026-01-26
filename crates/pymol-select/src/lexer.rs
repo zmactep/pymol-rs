@@ -103,82 +103,82 @@ impl Token {
 pub type LexResult<'a, T> = IResult<&'a str, T>;
 
 /// Parse whitespace (including multispace)
-fn ws(input: &str) -> LexResult<()> {
+fn ws(input: &str) -> LexResult<'_, ()> {
     value((), multispace0)(input)
 }
 
 /// Parse opening parenthesis
-fn lparen(input: &str) -> LexResult<Token> {
+fn lparen(input: &str) -> LexResult<'_, Token> {
     value(Token::LParen, char('('))(input)
 }
 
 /// Parse closing parenthesis
-fn rparen(input: &str) -> LexResult<Token> {
+fn rparen(input: &str) -> LexResult<'_, Token> {
     value(Token::RParen, char(')'))(input)
 }
 
 /// Parse comma
-fn comma(input: &str) -> LexResult<Token> {
+fn comma(input: &str) -> LexResult<'_, Token> {
     value(Token::Comma, char(','))(input)
 }
 
 /// Parse slash
-fn slash(input: &str) -> LexResult<Token> {
+fn slash(input: &str) -> LexResult<'_, Token> {
     value(Token::Slash, char('/'))(input)
 }
 
 /// Parse backtick
-fn backtick(input: &str) -> LexResult<Token> {
+fn backtick(input: &str) -> LexResult<'_, Token> {
     value(Token::Backtick, char('`'))(input)
 }
 
 /// Parse colon
-fn colon(input: &str) -> LexResult<Token> {
+fn colon(input: &str) -> LexResult<'_, Token> {
     value(Token::Colon, char(':'))(input)
 }
 
 /// Parse plus
-fn plus(input: &str) -> LexResult<Token> {
+fn plus(input: &str) -> LexResult<'_, Token> {
     value(Token::Plus, char('+'))(input)
 }
 
 /// Parse minus (but not part of a number)
-fn minus(input: &str) -> LexResult<Token> {
+fn minus(input: &str) -> LexResult<'_, Token> {
     value(Token::Minus, char('-'))(input)
 }
 
 /// Parse asterisk
-fn asterisk(input: &str) -> LexResult<Token> {
+fn asterisk(input: &str) -> LexResult<'_, Token> {
     value(Token::Asterisk, char('*'))(input)
 }
 
 /// Parse question mark
-fn question(input: &str) -> LexResult<Token> {
+fn question(input: &str) -> LexResult<'_, Token> {
     value(Token::Question, char('?'))(input)
 }
 
 /// Parse percent
-fn percent(input: &str) -> LexResult<Token> {
+fn percent(input: &str) -> LexResult<'_, Token> {
     value(Token::Percent, char('%'))(input)
 }
 
 /// Parse ampersand
-fn ampersand(input: &str) -> LexResult<Token> {
+fn ampersand(input: &str) -> LexResult<'_, Token> {
     value(Token::Ampersand, char('&'))(input)
 }
 
 /// Parse pipe
-fn pipe(input: &str) -> LexResult<Token> {
+fn pipe(input: &str) -> LexResult<'_, Token> {
     value(Token::Pipe, char('|'))(input)
 }
 
 /// Parse exclamation
-fn exclamation(input: &str) -> LexResult<Token> {
+fn exclamation(input: &str) -> LexResult<'_, Token> {
     value(Token::Exclamation, char('!'))(input)
 }
 
 /// Parse comparison operators
-fn comparison(input: &str) -> LexResult<Token> {
+fn comparison(input: &str) -> LexResult<'_, Token> {
     alt((
         value(Token::NotEquals, tag("!=")),
         value(Token::LessOrEqual, tag("<=")),
@@ -190,7 +190,7 @@ fn comparison(input: &str) -> LexResult<Token> {
 }
 
 /// Parse a number (integer or float) - does NOT consume leading minus
-fn number(input: &str) -> LexResult<Token> {
+fn number(input: &str) -> LexResult<'_, Token> {
     let (input, int_part) = digit1(input)?;
     let (input, frac_part) = opt(preceded(char('.'), digit1))(input)?;
 
@@ -218,7 +218,7 @@ fn is_ident_char(c: char) -> bool {
 }
 
 /// Parse an identifier
-fn ident(input: &str) -> LexResult<Token> {
+fn ident(input: &str) -> LexResult<'_, Token> {
     let (input, s) = recognize(pair(
         take_while1(is_ident_start),
         take_while(is_ident_char),
@@ -233,7 +233,7 @@ fn ident(input: &str) -> LexResult<Token> {
 }
 
 /// Parse an identifier that starts with a digit (like atom names "1H", "2HG")
-fn digit_ident(input: &str) -> LexResult<Token> {
+fn digit_ident(input: &str) -> LexResult<'_, Token> {
     let (input, s) = recognize(pair(
         digit1,
         take_while1(|c: char| c.is_alphabetic() || c == '\''),
@@ -242,7 +242,7 @@ fn digit_ident(input: &str) -> LexResult<Token> {
 }
 
 /// Parse a quoted string
-fn quoted_string(input: &str) -> LexResult<Token> {
+fn quoted_string(input: &str) -> LexResult<'_, Token> {
     let (input, s) = alt((
         delimited(char('"'), take_while(|c| c != '"'), char('"')),
         delimited(char('\''), take_while(|c| c != '\''), char('\'')),
@@ -251,12 +251,12 @@ fn quoted_string(input: &str) -> LexResult<Token> {
 }
 
 /// Parse end of input
-fn eof_token(input: &str) -> LexResult<Token> {
+fn eof_token(input: &str) -> LexResult<'_, Token> {
     value(Token::Eof, eof)(input)
 }
 
 /// Parse a single token
-fn token(input: &str) -> LexResult<Token> {
+fn token(input: &str) -> LexResult<'_, Token> {
     preceded(
         ws,
         alt((

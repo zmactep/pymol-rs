@@ -856,12 +856,12 @@ impl SettingStore {
     }
 
     /// Get read access to the inner settings
-    pub fn read(&self) -> parking_lot::RwLockReadGuard<GlobalSettings> {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, GlobalSettings> {
         self.inner.read()
     }
 
     /// Get write access to the inner settings
-    pub fn write(&self) -> parking_lot::RwLockWriteGuard<GlobalSettings> {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, GlobalSettings> {
         self.inner.write()
     }
 
