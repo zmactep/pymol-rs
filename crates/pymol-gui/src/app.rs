@@ -48,6 +48,8 @@ pub struct ViewerAdapter<'a> {
     pub clear_color: &'a mut [f32; 3],
     /// Flag to indicate if a redraw is needed
     pub needs_redraw: &'a mut bool,
+    /// Reference to named selections
+    pub selections: &'a mut std::collections::HashMap<String, String>,
 }
 
 impl<'a> ViewerLike for ViewerAdapter<'a> {
@@ -131,6 +133,22 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         // GUI doesn't support screenshot capture through this interface
         Err("Screenshot capture not yet implemented in GUI".to_string())
     }
+
+    fn get_selection(&self, name: &str) -> Option<&str> {
+        self.selections.get(name).map(|s| s.as_str())
+    }
+
+    fn define_selection(&mut self, name: &str, selection: &str) {
+        self.selections.insert(name.to_string(), selection.to_string());
+    }
+
+    fn remove_selection(&mut self, name: &str) -> bool {
+        self.selections.remove(name).is_some()
+    }
+
+    fn selection_names(&self) -> Vec<String> {
+        self.selections.keys().cloned().collect()
+    }
 }
 
 /// Main application state
@@ -174,6 +192,8 @@ pub struct App {
     camera: Camera,
     /// Object registry
     registry: ObjectRegistry,
+    /// Named selections (name -> selection expression)
+    selections: std::collections::HashMap<String, String>,
     /// Global settings
     settings: GlobalSettings,
     /// Named colors
@@ -252,6 +272,7 @@ impl App {
             viewport_rect: None,
             camera: Camera::new(),
             registry: ObjectRegistry::new(),
+            selections: std::collections::HashMap::new(),
             settings: GlobalSettings::new(),
             named_colors: NamedColors::default(),
             element_colors: ElementColors::default(),
@@ -731,6 +752,7 @@ impl App {
             named_colors: &self.named_colors,
             clear_color: &mut self.clear_color,
             needs_redraw: &mut self.needs_redraw,
+            selections: &mut self.selections,
         };
 
         // Use a fresh executor to avoid borrowing issues with self

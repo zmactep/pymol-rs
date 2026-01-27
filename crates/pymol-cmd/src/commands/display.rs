@@ -6,6 +6,7 @@ use pymol_select::AtomIndex;
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
 /// Register display commands
@@ -98,32 +99,23 @@ EXAMPLES
             RepMask::ALL.0
         };
 
-        // Get all object names
-        let object_names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+        // Evaluate selection with named selection support
+        let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
         // Apply to atoms matching the selection in each object
-        for name in &object_names {
-            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(name) {
-                // Use pymol_select to evaluate the selection against this molecule
-                let mol = mol_obj.molecule();
-                match pymol_select::select(mol, selection) {
-                    Ok(selected) => {
-                        if selected.count() > 0 {
-                            // Set object-level visibility for this rep
-                            mol_obj.state_mut().visible_reps.set_visible(rep);
-                            // Get mutable access and show rep on selected atoms
-                            let mol_mut = mol_obj.molecule_mut();
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                    atom.visible_reps.set_visible(rep);
-                                }
-                            }
-                            mol_obj.invalidate(DirtyFlags::REPS);
+        for (obj_name, selected) in selection_results {
+            if selected.count() > 0 {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    // Set object-level visibility for this rep
+                    mol_obj.state_mut().visible_reps.set_visible(rep);
+                    // Get mutable access and show rep on selected atoms
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            atom.visible_reps.set_visible(rep);
                         }
                     }
-                    Err(e) => {
-                        log::debug!("Selection error for {}: {:?}", name, e);
-                    }
+                    mol_obj.invalidate(DirtyFlags::REPS);
                 }
             }
         }
@@ -195,34 +187,25 @@ EXAMPLES
             RepMask::ALL.0
         };
 
-        // Get all object names
-        let object_names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+        // Evaluate selection with named selection support
+        let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
         // Apply to atoms matching the selection in each object
-        for name in &object_names {
-            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(name) {
-                // Use pymol_select to evaluate the selection against this molecule
-                let mol = mol_obj.molecule();
-                match pymol_select::select(mol, selection) {
-                    Ok(selected) => {
-                        if selected.count() > 0 {
-                            // Get mutable access and hide rep on selected atoms
-                            let mol_mut = mol_obj.molecule_mut();
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                    if rep == RepMask::ALL.0 {
-                                        atom.visible_reps = RepMask::NONE;
-                                    } else {
-                                        atom.visible_reps.set_hidden(rep);
-                                    }
-                                }
+        for (obj_name, selected) in selection_results {
+            if selected.count() > 0 {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    // Get mutable access and hide rep on selected atoms
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            if rep == RepMask::ALL.0 {
+                                atom.visible_reps = RepMask::NONE;
+                            } else {
+                                atom.visible_reps.set_hidden(rep);
                             }
-                            mol_obj.invalidate(DirtyFlags::REPS);
                         }
                     }
-                    Err(e) => {
-                        log::debug!("Selection error for {}: {:?}", name, e);
-                    }
+                    mol_obj.invalidate(DirtyFlags::REPS);
                 }
             }
         }
@@ -294,33 +277,24 @@ EXAMPLES
             CmdError::invalid_arg("representation", format!("unknown representation: {}", rep_name))
         })?;
 
-        // Get all object names
-        let object_names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+        // Evaluate selection with named selection support
+        let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
         // Apply to atoms matching the selection in each object
-        for name in &object_names {
-            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(name) {
-                // Use pymol_select to evaluate the selection against this molecule
-                let mol = mol_obj.molecule();
-                match pymol_select::select(mol, selection) {
-                    Ok(selected) => {
-                        if selected.count() > 0 {
-                            // Set object-level visibility for this rep
-                            mol_obj.state_mut().visible_reps.set_visible(rep);
-                            // Get mutable access: hide all reps, then show the specified one on selected atoms
-                            let mol_mut = mol_obj.molecule_mut();
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                    atom.visible_reps = RepMask::NONE;
-                                    atom.visible_reps.set_visible(rep);
-                                }
-                            }
-                            mol_obj.invalidate(DirtyFlags::REPS);
+        for (obj_name, selected) in selection_results {
+            if selected.count() > 0 {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    // Set object-level visibility for this rep
+                    mol_obj.state_mut().visible_reps.set_visible(rep);
+                    // Get mutable access: hide all reps, then show the specified one on selected atoms
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            atom.visible_reps = RepMask::NONE;
+                            atom.visible_reps.set_visible(rep);
                         }
                     }
-                    Err(e) => {
-                        log::debug!("Selection error for {}: {:?}", name, e);
-                    }
+                    mol_obj.invalidate(DirtyFlags::REPS);
                 }
             }
         }
@@ -604,46 +578,36 @@ EXAMPLES
             && !selection_lower.contains("rep ribbon")
             && !selection_lower.contains("rep ribb");
 
-        // Get all object names
-        let object_names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+        // Evaluate selection with named selection support
+        let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
         let mut total_colored = 0usize;
 
         // Apply color to atoms matching the selection in each object
-        for name in &object_names {
-            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(name) {
-                // Use pymol_select to evaluate the selection against this molecule
-                let mol = mol_obj.molecule();
-                match pymol_select::select(mol, selection) {
-                    Ok(selected) => {
-                        let count = selected.count();
-                        if count > 0 {
-                            // Get mutable access and set colors on selected atoms
-                            let mol_mut = mol_obj.molecule_mut();
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                    // If preserving cartoon/ribbon colors and the atom has these reps visible,
-                                    // save the current color to the rep-specific field before changing atom.color
-                                    if preserve_cartoon_color {
-                                        if atom.cartoon_color.is_none() && atom.visible_reps.is_visible(RepMask::CARTOON) {
-                                            atom.cartoon_color = Some(atom.color);
-                                        }
-                                        if atom.ribbon_color.is_none() && atom.visible_reps.is_visible(RepMask::RIBBON) {
-                                            atom.ribbon_color = Some(atom.color);
-                                        }
-                                    }
-                                    atom.color = color_index;
+        for (obj_name, selected) in selection_results {
+            let count = selected.count();
+            if count > 0 {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    // Get mutable access and set colors on selected atoms
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            // If preserving cartoon/ribbon colors and the atom has these reps visible,
+                            // save the current color to the rep-specific field before changing atom.color
+                            if preserve_cartoon_color {
+                                if atom.cartoon_color.is_none() && atom.visible_reps.is_visible(RepMask::CARTOON) {
+                                    atom.cartoon_color = Some(atom.color);
+                                }
+                                if atom.ribbon_color.is_none() && atom.visible_reps.is_visible(RepMask::RIBBON) {
+                                    atom.ribbon_color = Some(atom.color);
                                 }
                             }
-                            total_colored += count;
-                            // Mark the molecule as needing color rebuild
-                            mol_obj.invalidate(DirtyFlags::COLOR);
+                            atom.color = color_index;
                         }
                     }
-                    Err(e) => {
-                        // Log selection error but continue with other objects
-                        log::debug!("Selection error for {}: {:?}", name, e);
-                    }
+                    total_colored += count;
+                    // Mark the molecule as needing color rebuild
+                    mol_obj.invalidate(DirtyFlags::COLOR);
                 }
             }
         }

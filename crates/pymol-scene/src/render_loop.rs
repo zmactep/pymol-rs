@@ -64,6 +64,22 @@ pub trait ViewerLike {
     /// Set the background color
     fn set_background_color(&mut self, r: f32, g: f32, b: f32);
 
+    // =========================================================================
+    // Named Selections
+    // =========================================================================
+
+    /// Get a named selection expression by name
+    fn get_selection(&self, name: &str) -> Option<&str>;
+
+    /// Define (store) a named selection expression
+    fn define_selection(&mut self, name: &str, selection: &str);
+
+    /// Remove a named selection, returns true if it existed
+    fn remove_selection(&mut self, name: &str) -> bool;
+
+    /// Get all named selection names
+    fn selection_names(&self) -> Vec<String>;
+
     /// Capture a PNG screenshot (optional - not all viewers support this)
     ///
     /// Returns an error by default. Override for viewers that support screenshots.
@@ -121,6 +137,8 @@ pub struct Viewer {
     registry: ObjectRegistry,
     /// Scene manager
     scenes: SceneManager,
+    /// Named selections (name -> selection expression string)
+    selections: ahash::AHashMap<String, String>,
 
     // =========================================================================
     // Settings and Colors
@@ -186,6 +204,7 @@ impl Viewer {
             camera: Camera::new(),
             registry: ObjectRegistry::new(),
             scenes: SceneManager::new(),
+            selections: ahash::AHashMap::new(),
             settings: GlobalSettings::new(),
             named_colors: NamedColors::default(),
             element_colors: ElementColors::default(),
@@ -1203,6 +1222,22 @@ impl ViewerLike for Viewer {
 
     fn set_background_color(&mut self, r: f32, g: f32, b: f32) {
         Viewer::set_background_color(self, r, g, b)
+    }
+
+    fn get_selection(&self, name: &str) -> Option<&str> {
+        self.selections.get(name).map(|s| s.as_str())
+    }
+
+    fn define_selection(&mut self, name: &str, selection: &str) {
+        self.selections.insert(name.to_string(), selection.to_string());
+    }
+
+    fn remove_selection(&mut self, name: &str) -> bool {
+        self.selections.remove(name).is_some()
+    }
+
+    fn selection_names(&self) -> Vec<String> {
+        self.selections.keys().cloned().collect()
     }
 
     fn capture_png(
