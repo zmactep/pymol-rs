@@ -3,6 +3,7 @@
 //! The [`Viewer`] struct is the main application entry point, coordinating
 //! window management, input handling, and rendering.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,6 +21,61 @@ use pymol_mol::RepMask;
 use crate::camera::Camera;
 use crate::error::{ViewerError, WindowError};
 use crate::keybindings::{KeyBinding, KeyBindings};
+use crate::object::ObjectRegistry;
+
+/// Trait for types that can serve as a viewer backend for command execution
+///
+/// This trait abstracts the viewer interface, allowing commands to work with
+/// different viewer implementations (e.g., `Viewer`, GUI adapters).
+pub trait ViewerLike {
+    /// Get a reference to the object registry
+    fn objects(&self) -> &ObjectRegistry;
+
+    /// Get a mutable reference to the object registry
+    fn objects_mut(&mut self) -> &mut ObjectRegistry;
+
+    /// Get a reference to the camera
+    fn camera(&self) -> &Camera;
+
+    /// Get a mutable reference to the camera
+    fn camera_mut(&mut self) -> &mut Camera;
+
+    /// Zoom to fit all objects while preserving rotation
+    fn zoom_all(&mut self);
+
+    /// Zoom to fit a specific object while preserving rotation
+    fn zoom_on(&mut self, name: &str);
+
+    /// Center on all objects without changing zoom or rotation
+    fn center_all(&mut self);
+
+    /// Center on a specific object without changing zoom or rotation
+    fn center_on(&mut self, name: &str);
+
+    /// Reset the camera to default view
+    fn reset_view(&mut self);
+
+    /// Request a redraw
+    fn request_redraw(&mut self);
+
+    /// Get a color index by name
+    fn color_index(&self, name: &str) -> Option<u32>;
+
+    /// Set the background color
+    fn set_background_color(&mut self, r: f32, g: f32, b: f32);
+
+    /// Capture a PNG screenshot (optional - not all viewers support this)
+    ///
+    /// Returns an error by default. Override for viewers that support screenshots.
+    fn capture_png(
+        &mut self,
+        _path: &Path,
+        _width: Option<u32>,
+        _height: Option<u32>,
+    ) -> Result<(), String> {
+        Err("Screenshot capture not supported by this viewer".to_string())
+    }
+}
 
 /// Type alias for key action callbacks
 ///
@@ -27,7 +83,7 @@ use crate::keybindings::{KeyBinding, KeyBindings};
 /// and can perform any operation on it.
 pub type KeyAction = Arc<dyn Fn(&mut Viewer) + Send + Sync>;
 use crate::input::{CameraDelta, InputState};
-use crate::object::{MoleculeObject, Object, ObjectRegistry};
+use crate::object::{MoleculeObject, Object};
 use crate::scene::SceneManager;
 use crate::window::Window;
 
@@ -1093,6 +1149,69 @@ impl ApplicationHandler for Viewer {
 
             _ => {}
         }
+    }
+}
+
+// ============================================================================
+// ViewerLike implementation
+// ============================================================================
+
+impl ViewerLike for Viewer {
+    fn objects(&self) -> &ObjectRegistry {
+        &self.registry
+    }
+
+    fn objects_mut(&mut self) -> &mut ObjectRegistry {
+        &mut self.registry
+    }
+
+    fn camera(&self) -> &Camera {
+        &self.camera
+    }
+
+    fn camera_mut(&mut self) -> &mut Camera {
+        &mut self.camera
+    }
+
+    fn zoom_all(&mut self) {
+        Viewer::zoom_all(self)
+    }
+
+    fn zoom_on(&mut self, name: &str) {
+        Viewer::zoom_on(self, name)
+    }
+
+    fn center_all(&mut self) {
+        Viewer::center_all(self)
+    }
+
+    fn center_on(&mut self, name: &str) {
+        Viewer::center_on(self, name)
+    }
+
+    fn reset_view(&mut self) {
+        Viewer::reset_view(self)
+    }
+
+    fn request_redraw(&mut self) {
+        Viewer::request_redraw(self)
+    }
+
+    fn color_index(&self, name: &str) -> Option<u32> {
+        Viewer::color_index(self, name)
+    }
+
+    fn set_background_color(&mut self, r: f32, g: f32, b: f32) {
+        Viewer::set_background_color(self, r, g, b)
+    }
+
+    fn capture_png(
+        &mut self,
+        path: &Path,
+        width: Option<u32>,
+        height: Option<u32>,
+    ) -> Result<(), String> {
+        Viewer::capture_png(self, path, width, height).map_err(|e| e.to_string())
     }
 }
 

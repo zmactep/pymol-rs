@@ -9,8 +9,8 @@ members = [
     "crates/pymol-render",
     "crates/pymol-scene",
     "crates/pymol-cmd",
-    # These will be added as they are implemented:
-    # "crates/pymol-core",
+    "crates/pymol-python",
+    "crates/pymol-gui",
 ]
 
 [workspace.package]
@@ -30,7 +30,8 @@ pymol-io = { path = "crates/pymol-io" }
 pymol-render = { path = "crates/pymol-render" }
 pymol-scene = { path = "crates/pymol-scene" }
 pymol-cmd = { path = "crates/pymol-cmd" }
-# pymol-core = { path = "crates/pymol-core" }
+pymol-python = { path = "crates/pymol-python" }
+pymol-gui = { path = "crates/pymol-gui" }
 
 # External dependencies
 bitflags = "2"
@@ -53,3 +54,9 @@ bitvec = "1"
 phf = { version = "0.11", features = ["macros"] }
 rustyline = "14"
 image = { version = "0.25", default-features = false, features = ["png"] }
+pollster = "0.4"
+
+# egui integration
+egui = "0.30"
+egui-wgpu = "0.30"
+egui-winit = "0.30"

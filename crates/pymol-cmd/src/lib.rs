@@ -49,7 +49,7 @@ mod script;
 
 // Re-export main types
 pub use args::{ArgDef, ArgType, ArgValue, ParsedCommand};
-pub use command::{Command, CommandContext, CommandRegistry};
+pub use command::{Command, CommandContext, CommandRegistry, ViewerLike};
 pub use error::{CmdError, CmdResult, ParseError};
 pub use executor::CommandExecutor;
 pub use history::CommandHistory;
@@ -60,7 +60,7 @@ pub use script::ScriptEngine;
 /// Prelude for convenient imports
 pub mod prelude {
     pub use crate::args::{ArgDef, ArgValue, ParsedCommand};
-    pub use crate::command::{Command, CommandContext, CommandRegistry};
+    pub use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
     pub use crate::error::{CmdError, CmdResult};
     pub use crate::executor::CommandExecutor;
     pub use crate::parser::{parse_command, parse_commands};

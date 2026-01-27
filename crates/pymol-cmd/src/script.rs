@@ -5,8 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pymol_scene::Viewer;
-
+use crate::command::ViewerLike;
 use crate::error::{CmdError, CmdResult};
 use crate::executor::CommandExecutor;
 
@@ -61,7 +60,7 @@ impl ScriptEngine {
     }
 
     /// Run a .pml script file
-    pub fn run_pml(&mut self, viewer: &mut Viewer, path: &Path) -> CmdResult {
+    pub fn run_pml(&mut self, viewer: &mut dyn ViewerLike, path: &Path) -> CmdResult {
         // Check include depth
         if self.script_stack.len() >= self.max_include_depth {
             return Err(CmdError::Script {
@@ -103,14 +102,14 @@ impl ScriptEngine {
     }
 
     /// Run a script string
-    pub fn run_string(&mut self, viewer: &mut Viewer, script: &str) -> CmdResult {
+    pub fn run_string(&mut self, viewer: &mut dyn ViewerLike, script: &str) -> CmdResult {
         self.run_string_with_base(viewer, script, None)
     }
 
     /// Run a script string with a base directory for relative paths
     fn run_string_with_base(
         &mut self,
-        viewer: &mut Viewer,
+        viewer: &mut dyn ViewerLike,
         script: &str,
         base_dir: Option<&Path>,
     ) -> CmdResult {
@@ -153,12 +152,12 @@ impl ScriptEngine {
     }
 
     /// Execute a single command through the engine
-    pub fn do_(&mut self, viewer: &mut Viewer, cmd: &str) -> CmdResult {
+    pub fn do_(&mut self, viewer: &mut dyn ViewerLike, cmd: &str) -> CmdResult {
         self.executor.do_(viewer, cmd)
     }
 
     /// Execute multiple commands through the engine
-    pub fn do_multi(&mut self, viewer: &mut Viewer, cmds: &str) -> CmdResult {
+    pub fn do_multi(&mut self, viewer: &mut dyn ViewerLike, cmds: &str) -> CmdResult {
         self.executor.do_multi(viewer, cmds)
     }
 }

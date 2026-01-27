@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use ahash::AHashMap;
-use pymol_scene::Viewer;
+
+// Re-export ViewerLike from pymol-scene
+pub use pymol_scene::ViewerLike;
 
 use crate::args::{ArgDef, ParsedCommand};
 use crate::error::CmdResult;
@@ -13,18 +15,19 @@ use crate::error::CmdResult;
 /// Command execution context
 ///
 /// Provides access to the viewer state and execution options.
-pub struct CommandContext<'a> {
+/// Generic over `V: ViewerLike` to support different viewer implementations.
+pub struct CommandContext<'a, V: ViewerLike + ?Sized> {
     /// Reference to the viewer (scene, objects, camera, settings)
-    pub viewer: &'a mut Viewer,
+    pub viewer: &'a mut V,
     /// Whether to suppress output messages
     pub quiet: bool,
     /// Whether to log this command
     pub log: bool,
 }
 
-impl<'a> CommandContext<'a> {
+impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
     /// Create a new command context
-    pub fn new(viewer: &'a mut Viewer) -> Self {
+    pub fn new(viewer: &'a mut V) -> Self {
         Self {
             viewer,
             quiet: false,
@@ -33,7 +36,7 @@ impl<'a> CommandContext<'a> {
     }
 
     /// Create a quiet context (no output)
-    pub fn quiet(viewer: &'a mut Viewer) -> Self {
+    pub fn quiet(viewer: &'a mut V) -> Self {
         Self {
             viewer,
             quiet: true,
@@ -75,7 +78,9 @@ pub trait Command: Send + Sync {
     fn name(&self) -> &str;
 
     /// Execute the command
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult;
+    /// 
+    /// Uses a lifetime parameter to allow the context to borrow from non-'static viewers.
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult;
 
     /// Get help text for this command
     fn help(&self) -> &str {
@@ -250,7 +255,7 @@ mod tests {
             &self.name
         }
 
-        fn execute(&self, _ctx: &mut CommandContext, _args: &ParsedCommand) -> CmdResult {
+        fn execute<'a>(&self, _ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
             Ok(())
         }
 

@@ -1,0 +1,49 @@
+[package]
+name = "pymol-python"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for pymol-rs using PyO3"
+
+[lib]
+name = "pymol"
+crate-type = ["cdylib"]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { workspace = true }
+
+# Internal crates
+pymol-mol.workspace = true
+pymol-io = { workspace = true, features = ["fetch"] }
+pymol-select.workspace = true
+pymol-color.workspace = true
+pymol-settings.workspace = true
+pymol-render.workspace = true
+pymol-scene.workspace = true
+pymol-cmd.workspace = true
+
+# External dependencies
+lin_alg.workspace = true
+thiserror.workspace = true
+log.workspace = true
+env_logger.workspace = true
+parking_lot.workspace = true
+
+[features]
+default = []
+# Enable numpy array support for coordinate data
+numpy = ["dep:numpy"]
+
+[dependencies.numpy]
+version = "0.22"
+optional = true
+
+[dev-dependencies]
+pyo3 = { workspace = true, features = ["auto-initialize"] }
+
+[lints.rust]
+# Suppress warnings from PyO3's create_exception! macro which checks for gil-refs feature
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"gil-refs\"))"] }

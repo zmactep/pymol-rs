@@ -57,7 +57,7 @@ pub use keybindings::{KeyBinding, KeyBindings, KeyCode};
 pub use movie::{LoopMode, Movie, MovieFrame, PlaybackState, PlayDirection};
 pub use object::{DirtyFlags, MoleculeObject, Object, ObjectRegistry, ObjectState, ObjectType};
 pub use pick::{PickHit, Picker};
-pub use render_loop::{run, Viewer};
+pub use render_loop::{run, Viewer, ViewerLike};
 pub use scene::{Scene, SceneAtomData, SceneManager, SceneObjectData, SceneStoreMask};
 pub use window::Window;
 

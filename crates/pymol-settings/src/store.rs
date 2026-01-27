@@ -365,7 +365,7 @@ struct UniqueEntry {
 
 /// Storage for per-atom/bond settings using a sparse representation
 /// Uses a linked-list style approach similar to PyMOL for memory efficiency
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct UniqueSettings {
     /// Map from unique_id to first entry index
     id_to_offset: AHashMap<UniqueId, usize>,

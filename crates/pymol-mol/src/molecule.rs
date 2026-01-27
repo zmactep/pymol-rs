@@ -21,7 +21,7 @@ use crate::residue::{ChainIterator, ResidueIterator};
 /// - Bond connectivity
 /// - Coordinates for one or more states (conformations)
 /// - Per-object and per-atom/bond settings
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ObjectMolecule {
     // =========================================================================
     // Core Data

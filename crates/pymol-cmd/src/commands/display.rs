@@ -5,7 +5,7 @@ use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry};
+use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
 /// Register display commands
@@ -79,7 +79,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let rep_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("representation"));
@@ -176,7 +176,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let rep_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("representation"));
@@ -279,7 +279,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let rep_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("representation"))
@@ -368,7 +368,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -429,7 +429,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -488,7 +488,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -565,7 +565,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let color_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("color"))
@@ -695,7 +695,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let color_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("color"))

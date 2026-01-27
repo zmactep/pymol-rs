@@ -1,12 +1,10 @@
 //! Command executor
 //!
-//! Dispatches and executes commands against a Viewer.
+//! Dispatches and executes commands against a ViewerLike implementation.
 
 use std::path::Path;
 
-use pymol_scene::Viewer;
-
-use crate::command::{CommandContext, CommandRegistry};
+use crate::command::{CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
 use crate::logger::CommandLogger;
@@ -91,7 +89,7 @@ impl CommandExecutor {
     /// Execute a single command string
     ///
     /// # Arguments
-    /// * `viewer` - The viewer to execute against
+    /// * `viewer` - The viewer to execute against (implements ViewerLike)
     /// * `cmd` - The command string to execute
     ///
     /// # Example
@@ -99,20 +97,20 @@ impl CommandExecutor {
     /// executor.do_(&mut viewer, "load protein.pdb")?;
     /// executor.do_(&mut viewer, "zoom")?;
     /// ```
-    pub fn do_(&mut self, viewer: &mut Viewer, cmd: &str) -> CmdResult {
+    pub fn do_(&mut self, viewer: &mut dyn ViewerLike, cmd: &str) -> CmdResult {
         self.do_with_options(viewer, cmd, true, true)
     }
 
     /// Execute a command with options
     ///
     /// # Arguments
-    /// * `viewer` - The viewer to execute against
+    /// * `viewer` - The viewer to execute against (implements ViewerLike)
     /// * `cmd` - The command string
     /// * `log` - Whether to log the command
     /// * `quiet` - Whether to suppress output
     pub fn do_with_options(
         &mut self,
-        viewer: &mut Viewer,
+        viewer: &mut dyn ViewerLike,
         cmd: &str,
         log: bool,
         quiet: bool,
@@ -157,7 +155,7 @@ impl CommandExecutor {
     /// Execute multiple commands (semicolon or newline separated)
     ///
     /// Stops on first error unless the command is prefixed with `-` (silent fail).
-    pub fn do_multi(&mut self, viewer: &mut Viewer, cmds: &str) -> CmdResult {
+    pub fn do_multi(&mut self, viewer: &mut dyn ViewerLike, cmds: &str) -> CmdResult {
         let commands = parse_commands(cmds)?;
 
         for cmd in commands {
@@ -178,7 +176,7 @@ impl CommandExecutor {
     }
 
     /// Execute a .pml script file
-    pub fn run_script(&mut self, viewer: &mut Viewer, path: &Path) -> CmdResult {
+    pub fn run_script(&mut self, viewer: &mut dyn ViewerLike, path: &Path) -> CmdResult {
         let content = std::fs::read_to_string(path).map_err(|e| CmdError::Io(e))?;
         self.do_multi(viewer, &content).map_err(|e| match e {
             CmdError::Parse(pe) => CmdError::Script {

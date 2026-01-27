@@ -1,0 +1,37 @@
+[package]
+name = "pymol-gui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PyMOL-RS GUI application with egui interface"
+
+[[bin]]
+name = "pymol-rs"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+pymol-scene = { workspace = true }
+pymol-cmd = { workspace = true }
+pymol-mol = { workspace = true }
+pymol-io = { workspace = true }
+pymol-settings = { workspace = true }
+pymol-color = { workspace = true }
+pymol-render = { workspace = true }
+
+# egui integration
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }
+
+# Graphics
+winit = { workspace = true }
+wgpu = { workspace = true }
+lin_alg = { workspace = true }
+
+# Utilities
+log = { workspace = true }
+env_logger = { workspace = true }
+pollster = { workspace = true }

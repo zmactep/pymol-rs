@@ -269,9 +269,19 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
 
         // References
         SelectionExpr::Selection(name) => {
-            ctx.get_selection(name)
-                .cloned()
-                .ok_or_else(|| EvalError::SelectionNotFound(name.clone()))
+            // First try as named selection
+            if let Some(result) = ctx.get_selection(name) {
+                return Ok(result.clone());
+            }
+            // Fall back to model/object name matching (like "model name")
+            let pattern = Pattern::Exact(name.clone());
+            let result = eval_model(ctx, &pattern)?;
+            if result.count() > 0 {
+                Ok(result)
+            } else {
+                // Neither named selection nor model found with atoms
+                Err(EvalError::SelectionNotFound(name.clone()))
+            }
         }
         SelectionExpr::Macro(spec) => eval_macro(ctx, spec),
     }

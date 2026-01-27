@@ -7,7 +7,7 @@ use pymol_io::{read_file, write_file, FileFormat};
 use pymol_scene::MoleculeObject;
 
 use crate::args::{ArgDef, ParsedCommand};
-use crate::command::{Command, CommandContext, CommandRegistry};
+use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
 /// Register I/O commands
@@ -66,7 +66,7 @@ EXAMPLES
         ARGS
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         // Get filename (required)
         let filename = args
             .get_str(0)
@@ -172,7 +172,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let filename = args
             .get_str(0)
             .or_else(|| args.get_named_str("filename"))
@@ -253,7 +253,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         // Get filename (required)
         let filename = args
             .get_str(0)
@@ -355,7 +355,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let path = args.get_str(0).or_else(|| args.get_named_str("path"));
 
         let target = if let Some(p) = path {
@@ -406,7 +406,7 @@ USAGE
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, _args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
         let cwd = env::current_dir().map_err(|e| CmdError::execution(e.to_string()))?;
 
         ctx.print(&format!(" {}", cwd.display()));
@@ -452,7 +452,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let path = args
             .get_str(0)
             .or_else(|| args.get_named_str("path"))
@@ -529,7 +529,7 @@ EXAMPLES
 "#
     }
 
-    fn execute(&self, ctx: &mut CommandContext, args: &ParsedCommand) -> CmdResult {
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let code = args
             .get_str(0)
             .or_else(|| args.get_named_str("code"))
