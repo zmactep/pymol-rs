@@ -9,9 +9,10 @@ members = [
     "crates/pymol-render",
     "crates/pymol-scene",
     "crates/pymol-cmd",
-    "crates/pymol-python",
     "crates/pymol-gui",
 ]
+# pymol-python requires maturin to build (use: cd crates/pymol-python && maturin build)
+exclude = ["crates/pymol-python"]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,7 +31,6 @@ pymol-io = { path = "crates/pymol-io" }
 pymol-render = { path = "crates/pymol-render" }
 pymol-scene = { path = "crates/pymol-scene" }
 pymol-cmd = { path = "crates/pymol-cmd" }
-pymol-python = { path = "crates/pymol-python" }
 pymol-gui = { path = "crates/pymol-gui" }
 
 # External dependencies
@@ -38,7 +38,7 @@ bitflags = "2"
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
 wgpu = "23"
 winit = "0.30"
-pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3 = { version = "0.27", features = ["extension-module"] }
 nom = "7"
 thiserror = "2"
 log = "0.4"

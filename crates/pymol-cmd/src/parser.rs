@@ -16,7 +16,7 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped, tag, take_till, take_while, take_while1},
     character::complete::{char, multispace0, none_of, one_of},
-    combinator::{map, recognize, value},
+    combinator::{map, recognize},
     multi::{many0, separated_list0},
     number::complete::recognize_float,
     sequence::{delimited, pair, preceded, tuple},
@@ -378,10 +378,33 @@ fn parse_number(input: &str) -> IResult<&str, ArgValue> {
 
 /// Parse boolean keywords
 fn parse_bool(input: &str) -> IResult<&str, ArgValue> {
-    alt((
-        value(ArgValue::Bool(true), alt((tag("true"), tag("on"), tag("yes")))),
-        value(ArgValue::Bool(false), alt((tag("false"), tag("off"), tag("no")))),
-    ))(input)
+    let (remaining, keyword) = alt((
+        tag("true"),
+        tag("false"),
+        tag("yes"),
+        tag("no"),
+        tag("on"),
+        tag("off"),
+    ))(input)?;
+
+    // Ensure word boundary - next char must not be alphanumeric or underscore
+    if !remaining.is_empty() {
+        let next_char = remaining.chars().next().unwrap();
+        if next_char.is_alphanumeric() || next_char == '_' {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Tag,
+            )));
+        }
+    }
+
+    let value = match keyword {
+        "true" | "yes" | "on" => ArgValue::Bool(true),
+        "false" | "no" | "off" => ArgValue::Bool(false),
+        _ => unreachable!(),
+    };
+
+    Ok((remaining, value))
 }
 
 /// Parse an unquoted value (stops at comma, semicolon, or whitespace before named arg)
@@ -501,5 +524,30 @@ mod tests {
         } else {
             panic!("Expected list argument");
         }
+    }
+
+    #[test]
+    fn test_selection_with_not_operator() {
+        // "not" should not be partially matched as "no" (boolean)
+        let cmd = parse_command("select nca, not (chain A)").unwrap();
+        assert_eq!(cmd.name, "select");
+        assert_eq!(cmd.get_str(0), Some("nca"));
+        assert_eq!(cmd.get_str(1), Some("not (chain A)"));
+    }
+
+    #[test]
+    fn test_bool_word_boundary() {
+        // "no" as standalone boolean should still work
+        let cmd = parse_command("set valence, no").unwrap();
+        assert_eq!(cmd.name, "set");
+        assert_eq!(cmd.get_bool(1), Some(false));
+
+        // "on" as standalone boolean should still work
+        let cmd = parse_command("set valence, on").unwrap();
+        assert_eq!(cmd.get_bool(1), Some(true));
+
+        // "notable" should not match "no" - it's an identifier
+        let cmd = parse_command("select notable").unwrap();
+        assert_eq!(cmd.get_str(0), Some("notable"));
     }
 }

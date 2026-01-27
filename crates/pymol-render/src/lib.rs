@@ -68,6 +68,9 @@ pub use representation::dot::DotRep;
 pub use representation::line::LineRep;
 pub use representation::mesh::MeshRep;
 pub use representation::ribbon::RibbonRep;
+pub use representation::selection_indicator::{
+    SelectionIndicatorRep, DEFAULT_INDICATOR_SIZE, SELECTION_INDICATOR_COLOR,
+};
 pub use representation::sphere::SphereRep;
 pub use representation::stick::StickRep;
 pub use representation::surface::{Grid3D, SurfaceRep, SurfaceType};

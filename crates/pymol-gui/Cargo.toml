@@ -17,6 +17,7 @@ pymol-scene = { workspace = true }
 pymol-cmd = { workspace = true }
 pymol-mol = { workspace = true }
 pymol-io = { workspace = true }
+pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
 pymol-color = { workspace = true }
 pymol-render = { workspace = true }

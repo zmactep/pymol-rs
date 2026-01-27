@@ -173,8 +173,11 @@ EXAMPLES
         // Evaluate the selection to count atoms and validate it
         let (total_count, _results) = select_with_context(ctx.viewer, selection)?;
 
-        // Store the selection expression in the viewer
+        // Store the selection expression in the viewer (creates with visible=true by default)
         ctx.viewer.define_selection(name, selection);
+        
+        // Ensure the selection is visible (show indicators)
+        ctx.viewer.set_selection_visible(name, true);
 
         if !ctx.quiet {
             ctx.print(&format!(" Selector: selection \"{}\" defined with {} atoms.", name, total_count));
@@ -267,7 +270,9 @@ impl Command for IndicateCommand {
         r#"
 DESCRIPTION
 
-    "indicate" shows a visual indicator for the specified selection.
+    "indicate" shows a visual indicator (pink/magenta dots) for the specified
+    selection in the 3D viewport. This helps visualize which atoms are 
+    currently selected.
 
 USAGE
 
@@ -275,25 +280,72 @@ USAGE
 
 ARGUMENTS
 
-    selection = string: selection to indicate (default: all)
+    selection = string: selection to indicate (default: sele)
+                Use "none" or empty to clear the indication.
 
 EXAMPLES
 
     indicate chain A
     indicate organic
+    indicate sele
+    indicate none
 "#
     }
 
     fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
         let selection = args
             .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+            .or_else(|| args.get_named_str("selection"));
 
-        // TODO: Show visual indicator for selection
-
-        if !ctx.quiet {
-            ctx.print(&format!(" Indicating \"{}\"", selection));
+        match selection {
+            Some("none") | Some("") => {
+                // Clear indication when "none" or empty is specified
+                ctx.viewer.clear_indication();
+                if !ctx.quiet {
+                    ctx.print(" Indication cleared.");
+                }
+            }
+            None => {
+                // No arguments - default to "sele"
+                let sel = "sele";
+                
+                // Check if "sele" is a named selection that exists
+                if ctx.viewer.get_selection(sel).is_some() {
+                    // Make the existing selection visible
+                    ctx.viewer.set_selection_visible(sel, true);
+                    let (count, _) = select_with_context(ctx.viewer, sel)?;
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Indicating \"{}\" ({} atoms)", sel, count));
+                    }
+                } else {
+                    // "sele" doesn't exist - create it with "all" as default
+                    let (count, _) = select_with_context(ctx.viewer, "all")?;
+                    ctx.viewer.define_selection(sel, "all");
+                    ctx.viewer.set_selection_visible(sel, true);
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Indicating \"{}\" ({} atoms)", sel, count));
+                    }
+                }
+            }
+            Some(sel) => {
+                // Check if this is an existing named selection
+                if ctx.viewer.get_selection(sel).is_some() {
+                    // Make the existing selection visible
+                    ctx.viewer.set_selection_visible(sel, true);
+                    let (count, _) = select_with_context(ctx.viewer, sel)?;
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Indicating \"{}\" ({} atoms)", sel, count));
+                    }
+                } else {
+                    // It's a selection expression - create/update "indicate" selection
+                    let (count, _) = select_with_context(ctx.viewer, sel)?;
+                    ctx.viewer.define_selection("indicate", sel);
+                    ctx.viewer.set_selection_visible("indicate", true);
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Indicating \"{}\" ({} atoms)", sel, count));
+                    }
+                }
+            }
         }
 
         Ok(())

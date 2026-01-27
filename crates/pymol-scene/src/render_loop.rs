@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
+use pymol_select::{EvalContext, SelectionResult};
 use pymol_settings::GlobalSettings;
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, WindowEvent};
@@ -22,6 +23,29 @@ use crate::camera::Camera;
 use crate::error::{ViewerError, WindowError};
 use crate::keybindings::{KeyBinding, KeyBindings};
 use crate::object::ObjectRegistry;
+
+// ============================================================================
+// Selection Entry - stores selection expression and visibility state
+// ============================================================================
+
+/// Entry for a named selection
+#[derive(Debug, Clone)]
+pub struct SelectionEntry {
+    /// The selection expression
+    pub expression: String,
+    /// Whether the selection indicators are visible
+    pub visible: bool,
+}
+
+impl SelectionEntry {
+    /// Create a new selection entry with visibility enabled by default
+    pub fn new(expression: String) -> Self {
+        Self {
+            expression,
+            visible: true,
+        }
+    }
+}
 
 /// Trait for types that can serve as a viewer backend for command execution
 ///
@@ -80,6 +104,23 @@ pub trait ViewerLike {
     /// Get all named selection names
     fn selection_names(&self) -> Vec<String>;
 
+    /// Set the visibility of a named selection's indicators
+    fn set_selection_visible(&mut self, name: &str, visible: bool);
+
+    /// Check if a named selection's indicators are visible
+    fn is_selection_visible(&self, name: &str) -> bool;
+
+    /// Set the indicated selection (shows pink indicators in the 3D view)
+    /// For backwards compatibility - creates/updates an "indicate" selection
+    fn indicate_selection(&mut self, selection: &str);
+
+    /// Clear the indicated selection (hides all selection indicators)
+    fn clear_indication(&mut self);
+
+    /// Get the currently indicated selection expression
+    /// For backwards compatibility - returns first visible selection
+    fn indicated_selection(&self) -> Option<&str>;
+
     /// Capture a PNG screenshot (optional - not all viewers support this)
     ///
     /// Returns an error by default. Override for viewers that support screenshots.
@@ -137,8 +178,8 @@ pub struct Viewer {
     registry: ObjectRegistry,
     /// Scene manager
     scenes: SceneManager,
-    /// Named selections (name -> selection expression string)
-    selections: ahash::AHashMap<String, String>,
+    /// Named selections (name -> entry with expression and visibility)
+    selections: ahash::AHashMap<String, SelectionEntry>,
 
     // =========================================================================
     // Settings and Colors
@@ -401,6 +442,124 @@ impl Viewer {
     /// Get a reference to the named colors registry
     pub fn named_colors(&self) -> &NamedColors {
         &self.named_colors
+    }
+
+    // =========================================================================
+    // Selection Indication
+    // =========================================================================
+
+    /// Set the indicated selection (shows pink indicators in the 3D view)
+    ///
+    /// This evaluates the selection and displays pink indicator dots at
+    /// the positions of all selected atoms.
+    ///
+    /// # Arguments
+    /// * `selection` - A selection expression (e.g., "chain A", "organic", "sele")
+    pub fn indicate_selection(&mut self, selection: &str) {
+        // Create or update "indicate" selection and make it visible
+        self.selections.insert("indicate".to_string(), SelectionEntry::new(selection.to_string()));
+        self.needs_redraw = true;
+    }
+
+    /// Clear the indicated selection
+    ///
+    /// Hides all selection indicators in the 3D view.
+    pub fn clear_indication(&mut self) {
+        // Hide all selection indicators
+        for entry in self.selections.values_mut() {
+            entry.visible = false;
+        }
+        // Clear indicators from all molecules
+        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
+        for name in names {
+            if let Some(mol) = self.registry.get_molecule_mut(&name) {
+                mol.clear_selection_indicator();
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    /// Get the currently indicated selection expression
+    /// Returns the first visible selection expression for backwards compatibility
+    pub fn indicated_selection(&self) -> Option<&str> {
+        self.selections.values()
+            .find(|e| e.visible)
+            .map(|e| e.expression.as_str())
+    }
+
+    /// Evaluate all visible selections for all molecules
+    ///
+    /// Returns a vector of (object_name, SelectionResult) pairs where the
+    /// SelectionResult is the union of all visible selections.
+    fn evaluate_visible_selections(
+        &self,
+        names: &[String],
+    ) -> Vec<(String, SelectionResult)> {
+        // Collect visible selection expressions
+        let visible_selections: Vec<(&str, &str)> = self.selections
+            .iter()
+            .filter(|(_, entry)| entry.visible)
+            .map(|(name, entry)| (name.as_str(), entry.expression.as_str()))
+            .collect();
+
+        if visible_selections.is_empty() {
+            return Vec::new();
+        }
+
+        let mut results: Vec<(String, SelectionResult)> = Vec::new();
+
+        // Evaluate for each molecule
+        for mol_name in names {
+            if let Some(mol_obj) = self.registry.get_molecule(mol_name) {
+                let mol = mol_obj.molecule();
+                
+                // Build context for this molecule with named selections
+                let mut ctx = EvalContext::single(mol);
+                
+                // Add all named selections to context (for reference resolution)
+                for (sel_name, entry) in &self.selections {
+                    if let Ok(sel_ast) = pymol_select::parse(&entry.expression) {
+                        if let Ok(sel_result) = pymol_select::evaluate(&sel_ast, &ctx) {
+                            ctx.add_selection(sel_name.clone(), sel_result);
+                        }
+                    }
+                }
+
+                // Evaluate and combine all visible selections
+                let mut combined_result: Option<SelectionResult> = None;
+
+                for (sel_name, sel_expr) in &visible_selections {
+                    let expr = match pymol_select::parse(sel_expr) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            log::debug!("Failed to parse selection '{}': {:?}", sel_name, e);
+                            continue;
+                        }
+                    };
+
+                    match pymol_select::evaluate(&expr, &ctx) {
+                        Ok(result) => {
+                            combined_result = match combined_result {
+                                Some(existing) => Some(existing.union(&result)),
+                                None => Some(result),
+                            };
+                        }
+                        Err(e) => {
+                            log::debug!("Failed to evaluate selection '{}' for '{}': {:?}", sel_name, mol_name, e);
+                        }
+                    }
+                }
+
+                // Add combined result if any atoms matched
+                if let Some(result) = combined_result {
+                    if result.any() {
+                        results.push((mol_name.clone(), result));
+                    }
+                }
+            }
+        }
+
+        results
     }
 
     // =========================================================================
@@ -674,11 +833,27 @@ impl Viewer {
         // Prepare molecules for rendering
         // Create color resolver with borrowed data - need to avoid borrowing self during registry iteration
         let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
+        
+        // Evaluate all visible selections
+        let selection_results = self.evaluate_visible_selections(&names);
+        
+        // Get selection indicator size from settings (selection_width, ID 80)
+        // Use a minimum size to ensure visibility
+        let selection_width = self.settings.get_float(pymol_settings::id::selection_width).max(6.0);
+        
+        for name in &names {
             // Create color resolver fresh each iteration to avoid borrow conflicts
             let color_resolver = ColorResolver::new(&self.named_colors, &self.element_colors, &self.chain_colors);
-            if let Some(mol_obj) = self.registry.get_molecule_mut(&name) {
+            if let Some(mol_obj) = self.registry.get_molecule_mut(name) {
                 mol_obj.prepare_render(context, &color_resolver, &self.settings);
+                
+                // Update selection indicator if we have results for this molecule
+                if let Some((_, selection_result)) = selection_results.iter().find(|(n, _)| n == name) {
+                    mol_obj.set_selection_indicator_with_size(selection_result, context, Some(selection_width));
+                } else {
+                    // Clear indicator - no visible selection matches this molecule
+                    mol_obj.clear_selection_indicator();
+                }
             }
         }
 
@@ -1225,19 +1400,47 @@ impl ViewerLike for Viewer {
     }
 
     fn get_selection(&self, name: &str) -> Option<&str> {
-        self.selections.get(name).map(|s| s.as_str())
+        self.selections.get(name).map(|e| e.expression.as_str())
     }
 
     fn define_selection(&mut self, name: &str, selection: &str) {
-        self.selections.insert(name.to_string(), selection.to_string());
+        self.selections.insert(name.to_string(), SelectionEntry::new(selection.to_string()));
+        self.needs_redraw = true;
     }
 
     fn remove_selection(&mut self, name: &str) -> bool {
-        self.selections.remove(name).is_some()
+        let removed = self.selections.remove(name).is_some();
+        if removed {
+            self.needs_redraw = true;
+        }
+        removed
     }
 
     fn selection_names(&self) -> Vec<String> {
         self.selections.keys().cloned().collect()
+    }
+
+    fn set_selection_visible(&mut self, name: &str, visible: bool) {
+        if let Some(entry) = self.selections.get_mut(name) {
+            entry.visible = visible;
+            self.needs_redraw = true;
+        }
+    }
+
+    fn is_selection_visible(&self, name: &str) -> bool {
+        self.selections.get(name).map(|e| e.visible).unwrap_or(false)
+    }
+
+    fn indicate_selection(&mut self, selection: &str) {
+        Viewer::indicate_selection(self, selection)
+    }
+
+    fn clear_indication(&mut self) {
+        Viewer::clear_indication(self)
+    }
+
+    fn indicated_selection(&self) -> Option<&str> {
+        Viewer::indicated_selection(self)
     }
 
     fn capture_png(

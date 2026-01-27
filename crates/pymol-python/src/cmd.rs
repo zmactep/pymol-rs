@@ -501,7 +501,7 @@ impl PyCmd {
     /// Returns:
     ///     The setting value
     #[pyo3(signature = (name, selection=None))]
-    fn get<'py>(&self, py: Python<'py>, name: &str, selection: Option<&str>) -> PyResult<PyObject> {
+    fn get<'py>(&self, py: Python<'py>, name: &str, selection: Option<&str>) -> PyResult<Py<PyAny>> {
         get_setting_py(py, self.viewer.settings(), name)
     }
 

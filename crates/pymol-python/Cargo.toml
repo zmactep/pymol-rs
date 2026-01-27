@@ -1,10 +1,10 @@
 [package]
 name = "pymol-python"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+authors = ["PyMOL-RS Contributors"]
+license = "BSD-3-Clause"
+repository = "https://github.com/pymol-rs/pymol-rs"
 description = "Python bindings for pymol-rs using PyO3"
 
 [lib]
@@ -13,24 +13,24 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # PyO3 for Python bindings
-pyo3 = { workspace = true }
+pyo3 = { version = "0.27", features = ["extension-module"] }
 
-# Internal crates
-pymol-mol.workspace = true
-pymol-io = { workspace = true, features = ["fetch"] }
-pymol-select.workspace = true
-pymol-color.workspace = true
-pymol-settings.workspace = true
-pymol-render.workspace = true
-pymol-scene.workspace = true
-pymol-cmd.workspace = true
+# Internal crates (relative paths from this crate)
+pymol-mol = { path = "../pymol-mol" }
+pymol-io = { path = "../pymol-io", features = ["fetch"] }
+pymol-select = { path = "../pymol-select" }
+pymol-color = { path = "../pymol-color" }
+pymol-settings = { path = "../pymol-settings" }
+pymol-render = { path = "../pymol-render" }
+pymol-scene = { path = "../pymol-scene" }
+pymol-cmd = { path = "../pymol-cmd" }
 
 # External dependencies
-lin_alg.workspace = true
-thiserror.workspace = true
-log.workspace = true
-env_logger.workspace = true
-parking_lot.workspace = true
+lin_alg = { version = "1.1", features = ["computer_graphics"] }
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+parking_lot = "0.12"
 
 [features]
 default = []
@@ -38,11 +38,11 @@ default = []
 numpy = ["dep:numpy"]
 
 [dependencies.numpy]
-version = "0.22"
+version = "0.27"
 optional = true
 
 [dev-dependencies]
-pyo3 = { workspace = true, features = ["auto-initialize"] }
+pyo3 = { version = "0.27", features = ["auto-initialize"] }
 
 [lints.rust]
 # Suppress warnings from PyO3's create_exception! macro which checks for gil-refs feature

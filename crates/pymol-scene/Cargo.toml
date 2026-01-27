@@ -11,6 +11,7 @@ description = "Scene management, camera, and window handling for PyMOL-RS"
 # Internal crates
 pymol-mol.workspace = true
 pymol-render.workspace = true
+pymol-select.workspace = true
 pymol-color.workspace = true
 pymol-settings.workspace = true
 pymol-io.workspace = true

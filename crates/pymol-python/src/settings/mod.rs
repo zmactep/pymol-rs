@@ -10,7 +10,7 @@ pub fn get_setting_py<'py>(
     py: Python<'py>,
     settings: &GlobalSettings,
     name: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let id = pymol_settings::get_setting_id(name).ok_or_else(|| {
         pyo3::exceptions::PyKeyError::new_err(format!("Unknown setting: {}", name))
     })?;
@@ -43,14 +43,14 @@ pub fn set_setting_py(
 }
 
 /// Convert a Rust SettingValue to Python object
-fn setting_value_to_py(py: Python<'_>, value: &SettingValue) -> PyResult<PyObject> {
+fn setting_value_to_py(py: Python<'_>, value: &SettingValue) -> PyResult<Py<PyAny>> {
     match value {
-        SettingValue::Bool(b) => Ok(b.to_object(py)),
-        SettingValue::Int(i) => Ok(i.to_object(py)),
-        SettingValue::Float(f) => Ok(f.to_object(py)),
-        SettingValue::Float3(f) => Ok((f[0], f[1], f[2]).to_object(py)),
-        SettingValue::Color(c) => Ok(c.to_object(py)),
-        SettingValue::String(s) => Ok(s.to_object(py)),
+        SettingValue::Bool(b) => Ok((*b).into_pyobject(py)?.to_owned().into_any().unbind()),
+        SettingValue::Int(i) => Ok((*i).into_pyobject(py)?.to_owned().into_any().unbind()),
+        SettingValue::Float(f) => Ok((*f).into_pyobject(py)?.to_owned().into_any().unbind()),
+        SettingValue::Float3(f) => Ok((f[0], f[1], f[2]).into_pyobject(py)?.into_any().unbind()),
+        SettingValue::Color(c) => Ok((*c).into_pyobject(py)?.to_owned().into_any().unbind()),
+        SettingValue::String(s) => Ok(s.clone().into_pyobject(py)?.into_any().unbind()),
     }
 }
 

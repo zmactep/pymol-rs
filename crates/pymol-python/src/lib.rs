@@ -29,8 +29,8 @@ fn _pymol(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let _ = env_logger::try_init();
 
     // Register exception types
-    m.add("PymolError", py.get_type_bound::<error::PymolError>())?;
-    m.add("SelectionError", py.get_type_bound::<error::SelectionError>())?;
+    m.add("PymolError", py.get_type::<error::PymolError>())?;
+    m.add("SelectionError", py.get_type::<error::SelectionError>())?;
 
     // Register main types
     m.add_class::<PyCmd>()?;
@@ -69,7 +69,7 @@ fn register_submodule<F>(
 where
     F: FnOnce(&Bound<'_, PyModule>) -> PyResult<()>,
 {
-    let submodule = PyModule::new_bound(py, name)?;
+    let submodule = PyModule::new(py, name)?;
     register_fn(&submodule)?;
     parent.add_submodule(&submodule)?;
     Ok(())

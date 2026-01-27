@@ -7,8 +7,9 @@ use lin_alg::f32::Vec3;
 use pymol_mol::{ObjectMolecule, RepMask};
 use pymol_render::{
     CartoonRep, ColorResolver, DotRep, LineRep, MeshRep, RenderContext, Representation, RibbonRep,
-    SphereRep, StickRep, SurfaceRep,
+    SelectionIndicatorRep, SphereRep, StickRep, SurfaceRep,
 };
+use pymol_select::SelectionResult;
 use pymol_settings::{GlobalSettings, SettingResolver};
 
 use super::{Object, ObjectState, ObjectType, ObjectWithName};
@@ -42,6 +43,8 @@ struct RepresentationCache {
     ribbon: Option<RibbonRep>,
     surface: Option<SurfaceRep>,
     mesh: Option<MeshRep>,
+    /// Selection indicator representation (rendered last, on top of everything)
+    selection_indicator: Option<SelectionIndicatorRep>,
 }
 
 impl Default for RepresentationCache {
@@ -55,6 +58,7 @@ impl Default for RepresentationCache {
             ribbon: None,
             surface: None,
             mesh: None,
+            selection_indicator: None,
         }
     }
 }
@@ -70,6 +74,7 @@ impl RepresentationCache {
         self.ribbon = None;
         self.surface = None;
         self.mesh = None;
+        self.selection_indicator = None;
     }
 }
 
@@ -233,6 +238,83 @@ impl MoleculeObject {
     /// Get current surface quality
     pub fn surface_quality(&self) -> i32 {
         self.surface_quality
+    }
+
+    /// Set the selection indicator for this molecule
+    ///
+    /// This renders pink/magenta indicators at the selected atom positions.
+    ///
+    /// # Arguments
+    /// * `selection` - The selection result indicating which atoms to show
+    /// * `context` - The render context for uploading GPU data
+    pub fn set_selection_indicator(
+        &mut self,
+        selection: &SelectionResult,
+        context: &RenderContext,
+    ) {
+        self.set_selection_indicator_with_size(selection, context, None);
+    }
+
+    /// Set the selection indicator for this molecule with a custom size
+    ///
+    /// This renders pink/magenta indicators at the selected atom positions.
+    ///
+    /// # Arguments
+    /// * `selection` - The selection result indicating which atoms to show
+    /// * `context` - The render context for uploading GPU data
+    /// * `size` - Optional custom size for the indicator dots
+    pub fn set_selection_indicator_with_size(
+        &mut self,
+        selection: &SelectionResult,
+        context: &RenderContext,
+        size: Option<f32>,
+    ) {
+        // Get the current coordinate set
+        let coord_set = match self.molecule.get_coord_set(self.display_state) {
+            Some(cs) => cs,
+            None => {
+                log::debug!("No coord set available for selection indicator");
+                return;
+            }
+        };
+
+        // Create or get the selection indicator representation
+        let indicator = self
+            .representations
+            .selection_indicator
+            .get_or_insert_with(SelectionIndicatorRep::new);
+
+        // Apply custom size if provided - scale up for visibility in the shader
+        // The dot shader scales by 0.01, so we need larger values
+        let effective_size = size.unwrap_or(pymol_render::DEFAULT_INDICATOR_SIZE) * 10.0;
+        indicator.set_size(effective_size);
+
+        // Build and upload the indicator
+        indicator.build_for_selection(&self.molecule, coord_set, selection);
+        
+        log::debug!(
+            "Built selection indicator with {} instances, size={}",
+            indicator.instance_count(),
+            indicator.size()
+        );
+        
+        indicator.upload(context.device(), context.queue());
+    }
+
+    /// Clear the selection indicator for this molecule
+    pub fn clear_selection_indicator(&mut self) {
+        if let Some(ref mut indicator) = self.representations.selection_indicator {
+            indicator.clear();
+        }
+    }
+
+    /// Check if this molecule has a selection indicator
+    pub fn has_selection_indicator(&self) -> bool {
+        self.representations
+            .selection_indicator
+            .as_ref()
+            .map(|i| !i.is_empty())
+            .unwrap_or(false)
     }
 
     /// Get per-object settings (create if needed)
@@ -488,6 +570,25 @@ impl MoleculeObject {
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
                     mesh.render(render_pass);
                 }
+            }
+        }
+
+        // Selection indicator (rendered last, on top of everything)
+        if let Some(ref indicator) = self.representations.selection_indicator {
+            if !indicator.is_empty() {
+                log::debug!(
+                    "Rendering selection indicator with {} instances",
+                    indicator.instance_count()
+                );
+                let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
+                render_pass.set_pipeline(&pipeline);
+                render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
+                render_pass.set_index_buffer(
+                    context.quad_index_buffer().slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                indicator.render(render_pass);
             }
         }
     }

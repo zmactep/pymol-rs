@@ -7,6 +7,7 @@ pub mod dot;
 pub mod line;
 pub mod mesh;
 pub mod ribbon;
+pub mod selection_indicator;
 pub mod sphere;
 pub mod stick;
 pub mod surface;
