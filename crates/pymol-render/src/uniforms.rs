@@ -198,13 +198,13 @@ impl GlobalUniforms {
     }
 }
 
-/// Builder for creating global uniforms from settings
-#[allow(dead_code)]
-pub struct UniformsBuilder {
+/// Builder for creating global uniforms from settings (crate-internal)
+#[cfg(test)]
+pub(crate) struct UniformsBuilder {
     uniforms: GlobalUniforms,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl UniformsBuilder {
     /// Create a new builder with default values
     pub fn new() -> Self {
@@ -258,6 +258,7 @@ impl UniformsBuilder {
     }
 }
 
+#[cfg(test)]
 impl Default for UniformsBuilder {
     fn default() -> Self {
         Self::new()

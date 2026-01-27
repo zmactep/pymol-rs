@@ -2,30 +2,6 @@
 
 use wgpu::util::DeviceExt;
 
-/// Create a vertex buffer from a slice of vertex data
-#[allow(dead_code)]
-pub fn create_vertex_buffer<T: bytemuck::Pod>(
-    device: &wgpu::Device,
-    label: &str,
-    data: &[T],
-) -> wgpu::Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::cast_slice(data),
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-    })
-}
-
-/// Create an index buffer from a slice of indices
-#[allow(dead_code)]
-pub fn create_index_buffer(device: &wgpu::Device, label: &str, data: &[u32]) -> wgpu::Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::cast_slice(data),
-        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-    })
-}
-
 /// Create a uniform buffer from data
 pub fn create_uniform_buffer<T: bytemuck::Pod>(
     device: &wgpu::Device,
@@ -37,12 +13,6 @@ pub fn create_uniform_buffer<T: bytemuck::Pod>(
         contents: bytemuck::bytes_of(data),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     })
-}
-
-/// Update an existing buffer with new data
-#[allow(dead_code)]
-pub fn update_buffer<T: bytemuck::Pod>(queue: &wgpu::Queue, buffer: &wgpu::Buffer, data: &[T]) {
-    queue.write_buffer(buffer, 0, bytemuck::cast_slice(data));
 }
 
 /// Update a uniform buffer with new data

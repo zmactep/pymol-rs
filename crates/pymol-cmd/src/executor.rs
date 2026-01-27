@@ -41,16 +41,6 @@ impl CommandExecutor {
         }
     }
 
-    /// Create an executor with a custom registry
-    pub fn with_registry(registry: CommandRegistry) -> Self {
-        Self {
-            registry,
-            logger: CommandLogger::new(),
-            history: CommandHistory::new(),
-            echo: false,
-        }
-    }
-
     /// Get a reference to the command registry
     pub fn registry(&self) -> &CommandRegistry {
         &self.registry
@@ -79,11 +69,6 @@ impl CommandExecutor {
     /// Get a mutable reference to the logger
     pub fn logger_mut(&mut self) -> &mut CommandLogger {
         &mut self.logger
-    }
-
-    /// Set echo mode (print commands before execution)
-    pub fn set_echo(&mut self, echo: bool) {
-        self.echo = echo;
     }
 
     /// Execute a single command string

@@ -107,14 +107,6 @@ impl CommandLogger {
         }
     }
 
-    /// Flush the log buffer
-    pub fn flush(&mut self) -> CmdResult<()> {
-        if let Some(ref mut writer) = self.writer {
-            writer.flush()?;
-        }
-        Ok(())
-    }
-
     /// Close the log file
     pub fn log_close(&mut self) -> CmdResult<()> {
         if let Some(mut writer) = self.writer.take() {
@@ -127,11 +119,6 @@ impl CommandLogger {
     /// Check if logging is active
     pub fn is_active(&self) -> bool {
         self.active
-    }
-
-    /// Get the current log format
-    pub fn format(&self) -> LogFormat {
-        self.format
     }
 }
 

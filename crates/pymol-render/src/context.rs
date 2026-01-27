@@ -4,7 +4,7 @@
 //! needed for rendering molecular representations.
 
 use crate::buffer::{create_uniform_buffer, update_uniform_buffer};
-use crate::pipeline::{depth_stencil_state, get_blend_state, BlendMode, PipelineCache, PipelineKey, PipelineType};
+use crate::pipeline::{depth_stencil_state, get_blend_state, BlendMode, PipelineKey, PipelineType};
 use crate::uniforms::GlobalUniforms;
 use crate::vertex::{CylinderVertex, DotVertex, LineVertex, MeshVertex, SphereVertex, BILLBOARD_VERTICES, QUAD_INDICES};
 use wgpu::util::DeviceExt;
@@ -22,9 +22,6 @@ pub struct RenderContext {
     surface_format: wgpu::TextureFormat,
     /// Depth texture format
     depth_format: wgpu::TextureFormat,
-    /// Pipeline cache
-    #[allow(dead_code)]
-    pipeline_cache: PipelineCache,
     /// Global uniforms buffer
     uniform_buffer: wgpu::Buffer,
     /// Bind group for global uniforms
@@ -132,7 +129,6 @@ impl RenderContext {
             queue,
             surface_format,
             depth_format,
-            pipeline_cache: PipelineCache::new(),
             uniform_buffer,
             uniform_bind_group,
             uniform_bind_group_layout,

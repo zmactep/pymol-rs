@@ -249,26 +249,6 @@ impl InputState {
     }
 }
 
-/// PyMOL mouse button modes
-///
-/// PyMOL supports different mouse button configurations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum MouseMode {
-    /// Default 3-button mouse mode
-    ThreeButton,
-    /// Two-button mouse mode (right button does zoom)
-    TwoButton,
-    /// Single-button mouse mode
-    OneButton,
-}
-
-impl Default for MouseMode {
-    fn default() -> Self {
-        MouseMode::ThreeButton
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,8 +3,6 @@
 //! Labels display text in 3D space, positioned at specific coordinates.
 //! They can be attached to atoms or free-floating.
 
-#![allow(dead_code)]
-
 use lin_alg::f32::Vec3;
 use pymol_render::{LineRep, LineVertex, RenderContext, Representation};
 

@@ -5,7 +5,7 @@
 
 use lin_alg::f32::Vec3;
 use pymol_mol::AtomIndex;
-use pymol_render::picking::{PickResult, PickingConfig, PickingId, Ray};
+use pymol_render::picking::{PickResult, PickingConfig, Ray};
 
 use crate::object::{ObjectRegistry, ObjectType};
 
@@ -240,38 +240,6 @@ impl Picker {
     }
 }
 
-/// Build a mapping from object IDs to names for GPU picking
-#[allow(dead_code)]
-pub fn build_object_id_map(registry: &ObjectRegistry) -> Vec<String> {
-    registry.names().map(|s| s.to_string()).collect()
-}
-
-/// Get the object ID for a named object
-#[allow(dead_code)]
-pub fn get_object_id(object_names: &[String], name: &str) -> Option<u32> {
-    object_names
-        .iter()
-        .position(|n| n == name)
-        .map(|i| i as u32)
-}
-
-/// Create a picking ID for an object
-#[allow(dead_code)]
-pub fn object_picking_id(object_names: &[String], name: &str) -> Option<PickingId> {
-    get_object_id(object_names, name).map(PickingId::object)
-}
-
-/// Create a picking ID for an atom
-#[allow(dead_code)]
-pub fn atom_picking_id(
-    object_names: &[String],
-    object_name: &str,
-    atom_index: AtomIndex,
-) -> Option<PickingId> {
-    get_object_id(object_names, object_name)
-        .map(|obj_id| PickingId::new(obj_id, usize::from(atom_index) as u32))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,14 +248,6 @@ mod tests {
     fn test_picker_creation() {
         let picker = Picker::new();
         assert!(picker.last_result().is_none());
-    }
-
-    #[test]
-    fn test_build_object_id_map() {
-        // This would need a mock registry to test properly
-        let registry = ObjectRegistry::new();
-        let map = build_object_id_map(&registry);
-        assert!(map.is_empty());
     }
 
     #[test]

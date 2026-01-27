@@ -6,7 +6,7 @@ use std::path::Path;
 use pymol_io::{read_file, write_file, FileFormat};
 use pymol_scene::MoleculeObject;
 
-use crate::args::{ArgDef, ParsedCommand};
+use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
@@ -59,11 +59,6 @@ EXAMPLES
     load ligand.sdf, object=lig
     load structure.cif, format=cif
 "#
-    }
-
-    fn args(&self) -> &[ArgDef] {
-        static ARGS: &[ArgDef] = &[];
-        ARGS
     }
 
     fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {

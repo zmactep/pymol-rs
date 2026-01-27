@@ -9,7 +9,7 @@ use ahash::AHashMap;
 // Re-export ViewerLike from pymol-scene
 pub use pymol_scene::ViewerLike;
 
-use crate::args::{ArgDef, ParsedCommand};
+use crate::args::ParsedCommand;
 use crate::error::CmdResult;
 
 /// Command execution context
@@ -31,15 +31,6 @@ impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
         Self {
             viewer,
             quiet: false,
-            log: true,
-        }
-    }
-
-    /// Create a quiet context (no output)
-    pub fn quiet(viewer: &'a mut V) -> Self {
-        Self {
-            viewer,
-            quiet: true,
             log: true,
         }
     }
@@ -85,11 +76,6 @@ pub trait Command: Send + Sync {
     /// Get help text for this command
     fn help(&self) -> &str {
         "No help available."
-    }
-
-    /// Get argument definitions for validation and help
-    fn args(&self) -> &[ArgDef] {
-        &[]
     }
 
     /// Get list of command aliases
@@ -139,18 +125,6 @@ impl CommandRegistry {
         // Register aliases
         for alias in aliases {
             self.aliases.insert(alias, name.clone());
-        }
-
-        self.commands.insert(name, cmd);
-    }
-
-    /// Register a command with an Arc
-    pub fn register_arc(&mut self, cmd: Arc<dyn Command>) {
-        let name = cmd.name().to_string();
-
-        // Register aliases
-        for alias in cmd.aliases() {
-            self.aliases.insert(alias.to_string(), name.clone());
         }
 
         self.commands.insert(name, cmd);
@@ -216,30 +190,6 @@ impl CommandRegistry {
         self.commands.clear();
         self.aliases.clear();
     }
-}
-
-/// Helper macro to create simple commands from closures
-#[macro_export]
-macro_rules! simple_command {
-    ($name:expr, $help:expr, |$ctx:ident, $args:ident| $body:expr) => {{
-        struct SimpleCommand;
-        impl $crate::Command for SimpleCommand {
-            fn name(&self) -> &str {
-                $name
-            }
-            fn help(&self) -> &str {
-                $help
-            }
-            fn execute(
-                &self,
-                $ctx: &mut $crate::CommandContext,
-                $args: &$crate::ParsedCommand,
-            ) -> $crate::CmdResult {
-                $body
-            }
-        }
-        SimpleCommand
-    }};
 }
 
 #[cfg(test)]

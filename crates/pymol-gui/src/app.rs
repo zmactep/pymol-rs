@@ -28,13 +28,6 @@ use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
 use crate::ui::{CommandLinePanel, ObjectListPanel, OutputPanel};
 
-// Unused imports for future use
-#[allow(unused_imports)]
-use crate::ui::controls::ControlAction;
-#[allow(unused_imports)]
-use crate::ui::state_bar::StateBarAction;
-#[allow(unused_imports)]
-use crate::ui::{ControlsPanel, MouseInfoPanel, StateBar};
 
 /// Type alias for key action callbacks
 pub type KeyAction = Arc<dyn Fn(&mut App) + Send + Sync>;
@@ -147,9 +140,6 @@ pub struct App {
     // =========================================================================
     /// wgpu instance
     instance: wgpu::Instance,
-    /// GPU adapter (kept for info)
-    #[allow(dead_code)]
-    adapter: Option<wgpu::Adapter>,
     /// Render context for molecular rendering (owns device and queue)
     render_context: Option<RenderContext>,
 
@@ -251,7 +241,6 @@ impl App {
 
         let mut app = Self {
             instance,
-            adapter: None,
             render_context: None,
             window: None,
             surface: None,
@@ -345,7 +334,8 @@ impl App {
         let format = caps
             .formats
             .iter()
-            .find(|f| f.is_srgb())
+            .find(|f| **f == wgpu::TextureFormat::Bgra8Unorm)
+            .or_else(|| caps.formats.iter().find(|f| **f == wgpu::TextureFormat::Rgba8Unorm))
             .copied()
             .unwrap_or(caps.formats[0]);
 
@@ -388,7 +378,6 @@ impl App {
         self.surface = Some(surface);
         self.surface_config = Some(config);
         self.depth_view = Some(depth_view);
-        self.adapter = Some(adapter);
         self.render_context = Some(render_context);
         self.egui_state = Some(egui_state);
         self.egui_renderer = Some(egui_renderer);
@@ -728,83 +717,6 @@ impl App {
         Some((clipped_primitives, full_output.textures_delta))
     }
 
-    /// Draw the egui UI (kept for future use/debugging)
-    #[allow(dead_code)]
-    fn draw_ui(&mut self, ctx: &egui::Context) {
-        let mut commands_to_execute = Vec::new();
-        let mut control_actions = Vec::new();
-        let mut object_actions = Vec::new();
-        let mut state_bar_actions = Vec::new();
-
-        // Top panel - output and command line
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            if self.gui_state.show_output_panel {
-                OutputPanel::show(ui, &mut self.gui_state);
-                ui.separator();
-            }
-
-            match CommandLinePanel::show(ui, &mut self.gui_state) {
-                CommandAction::Execute(cmd) => {
-                    commands_to_execute.push(cmd);
-                }
-                CommandAction::None => {}
-            }
-        });
-
-        // Bottom panel - state bar
-        if self.gui_state.show_state_bar {
-            egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-                state_bar_actions = StateBar::show(ui, &self.gui_state);
-            });
-        }
-
-        // Right panel - controls, objects, mouse info
-        if self.gui_state.show_control_panel {
-            egui::SidePanel::right("right_panel")
-                .default_width(self.gui_state.right_panel_width)
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        // Controls
-                        control_actions = ControlsPanel::show(
-                            ui,
-                            self.gui_state.is_playing,
-                            self.gui_state.is_rocking,
-                        );
-
-                        ui.separator();
-
-                        // Object list
-                        object_actions = ObjectListPanel::show(ui, &self.registry);
-
-                        ui.separator();
-
-                        // Mouse info
-                        MouseInfoPanel::show(ui, &mut self.gui_state);
-                    });
-                });
-        }
-
-        // Process commands
-        for cmd in commands_to_execute {
-            self.execute_command(&cmd);
-        }
-
-        // Process control actions
-        for action in control_actions {
-            self.handle_control_action(action);
-        }
-
-        // Process object actions
-        for action in object_actions {
-            self.handle_object_action(action);
-        }
-
-        // Process state bar actions
-        for action in state_bar_actions {
-            self.handle_state_bar_action(action);
-        }
-    }
-
     /// Execute a command using the CommandExecutor with ViewerAdapter
     fn execute_command(&mut self, cmd: &str) {
         let cmd = cmd.trim();
@@ -879,260 +791,6 @@ impl App {
         }
     }
 
-    /// Toggle a representation (used by key bindings)
-    #[allow(dead_code)]
-    fn toggle_representation(&mut self, rep: u32) {
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                mol.toggle(rep);
-            }
-        }
-        self.needs_redraw = true;
-    }
-
-    /// Hide all representations (used by key bindings)
-    #[allow(dead_code)]
-    fn hide_all_representations(&mut self) {
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                mol.hide_all();
-            }
-        }
-        self.needs_redraw = true;
-    }
-
-    /// Show default representations (used by key bindings)
-    #[allow(dead_code)]
-    fn show_default_representations(&mut self) {
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                mol.hide_all();
-                mol.show(RepMask::LINES);
-                mol.show(RepMask::STICKS);
-            }
-        }
-        self.needs_redraw = true;
-    }
-
-    /// Increase surface quality (used by key bindings)
-    #[allow(dead_code)]
-    fn increase_surface_quality(&mut self) {
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                let q = mol.surface_quality();
-                mol.set_surface_quality((q + 1).min(4));
-            }
-        }
-        self.needs_redraw = true;
-    }
-
-    /// Decrease surface quality (used by key bindings)
-    #[allow(dead_code)]
-    fn decrease_surface_quality(&mut self) {
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                let q = mol.surface_quality();
-                mol.set_surface_quality((q - 1).max(-4));
-            }
-        }
-        self.needs_redraw = true;
-    }
-
-    /// Set background color by name (legacy method, now use bg_color command)
-    #[allow(dead_code)]
-    fn set_bg_color(&mut self, name: &str) {
-        let color = match name.to_lowercase().as_str() {
-            "black" => [0.0, 0.0, 0.0],
-            "white" => [1.0, 1.0, 1.0],
-            "gray" | "grey" => [0.5, 0.5, 0.5],
-            "red" => [1.0, 0.0, 0.0],
-            "green" => [0.0, 1.0, 0.0],
-            "blue" => [0.0, 0.0, 1.0],
-            _ => {
-                self.gui_state.print_error(format!("Unknown color: {}", name));
-                return;
-            }
-        };
-        self.clear_color = color;
-        self.gui_state.print_info(format!("Background set to {}", name));
-        self.needs_redraw = true;
-    }
-
-    /// Show representation by name (legacy method, now use show command)
-    #[allow(dead_code)]
-    fn show_representation_by_name(&mut self, name: &str) {
-        let rep = match name.to_lowercase().as_str() {
-            "lines" => RepMask::LINES,
-            "sticks" => RepMask::STICKS,
-            "spheres" => RepMask::SPHERES,
-            "cartoon" => RepMask::CARTOON,
-            "surface" => RepMask::SURFACE,
-            "mesh" => RepMask::MESH,
-            "dots" => RepMask::DOTS,
-            "ribbon" => RepMask::RIBBON,
-            _ => {
-                self.gui_state.print_error(format!("Unknown representation: {}", name));
-                return;
-            }
-        };
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                mol.show(rep);
-            }
-        }
-        self.gui_state.print_info(format!("Showing {}", name));
-        self.needs_redraw = true;
-    }
-
-    /// Hide representation by name (legacy method, now use hide command)
-    #[allow(dead_code)]
-    fn hide_representation_by_name(&mut self, name: &str) {
-        let rep = match name.to_lowercase().as_str() {
-            "lines" => RepMask::LINES,
-            "sticks" => RepMask::STICKS,
-            "spheres" => RepMask::SPHERES,
-            "cartoon" => RepMask::CARTOON,
-            "surface" => RepMask::SURFACE,
-            "mesh" => RepMask::MESH,
-            "dots" => RepMask::DOTS,
-            "ribbon" => RepMask::RIBBON,
-            "everything" | "all" => {
-                self.hide_all_representations();
-                self.gui_state.print_info("Hiding all representations");
-                return;
-            }
-            _ => {
-                self.gui_state.print_error(format!("Unknown representation: {}", name));
-                return;
-            }
-        };
-        let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        for name in names {
-            if let Some(mol) = self.registry.get_molecule_mut(&name) {
-                mol.hide(rep);
-            }
-        }
-        self.gui_state.print_info(format!("Hiding {}", name));
-        self.needs_redraw = true;
-    }
-
-    /// Color all objects (legacy method, now use color command)
-    #[allow(dead_code)]
-    fn color_all(&mut self, color: &str) {
-        if let Some(color_idx) = self.named_colors.get_by_name(color).map(|(idx, _)| idx) {
-            let names: Vec<String> = self.registry.names().map(|s: &str| s.to_string()).collect();
-            for name in names {
-                if let Some(mol_obj) = self.registry.get_molecule_mut(&name) {
-                    for atom in mol_obj.molecule_mut().atoms_mut() {
-                        atom.color = color_idx as i32;
-                    }
-                }
-            }
-            self.gui_state.print_info(format!("Colored all objects {}", color));
-            self.needs_redraw = true;
-        } else {
-            self.gui_state.print_error(format!("Unknown color: {}", color));
-        }
-    }
-
-    /// Print help (legacy method, now use help command)
-    #[allow(dead_code)]
-    fn print_help(&mut self) {
-        self.gui_state.print_info("Available commands:");
-        self.gui_state.print("  load <file>     - Load a molecule file");
-        self.gui_state.print("  show <rep>      - Show representation (lines, sticks, cartoon, etc.)");
-        self.gui_state.print("  hide <rep>      - Hide representation");
-        self.gui_state.print("  color <color>   - Color all objects");
-        self.gui_state.print("  bg_color <col>  - Set background color");
-        self.gui_state.print("  zoom            - Zoom to fit all objects");
-        self.gui_state.print("  center          - Center on all objects");
-        self.gui_state.print("  reset           - Reset view");
-        self.gui_state.print("  help            - Show this help");
-    }
-
-    /// Handle control panel actions (for future use)
-    #[allow(dead_code)]
-    fn handle_control_action(&mut self, action: ControlAction) {
-        match action {
-            ControlAction::None => {}
-            ControlAction::Reset => self.reset_view(),
-            ControlAction::Zoom => self.zoom_all(),
-            ControlAction::Orient => {
-                // TODO: implement orient
-                self.gui_state.print_info("Orient not yet implemented");
-            }
-            ControlAction::ToggleOrtho => {
-                self.camera.toggle_projection();
-                self.needs_redraw = true;
-            }
-            ControlAction::Screenshot => {
-                self.gui_state.print_info("Screenshot not yet implemented");
-            }
-            ControlAction::Ray => {
-                self.gui_state.print_info("Ray tracing not yet implemented");
-            }
-            ControlAction::Unpick => {
-                self.gui_state.print_info("Unpick not yet implemented");
-            }
-            ControlAction::Deselect => {
-                self.gui_state.print_info("Deselect not yet implemented");
-            }
-            ControlAction::Rock => {
-                self.gui_state.is_rocking = !self.gui_state.is_rocking;
-                self.gui_state.print_info(if self.gui_state.is_rocking {
-                    "Rocking enabled"
-                } else {
-                    "Rocking disabled"
-                });
-            }
-            ControlAction::GetView => {
-                let view = self.camera.current_view();
-                self.gui_state.print_info(format!("View: {:?}", view));
-            }
-            ControlAction::FirstState => {
-                self.gui_state.current_state = 1;
-            }
-            ControlAction::PreviousState => {
-                if self.gui_state.current_state > 1 {
-                    self.gui_state.current_state -= 1;
-                }
-            }
-            ControlAction::Stop => {
-                self.gui_state.is_playing = false;
-            }
-            ControlAction::Play => {
-                self.gui_state.is_playing = !self.gui_state.is_playing;
-            }
-            ControlAction::NextState => {
-                if self.gui_state.current_state < self.gui_state.total_states {
-                    self.gui_state.current_state += 1;
-                }
-            }
-            ControlAction::LastState => {
-                self.gui_state.current_state = self.gui_state.total_states;
-            }
-            ControlAction::MovieClear => {
-                self.gui_state.print_info("Movie clear not yet implemented");
-            }
-            ControlAction::Builder => {
-                self.gui_state.print_info("Builder not yet implemented");
-            }
-            ControlAction::Properties => {
-                self.gui_state.print_info("Properties not yet implemented");
-            }
-            ControlAction::Rebuild => {
-                self.needs_redraw = true;
-                self.gui_state.print_info("Rebuilding representations...");
-            }
-        }
-    }
-
     /// Handle object list actions
     fn handle_object_action(&mut self, action: ObjectAction) {
         match action {
@@ -1199,49 +857,6 @@ impl App {
                     if let Some((min, max)) = obj.extent() {
                         self.camera.center_to(min, max);
                         self.needs_redraw = true;
-                    }
-                }
-            }
-        }
-    }
-
-    /// Handle state bar actions (for future use)
-    #[allow(dead_code)]
-    fn handle_state_bar_action(&mut self, action: StateBarAction) {
-        match action {
-            StateBarAction::None => {}
-            StateBarAction::FirstState => {
-                self.gui_state.current_state = 1;
-            }
-            StateBarAction::PreviousState => {
-                if self.gui_state.current_state > 1 {
-                    self.gui_state.current_state -= 1;
-                }
-            }
-            StateBarAction::Stop => {
-                self.gui_state.is_playing = false;
-            }
-            StateBarAction::TogglePlay => {
-                self.gui_state.is_playing = !self.gui_state.is_playing;
-            }
-            StateBarAction::NextState => {
-                if self.gui_state.current_state < self.gui_state.total_states {
-                    self.gui_state.current_state += 1;
-                }
-            }
-            StateBarAction::LastState => {
-                self.gui_state.current_state = self.gui_state.total_states;
-            }
-            StateBarAction::SceneCycle => {
-                self.gui_state.print_info("Scene cycle not yet implemented");
-            }
-            StateBarAction::Fullscreen => {
-                if let Some(window) = &self.window {
-                    let is_fullscreen = window.fullscreen().is_some();
-                    if is_fullscreen {
-                        window.set_fullscreen(None);
-                    } else {
-                        window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
                     }
                 }
             }

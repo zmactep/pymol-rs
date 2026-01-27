@@ -174,8 +174,6 @@ pub struct GuiState {
     pub show_output_panel: bool,
     /// Show the right-side control panel
     pub show_control_panel: bool,
-    /// Show the bottom state bar
-    pub show_state_bar: bool,
     /// Output panel height in pixels
     pub output_panel_height: f32,
     /// Right panel width in pixels
@@ -236,7 +234,6 @@ impl GuiState {
             saved_input: String::new(),
             show_output_panel: true,
             show_control_panel: true,
-            show_state_bar: true,
             output_panel_height: 150.0,
             right_panel_width: 200.0,
             mouse_mode: MouseMode::default(),

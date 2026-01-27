@@ -62,7 +62,8 @@ impl Window {
         let format = caps
             .formats
             .iter()
-            .find(|f| f.is_srgb())
+            .find(|f| **f == wgpu::TextureFormat::Bgra8Unorm)
+            .or_else(|| caps.formats.iter().find(|f| **f == wgpu::TextureFormat::Rgba8Unorm))
             .copied()
             .unwrap_or(caps.formats[0]);
 

@@ -235,16 +235,6 @@ impl<'a> ColorResolver<'a> {
     }
 }
 
-/// Create a default color resolver with standard color tables
-#[allow(dead_code)]
-pub fn default_color_resolver<'a>(
-    named_colors: &'a NamedColors,
-    element_colors: &'a ElementColors,
-    chain_colors: &'a ChainColors,
-) -> ColorResolver<'a> {
-    ColorResolver::new(named_colors, element_colors, chain_colors)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
