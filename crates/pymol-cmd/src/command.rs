@@ -12,6 +12,57 @@ pub use pymol_scene::ViewerLike;
 use crate::args::ParsedCommand;
 use crate::error::CmdResult;
 
+// ============================================================================
+// Output message types
+// ============================================================================
+
+/// Kind of command output message
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MessageKind {
+    /// Informational message (default)
+    #[default]
+    Info,
+    /// Warning message
+    Warning,
+    /// Error message
+    Error,
+}
+
+/// A typed output message from command execution
+#[derive(Debug, Clone)]
+pub struct OutputMessage {
+    /// The message text
+    pub text: String,
+    /// The message kind (info, warning, error)
+    pub kind: MessageKind,
+}
+
+impl OutputMessage {
+    /// Create an info message
+    pub fn info(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: MessageKind::Info,
+        }
+    }
+
+    /// Create a warning message
+    pub fn warning(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: MessageKind::Warning,
+        }
+    }
+
+    /// Create an error message
+    pub fn error(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind: MessageKind::Error,
+        }
+    }
+}
+
 /// Command execution context
 ///
 /// Provides access to the viewer state and execution options.
@@ -23,6 +74,8 @@ pub struct CommandContext<'a, V: ViewerLike + ?Sized> {
     pub quiet: bool,
     /// Whether to log this command
     pub log: bool,
+    /// Collected output messages (for GUI display)
+    output_buffer: Vec<OutputMessage>,
 }
 
 impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
@@ -32,6 +85,7 @@ impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
             viewer,
             quiet: false,
             log: true,
+            output_buffer: Vec::new(),
         }
     }
 
@@ -47,16 +101,41 @@ impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
         self
     }
 
-    /// Print a message (unless quiet mode is enabled)
-    pub fn print(&self, msg: &str) {
+    /// Print an info message (unless quiet mode is enabled)
+    /// 
+    /// The message is both logged and collected in the output buffer
+    /// for retrieval by the GUI.
+    pub fn print(&mut self, msg: &str) {
         if !self.quiet {
             log::info!("{}", msg);
+            self.output_buffer.push(OutputMessage::info(msg));
+        }
+    }
+
+    /// Print a warning message (unless quiet mode is enabled)
+    pub fn print_warning(&mut self, msg: &str) {
+        if !self.quiet {
+            log::warn!("{}", msg);
+            self.output_buffer.push(OutputMessage::warning(msg));
         }
     }
 
     /// Print an error message (even in quiet mode)
-    pub fn error(&self, msg: &str) {
+    /// 
+    /// Error messages are always shown regardless of quiet mode.
+    pub fn print_error(&mut self, msg: &str) {
         log::error!("{}", msg);
+        self.output_buffer.push(OutputMessage::error(msg));
+    }
+
+    /// Take the collected output messages, clearing the buffer
+    pub fn take_output(&mut self) -> Vec<OutputMessage> {
+        std::mem::take(&mut self.output_buffer)
+    }
+
+    /// Get a reference to the collected output messages
+    pub fn output(&self) -> &[OutputMessage] {
+        &self.output_buffer
     }
 }
 

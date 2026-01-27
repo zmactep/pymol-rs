@@ -4,11 +4,30 @@
 
 use std::path::Path;
 
-use crate::command::{CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{CommandContext, CommandRegistry, OutputMessage, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
 use crate::logger::CommandLogger;
 use crate::parser::{parse_command, parse_commands};
+
+/// Result of command execution including any output messages
+#[derive(Debug, Default)]
+pub struct CommandOutput {
+    /// Output messages from the command (typed with info/warning/error)
+    pub messages: Vec<OutputMessage>,
+}
+
+impl CommandOutput {
+    /// Create a new empty output
+    pub fn new() -> Self {
+        Self { messages: Vec::new() }
+    }
+
+    /// Check if there are any output messages
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+}
 
 /// Command executor
 ///
@@ -83,31 +102,34 @@ impl CommandExecutor {
     /// executor.do_(&mut viewer, "zoom")?;
     /// ```
     pub fn do_(&mut self, viewer: &mut dyn ViewerLike, cmd: &str) -> CmdResult {
-        self.do_with_options(viewer, cmd, true, true)
+        self.do_with_options(viewer, cmd, true, false).map(|_| ())
     }
 
-    /// Execute a command with options
+    /// Execute a command with options, returning any output messages
     ///
     /// # Arguments
     /// * `viewer` - The viewer to execute against (implements ViewerLike)
     /// * `cmd` - The command string
     /// * `log` - Whether to log the command
     /// * `quiet` - Whether to suppress output
+    ///
+    /// # Returns
+    /// On success, returns `CommandOutput` containing any messages from the command.
     pub fn do_with_options(
         &mut self,
         viewer: &mut dyn ViewerLike,
         cmd: &str,
         log: bool,
         quiet: bool,
-    ) -> CmdResult {
+    ) -> Result<CommandOutput, CmdError> {
         let cmd = cmd.trim();
         if cmd.is_empty() {
-            return Ok(());
+            return Ok(CommandOutput::new());
         }
 
         // Skip comments
         if cmd.starts_with('#') {
-            return Ok(());
+            return Ok(CommandOutput::new());
         }
 
         // Echo command if enabled
@@ -132,9 +154,14 @@ impl CommandExecutor {
             .get(&parsed.name)
             .ok_or_else(|| CmdError::UnknownCommand(parsed.name.clone()))?;
 
-        // Execute
+        // Execute and collect output
         let mut ctx = CommandContext::new(viewer).with_quiet(quiet).with_log(log);
-        command.execute(&mut ctx, &parsed)
+        command.execute(&mut ctx, &parsed)?;
+
+        // Return collected output
+        Ok(CommandOutput {
+            messages: ctx.take_output(),
+        })
     }
 
     /// Execute multiple commands (semicolon or newline separated)

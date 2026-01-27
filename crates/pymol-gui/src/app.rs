@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use egui::ViewportId;
-use pymol_cmd::{CommandExecutor, ViewerLike};
+use pymol_cmd::{CommandExecutor, MessageKind, ViewerLike};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_mol::RepMask;
 use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
@@ -664,6 +664,7 @@ impl App {
         let full_output = {
             let gui_state = &mut self.gui_state;
             let registry = &self.registry;
+            let selections = &self.selections;
             
             self.egui_ctx.run(raw_input, |ctx| {
                 // Top panel - output and command line
@@ -687,8 +688,8 @@ impl App {
                         .default_width(gui_state.right_panel_width)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
-                                // Object list
-                                object_actions = ObjectListPanel::show(ui, registry);
+                                // Object list with selections
+                                object_actions = ObjectListPanel::show(ui, registry, selections);
                             });
                         });
                 }
@@ -760,9 +761,17 @@ impl App {
         let mut executor = CommandExecutor::new();
         
         // Execute the command using the proper CommandExecutor
-        match executor.do_(&mut adapter, cmd) {
-            Ok(()) => {
-                // Command succeeded
+        // Use do_with_options to capture output messages
+        match executor.do_with_options(&mut adapter, cmd, true, false) {
+            Ok(output) => {
+                // Display any output messages from the command with appropriate styling
+                for msg in output.messages {
+                    match msg.kind {
+                        MessageKind::Info => self.gui_state.print_info(msg.text),
+                        MessageKind::Warning => self.gui_state.print_warning(msg.text),
+                        MessageKind::Error => self.gui_state.print_error(msg.text),
+                    }
+                }
             }
             Err(e) => {
                 // Print the error to the GUI output
@@ -881,6 +890,14 @@ impl App {
                         self.needs_redraw = true;
                     }
                 }
+            }
+            ObjectAction::DeleteSelection(name) => {
+                self.selections.remove(&name);
+                self.gui_state.print_info(format!("Deleted selection \"{}\"", name));
+            }
+            ObjectAction::ToggleSelectionEnabled(_name) => {
+                // TODO: Toggle selection visibility indicator
+                // Selections don't have an enabled/disabled state yet
             }
         }
     }

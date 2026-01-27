@@ -102,9 +102,12 @@ EXAMPLES
         // Evaluate selection with named selection support
         let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
+        let mut total_affected = 0usize;
+
         // Apply to atoms matching the selection in each object
         for (obj_name, selected) in selection_results {
-            if selected.count() > 0 {
+            let count = selected.count();
+            if count > 0 {
                 if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
                     // Set object-level visibility for this rep
                     mol_obj.state_mut().visible_reps.set_visible(rep);
@@ -116,6 +119,7 @@ EXAMPLES
                         }
                     }
                     mol_obj.invalidate(DirtyFlags::REPS);
+                    total_affected += count;
                 }
             }
         }
@@ -123,7 +127,9 @@ EXAMPLES
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            if let Some(name) = rep_name {
+            if total_affected == 0 {
+                ctx.print_error(&format!(" Show: selection \"{}\" not found", selection));
+            } else if let Some(name) = rep_name {
                 ctx.print(&format!(" Showing {}", name));
             } else {
                 ctx.print(" Showing all representations");
@@ -190,9 +196,12 @@ EXAMPLES
         // Evaluate selection with named selection support
         let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
+        let mut total_affected = 0usize;
+
         // Apply to atoms matching the selection in each object
         for (obj_name, selected) in selection_results {
-            if selected.count() > 0 {
+            let count = selected.count();
+            if count > 0 {
                 if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
                     // Get mutable access and hide rep on selected atoms
                     let mol_mut = mol_obj.molecule_mut();
@@ -206,6 +215,7 @@ EXAMPLES
                         }
                     }
                     mol_obj.invalidate(DirtyFlags::REPS);
+                    total_affected += count;
                 }
             }
         }
@@ -213,7 +223,9 @@ EXAMPLES
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            if let Some(name) = rep_name {
+            if total_affected == 0 {
+                ctx.print_error(&format!(" Hide: selection \"{}\" not found", selection));
+            } else if let Some(name) = rep_name {
                 ctx.print(&format!(" Hiding {}", name));
             } else {
                 ctx.print(" Hiding all representations");
@@ -280,9 +292,12 @@ EXAMPLES
         // Evaluate selection with named selection support
         let selection_results = evaluate_selection(ctx.viewer, selection)?;
 
+        let mut total_affected = 0usize;
+
         // Apply to atoms matching the selection in each object
         for (obj_name, selected) in selection_results {
-            if selected.count() > 0 {
+            let count = selected.count();
+            if count > 0 {
                 if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
                     // Set object-level visibility for this rep
                     mol_obj.state_mut().visible_reps.set_visible(rep);
@@ -295,6 +310,7 @@ EXAMPLES
                         }
                     }
                     mol_obj.invalidate(DirtyFlags::REPS);
+                    total_affected += count;
                 }
             }
         }
@@ -302,7 +318,11 @@ EXAMPLES
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            ctx.print(&format!(" Showing as {}", rep_name));
+            if total_affected == 0 {
+                ctx.print_error(&format!(" Show as: selection \"{}\" not found", selection));
+            } else {
+                ctx.print(&format!(" Showing as {}", rep_name));
+            }
         }
 
         Ok(())
@@ -615,7 +635,11 @@ EXAMPLES
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            ctx.print(&format!(" Color: {} atoms colored {}", total_colored, color_name));
+            if total_colored == 0 {
+                ctx.print_error(&format!(" Color: 0 atoms colored {} (selection not found)", color_name));
+            } else {
+                ctx.print(&format!(" Color: {} atoms colored {}", total_colored, color_name));
+            }
         }
 
         Ok(())

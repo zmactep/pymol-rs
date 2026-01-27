@@ -199,23 +199,53 @@ impl Command for DeselectCommand {
         r#"
 DESCRIPTION
 
-    "deselect" clears the current selection indicator.
+    "deselect" removes a named selection or clears all selections.
 
 USAGE
 
-    deselect
+    deselect [ selection ]
+
+ARGUMENTS
+
+    selection = string: name of selection to remove (default: all selections)
 
 EXAMPLES
 
+    deselect chainA
     deselect
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
-        // TODO: Clear the current selection indicator
+    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+        // Get optional selection name
+        let name = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("selection"));
 
-        if !ctx.quiet {
-            ctx.print(" Selection cleared");
+        if let Some(name) = name {
+            // Remove specific selection
+            let existed = ctx.viewer.remove_selection(name);
+            if !ctx.quiet {
+                if existed {
+                    ctx.print(&format!(" Selection \"{}\" deleted.", name));
+                } else {
+                    ctx.print_error(&format!(" Selection \"{}\" not found.", name));
+                }
+            }
+        } else {
+            // Remove all selections
+            let names = ctx.viewer.selection_names();
+            let count = names.len();
+            for name in names {
+                ctx.viewer.remove_selection(&name);
+            }
+            if !ctx.quiet {
+                if count > 0 {
+                    ctx.print(&format!(" {} selection(s) cleared.", count));
+                } else {
+                    ctx.print(" No selections to clear.");
+                }
+            }
         }
 
         Ok(())
