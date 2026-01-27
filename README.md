@@ -9,12 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
+  <a href="#graphical-interface">Interface</a> •
+  <a href="#features">Features</a> •
   <a href="#usage">Usage</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#roadmap">Roadmap</a> •
-  <a href="#license">License</a>
+  <a href="#architecture">Architecture</a>
 </p>
 
 <p align="center">
@@ -33,6 +32,41 @@ PyMOL-RS is a modern molecular visualization system written in Rust. It aims to 
 - **PyMOL-compatible command syntax** for familiar workflows
 - **Full selection language** support for precise atom selection
 - **High performance** through Rust's zero-cost abstractions
+
+## Quick Start
+
+### Requirements
+
+- Rust 1.70 or later
+- GPU with Vulkan, Metal, or DirectX 12 support
+
+### Build and Run
+
+```bash
+git clone https://github.com/pymol-rs/pymol-rs
+cd pymol-rs
+make release
+make run
+```
+
+### Build Targets
+
+| Command | Description |
+|---------|-------------|
+| `make release` | Build Rust workspace (release) |
+| `make run` | Run the GUI application |
+| `make debug` | Build Rust workspace (debug) |
+| `make python` | Build Python wheel (requires [maturin](https://github.com/PyO3/maturin)) |
+| `make test` | Run tests |
+| `make clean` | Clean all build artifacts |
+
+## Graphical Interface
+
+PyMOL-RS includes a full graphical interface built with egui:
+
+<p align="center">
+  <img src="images/interface.png" alt="PyMOL-RS Interface" width="800">
+</p>
 
 ## Features
 
@@ -76,88 +110,11 @@ not solvent
 polymer or ligand
 
 # Distance operators
-around 5 of ligand   # Within 5Å of ligand
-byres near_to 4 of site
+around 5 ligand   # Within 5Å of ligand
+byres near_to 4 site
 
 # Grouping
 bychain resn HEM     # Entire chains containing HEM
-```
-
-### Interactive Viewer
-
-- Real-time 3D navigation (rotate, pan, zoom)
-- Scene management and snapshots
-- Screenshot export (PNG)
-- Customizable key bindings
-
-### Graphical Interface
-
-PyMOL-RS includes a full graphical interface built with egui:
-
-<p align="center">
-  <img src="images/interface.png" alt="PyMOL-RS Interface" width="800">
-</p>
-
-The interface consists of three main areas:
-
-| Component | Description |
-|-----------|-------------|
-| **Command Console** | Top area with command input, history, and colored output messages |
-| **3D Viewer** | Central GPU-accelerated molecular rendering viewport |
-| **Objects Panel** | Right sidebar listing loaded objects with quick action buttons |
-
-The Objects panel provides quick access buttons for each object:
-
-| Button | Action |
-|--------|--------|
-| **A** | Actions menu (delete, duplicate, rename) |
-| **S** | Show representations |
-| **H** | Hide representations |
-| **L** | Label options |
-| **C** | Color options |
-
-## Quick Start
-
-### Requirements
-
-- Rust 1.70 or later
-- GPU with Vulkan, Metal, or DirectX 12 support
-
-### Build
-
-```bash
-git clone https://github.com/pymol-rs/pymol-rs
-cd pymol-rs
-
-# Build the GUI application
-cargo build --release
-
-# Or use make for convenience
-make release
-```
-
-#### Build Targets
-
-| Command | Description |
-|---------|-------------|
-| `make release` | Build Rust workspace (release) |
-| `make debug` | Build Rust workspace (debug) |
-| `make python` | Build Python wheel (requires [maturin](https://github.com/PyO3/maturin)) |
-| `make all` | Build both Rust and Python |
-| `make test` | Run tests |
-| `make clean` | Clean all build artifacts |
-
-### Run the GUI
-
-```bash
-# Run the GUI application
-cargo run -p pymol-gui --release
-
-# Or after building
-./target/release/pymol-rs
-
-# Load a file directly
-cargo run -p pymol-gui --release -- protein.pdb
 ```
 
 ## Usage
@@ -209,30 +166,6 @@ executor.do_(&mut viewer, "color green, chain A")?;
 executor.do_(&mut viewer, "zoom")?;
 ```
 
-### Interactive Command Line
-
-Run the interactive viewer and use PyMOL-style commands:
-
-```bash
-cargo run --example interactive -- 1IGT.cif
-```
-
-```
-PyMOL> as cartoon
-PyMOL> color by_chain
-PyMOL> bg_color black
-PyMOL> show sticks, chain A and resi 1-100
-PyMOL> show surface, chain C
-PyMOL> color atomic, rep sticks
-PyMOL> hide cartoon, rep sticks
-PyMOL> png output.png, 1920, 1080
-PyMOL> quit
-```
-
-<p align="center">
-  <img src="images/output.png" alt="PyMOL-RS Example Output" width="800">
-</p>
-
 ### Python API
 
 PyMOL-RS provides Python bindings with a familiar PyMOL-like API:
@@ -255,7 +188,7 @@ cmd.show("sticks", "chain A and resi 1-100")
 # Color by various schemes
 cmd.color("green", "chain A")
 cmd.color("cyan", "chain B")
-cmd.color("atomic", "rep sticks")a
+cmd.color("atomic", "rep sticks")
 
 # Selection operations
 cmd.select("active_site", "byres around 5 ligand")
@@ -267,18 +200,6 @@ cmd.png("output.png", width=1920, height=1080)
 for atom in cmd.get_model("chain A and name CA").atom:
     print(f"{atom.resn} {atom.resi}: {atom.coord}")
 ```
-
-## Controls
-
-### Mouse
-
-| Action | Control |
-|--------|---------|
-| Rotate | Left drag |
-| Pan | Middle drag |
-| Zoom | Right drag / Scroll |
-
-
 
 ## Architecture
 
