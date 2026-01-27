@@ -13,7 +13,7 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#usage">Usage</a> •
   <a href="#architecture">Architecture</a> •
-  <a href="#not-implemented-yet">Roadmap</a> •
+  <a href="#roadmap">Roadmap</a> •
   <a href="#license">License</a>
 </p>
 
@@ -90,6 +90,32 @@ bychain resn HEM     # Entire chains containing HEM
 - Screenshot export (PNG)
 - Customizable key bindings
 
+### Graphical Interface
+
+PyMOL-RS includes a full graphical interface built with egui:
+
+<p align="center">
+  <img src="images/interface.png" alt="PyMOL-RS Interface" width="800">
+</p>
+
+The interface consists of three main areas:
+
+| Component | Description |
+|-----------|-------------|
+| **Command Console** | Top area with command input, history, and colored output messages |
+| **3D Viewer** | Central GPU-accelerated molecular rendering viewport |
+| **Objects Panel** | Right sidebar listing loaded objects with quick action buttons |
+
+The Objects panel provides quick access buttons for each object:
+
+| Button | Action |
+|--------|--------|
+| **A** | Actions menu (delete, duplicate, rename) |
+| **S** | Show representations |
+| **H** | Hide representations |
+| **L** | Label options |
+| **C** | Color options |
+
 ## Quick Start
 
 ### Requirements
@@ -102,17 +128,36 @@ bychain resn HEM     # Entire chains containing HEM
 ```bash
 git clone https://github.com/pymol-rs/pymol-rs
 cd pymol-rs
+
+# Build the GUI application
 cargo build --release
+
+# Or use make for convenience
+make release
 ```
 
-### Run the Interactive Viewer
+#### Build Targets
+
+| Command | Description |
+|---------|-------------|
+| `make release` | Build Rust workspace (release) |
+| `make debug` | Build Rust workspace (debug) |
+| `make python` | Build Python wheel (requires [maturin](https://github.com/PyO3/maturin)) |
+| `make all` | Build both Rust and Python |
+| `make test` | Run tests |
+| `make clean` | Clean all build artifacts |
+
+### Run the GUI
 
 ```bash
-# View a PDB file
-cargo run --example interactive -- protein.pdb
+# Run the GUI application
+cargo run -p pymol-gui --release
 
-# Or run the simple viewer example
-cargo run -p pymol-scene --example viewer
+# Or after building
+./target/release/pymol-rs
+
+# Load a file directly
+cargo run -p pymol-gui --release -- protein.pdb
 ```
 
 ## Usage
@@ -188,6 +233,41 @@ PyMOL> quit
   <img src="images/output.png" alt="PyMOL-RS Example Output" width="800">
 </p>
 
+### Python API
+
+PyMOL-RS provides Python bindings with a familiar PyMOL-like API:
+
+```bash
+# Build and install the Python package
+make python-dev
+```
+
+```python
+from pymol import cmd
+
+# Load a structure
+cmd.load("protein.pdb")
+
+# Show representations
+cmd.show("cartoon")
+cmd.show("sticks", "chain A and resi 1-100")
+
+# Color by various schemes
+cmd.color("green", "chain A")
+cmd.color("cyan", "chain B")
+cmd.color("atomic", "rep sticks")a
+
+# Selection operations
+cmd.select("active_site", "byres around 5 ligand")
+
+# Export image
+cmd.png("output.png", width=1920, height=1080)
+
+# Access atom data
+for atom in cmd.get_model("chain A and name CA").atom:
+    print(f"{atom.resn} {atom.resi}: {atom.coord}")
+```
+
 ## Controls
 
 ### Mouse
@@ -198,23 +278,7 @@ PyMOL> quit
 | Pan | Middle drag |
 | Zoom | Right drag / Scroll |
 
-### Keyboard
 
-| Key | Action |
-|-----|--------|
-| `1` | Toggle lines |
-| `2` | Toggle sticks |
-| `3` | Toggle spheres |
-| `4` | Toggle cartoon |
-| `5` | Toggle surface |
-| `6` | Toggle mesh |
-| `7` | Toggle dots |
-| `8` | Toggle ribbon |
-| `R` | Reset view |
-| `O` | Toggle orthographic/perspective |
-| `H` | Hide all |
-| `A` | Show default (lines + sticks) |
-| `Esc` | Exit |
 
 ## Architecture
 
@@ -229,7 +293,9 @@ pymol-rs/
 ├── pymol-render    # wgpu-based GPU rendering engine
 ├── pymol-scene     # Viewer, camera, and scene management
 ├── pymol-cmd       # Command parser and executor
-└── pymol-settings  # Configuration and settings system
+├── pymol-settings  # Configuration and settings system
+├── pymol-gui       # Graphical user interface (egui)
+└── pymol-python    # Python bindings (PyO3, built separately with maturin)
 ```
 
 ### Layer Overview
@@ -237,7 +303,10 @@ pymol-rs/
 ```
 ┌─────────────────────────────────────────┐
 │             Application Layer           │
-│         pymol-cmd, pymol-scene          │
+│    pymol-gui, pymol-cmd, pymol-python   │
+├─────────────────────────────────────────┤
+│              Scene Layer                │
+│             pymol-scene                 │
 ├─────────────────────────────────────────┤
 │             Rendering Layer             │
 │             pymol-render                │
@@ -250,11 +319,10 @@ pymol-rs/
 └─────────────────────────────────────────┘
 ```
 
-## Not Implemented Yet
+## Roadmap
 
 PyMOL-RS is in active development. The following features are planned but not yet available:
 
-- **GUI** - End-user PyMOL-like graphical interface
 - **Labels** - Text labels for atoms and residues
 - **Measurements** - Distance, angle, and dihedral measurements
 - **Symmetry mates** - Crystallographic symmetry display
