@@ -26,10 +26,11 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
+use crate::async_tasks::{AsyncTaskResult, AsyncTaskRunner};
 use crate::state::GuiState;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
-use crate::ui::{CommandLinePanel, ObjectListPanel, OutputPanel};
+use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel};
 
 /// Type alias for key action callbacks
 pub type KeyAction = Arc<dyn Fn(&mut App) + Send + Sync>;
@@ -52,6 +53,8 @@ pub struct ViewerAdapter<'a> {
     pub needs_redraw: &'a mut bool,
     /// Reference to named selections (with visibility state)
     pub selections: &'a mut std::collections::HashMap<String, SelectionEntry>,
+    /// Reference to async task runner for background operations
+    pub async_runner: &'a AsyncTaskRunner,
 }
 
 impl<'a> ViewerLike for ViewerAdapter<'a> {
@@ -188,6 +191,15 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
             .find(|e| e.visible)
             .map(|e| e.expression.as_str())
     }
+
+    fn request_async_fetch(&mut self, code: &str, name: &str, format: u8) -> bool {
+        let fmt = match format {
+            1 => pymol_io::FetchFormat::Pdb,
+            _ => pymol_io::FetchFormat::Cif,
+        };
+        self.async_runner.spawn_fetch(code.to_string(), name.to_string(), fmt);
+        true
+    }
 }
 
 /// Main application state
@@ -284,6 +296,12 @@ pub struct App {
     // =========================================================================
     /// Keyboard shortcuts
     key_bindings: KeyBindings<KeyAction>,
+
+    // =========================================================================
+    // Async Task System
+    // =========================================================================
+    /// Async task runner for background operations (fetch, etc.)
+    async_runner: AsyncTaskRunner,
 }
 
 impl Default for App {
@@ -337,6 +355,7 @@ impl App {
             frame_count: 0,
             clear_color: [0.0, 0.0, 0.0],
             key_bindings: KeyBindings::new(),
+            async_runner: AsyncTaskRunner::new(),
         };
 
         // Set up default key bindings
@@ -735,6 +754,9 @@ impl App {
         let mut object_actions = Vec::new();
         let mut viewport_rect_logical = egui::Rect::NOTHING;
 
+        // Check for pending async tasks and get their messages before entering the closure
+        let pending_messages = self.async_runner.pending_messages();
+
         // Run egui with a closure that captures only what it needs
         let full_output = {
             let gui_state = &mut self.gui_state;
@@ -781,6 +803,11 @@ impl App {
                 
                 // Track if mouse is over the viewport
                 gui_state.viewport_hovered = central_response.inner.hovered();
+
+                // Show notification overlay when async tasks are in progress
+                if !pending_messages.is_empty() {
+                    NotificationOverlay::show(ctx, &pending_messages);
+                }
             })
         };
 
@@ -847,6 +874,7 @@ impl App {
             clear_color: &mut self.clear_color,
             needs_redraw: &mut self.needs_redraw,
             selections: &mut self.selections,
+            async_runner: &self.async_runner,
         };
 
         // Use a fresh executor to avoid borrowing issues with self
@@ -907,6 +935,45 @@ impl App {
         if let Some((min, max)) = self.registry.extent() {
             self.camera.center_to(min, max);
             self.needs_redraw = true;
+        }
+    }
+
+    /// Zoom to fit a specific object
+    pub fn zoom_on(&mut self, name: &str) {
+        if let Some(obj) = self.registry.get(name) {
+            if let Some((min, max)) = obj.extent() {
+                self.camera.zoom_to(min, max);
+                self.needs_redraw = true;
+            }
+        }
+    }
+
+    /// Process completed async tasks
+    ///
+    /// This should be called each frame to handle results from background operations
+    /// like fetch, save, etc.
+    fn process_async_tasks(&mut self) {
+        while let Some(result) = self.async_runner.poll() {
+            match result {
+                AsyncTaskResult::Fetch { name, code, result } => {
+                    match result {
+                        Ok(mol) => {
+                            self.registry.add(MoleculeObject::with_name(mol, &name));
+                            self.gui_state
+                                .print_info(format!(" Fetched {} as \"{}\"", code, name));
+                            // Zoom to the new molecule
+                            self.zoom_on(&name);
+                        }
+                        Err(e) => {
+                            self.gui_state
+                                .print_error(format!("Fetch failed for {}: {}", code, e));
+                        }
+                    }
+                }
+                // Handle future task types here
+            }
+            self.needs_redraw = true;
+            self.request_redraw();
         }
     }
 
@@ -1264,6 +1331,9 @@ impl ApplicationHandler for App {
                 let dt = (now - self.last_frame).as_secs_f32();
                 self.last_frame = now;
                 self.frame_count = self.frame_count.saturating_add(1);
+
+                // Process any completed async tasks (fetch, etc.)
+                self.process_async_tasks();
 
                 // Process input and update camera (only if egui doesn't want input)
                 self.process_input();

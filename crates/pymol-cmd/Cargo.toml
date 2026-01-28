@@ -8,7 +8,7 @@ repository.workspace = true
 description = "PyMOL command parsing and execution system"
 
 [features]
-default = ["fetch"]
+default = ["fetch-async"]
 fetch = ["pymol-io/fetch"]
 fetch-async = ["pymol-io/fetch-async"]
 

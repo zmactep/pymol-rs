@@ -16,7 +16,7 @@ path = "src/main.rs"
 pymol-scene = { workspace = true }
 pymol-cmd = { workspace = true }
 pymol-mol = { workspace = true }
-pymol-io = { workspace = true }
+pymol-io = { workspace = true, features = ["fetch-async"] }
 pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
 pymol-color = { workspace = true }
@@ -37,3 +37,6 @@ log = { workspace = true }
 env_logger = { workspace = true }
 pollster = { workspace = true }
 dirs = "5"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread"] }

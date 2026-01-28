@@ -14,8 +14,10 @@
 //! - State/playback controls for multi-state molecules
 
 pub mod app;
+pub mod async_tasks;
 pub mod state;
 pub mod ui;
 
 pub use app::App;
+pub use async_tasks::{AsyncTask, AsyncTaskResult, AsyncTaskRunner, FetchTask};
 pub use state::GuiState;

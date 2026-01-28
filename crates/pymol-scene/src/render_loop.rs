@@ -132,6 +132,33 @@ pub trait ViewerLike {
     ) -> Result<(), String> {
         Err("Screenshot capture not supported by this viewer".to_string())
     }
+
+    // =========================================================================
+    // Async Operations
+    // =========================================================================
+
+    /// Request an async fetch operation from RCSB PDB (non-blocking)
+    ///
+    /// This method allows commands to request background fetch operations without
+    /// blocking the main thread. The viewer implementation decides how to handle
+    /// the async operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - PDB ID to fetch (e.g., "1ubq")
+    /// * `name` - Object name to use when adding to registry
+    /// * `format` - Format code: 0 = CIF (default), 1 = PDB
+    ///
+    /// # Returns
+    ///
+    /// * `true` - Request was accepted; fetch is running in background
+    /// * `false` - Async fetch not supported; caller should use sync fallback
+    ///
+    /// The default implementation returns `false`, indicating async fetch is not
+    /// supported. GUI viewers should override this to spawn background tasks.
+    fn request_async_fetch(&mut self, _code: &str, _name: &str, _format: u8) -> bool {
+        false
+    }
 }
 
 /// Type alias for key action callbacks

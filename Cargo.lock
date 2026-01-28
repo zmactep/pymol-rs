@@ -2447,6 +2447,7 @@ dependencies = [
  "pymol-scene",
  "pymol-select",
  "pymol-settings",
+ "tokio",
  "wgpu",
  "winit",
 ]

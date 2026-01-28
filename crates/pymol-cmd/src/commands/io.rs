@@ -554,29 +554,43 @@ EXAMPLES
             })
             .unwrap_or_default();
 
-        // Fetch the structure
-        #[cfg(feature = "fetch")]
-        let mol = pymol_io::fetch(code, format)
-            .map_err(|e| CmdError::FileFormat(e.to_string()))?;
-
-        #[cfg(all(feature = "fetch-async", not(feature = "fetch")))]
-        let mol = {
-            // For async, we'd need a runtime - for now just error
-            return Err(CmdError::execution(
-                "Async fetch not supported in synchronous context",
-            ));
+        // Convert format to code for async API
+        let format_code = match format {
+            pymol_io::FetchFormat::Pdb => 1u8,
+            pymol_io::FetchFormat::Cif => 0u8,
         };
 
-        // Add to viewer
-        ctx.viewer
-            .objects_mut()
-            .add(MoleculeObject::with_name(mol, name));
+        // Try async path first (GUI supports this)
+        if ctx.viewer.request_async_fetch(code, name, format_code) {
+            ctx.print(&format!(" Fetching {}...", code));
+            return Ok(());
+        }
 
-        ctx.print(&format!(" Fetched {} as \"{}\"", code, name));
+        // Sync fallback for non-GUI viewers (headless, scripts, etc.)
+        #[cfg(feature = "fetch")]
+        {
+            let mol = pymol_io::fetch(code, format)
+                .map_err(|e| CmdError::FileFormat(e.to_string()))?;
 
-        // Zoom to fetched molecule (preserves rotation)
-        ctx.viewer.zoom_on(name);
+            // Add to viewer
+            ctx.viewer
+                .objects_mut()
+                .add(MoleculeObject::with_name(mol, name));
 
-        Ok(())
+            ctx.print(&format!(" Fetched {} as \"{}\"", code, name));
+
+            // Zoom to fetched molecule (preserves rotation)
+            ctx.viewer.zoom_on(name);
+
+            return Ok(());
+        }
+
+        // No fetch implementation available
+        #[cfg(not(feature = "fetch"))]
+        {
+            return Err(CmdError::execution(
+                "Fetch not available: neither async nor sync fetch is enabled",
+            ));
+        }
     }
 }
