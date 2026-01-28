@@ -300,6 +300,16 @@ impl App {
             ..Default::default()
         });
 
+        // Create executor and extract command names for autocomplete
+        let executor = CommandExecutor::new();
+        let command_names: Vec<String> = executor.registry()
+            .all_names()
+            .map(String::from)
+            .collect();
+
+        let mut gui_state = GuiState::new();
+        gui_state.command_names = command_names;
+
         let mut app = Self {
             instance,
             render_context: None,
@@ -318,8 +328,8 @@ impl App {
             named_colors: NamedColors::default(),
             element_colors: ElementColors::default(),
             chain_colors: ChainColors,
-            executor: CommandExecutor::new(),
-            gui_state: GuiState::new(),
+            executor,
+            gui_state,
             object_list_panel: ObjectListPanel::new(),
             input: InputState::new(),
             last_frame: Instant::now(),
