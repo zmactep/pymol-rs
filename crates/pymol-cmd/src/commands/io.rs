@@ -1,7 +1,7 @@
 //! File I/O commands: load, save, png, fetch, cd, pwd, ls
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pymol_io::{read_file, write_file, FileFormat};
 use pymol_scene::MoleculeObject;
@@ -9,6 +9,14 @@ use pymol_scene::MoleculeObject;
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
+
+/// Expand shell-style paths: ~ to home directory, $VAR to environment variables
+fn expand_path(path: &str) -> PathBuf {
+    match shellexpand::full(path) {
+        Ok(expanded) => PathBuf::from(expanded.as_ref()),
+        Err(_) => PathBuf::from(path), // Fall back to original if expansion fails
+    }
+}
 
 /// Register I/O commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -107,11 +115,11 @@ EXAMPLES
             .unwrap_or(false);
 
         // Load the file
-        let path = Path::new(filename);
+        let path = expand_path(filename);
         let mol = if let Some(fmt) = format {
-            pymol_io::read_file_format(path, fmt)
+            pymol_io::read_file_format(&path, fmt)
         } else {
-            read_file(path)
+            read_file(&path)
         }
         .map_err(|e| CmdError::FileFormat(e.to_string()))?;
 
@@ -185,7 +193,7 @@ EXAMPLES
 
         // For now, save the first molecule object
         // TODO: Implement proper selection support
-        let path = Path::new(filename);
+        let path = expand_path(filename);
 
         // Find first molecule to save
         let mol = ctx
@@ -195,7 +203,7 @@ EXAMPLES
             .find_map(|name| ctx.viewer.objects().get_molecule(name))
             .ok_or_else(|| CmdError::execution("No molecule objects to save"))?;
 
-        write_file(path, mol.molecule()).map_err(|e| CmdError::FileFormat(e.to_string()))?;
+        write_file(&path, mol.molecule()).map_err(|e| CmdError::FileFormat(e.to_string()))?;
 
         ctx.print(&format!(" Saved \"{}\"", filename));
 
@@ -285,7 +293,7 @@ EXAMPLES
             .unwrap_or(false);
 
         // Ensure the path ends with .png
-        let path = Path::new(filename);
+        let path = expand_path(filename);
         let path = if path.extension().map(|e| e.to_ascii_lowercase()) != Some("png".into()) {
             path.with_extension("png")
         } else {
@@ -354,7 +362,7 @@ EXAMPLES
         let path = args.get_str(0).or_else(|| args.get_named_str("path"));
 
         let target = if let Some(p) = path {
-            Path::new(p).to_path_buf()
+            expand_path(p)
         } else {
             // Default to home directory
             dirs_path_or_current()
@@ -448,17 +456,17 @@ EXAMPLES
     }
 
     fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
-        let path = args
+        let path_str = args
             .get_str(0)
             .or_else(|| args.get_named_str("path"))
             .unwrap_or(".");
 
-        let dir = Path::new(path);
+        let dir = expand_path(path_str);
 
         if !dir.is_dir() {
             return Err(CmdError::execution(format!(
                 "'{}' is not a directory",
-                path
+                path_str
             )));
         }
 

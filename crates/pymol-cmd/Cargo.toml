@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 ahash = { workspace = true }
 log = { workspace = true }
 lin_alg = { workspace = true }
+shellexpand = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

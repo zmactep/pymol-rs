@@ -33,12 +33,17 @@ clean:
 	rm -rf crates/pymol-python/target
 	rm -rf target/wheels
 
+# Run GUI application
+run:
+	./target/release/pymol-rs
+
 # Show help
 help:
 	@echo "Available targets:"
 	@echo "  all            - Build release binaries and Python wheel"
 	@echo "  build/debug    - Build Rust workspace (debug)"
 	@echo "  release        - Build Rust workspace (release)"
+	@echo "  run            - Run release version of GUI interface"
 	@echo "  python         - Build Python wheel (release)"
 	@echo "  python-dev     - Install Python package in development mode"
 	@echo "  test           - Run tests"

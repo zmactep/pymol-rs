@@ -254,6 +254,8 @@ pub struct App {
     // =========================================================================
     /// GUI state (output, command line, etc.)
     gui_state: GuiState,
+    /// Object list panel (stateful for menu handling)
+    object_list_panel: ObjectListPanel,
 
     // =========================================================================
     // Input State
@@ -318,6 +320,7 @@ impl App {
             chain_colors: ChainColors,
             executor: CommandExecutor::new(),
             gui_state: GuiState::new(),
+            object_list_panel: ObjectListPanel::new(),
             input: InputState::new(),
             last_frame: Instant::now(),
             needs_redraw: true,
@@ -721,6 +724,7 @@ impl App {
             let gui_state = &mut self.gui_state;
             let registry = &self.registry;
             let selections = &self.selections;
+            let object_list_panel = &mut self.object_list_panel;
             
             self.egui_ctx.run(raw_input, |ctx| {
                 // Top panel - output and command line
@@ -744,8 +748,8 @@ impl App {
                         .default_width(gui_state.right_panel_width)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
-                                // Object list with selections
-                                object_actions = ObjectListPanel::show(ui, registry, selections);
+                                // Object list with selections (stateful panel)
+                                object_actions = object_list_panel.show(ui, registry, selections);
                             });
                         });
                 }
