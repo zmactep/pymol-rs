@@ -795,10 +795,17 @@ impl App {
             self.handle_object_action(action);
         }
 
-        // Request window redraw if we processed any actions to update UI immediately
+        // Check if egui needs a repaint (e.g., for popup menus, animations, etc.)
+        // repaint_delay of Duration::ZERO means immediate repaint needed
+        let egui_needs_repaint = full_output
+            .viewport_output
+            .values()
+            .any(|v| v.repaint_delay.is_zero());
+
+        // Request window redraw if we processed any actions OR if egui needs repaint
         // This is needed because the event loop is in Wait mode and won't redraw
         // unless explicitly requested
-        if has_actions {
+        if has_actions || egui_needs_repaint {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
@@ -1169,7 +1176,7 @@ impl ApplicationHandler for App {
         // Create window
         let window_attrs = Window::default_attributes()
             .with_title("PyMOL-RS")
-            .with_inner_size(PhysicalSize::new(1280, 800));
+            .with_inner_size(PhysicalSize::new(1024, 768));
 
         let window = Arc::new(
             event_loop
@@ -1283,10 +1290,11 @@ impl ApplicationHandler for App {
 
             WindowEvent::CursorMoved { .. } => {
                 // Input already handled above
-                // Request redraw when dragging - viewport check is done in process_input()
+                // Always request redraw on cursor move so egui hover states update
+                self.request_redraw();
+                // Mark 3D scene as needing redraw only when dragging
                 if self.input.any_button_pressed() {
                     self.needs_redraw = true;
-                    self.request_redraw();
                 }
             }
 

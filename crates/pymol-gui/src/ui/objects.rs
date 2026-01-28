@@ -6,22 +6,44 @@
 
 use std::collections::HashMap;
 
-use egui::{Color32, RichText, Ui, Vec2, Pos2, Id};
+use egui::{Color32, RichText, Ui, Vec2, Pos2, Id, Align2};
 use pymol_mol::RepMask;
 use pymol_scene::{ObjectRegistry, SelectionEntry};
 
 /// Minimum size for action buttons (A, S, H, L, C) to ensure consistent sizing
 const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(22.0);
 
-/// Button colors for the action buttons
-mod button_colors {
+/// All color constants used in the object list panel
+mod colors {
     use egui::Color32;
+    
+    // Button colors (A, S, H, L, C)
     pub const ACTION: Color32 = Color32::from_rgb(150, 150, 255);   // A - blue
     pub const SHOW: Color32 = Color32::from_rgb(100, 200, 100);     // S - green
     pub const HIDE: Color32 = Color32::from_rgb(200, 100, 100);     // H - red
     pub const LABEL: Color32 = Color32::from_rgb(200, 200, 255);    // L - light blue
     pub const COLOR: Color32 = Color32::from_rgb(255, 200, 100);    // C - orange/yellow
+    
+    // Object state colors
+    pub const ENABLED: Color32 = Color32::from_rgb(100, 255, 100);  // Green for enabled
+    pub const DISABLED: Color32 = Color32::GRAY;                     // Gray for disabled
+    
+    // Selection colors
+    pub const SELECTION: Color32 = Color32::from_rgb(255, 85, 255);      // Bright pink
+    pub const SELECTION_HIDDEN: Color32 = Color32::from_rgb(128, 43, 128); // Dimmed pink
 }
+
+/// Available molecular representations for show/hide menus
+const REPRESENTATIONS: &[(&str, u32)] = &[
+    ("lines", RepMask::LINES),
+    ("sticks", RepMask::STICKS),
+    ("spheres", RepMask::SPHERES),
+    ("cartoon", RepMask::CARTOON),
+    ("surface", RepMask::SURFACE),
+    ("mesh", RepMask::MESH),
+    ("dots", RepMask::DOTS),
+    ("ribbon", RepMask::RIBBON),
+];
 
 /// What menu is currently showing
 #[derive(Clone, PartialEq, Debug)]
@@ -74,15 +96,25 @@ fn menu_button(
         .min_size(BUTTON_MIN_SIZE);
     let response = ui.add(button);
     
+    // Check if this button's menu is currently active
+    let is_this_menu_active = menu_state.active == target_menu;
+    
     if response.clicked() {
-        if menu_state.active == target_menu {
+        if is_this_menu_active {
             // Clicking the same button closes the menu
             menu_state.active = ActiveMenu::None;
         } else {
             // Open this menu (automatically closes any other)
             menu_state.active = target_menu;
-            menu_state.anchor_pos = response.rect.left_bottom();
+            // Use right_bottom so popup opens to the left (better for right-side panel)
+            menu_state.anchor_pos = response.rect.right_bottom();
         }
+        // Request immediate repaint to show menu without delay
+        ui.ctx().request_repaint();
+    } else if is_this_menu_active {
+        // Keep anchor_pos updated every frame for the active menu's button
+        // This prevents "jumping" when scroll position or layout changes
+        menu_state.anchor_pos = response.rect.right_bottom();
     }
     
     // Show tooltip only when no menu is open
@@ -132,10 +164,6 @@ pub struct ObjectListPanel {
     menu_state: MenuState,
 }
 
-/// Color for selections (pink/magenta like PyMOL)
-const SELECTION_COLOR: Color32 = Color32::from_rgb(255, 85, 255);
-/// Color for hidden selections (dimmed)
-const SELECTION_HIDDEN_COLOR: Color32 = Color32::from_rgb(128, 43, 128);
 
 impl ObjectListPanel {
     /// Create a new ObjectListPanel
@@ -143,83 +171,146 @@ impl ObjectListPanel {
         Self::default()
     }
 
-    /// Draw the object list panel
-    /// 
+    /// Render the right-aligned button bar (A, S, H, L, C) for an object or selection
+    ///
     /// # Arguments
     /// * `ui` - The egui UI context
-    /// * `registry` - Object registry containing molecules and other objects
-    /// * `selections` - Named selections (name -> expression)
-    pub fn show(&mut self, ui: &mut Ui, registry: &ObjectRegistry, selections: &HashMap<String, SelectionEntry>) -> Vec<ObjectAction> {
-        let mut actions = Vec::new();
-        
-        // Track if any menu button was clicked this frame
-        let mut menu_button_clicked = false;
-
-        ui.vertical(|ui| {
-            // Header
-            ui.label(
-                RichText::new("Objects")
-                    .strong()
-                    .color(Color32::WHITE),
-            );
-
-            ui.separator();
-
-            // ========== "all" row ==========
-            let all_enabled = registry.names().all(|name| {
-                registry.get(name).map(|o| o.is_enabled()).unwrap_or(false)
-            });
-            let has_objects = registry.names().next().is_some();
+    /// * `target_name` - Name of the object or selection
+    /// * `is_selection` - true if this is a selection, false if it's an object
+    /// * `menu_button_clicked` - Mutable flag to track if any menu button was clicked
+    fn render_button_bar(
+        &mut self,
+        ui: &mut Ui,
+        target_name: &str,
+        is_selection: bool,
+        menu_button_clicked: &mut bool,
+    ) {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Buttons are added in reverse order (right-to-left): C, L, H, S, A
             
-            ui.horizontal(|ui| {
-                let all_color = if !has_objects {
-                    Color32::GRAY
-                } else if all_enabled {
-                    Color32::from_rgb(100, 255, 100)
+            // C - Color
+            let color_tooltip = if is_selection { "Color selection" } else { "Color" };
+            if menu_button(
+                ui, "C", colors::COLOR, color_tooltip,
+                &mut self.menu_state,
+                ActiveMenu::Color { object: target_name.to_string() }
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+
+            // L - Labels (simple button, no menu)
+            if ui
+                .add(action_button("L", colors::LABEL))
+                .on_hover_text("Labels")
+                .clicked()
+            {
+                // Toggle labels (TODO: implement)
+            }
+
+            // H - Hide
+            if menu_button(
+                ui, "H", colors::HIDE, "Hide representations",
+                &mut self.menu_state,
+                ActiveMenu::Hide { object: target_name.to_string() }
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+
+            // S - Show
+            if menu_button(
+                ui, "S", colors::SHOW, "Show representations",
+                &mut self.menu_state,
+                ActiveMenu::Show { object: target_name.to_string() }
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+
+            // A - Actions (different menu for selections vs objects)
+            let action_menu = if is_selection {
+                ActiveMenu::SelectionActions { selection: target_name.to_string() }
+            } else {
+                ActiveMenu::Actions { object: target_name.to_string() }
+            };
+            if menu_button(
+                ui, "A", colors::ACTION, "Actions",
+                &mut self.menu_state,
+                action_menu
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+        });
+    }
+
+    /// Render the panel header ("Objects" title)
+    fn render_header(ui: &mut Ui) {
+        ui.label(
+            RichText::new("Objects")
+                .strong()
+                .color(Color32::WHITE),
+        );
+        ui.separator();
+    }
+
+    /// Render the "all" row with aggregate actions for all objects
+    fn render_all_row(
+        ui: &mut Ui,
+        registry: &ObjectRegistry,
+        actions: &mut Vec<ObjectAction>,
+    ) {
+        let all_enabled = registry.names().all(|name| {
+            registry.get(name).map(|o| o.is_enabled()).unwrap_or(false)
+        });
+        let has_objects = registry.names().next().is_some();
+        
+        ui.horizontal(|ui| {
+            let all_color = if !has_objects {
+                colors::DISABLED
+            } else if all_enabled {
+                colors::ENABLED
+            } else {
+                Color32::WHITE
+            };
+            
+            let all_response = ui.add(
+                egui::Label::new(
+                    RichText::new("all")
+                        .family(egui::FontFamily::Monospace)
+                        .color(all_color),
+                )
+                .sense(egui::Sense::click()),
+            );
+            
+            if all_response.clicked() && has_objects {
+                if all_enabled {
+                    actions.push(ObjectAction::DisableAll);
                 } else {
-                    Color32::WHITE
-                };
-                
-                let all_response = ui.add(
-                    egui::Label::new(
-                        RichText::new("all")
-                            .family(egui::FontFamily::Monospace)
-                            .color(all_color),
-                    )
-                    .sense(egui::Sense::click()),
-                );
-                
-                if all_response.clicked() && has_objects {
-                    if all_enabled {
-                        actions.push(ObjectAction::DisableAll);
-                    } else {
-                        actions.push(ObjectAction::EnableAll);
-                    }
+                    actions.push(ObjectAction::EnableAll);
                 }
-                
-                all_response.on_hover_text(if all_enabled { "Click to disable all" } else { "Click to enable all" });
+            }
+            
+            all_response.on_hover_text(if all_enabled { "Click to disable all" } else { "Click to enable all" });
 
-                // "all" row buttons - simple action buttons, no menus
+            // Right-align the buttons (simple action buttons, no menus)
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Buttons are added in reverse order (right-to-left)
                 if ui
-                    .add(action_button("A", button_colors::ACTION))
-                    .on_hover_text("Actions menu")
+                    .add(action_button("C", colors::COLOR))
+                    .on_hover_text("Color all objects")
                     .clicked()
                 {
-                    // Actions menu would go here
+                    // Color picker would go here
                 }
 
                 if ui
-                    .add(action_button("S", button_colors::SHOW))
-                    .on_hover_text("Show representations")
+                    .add(action_button("L", colors::LABEL))
+                    .on_hover_text("Toggle labels")
                     .clicked()
                 {
-                    for name in registry.names() {
-                        actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::LINES));
-                    }
+                    // Toggle labels for all
                 }
 
                 if ui
-                    .add(action_button("H", button_colors::HIDE))
+                    .add(action_button("H", colors::HIDE))
                     .on_hover_text("Hide all representations")
                     .clicked()
                 {
@@ -229,196 +320,173 @@ impl ObjectListPanel {
                 }
 
                 if ui
-                    .add(action_button("L", button_colors::LABEL))
-                    .on_hover_text("Toggle labels")
+                    .add(action_button("S", colors::SHOW))
+                    .on_hover_text("Show representations")
                     .clicked()
                 {
-                    // Toggle labels for all
+                    for name in registry.names() {
+                        actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::LINES));
+                    }
                 }
 
                 if ui
-                    .add(action_button("C", button_colors::COLOR))
-                    .on_hover_text("Color all objects")
+                    .add(action_button("A", colors::ACTION))
+                    .on_hover_text("Actions menu")
                     .clicked()
                 {
-                    // Color picker would go here
+                    // Actions menu would go here
                 }
             });
+        });
+        
+        ui.separator();
+    }
 
-            ui.separator();
+    /// Render a single object row
+    fn render_object_row(
+        &mut self,
+        ui: &mut Ui,
+        name: &str,
+        is_enabled: bool,
+        actions: &mut Vec<ObjectAction>,
+        menu_button_clicked: &mut bool,
+    ) {
+        ui.push_id(name, |ui| {
+            ui.horizontal(|ui| {
+                let name_color = if is_enabled {
+                    colors::ENABLED
+                } else {
+                    colors::DISABLED
+                };
 
-            // ========== Object rows ==========
-            let names: Vec<_> = registry.names().map(|s| s.to_string()).collect();
-            for name in names {
+                let name_response = ui.add(
+                    egui::Label::new(
+                        RichText::new(name)
+                            .family(egui::FontFamily::Monospace)
+                            .color(name_color),
+                    )
+                    .sense(egui::Sense::click()),
+                );
+
+                if name_response.clicked() {
+                    actions.push(ObjectAction::ToggleEnabled(name.to_string()));
+                }
+                if name_response.secondary_clicked() {
+                    actions.push(ObjectAction::ZoomTo(name.to_string()));
+                }
+
+                self.render_button_bar(ui, name, false, menu_button_clicked);
+            });
+        });
+    }
+
+    /// Render a single selection row
+    fn render_selection_row(
+        &mut self,
+        ui: &mut Ui,
+        name: &str,
+        entry: &SelectionEntry,
+        actions: &mut Vec<ObjectAction>,
+        menu_button_clicked: &mut bool,
+    ) {
+        ui.push_id(format!("sel_{}", name), |ui| {
+            ui.horizontal(|ui| {
+                let display_name = format!("({})", name);
+                
+                let color = if entry.visible {
+                    colors::SELECTION
+                } else {
+                    colors::SELECTION_HIDDEN
+                };
+                
+                let name_response = ui.add(
+                    egui::Label::new(
+                        RichText::new(&display_name)
+                            .family(egui::FontFamily::Monospace)
+                            .color(color),
+                    )
+                    .sense(egui::Sense::click()),
+                );
+
+                let clicked = name_response.clicked();
+
+                let visibility_hint = if entry.visible { "visible" } else { "hidden" };
+                name_response.on_hover_text(format!(
+                    "Selection: {} ({})\nClick to toggle visibility",
+                    entry.expression, visibility_hint
+                ));
+
+                if clicked {
+                    actions.push(ObjectAction::ToggleSelectionEnabled(name.to_string()));
+                }
+
+                self.render_button_bar(ui, name, true, menu_button_clicked);
+            });
+        });
+    }
+
+    /// Render the active menu and handle click-outside-to-close behavior
+    fn render_menu_and_handle_close(
+        &mut self,
+        ui: &mut Ui,
+        actions: &mut Vec<ObjectAction>,
+        menu_button_clicked: bool,
+    ) {
+        if self.menu_state.active == ActiveMenu::None {
+            return;
+        }
+
+        let menu_clicked = self.render_active_menu(ui, actions);
+        
+        // Close menu on click outside (but not if we clicked a menu button or menu item)
+        if !menu_button_clicked && !menu_clicked {
+            if ui.input(|i| i.pointer.any_click()) {
+                self.menu_state.active = ActiveMenu::None;
+            }
+        }
+    }
+
+    /// Draw the object list panel
+    /// 
+    /// # Arguments
+    /// * `ui` - The egui UI context
+    /// * `registry` - Object registry containing molecules and other objects
+    /// * `selections` - Named selections (name -> expression)
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        registry: &ObjectRegistry,
+        selections: &HashMap<String, SelectionEntry>,
+    ) -> Vec<ObjectAction> {
+        let mut actions = Vec::new();
+        let mut menu_button_clicked = false;
+
+        ui.vertical(|ui| {
+            Self::render_header(ui);
+            Self::render_all_row(ui, registry, &mut actions);
+
+            // Object rows
+            for name in registry.names() {
                 let is_enabled = registry
-                    .get(&name)
+                    .get(name)
                     .map(|o| o.is_enabled())
                     .unwrap_or(false);
-
-                ui.push_id(&name, |ui| {
-                    ui.horizontal(|ui| {
-                        let name_color = if is_enabled {
-                            Color32::from_rgb(100, 255, 100)
-                        } else {
-                            Color32::GRAY
-                        };
-
-                        let name_response = ui.add(
-                            egui::Label::new(
-                                RichText::new(&name)
-                                    .family(egui::FontFamily::Monospace)
-                                    .color(name_color),
-                            )
-                            .sense(egui::Sense::click()),
-                        );
-
-                        if name_response.clicked() {
-                            actions.push(ObjectAction::ToggleEnabled(name.clone()));
-                        }
-                        if name_response.secondary_clicked() {
-                            actions.push(ObjectAction::ZoomTo(name.clone()));
-                        }
-
-                        // Menu buttons - they only update state, NEVER render popups
-                        if menu_button(
-                            ui, "A", button_colors::ACTION, "Actions",
-                            &mut self.menu_state,
-                            ActiveMenu::Actions { object: name.clone() }
-                        ).clicked() {
-                            menu_button_clicked = true;
-                        }
-
-                        if menu_button(
-                            ui, "S", button_colors::SHOW, "Show representations",
-                            &mut self.menu_state,
-                            ActiveMenu::Show { object: name.clone() }
-                        ).clicked() {
-                            menu_button_clicked = true;
-                        }
-
-                        if menu_button(
-                            ui, "H", button_colors::HIDE, "Hide representations",
-                            &mut self.menu_state,
-                            ActiveMenu::Hide { object: name.clone() }
-                        ).clicked() {
-                            menu_button_clicked = true;
-                        }
-
-                        if ui
-                            .add(action_button("L", button_colors::LABEL))
-                            .on_hover_text("Labels")
-                            .clicked()
-                        {
-                            // Toggle labels
-                        }
-
-                        if menu_button(
-                            ui, "C", button_colors::COLOR, "Color",
-                            &mut self.menu_state,
-                            ActiveMenu::Color { object: name.clone() }
-                        ).clicked() {
-                            menu_button_clicked = true;
-                        }
-                    });
-                });
+                self.render_object_row(ui, name, is_enabled, &mut actions, &mut menu_button_clicked);
             }
 
-            // ========== Selection rows ==========
+            // Selection rows
             if !selections.is_empty() {
                 ui.separator();
-                
-                let mut sel_entries: Vec<(&String, &SelectionEntry)> = selections.iter().collect();
+                let mut sel_entries: Vec<_> = selections.iter().collect();
                 sel_entries.sort_by(|a, b| a.0.cmp(b.0));
                 
                 for (sel_name, entry) in sel_entries {
-                    ui.push_id(format!("sel_{}", sel_name), |ui| {
-                        ui.horizontal(|ui| {
-                            let display_name = format!("({})", sel_name);
-                            
-                            // Use different color based on visibility
-                            let color = if entry.visible {
-                                SELECTION_COLOR  // Bright pink when visible
-                            } else {
-                                SELECTION_HIDDEN_COLOR  // Dimmed when hidden
-                            };
-                            
-                            let name_response = ui.add(
-                                egui::Label::new(
-                                    RichText::new(&display_name)
-                                        .family(egui::FontFamily::Monospace)
-                                        .color(color),
-                                )
-                                .sense(egui::Sense::click()),
-                            );
-
-                            let clicked = name_response.clicked();
-
-                            let visibility_hint = if entry.visible { "visible" } else { "hidden" };
-                            name_response.on_hover_text(format!("Selection: {} ({})\nClick to toggle visibility", entry.expression, visibility_hint));
-
-                            if clicked {
-                                actions.push(ObjectAction::ToggleSelectionEnabled(sel_name.to_string()));
-                            }
-
-                            // Selection menu buttons
-                            if menu_button(
-                                ui, "A", button_colors::ACTION, "Actions",
-                                &mut self.menu_state,
-                                ActiveMenu::SelectionActions { selection: sel_name.to_string() }
-                            ).clicked() {
-                                menu_button_clicked = true;
-                            }
-
-                            if menu_button(
-                                ui, "S", button_colors::SHOW, "Show representations",
-                                &mut self.menu_state,
-                                ActiveMenu::Show { object: sel_name.to_string() }
-                            ).clicked() {
-                                menu_button_clicked = true;
-                            }
-
-                            if menu_button(
-                                ui, "H", button_colors::HIDE, "Hide representations",
-                                &mut self.menu_state,
-                                ActiveMenu::Hide { object: sel_name.to_string() }
-                            ).clicked() {
-                                menu_button_clicked = true;
-                            }
-
-                            if ui
-                                .add(action_button("L", button_colors::LABEL))
-                                .on_hover_text("Labels")
-                                .clicked()
-                            {
-                                // Toggle labels for selection
-                            }
-
-                            if menu_button(
-                                ui, "C", button_colors::COLOR, "Color selection",
-                                &mut self.menu_state,
-                                ActiveMenu::Color { object: sel_name.to_string() }
-                            ).clicked() {
-                                menu_button_clicked = true;
-                            }
-                        });
-                    });
+                    self.render_selection_row(ui, sel_name, entry, &mut actions, &mut menu_button_clicked);
                 }
             }
         });
 
-        // ========== RENDER THE SINGLE ACTIVE MENU ==========
-        // This happens AFTER all buttons are processed, so state is final
-        if self.menu_state.active != ActiveMenu::None {
-            let menu_clicked = self.render_active_menu(ui, &mut actions);
-            
-            // Close menu on click outside (but not if we clicked a menu button or menu item)
-            if !menu_button_clicked && !menu_clicked {
-                if ui.input(|i| i.pointer.any_click()) {
-                    self.menu_state.active = ActiveMenu::None;
-                }
-            }
-        }
-
+        self.render_menu_and_handle_close(ui, &mut actions, menu_button_clicked);
         actions
     }
 
@@ -427,13 +495,29 @@ impl ObjectListPanel {
     fn render_active_menu(&mut self, ui: &mut Ui, actions: &mut Vec<ObjectAction>) -> bool {
         let mut item_clicked = false;
         
+        // Request repaint to ensure the popup is fully rendered
+        // This is critical for the first frame after opening
+        ui.ctx().request_repaint();
+        
+        // Use a stable Area configuration:
+        // - fixed_pos: anchor to button's right-bottom corner
+        // - pivot RIGHT_TOP: popup's right-top aligns with anchor, so it expands LEFT
+        // - movable(false): prevent dragging
+        // - constrain(false): don't auto-adjust position (causes jumping)
+        // - Order::Tooltip: highest rendering priority, ensures immediate visibility
         egui::Area::new(Id::new("object_list_menu_panel"))
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Tooltip)
             .fixed_pos(self.menu_state.anchor_pos)
-            .constrain(true)
+            .pivot(Align2::RIGHT_TOP)
+            .movable(false)
+            .constrain(false)
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style())
-                    .show(ui, |ui| {
+                // Use explicit solid colors to avoid semi-transparency on first frame
+                let popup_frame = egui::Frame::popup(ui.style())
+                    .fill(Color32::from_rgb(40, 40, 45))  // Solid dark background
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(80, 80, 85)));
+                
+                popup_frame.show(ui, |ui| {
                         ui.set_min_width(100.0);
                         
                         match &self.menu_state.active.clone() {
@@ -442,10 +526,10 @@ impl ObjectListPanel {
                                 item_clicked = Self::render_actions_menu(ui, object, actions);
                             }
                             ActiveMenu::Show { object } => {
-                                item_clicked = Self::render_show_menu(ui, object, actions);
+                                item_clicked = Self::render_representation_menu(ui, object, actions, true);
                             }
                             ActiveMenu::Hide { object } => {
-                                item_clicked = Self::render_hide_menu(ui, object, actions);
+                                item_clicked = Self::render_representation_menu(ui, object, actions, false);
                             }
                             ActiveMenu::Color { object } => {
                                 item_clicked = Self::render_color_menu(ui, object, actions);
@@ -474,87 +558,42 @@ impl ObjectListPanel {
         false
     }
 
-    /// Render show menu - returns true if item clicked
-    fn render_show_menu(ui: &mut Ui, name: &str, actions: &mut Vec<ObjectAction>) -> bool {
-        if ui.button("lines").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::LINES));
-            return true;
+    /// Render representation menu (show or hide) - returns true if item clicked
+    /// 
+    /// # Arguments
+    /// * `is_show` - true for show menu, false for hide menu
+    fn render_representation_menu(
+        ui: &mut Ui,
+        name: &str,
+        actions: &mut Vec<ObjectAction>,
+        is_show: bool,
+    ) -> bool {
+        // Render buttons for each representation
+        for (rep_name, rep_mask) in REPRESENTATIONS {
+            if ui.button(*rep_name).clicked() {
+                let action = if is_show {
+                    ObjectAction::ShowRep(name.to_string(), *rep_mask)
+                } else {
+                    ObjectAction::HideRep(name.to_string(), *rep_mask)
+                };
+                actions.push(action);
+                return true;
+            }
         }
-        if ui.button("sticks").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::STICKS));
-            return true;
-        }
-        if ui.button("spheres").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::SPHERES));
-            return true;
-        }
-        if ui.button("cartoon").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::CARTOON));
-            return true;
-        }
-        if ui.button("surface").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::SURFACE));
-            return true;
-        }
-        if ui.button("mesh").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::MESH));
-            return true;
-        }
-        if ui.button("dots").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::DOTS));
-            return true;
-        }
-        if ui.button("ribbon").clicked() {
-            actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::RIBBON));
-            return true;
-        }
+        
+        // Separator and "all/everything" option
         ui.separator();
-        if ui.button("all").clicked() {
-            actions.push(ObjectAction::ShowAll(name.to_string()));
+        let all_label = if is_show { "all" } else { "everything" };
+        if ui.button(all_label).clicked() {
+            let action = if is_show {
+                ObjectAction::ShowAll(name.to_string())
+            } else {
+                ObjectAction::HideAll(name.to_string())
+            };
+            actions.push(action);
             return true;
         }
-        false
-    }
-
-    /// Render hide menu - returns true if item clicked
-    fn render_hide_menu(ui: &mut Ui, name: &str, actions: &mut Vec<ObjectAction>) -> bool {
-        if ui.button("lines").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::LINES));
-            return true;
-        }
-        if ui.button("sticks").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::STICKS));
-            return true;
-        }
-        if ui.button("spheres").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::SPHERES));
-            return true;
-        }
-        if ui.button("cartoon").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::CARTOON));
-            return true;
-        }
-        if ui.button("surface").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::SURFACE));
-            return true;
-        }
-        if ui.button("mesh").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::MESH));
-            return true;
-        }
-        if ui.button("dots").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::DOTS));
-            return true;
-        }
-        if ui.button("ribbon").clicked() {
-            actions.push(ObjectAction::HideRep(name.to_string(), RepMask::RIBBON));
-            return true;
-        }
-        ui.separator();
-        if ui.button("everything").clicked() {
-            actions.push(ObjectAction::HideAll(name.to_string()));
-            return true;
-        }
+        
         false
     }
 
