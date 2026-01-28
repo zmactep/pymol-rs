@@ -187,25 +187,28 @@ fn parse_content(content: &[u8], format: FetchFormat) -> IoResult<ObjectMolecule
 /// - The downloaded content cannot be parsed
 #[cfg(feature = "fetch")]
 pub fn fetch(pdb_id: &str, format: FetchFormat) -> IoResult<ObjectMolecule> {
+    use std::io::Read;
+
     validate_pdb_id(pdb_id)?;
 
     let url = build_rcsb_url(pdb_id, format);
 
     let response = ureq::get(&url)
-        .set("User-Agent", USER_AGENT)
+        .header("User-Agent", USER_AGENT)
         .call()
-        .map_err(|e| match e {
-            ureq::Error::Status(404, _) => {
-                IoError::fetch(format!("PDB ID '{}' not found", pdb_id))
-            }
-            ureq::Error::Status(code, _) => {
-                IoError::fetch(format!("HTTP error {}: {}", code, url))
-            }
-            ureq::Error::Transport(t) => IoError::fetch(format!("Network error: {}", t)),
-        })?;
+        .map_err(|e| IoError::fetch(format!("Network error: {}", e)))?;
+
+    let status = response.status().as_u16();
+    if status == 404 {
+        return Err(IoError::fetch(format!("PDB ID '{}' not found", pdb_id)));
+    }
+    if status >= 400 {
+        return Err(IoError::fetch(format!("HTTP error {}: {}", status, url)));
+    }
 
     let mut content = Vec::new();
     response
+        .into_body()
         .into_reader()
         .read_to_end(&mut content)
         .map_err(|e| IoError::fetch(format!("Failed to read response: {}", e)))?;

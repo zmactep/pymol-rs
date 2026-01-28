@@ -200,11 +200,13 @@ impl GlobalUniforms {
 
 /// Builder for creating global uniforms from settings (crate-internal)
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) struct UniformsBuilder {
     uniforms: GlobalUniforms,
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 impl UniformsBuilder {
     /// Create a new builder with default values
     pub fn new() -> Self {

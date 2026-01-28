@@ -232,7 +232,7 @@ impl Viewer {
     /// The viewer is created without a window. Use [`create_window`] to
     /// create a window after the event loop is running.
     pub fn new() -> Self {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
@@ -275,19 +275,18 @@ impl Viewer {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or_else(|| ViewerError::GpuInitFailed("No suitable adapter found".to_string()))?;
+            .map_err(|e| ViewerError::GpuInitFailed(format!("No suitable adapter found: {}", e)))?;
 
         // Request device
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("PyMOL-RS Device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("PyMOL-RS Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|e| ViewerError::GpuInitFailed(e.to_string()))?;
 
@@ -767,6 +766,9 @@ impl Viewer {
             Err(wgpu::SurfaceError::Timeout) => {
                 return Ok(());
             }
+            Err(wgpu::SurfaceError::Other) => {
+                return Err(ViewerError::GpuInitFailed("Surface error".to_string()));
+            }
         };
 
         let view = output
@@ -878,6 +880,7 @@ impl Viewer {
                         }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: window.depth_view(),
@@ -1075,6 +1078,7 @@ impl Viewer {
                         }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth_view,
@@ -1116,15 +1120,15 @@ impl Viewer {
 
         // Copy texture to buffer
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &color_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(output_height),
@@ -1146,7 +1150,7 @@ impl Viewer {
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             tx.send(result).unwrap();
         });
-        device.poll(wgpu::Maintain::Wait);
+        device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).ok();
         rx.recv()
             .map_err(|e| ViewerError::GpuInitFailed(format!("Failed to receive map result: {}", e)))?
             .map_err(|e| ViewerError::GpuInitFailed(format!("Failed to map buffer: {:?}", e)))?;

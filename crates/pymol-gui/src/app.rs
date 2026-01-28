@@ -295,7 +295,7 @@ impl Default for App {
 impl App {
     /// Create a new application
     pub fn new() -> Self {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
@@ -371,7 +371,7 @@ impl App {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or_else(|| "No suitable GPU adapter found".to_string())?;
+            .map_err(|e| format!("No suitable GPU adapter found: {}", e))?;
 
         // Log adapter info
         let info = adapter.get_info();
@@ -380,15 +380,14 @@ impl App {
 
         // Request device
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("PyMOL-RS Device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("PyMOL-RS Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|e| format!("Failed to create device: {}", e))?;
 
@@ -428,7 +427,12 @@ impl App {
             None,
         );
 
-        let egui_renderer = egui_wgpu::Renderer::new(&device, format, None, 1, false);
+        let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions {
+            depth_stencil_format: None,
+            msaa_samples: 1,
+            dithering: false,
+            ..Default::default()
+        });
 
         // Create render context (takes ownership of device and queue)
         let render_context = RenderContext::new(device, queue, format);
@@ -614,6 +618,7 @@ impl App {
                         }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: depth_view,
@@ -678,6 +683,7 @@ impl App {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
+                        depth_slice: None,
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
@@ -756,7 +762,7 @@ impl App {
 
                 // Central panel to capture the viewport rect (area for 3D rendering)
                 let central_response = egui::CentralPanel::default()
-                    .frame(egui::Frame::none())
+                    .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         // Make the central panel interactive to detect hover
                         ui.allocate_response(ui.available_size(), egui::Sense::hover())

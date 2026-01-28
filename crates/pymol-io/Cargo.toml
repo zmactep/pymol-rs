@@ -21,8 +21,8 @@ memmap2 = { workspace = true }
 lin_alg = { workspace = true }
 
 # Optional fetch dependencies
-ureq = { version = "2", optional = true }
-reqwest = { version = "0.12", features = ["gzip"], optional = true }
+ureq = { version = "3", optional = true }
+reqwest = { version = "0.13", features = ["gzip"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

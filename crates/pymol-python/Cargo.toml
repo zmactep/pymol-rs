@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # PyO3 for Python bindings
-pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27.2", features = ["extension-module"] }
 
 # Internal crates (relative paths from this crate)
 pymol-mol = { path = "../pymol-mol" }
@@ -38,11 +38,11 @@ default = []
 numpy = ["dep:numpy"]
 
 [dependencies.numpy]
-version = "0.27"
+version = "0.27.1"
 optional = true
 
 [dev-dependencies]
-pyo3 = { version = "0.27", features = ["auto-initialize"] }
+pyo3 = { version = "0.27.2", features = ["auto-initialize"] }
 
 [lints.rust]
 # Suppress warnings from PyO3's create_exception! macro which checks for gil-refs feature

@@ -36,8 +36,8 @@ pymol-gui = { path = "crates/pymol-gui" }
 # External dependencies
 bitflags = "2"
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
-wgpu = "23"
-winit = "0.30"
+wgpu = "27"
+winit = "0.30.12"
 nom = "7"
 thiserror = "2"
 log = "0.4"
@@ -51,12 +51,12 @@ flate2 = "1"
 rayon = "1"
 bitvec = "1"
 phf = { version = "0.11", features = ["macros"] }
-rustyline = "14"
+rustyline = "17"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pollster = "0.4"
 shellexpand = "3"
 
 # egui integration
-egui = "0.30"
-egui-wgpu = "0.30"
-egui-winit = "0.30"
+egui = "0.33"
+egui-wgpu = "0.33"
+egui-winit = "0.33"
