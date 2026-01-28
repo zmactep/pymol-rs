@@ -35,10 +35,9 @@ jobs:
             name: linux-x86_64
             ext: ''
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             name: linux-arm64
             ext: ''
-            cross: true
 
     steps:
       - name: Checkout
@@ -65,16 +64,7 @@ jobs:
             libasound2-dev \
             libfontconfig1-dev
 
-      - name: Install cross
-        if: matrix.cross
-        uses: taiki-e/install-action@cross
-
-      - name: Build with cross
-        if: matrix.cross
-        run: cross build --release -p pymol-gui --target ${{ matrix.target }}
-
       - name: Build with cargo
-        if: ${{ !matrix.cross }}
         run: cargo build --release -p pymol-gui --target ${{ matrix.target }}
 
       - name: Package (Unix)
@@ -110,7 +100,7 @@ jobs:
           - os: ubuntu-latest
             target: x86_64
             manylinux: auto
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64
             manylinux: auto
 
@@ -122,12 +112,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Setup QEMU
-        if: matrix.target == 'aarch64' && runner.os == 'Linux'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
