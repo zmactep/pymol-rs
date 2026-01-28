@@ -54,7 +54,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let selection = args
             .get_str(0)
             .or_else(|| args.get_named_str("selection"))
@@ -151,7 +151,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let selection = args
             .get_str(0)
             .or_else(|| args.get_named_str("selection"))
@@ -213,7 +213,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let selection = args
             .get_str(0)
             .or_else(|| args.get_named_str("selection"))
@@ -262,7 +262,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, _args: &ParsedCommand) -> CmdResult {
         ctx.viewer.reset_view();
 
         if !ctx.quiet {
@@ -316,7 +316,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let mode = args
             .get_str(0)
             .or_else(|| args.get_named_str("mode"))
@@ -402,7 +402,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, _args: &ParsedCommand) -> CmdResult {
         let view = ctx.viewer.camera().current_view();
 
         // Format view as PyMOL-style output
@@ -487,7 +487,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // Parse the view values
         // This is complex because PyMOL accepts a tuple as the argument
         let arg0 = args.get_arg(0).ok_or_else(|| CmdError::MissingArgument("view".to_string()))?;

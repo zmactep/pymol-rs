@@ -51,7 +51,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, _ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, _ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let _code = args.get_int(0).or_else(|| args.get_named_int("code")).unwrap_or(0);
 
         // Signal that we want to quit
@@ -98,7 +98,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let what = args
             .get_str(0)
             .or_else(|| args.get_named_str("what"))
@@ -161,7 +161,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, _args: &ParsedCommand) -> CmdResult {
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
@@ -204,7 +204,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let selection = args
             .get_str(0)
             .or_else(|| args.get_named_str("selection"))
@@ -272,14 +272,20 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let command = args.get_str(0).or_else(|| args.get_named_str("command"));
 
         if let Some(cmd_name) = command {
             // Show help for specific command
-            // We'd need access to the registry here, which we don't have directly
-            // For now, just print a message
-            ctx.print(&format!(" Help for '{}' - use 'help' in interactive mode", cmd_name));
+            if let Some(registry) = ctx.registry() {
+                if let Some(cmd) = registry.get(cmd_name) {
+                    ctx.print(cmd.help());
+                } else {
+                    ctx.print(&format!(" Unknown command: '{}'", cmd_name));
+                }
+            } else {
+                ctx.print(&format!(" Help for '{}' - registry not available", cmd_name));
+            }
         } else {
             // List available commands
             ctx.print(" Available commands:");

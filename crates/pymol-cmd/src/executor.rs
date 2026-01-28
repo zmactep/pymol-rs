@@ -155,7 +155,10 @@ impl CommandExecutor {
             .ok_or_else(|| CmdError::UnknownCommand(parsed.name.clone()))?;
 
         // Execute and collect output
-        let mut ctx = CommandContext::new(viewer).with_quiet(quiet).with_log(log);
+        let mut ctx = CommandContext::new(viewer)
+            .with_quiet(quiet)
+            .with_log(log)
+            .with_registry(&self.registry);
         command.execute(&mut ctx, &parsed)?;
 
         // Return collected output

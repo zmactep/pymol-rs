@@ -69,7 +69,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // Get filename (required)
         let filename = args
             .get_str(0)
@@ -175,7 +175,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let filename = args
             .get_str(0)
             .or_else(|| args.get_named_str("filename"))
@@ -256,7 +256,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // Get filename (required)
         let filename = args
             .get_str(0)
@@ -358,7 +358,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let path = args.get_str(0).or_else(|| args.get_named_str("path"));
 
         let target = if let Some(p) = path {
@@ -409,7 +409,7 @@ USAGE
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, _args: &ParsedCommand) -> CmdResult {
         let cwd = env::current_dir().map_err(|e| CmdError::execution(e.to_string()))?;
 
         ctx.print(&format!(" {}", cwd.display()));
@@ -455,7 +455,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let path_str = args
             .get_str(0)
             .or_else(|| args.get_named_str("path"))
@@ -532,7 +532,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let code = args
             .get_str(0)
             .or_else(|| args.get_named_str("code"))

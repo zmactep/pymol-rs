@@ -47,7 +47,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -122,7 +122,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let old_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("old_name"))
@@ -182,7 +182,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -243,7 +243,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let target = args
             .get_str(0)
             .or_else(|| args.get_named_str("target"))
@@ -309,7 +309,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -367,7 +367,7 @@ EXAMPLES
 "#
     }
 
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))

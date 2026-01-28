@@ -67,25 +67,32 @@ impl OutputMessage {
 ///
 /// Provides access to the viewer state and execution options.
 /// Generic over `V: ViewerLike` to support different viewer implementations.
-pub struct CommandContext<'a, V: ViewerLike + ?Sized> {
+///
+/// The two lifetime parameters are:
+/// - `'v` - lifetime of the viewer reference
+/// - `'r` - lifetime of the registry reference (may differ from viewer)
+pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     /// Reference to the viewer (scene, objects, camera, settings)
-    pub viewer: &'a mut V,
+    pub viewer: &'v mut V,
     /// Whether to suppress output messages
     pub quiet: bool,
     /// Whether to log this command
     pub log: bool,
     /// Collected output messages (for GUI display)
     output_buffer: Vec<OutputMessage>,
+    /// Optional reference to command registry (for help lookups)
+    registry: Option<&'r CommandRegistry>,
 }
 
-impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
+impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
     /// Create a new command context
-    pub fn new(viewer: &'a mut V) -> Self {
+    pub fn new(viewer: &'v mut V) -> Self {
         Self {
             viewer,
             quiet: false,
             log: true,
             output_buffer: Vec::new(),
+            registry: None,
         }
     }
 
@@ -99,6 +106,17 @@ impl<'a, V: ViewerLike + ?Sized> CommandContext<'a, V> {
     pub fn with_log(mut self, log: bool) -> Self {
         self.log = log;
         self
+    }
+
+    /// Set the command registry reference
+    pub fn with_registry(mut self, registry: &'r CommandRegistry) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Get a reference to the command registry (if available)
+    pub fn registry(&self) -> Option<&CommandRegistry> {
+        self.registry
     }
 
     /// Print an info message (unless quiet mode is enabled)
@@ -149,8 +167,10 @@ pub trait Command: Send + Sync {
 
     /// Execute the command
     /// 
-    /// Uses a lifetime parameter to allow the context to borrow from non-'static viewers.
-    fn execute<'a>(&self, ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, args: &ParsedCommand) -> CmdResult;
+    /// Uses lifetime parameters to allow the context to borrow from non-'static viewers.
+    /// - `'v` - lifetime of the viewer reference
+    /// - `'r` - lifetime of the registry reference
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult;
 
     /// Get help text for this command
     fn help(&self) -> &str {
@@ -284,7 +304,7 @@ mod tests {
             &self.name
         }
 
-        fn execute<'a>(&self, _ctx: &mut CommandContext<'a, dyn ViewerLike + 'a>, _args: &ParsedCommand) -> CmdResult {
+        fn execute<'v, 'r>(&self, _ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, _args: &ParsedCommand) -> CmdResult {
             Ok(())
         }
 

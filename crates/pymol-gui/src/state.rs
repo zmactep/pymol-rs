@@ -308,6 +308,12 @@ pub struct GuiState {
     pub completion: CompletionState,
     /// Cached list of command names for autocomplete (populated on startup)
     pub command_names: Vec<String>,
+
+    // =========================================================================
+    // Application Control
+    // =========================================================================
+    /// Whether the quit command was issued
+    pub quit_requested: bool,
 }
 
 impl Default for GuiState {
@@ -342,6 +348,7 @@ impl GuiState {
             viewport_hovered: false,
             completion: CompletionState::new(),
             command_names: Vec::new(), // Populated by App on startup
+            quit_requested: false,
         };
 
         // Add initial welcome messages

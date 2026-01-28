@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use egui::ViewportId;
-use pymol_cmd::{CommandExecutor, MessageKind, ViewerLike};
+use pymol_cmd::{CmdError, CommandExecutor, MessageKind, ViewerLike};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_mol::RepMask;
 use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
@@ -866,6 +866,10 @@ impl App {
                     }
                 }
             }
+            Err(CmdError::Aborted) => {
+                // Quit/exit command was issued - signal application to close
+                self.gui_state.quit_requested = true;
+            }
             Err(e) => {
                 // Print the error to the GUI output
                 self.gui_state.print_error(format!("{}", e));
@@ -1286,6 +1290,11 @@ impl ApplicationHandler for App {
                     }
                 }
                 self.needs_redraw = false;
+
+                // Check if quit was requested by a command (quit/exit)
+                if self.gui_state.quit_requested {
+                    event_loop.exit();
+                }
 
                 // Request continuous redraw if needed
                 // Also request redraws for the first few frames to let egui layout properly
