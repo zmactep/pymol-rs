@@ -133,7 +133,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
           manylinux: ${{ matrix.manylinux || 'auto' }}
           working-directory: crates/pymol-python
 
