@@ -28,9 +28,3 @@ ahash = { workspace = true }
 log = { workspace = true }
 lin_alg = { workspace = true }
 shellexpand = { workspace = true }
-
-[dev-dependencies]
-env_logger = { workspace = true }
-winit = { workspace = true }
-pollster = "0.4"
-rustyline = { workspace = true }

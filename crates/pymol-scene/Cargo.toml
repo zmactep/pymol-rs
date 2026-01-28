@@ -27,6 +27,3 @@ bitflags.workspace = true
 parking_lot.workspace = true
 pollster = "0.4"
 image.workspace = true
-
-[dev-dependencies]
-env_logger.workspace = true
