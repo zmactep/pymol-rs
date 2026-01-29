@@ -7,7 +7,7 @@ use pymol_io::{read_file, write_file, FileFormat};
 use pymol_scene::MoleculeObject;
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
 /// Expand shell-style paths: ~ to home directory, $VAR to environment variables
@@ -67,6 +67,10 @@ EXAMPLES
     load ligand.sdf, object=lig
     load structure.cif, format=cif
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path, ArgHint::Object]
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
@@ -175,6 +179,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path, ArgHint::Selection]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let filename = args
             .get_str(0)
@@ -254,6 +262,10 @@ EXAMPLES
     png output.png, width=800
     png hires.png, 4096, 4096, quiet=1
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path]
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
@@ -358,6 +370,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let path = args.get_str(0).or_else(|| args.get_named_str("path"));
 
@@ -453,6 +469,10 @@ EXAMPLES
     ls
     ls /home/user/molecules
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path]
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {

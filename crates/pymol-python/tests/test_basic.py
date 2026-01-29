@@ -176,25 +176,38 @@ def test_exceptions():
 
 
 def test_png_command_headless():
-    """Test that png command exists and raises appropriate error in headless mode."""
+    """Test that png command works in headless mode."""
     from pymol_rs import cmd
+    import tempfile
+    import os
     
-    # In headless mode, png should raise an error explaining the limitation
-    with pytest.raises(RuntimeError, match="GUI mode"):
-        cmd.png("test_output.png")
+    # PNG should now work in headless mode (hidden window with render context)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, "test_output.png")
+        cmd.png(output_path)  # Should succeed
+        assert os.path.exists(output_path), "PNG file was not created"
+        # Verify it's a valid PNG (starts with PNG magic bytes)
+        with open(output_path, 'rb') as f:
+            magic = f.read(8)
+            assert magic[:4] == b'\x89PNG', "File is not a valid PNG"
 
 
 def test_png_with_dimensions():
-    """Test png command signature accepts width and height."""
+    """Test png command with custom width and height."""
     from pymol_rs import cmd
+    import tempfile
+    import os
     
-    # Should accept width and height parameters
-    # In headless mode this will raise, but we're testing the API exists
-    with pytest.raises(RuntimeError):
-        cmd.png("test.png", width=800, height=600)
-    
-    with pytest.raises(RuntimeError):
-        cmd.png("test.png", 1920, 1080)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Test with width and height keyword arguments
+        output_path = os.path.join(tmpdir, "test_800x600.png")
+        cmd.png(output_path, width=800, height=600)
+        assert os.path.exists(output_path), "PNG file was not created"
+        
+        # Test with positional arguments
+        output_path2 = os.path.join(tmpdir, "test_1920x1080.png")
+        cmd.png(output_path2, 1920, 1080)
+        assert os.path.exists(output_path2), "PNG file was not created"
 
 
 def test_show_gui_exists():

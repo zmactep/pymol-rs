@@ -19,8 +19,10 @@ pub mod fetch;
 pub mod ipc;
 pub mod state;
 pub mod ui;
+pub mod viewer_adapter;
 
 pub use app::App;
+pub use viewer_adapter::ViewerAdapter;
 pub use async_tasks::{AsyncTask, TaskContext, TaskResult, TaskRunner};
 pub use fetch::{FetchResult, FetchTask};
 pub use ipc::{

@@ -212,6 +212,8 @@ pub struct GuiState {
     pub completion: CompletionState,
     /// Cached list of command names for autocomplete (populated on startup)
     pub command_names: Vec<String>,
+    /// Cached list of commands that take file paths as first argument (populated on startup)
+    pub path_commands: Vec<String>,
 }
 
 impl Default for GuiState {
@@ -239,6 +241,7 @@ impl GuiState {
             viewport_hovered: false,
             completion: CompletionState::new(),
             command_names: Vec::new(), // Populated by App on startup
+            path_commands: Vec::new(), // Populated by App on startup
         };
 
         // Add initial welcome messages

@@ -134,7 +134,7 @@ impl CommandLinePanel {
     /// If there's exactly one match, apply it immediately without showing popup
     fn trigger_completion(state: &mut GuiState) {
         let cursor_pos = state.command_input.len();
-        let result = generate_completions(&state.command_input, cursor_pos, &state.command_names);
+        let result = generate_completions(&state.command_input, cursor_pos, &state.command_names, &state.path_commands);
 
         if result.suggestions.len() == 1 {
             // Single match - apply immediately using CompletionState temporarily

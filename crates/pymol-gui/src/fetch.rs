@@ -35,13 +35,13 @@ impl TaskResult for FetchResult {
             Ok(mol) => {
                 ctx.add_molecule(&self.name, mol);
                 ctx.print_info(format!(" Fetched {} as \"{}\"", self.code, self.name));
-                ctx.zoom_on(&self.name);
+                // Use command system for zoom (also triggers redraw)
+                ctx.execute_command(&format!("zoom {}", self.name));
             }
             Err(e) => {
                 ctx.print_error(format!("Fetch failed for {}: {}", self.code, e));
             }
         }
-        ctx.request_redraw();
     }
 }
 

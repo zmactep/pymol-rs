@@ -34,12 +34,18 @@ use pymol_mol::ObjectMolecule;
 ///
 /// This trait abstracts the application (App) so that task results don't
 /// depend on App directly. App implements this trait.
+///
+/// For operations like zoom, center, etc., use `execute_command()` with the
+/// appropriate command string (e.g., "zoom object_name").
 pub trait TaskContext {
     /// Add a molecule to the registry
     fn add_molecule(&mut self, name: &str, mol: ObjectMolecule);
 
-    /// Zoom the camera to focus on an object
-    fn zoom_on(&mut self, name: &str);
+    /// Execute a command string via the command system
+    ///
+    /// This allows task results to perform any operation that commands support
+    /// (zoom, center, show, hide, etc.) without duplicating logic.
+    fn execute_command(&mut self, cmd: &str);
 
     /// Print an informational message to the output
     fn print_info(&mut self, msg: String);
@@ -49,9 +55,6 @@ pub trait TaskContext {
 
     /// Print an error message to the output
     fn print_error(&mut self, msg: String);
-
-    /// Request a redraw of the viewport
-    fn request_redraw(&mut self);
 }
 
 // ============================================================================

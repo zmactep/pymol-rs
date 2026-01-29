@@ -52,7 +52,8 @@ impl TaskResult for IpcCallbackResult {
             }
         }
 
-        ctx.request_redraw();
+        // Request redraw via command system
+        ctx.execute_command("refresh");
     }
 }
 

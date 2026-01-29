@@ -6,9 +6,6 @@
 
 use std::path::Path;
 
-/// Commands that take a file/directory path as their first argument
-const PATH_COMMANDS: &[&str] = &["load", "save", "png", "cd", "ls", "dir"];
-
 /// Result of completion generation
 #[derive(Debug)]
 pub struct CompletionResult {
@@ -34,6 +31,7 @@ impl CompletionResult {
 /// * `input` - The current command line text
 /// * `cursor_pos` - Byte position of the cursor in the input
 /// * `command_names` - List of available command names for completion
+/// * `path_commands` - List of command names that take file paths as first argument
 ///
 /// # Returns
 /// A `CompletionResult` with the start position and list of suggestions
@@ -41,6 +39,7 @@ pub fn generate_completions(
     input: &str,
     cursor_pos: usize,
     command_names: &[String],
+    path_commands: &[String],
 ) -> CompletionResult {
     // Ensure cursor position is valid
     let cursor_pos = cursor_pos.min(input.len());
@@ -56,13 +55,18 @@ pub fn generate_completions(
     } else if words.len() == 1 && !ends_with_space {
         // Typing first word - complete command name
         complete_command(words[0], cursor_pos, command_names)
-    } else if PATH_COMMANDS.contains(&words[0].to_lowercase().as_str()) {
+    } else if is_path_command(&words[0].to_lowercase(), path_commands) {
         // First word is a path command - complete file path
         complete_path(text_before_cursor, cursor_pos)
     } else {
         // No completion for other cases
         CompletionResult::empty(cursor_pos)
     }
+}
+
+/// Check if a command name is in the path commands list (case-insensitive)
+fn is_path_command(cmd: &str, path_commands: &[String]) -> bool {
+    path_commands.iter().any(|pc| pc.eq_ignore_ascii_case(cmd))
 }
 
 /// Complete command names
@@ -214,9 +218,10 @@ mod tests {
             "log".to_string(),
             "zoom".to_string(),
         ];
+        let path_commands = vec!["load".to_string(), "ls".to_string()];
 
         // Complete "l"
-        let result = generate_completions("l", 1, &commands);
+        let result = generate_completions("l", 1, &commands, &path_commands);
         assert_eq!(result.start_pos, 0);
         assert!(result.suggestions.contains(&"load".to_string()));
         assert!(result.suggestions.contains(&"label".to_string()));
@@ -225,7 +230,7 @@ mod tests {
         assert!(!result.suggestions.contains(&"zoom".to_string()));
 
         // Complete "lo"
-        let result = generate_completions("lo", 2, &commands);
+        let result = generate_completions("lo", 2, &commands, &path_commands);
         assert_eq!(result.start_pos, 0);
         assert!(result.suggestions.contains(&"load".to_string()));
         assert!(result.suggestions.contains(&"log".to_string()));

@@ -13,6 +13,31 @@ use crate::args::ParsedCommand;
 use crate::error::CmdResult;
 
 // ============================================================================
+// Argument hints for completion
+// ============================================================================
+
+/// Hint about what type of argument a command expects at a given position.
+/// Used by the completion system to provide context-aware suggestions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArgHint {
+    /// No specific hint (generic argument)
+    #[default]
+    None,
+    /// File or directory path
+    Path,
+    /// Selection expression
+    Selection,
+    /// Object name
+    Object,
+    /// Representation type (cartoon, sticks, spheres, etc.)
+    Representation,
+    /// Color name or value
+    Color,
+    /// Setting name
+    Setting,
+}
+
+// ============================================================================
 // Output message types
 // ============================================================================
 
@@ -181,6 +206,15 @@ pub trait Command: Send + Sync {
     fn aliases(&self) -> &[&str] {
         &[]
     }
+
+    /// Get argument hints for completion
+    /// 
+    /// Returns a slice of hints indicating what type of argument is expected
+    /// at each position. Used by the completion system to provide context-aware
+    /// suggestions (e.g., file paths for "load", selections for "select").
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[]
+    }
 }
 
 /// Registry mapping command names to implementations
@@ -288,6 +322,37 @@ impl CommandRegistry {
     pub fn clear(&mut self) {
         self.commands.clear();
         self.aliases.clear();
+    }
+
+    /// Get all command names (including aliases) that expect a specific argument hint
+    /// at the given position (0-indexed).
+    /// 
+    /// This is used by the completion system to determine which commands should
+    /// trigger specific completion types (e.g., file path completion).
+    pub fn commands_with_hint(&self, hint: ArgHint, position: usize) -> Vec<&str> {
+        let mut result = Vec::new();
+        
+        for (name, cmd) in &self.commands {
+            let hints = cmd.arg_hints();
+            if hints.get(position) == Some(&hint) {
+                result.push(name.as_str());
+                // Also include aliases for this command
+                for (alias, target) in &self.aliases {
+                    if target == name {
+                        result.push(alias.as_str());
+                    }
+                }
+            }
+        }
+        
+        result
+    }
+
+    /// Check if a command expects a specific argument hint at the given position
+    pub fn command_has_hint(&self, name: &str, hint: ArgHint, position: usize) -> bool {
+        self.get(name)
+            .map(|cmd| cmd.arg_hints().get(position) == Some(&hint))
+            .unwrap_or(false)
     }
 }
 

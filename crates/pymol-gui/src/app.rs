@@ -3,12 +3,11 @@
 //! The App struct is the main entry point that combines the Viewer, CommandExecutor,
 //! and egui UI into a single application.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
 use egui::ViewportId;
-use pymol_cmd::{CmdError, CommandExecutor, MessageKind, ViewerLike};
+use pymol_cmd::{ArgHint, CmdError, CommandExecutor, MessageKind, ParsedCommand, parse_command};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_mol::RepMask;
 use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
@@ -27,7 +26,6 @@ use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
 use crate::async_tasks::{TaskContext, TaskRunner};
-use crate::fetch::FetchTask;
 use crate::ipc::{
     ExternalCommandRegistry, IpcCallbackTask, IpcRequest, IpcResponse, IpcServer, OutputKind,
 };
@@ -35,176 +33,10 @@ use crate::state::GuiState;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
 use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel};
+use crate::viewer_adapter::ViewerAdapter;
 
 /// Type alias for key action callbacks
 pub type KeyAction = Arc<dyn Fn(&mut App) + Send + Sync>;
-
-// ============================================================================
-// ViewerAdapter - bridges App state to the ViewerLike trait for commands
-// ============================================================================
-
-/// Adapter that wraps App's fields to implement ViewerLike for command execution
-pub struct ViewerAdapter<'a> {
-    /// Reference to the object registry
-    pub registry: &'a mut ObjectRegistry,
-    /// Reference to the camera
-    pub camera: &'a mut Camera,
-    /// Reference to named colors
-    pub named_colors: &'a NamedColors,
-    /// Reference to the background/clear color
-    pub clear_color: &'a mut [f32; 3],
-    /// Flag to indicate if a redraw is needed
-    pub needs_redraw: &'a mut bool,
-    /// Reference to named selections (with visibility state)
-    pub selections: &'a mut std::collections::HashMap<String, SelectionEntry>,
-    /// Reference to task runner for background operations
-    pub task_runner: &'a TaskRunner,
-}
-
-impl<'a> ViewerLike for ViewerAdapter<'a> {
-    fn objects(&self) -> &ObjectRegistry {
-        self.registry
-    }
-
-    fn objects_mut(&mut self) -> &mut ObjectRegistry {
-        self.registry
-    }
-
-    fn camera(&self) -> &Camera {
-        self.camera
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        self.camera
-    }
-
-    fn zoom_all(&mut self) {
-        if let Some((min, max)) = self.registry.extent() {
-            self.camera.zoom_to(min, max);
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn zoom_on(&mut self, name: &str) {
-        if let Some(obj) = self.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera.zoom_to(min, max);
-                *self.needs_redraw = true;
-            }
-        }
-    }
-
-    fn center_all(&mut self) {
-        if let Some((min, max)) = self.registry.extent() {
-            self.camera.center_to(min, max);
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn center_on(&mut self, name: &str) {
-        if let Some(obj) = self.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera.center_to(min, max);
-                *self.needs_redraw = true;
-            }
-        }
-    }
-
-    fn reset_view(&mut self) {
-        *self.camera = Camera::new();
-        if let Some((min, max)) = self.registry.extent() {
-            self.camera.reset_view(min, max);
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn request_redraw(&mut self) {
-        *self.needs_redraw = true;
-    }
-
-    fn color_index(&self, name: &str) -> Option<u32> {
-        self.named_colors.get_by_name(name).map(|(idx, _)| idx)
-    }
-
-    fn set_background_color(&mut self, r: f32, g: f32, b: f32) {
-        self.clear_color[0] = r;
-        self.clear_color[1] = g;
-        self.clear_color[2] = b;
-        *self.needs_redraw = true;
-    }
-
-    fn capture_png(
-        &mut self,
-        _path: &Path,
-        _width: Option<u32>,
-        _height: Option<u32>,
-    ) -> Result<(), String> {
-        // GUI doesn't support screenshot capture through this interface
-        Err("Screenshot capture not yet implemented in GUI".to_string())
-    }
-
-    fn get_selection(&self, name: &str) -> Option<&str> {
-        self.selections.get(name).map(|e| e.expression.as_str())
-    }
-
-    fn define_selection(&mut self, name: &str, selection: &str) {
-        self.selections.insert(name.to_string(), SelectionEntry::new(selection.to_string()));
-        *self.needs_redraw = true;
-    }
-
-    fn remove_selection(&mut self, name: &str) -> bool {
-        let removed = self.selections.remove(name).is_some();
-        if removed {
-            *self.needs_redraw = true;
-        }
-        removed
-    }
-
-    fn selection_names(&self) -> Vec<String> {
-        self.selections.keys().cloned().collect()
-    }
-
-    fn set_selection_visible(&mut self, name: &str, visible: bool) {
-        if let Some(entry) = self.selections.get_mut(name) {
-            entry.visible = visible;
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn is_selection_visible(&self, name: &str) -> bool {
-        self.selections.get(name).map(|e| e.visible).unwrap_or(false)
-    }
-
-    fn indicate_selection(&mut self, selection: &str) {
-        // For backwards compatibility: create or update "indicate" selection and make it visible
-        self.selections.insert("indicate".to_string(), SelectionEntry::new(selection.to_string()));
-        *self.needs_redraw = true;
-    }
-
-    fn clear_indication(&mut self) {
-        // Hide all selection indicators
-        for entry in self.selections.values_mut() {
-            entry.visible = false;
-        }
-        *self.needs_redraw = true;
-    }
-
-    fn indicated_selection(&self) -> Option<&str> {
-        // Return the first visible selection expression (for backwards compat)
-        self.selections.values()
-            .find(|e| e.visible)
-            .map(|e| e.expression.as_str())
-    }
-
-    fn request_async_fetch(&mut self, code: &str, name: &str, format: u8) -> bool {
-        let fmt = match format {
-            1 => pymol_io::FetchFormat::Pdb,
-            _ => pymol_io::FetchFormat::Cif,
-        };
-        self.task_runner.spawn(FetchTask::new(code.to_string(), name.to_string(), fmt));
-        true
-    }
-}
 
 /// Main application state
 pub struct App {
@@ -343,13 +175,8 @@ impl TaskContext for App {
         self.registry.add(MoleculeObject::with_name(mol, name));
     }
 
-    fn zoom_on(&mut self, name: &str) {
-        if let Some(obj) = self.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera.zoom_to(min, max);
-                self.needs_redraw = true;
-            }
-        }
+    fn execute_command(&mut self, cmd: &str) {
+        self.execute_command(cmd);
     }
 
     fn print_info(&mut self, msg: String) {
@@ -362,13 +189,6 @@ impl TaskContext for App {
 
     fn print_error(&mut self, msg: String) {
         self.gui_state.print_error(msg);
-    }
-
-    fn request_redraw(&mut self) {
-        self.needs_redraw = true;
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
     }
 }
 
@@ -391,13 +211,24 @@ impl App {
 
         // Create executor and extract command names for autocomplete
         let executor = CommandExecutor::new();
-        let command_names: Vec<String> = executor.registry()
+        let registry = executor.registry();
+        
+        // Get all command names (including aliases)
+        let command_names: Vec<String> = registry
             .all_names()
+            .map(String::from)
+            .collect();
+        
+        // Get commands that take file paths as first argument (position 0)
+        let path_commands: Vec<String> = registry
+            .commands_with_hint(ArgHint::Path, 0)
+            .into_iter()
             .map(String::from)
             .collect();
 
         let mut gui_state = GuiState::new();
         gui_state.command_names = command_names;
+        gui_state.path_commands = path_commands;
 
         let mut app = Self {
             instance,
@@ -1004,17 +835,22 @@ impl App {
     /// registered via IPC, it will send a callback request to the client.
     fn execute_command(&mut self, cmd: &str) {
         let cmd = cmd.trim();
-        if cmd.is_empty() {
+        if cmd.is_empty() || cmd.starts_with('#') {
             return;
         }
 
-        // Parse command name and arguments
-        let mut parts = cmd.split_whitespace();
-        let cmd_name = parts.next().unwrap_or("");
-        
-        // Special handling for "help <external_command>"
-        if cmd_name == "help" {
-            if let Some(target_cmd) = parts.next() {
+        // Parse using pymol-cmd parser for proper handling of quotes, commas, etc.
+        let parsed = match parse_command(cmd) {
+            Ok(p) => p,
+            Err(e) => {
+                self.gui_state.print_error(format!("Parse error: {}", e));
+                return;
+            }
+        };
+
+        // Handle "help <external_command>" - check if help target is an external command
+        if parsed.name == "help" {
+            if let Some(target_cmd) = parsed.get_str(0) {
                 if let Some(help_text) = self.external_commands.help(target_cmd) {
                     self.gui_state.print_info(help_text);
                     return;
@@ -1026,21 +862,21 @@ impl App {
                 // Fall through to built-in help command
             }
         }
-        
+
         // Check if it's an external command (registered via IPC)
-        if self.external_commands.contains(cmd_name) {
-            self.execute_external_command(cmd_name, cmd);
+        if self.external_commands.contains(&parsed.name) {
+            self.execute_external_command(&parsed);
             return;
         }
 
-        // Execute as built-in command
+        // Execute as built-in command using CommandExecutor
         self.execute_builtin_command_internal(cmd);
     }
 
     /// Execute an external command via IPC callback
     ///
     /// This spawns an async task that waits for the callback response.
-    fn execute_external_command(&mut self, cmd_name: &str, full_cmd: &str) {
+    fn execute_external_command(&mut self, parsed: &ParsedCommand) {
         let server = match self.ipc_server.as_mut() {
             Some(s) => s,
             None => {
@@ -1050,10 +886,10 @@ impl App {
         };
 
         let id = server.next_callback_id();
-        let args: Vec<String> = full_cmd
-            .split_whitespace()
-            .skip(1)
-            .map(|s| s.to_string())
+        // Convert parsed arguments to strings using ArgValue's Display impl
+        let args: Vec<String> = parsed.args
+            .iter()
+            .map(|(_, v)| v.to_string())
             .collect();
 
         // Create oneshot channel for the callback response
@@ -1065,7 +901,7 @@ impl App {
         // Send the CallbackRequest to the client
         let response = IpcResponse::CallbackRequest {
             id,
-            name: cmd_name.to_string(),
+            name: parsed.name.clone(),
             args,
         };
 
@@ -1075,12 +911,17 @@ impl App {
         }
 
         // Spawn the async task that waits for the response
-        let task = IpcCallbackTask::new(id, cmd_name.to_string(), rx);
+        let task = IpcCallbackTask::new(id, parsed.name.clone(), rx);
         self.task_runner.spawn(task);
     }
 
     /// Execute a built-in command (internal helper)
     fn execute_builtin_command_internal(&mut self, cmd: &str) {
+        // Calculate default size for PNG capture from viewport or window
+        let default_size = self.viewport_rect
+            .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))
+            .unwrap_or((1024, 768));
+
         // Create a ViewerAdapter that wraps our state
         let mut adapter = ViewerAdapter {
             registry: &mut self.registry,
@@ -1090,6 +931,12 @@ impl App {
             needs_redraw: &mut self.needs_redraw,
             selections: &mut self.selections,
             task_runner: &self.task_runner,
+            // PNG capture fields
+            render_context: self.render_context.as_ref(),
+            settings: &self.settings,
+            element_colors: &self.element_colors,
+            chain_colors: &self.chain_colors,
+            default_size,
         };
 
         // Use a fresh executor to avoid borrowing issues with self
@@ -1120,56 +967,11 @@ impl App {
         }
     }
 
-    /// Load a molecular file
-    fn load_file(&mut self, path: &str) {
-        match pymol_io::read_file(std::path::Path::new(path)) {
-            Ok(mol) => {
-                let name = mol.name.clone();
-                self.gui_state.print_info(format!("CmdLoad: \"{}\" loaded as \"{}\"", path, name));
-                let obj = MoleculeObject::new(mol);
-                self.registry.add(obj);
-                self.zoom_all();
-                self.needs_redraw = true;
-            }
-            Err(e) => {
-                self.gui_state.print_error(format!("Failed to load {}: {}", path, e));
-            }
-        }
-    }
-
-    /// Zoom to fit all objects
-    pub fn zoom_all(&mut self) {
-        if let Some((min, max)) = self.registry.extent() {
-            self.camera.zoom_to(min, max);
-            self.needs_redraw = true;
-        }
-    }
-
-    /// Center on all objects
-    pub fn center_all(&mut self) {
-        if let Some((min, max)) = self.registry.extent() {
-            self.camera.center_to(min, max);
-            self.needs_redraw = true;
-        }
-    }
-
-    /// Zoom to fit a specific object
-    pub fn zoom_on(&mut self, name: &str) {
-        if let Some(obj) = self.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera.zoom_to(min, max);
-                self.needs_redraw = true;
-            }
-        }
-    }
-
-    /// Center on a specific object
-    pub fn center_on(&mut self, name: &str) {
-        if let Some(obj) = self.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera.center_to(min, max);
-                self.needs_redraw = true;
-            }
+    /// Request a redraw of the window
+    fn request_redraw(&mut self) {
+        self.needs_redraw = true;
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -1324,15 +1126,6 @@ impl App {
                 self.headless = true;
                 Some(IpcResponse::Ok { id: *id })
             }
-        }
-    }
-
-    /// Reset view
-    pub fn reset_view(&mut self) {
-        self.camera = Camera::new();
-        if let Some((min, max)) = self.registry.extent() {
-            self.camera.reset_view(min, max);
-            self.needs_redraw = true;
         }
     }
 
@@ -1492,10 +1285,10 @@ impl App {
                 self.needs_redraw = true;
             }
             ObjectAction::ZoomTo(name) => {
-                self.zoom_on(&name);
+                self.execute_command(&format!("zoom {}", name));
             }
             ObjectAction::CenterOn(name) => {
-                self.center_on(&name);
+                self.execute_command(&format!("center {}", name));
             }
             ObjectAction::DeleteSelection(name) => {
                 self.selections.remove(&name);
@@ -1613,9 +1406,10 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Load pending file if any
+        // Load pending file if any (use command executor for consistency)
         if let Some(path) = self.pending_load_file.take() {
-            self.load_file(&path);
+            // Quote the path to handle spaces and special characters
+            self.execute_command(&format!("load \"{}\"", path));
         }
 
         window.request_redraw();
