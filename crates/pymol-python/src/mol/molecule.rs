@@ -80,9 +80,9 @@ impl PyObjectMolecule {
         self.inner.atom_count()
     }
 
-    /// Alias for atom_count
+    /// Alias for atom_count (PyMOL API compatibility)
     fn n_atoms(&self) -> usize {
-        self.inner.atom_count()
+        self.atom_count()
     }
 
     /// Number of bonds
@@ -91,9 +91,9 @@ impl PyObjectMolecule {
         self.inner.bond_count()
     }
 
-    /// Alias for bond_count
+    /// Alias for bond_count (PyMOL API compatibility)
     fn n_bonds(&self) -> usize {
-        self.inner.bond_count()
+        self.bond_count()
     }
 
     /// Number of states/frames
@@ -102,9 +102,9 @@ impl PyObjectMolecule {
         self.inner.state_count()
     }
 
-    /// Alias for state_count
+    /// Alias for state_count (PyMOL API compatibility)
     fn n_states(&self) -> usize {
-        self.inner.state_count()
+        self.state_count()
     }
 
     /// Check if molecule has coordinates

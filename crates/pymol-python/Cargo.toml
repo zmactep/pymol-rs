@@ -2,13 +2,13 @@
 name = "pymol-python"
 version = "0.1.0"
 edition = "2021"
-authors = ["PyMOL-RS Contributors"]
+authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
-repository = "https://github.com/pymol-rs/pymol-rs"
+repository = "https://github.com/zmactep/pymol-rs"
 description = "Python bindings for pymol-rs using PyO3"
 
 [lib]
-name = "pymol"
+name = "pymol_rs"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -24,6 +24,10 @@ pymol-settings = { path = "../pymol-settings" }
 pymol-render = { path = "../pymol-render" }
 pymol-scene = { path = "../pymol-scene" }
 pymol-cmd = { path = "../pymol-cmd" }
+pymol-gui = { path = "../pymol-gui" }
+
+# For the GUI launcher (run_gui function)
+winit = "0.30.12"
 
 # External dependencies
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
@@ -31,6 +35,14 @@ thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 parking_lot = "0.12"
+
+# IPC / Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Process management
+which = "7"
+shellexpand = "3"
 
 [features]
 default = []

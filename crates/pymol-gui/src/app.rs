@@ -26,7 +26,11 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
-use crate::async_tasks::{AsyncTaskResult, AsyncTaskRunner};
+use crate::async_tasks::{TaskContext, TaskRunner};
+use crate::fetch::FetchTask;
+use crate::ipc::{
+    ExternalCommandRegistry, IpcCallbackTask, IpcRequest, IpcResponse, IpcServer, OutputKind,
+};
 use crate::state::GuiState;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
@@ -53,8 +57,8 @@ pub struct ViewerAdapter<'a> {
     pub needs_redraw: &'a mut bool,
     /// Reference to named selections (with visibility state)
     pub selections: &'a mut std::collections::HashMap<String, SelectionEntry>,
-    /// Reference to async task runner for background operations
-    pub async_runner: &'a AsyncTaskRunner,
+    /// Reference to task runner for background operations
+    pub task_runner: &'a TaskRunner,
 }
 
 impl<'a> ViewerLike for ViewerAdapter<'a> {
@@ -197,7 +201,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
             1 => pymol_io::FetchFormat::Pdb,
             _ => pymol_io::FetchFormat::Cif,
         };
-        self.async_runner.spawn_fetch(code.to_string(), name.to_string(), fmt);
+        self.task_runner.spawn(FetchTask::new(code.to_string(), name.to_string(), fmt));
         true
     }
 }
@@ -300,19 +304,86 @@ pub struct App {
     // =========================================================================
     // Async Task System
     // =========================================================================
-    /// Async task runner for background operations (fetch, etc.)
-    async_runner: AsyncTaskRunner,
+    /// Task runner for background operations (fetch, etc.)
+    task_runner: TaskRunner,
+
+    // =========================================================================
+    // IPC (Inter-Process Communication)
+    // =========================================================================
+    /// Optional IPC server for external control (e.g., from Python)
+    ipc_server: Option<IpcServer>,
+    /// Registry for external commands registered via IPC
+    external_commands: ExternalCommandRegistry,
+
+    // =========================================================================
+    // Headless Mode
+    // =========================================================================
+    /// Whether the application is running in headless mode (no window displayed)
+    headless: bool,
+
+    // =========================================================================
+    // Pending Actions (initialization)
+    // =========================================================================
+    /// File path to load after GPU initialization
+    pending_load_file: Option<String>,
+
+    // =========================================================================
+    // Application Lifecycle
+    // =========================================================================
+    /// Whether the quit command was issued
+    quit_requested: bool,
+}
+
+// ============================================================================
+// TaskContext implementation for App
+// ============================================================================
+
+impl TaskContext for App {
+    fn add_molecule(&mut self, name: &str, mol: pymol_mol::ObjectMolecule) {
+        self.registry.add(MoleculeObject::with_name(mol, name));
+    }
+
+    fn zoom_on(&mut self, name: &str) {
+        if let Some(obj) = self.registry.get(name) {
+            if let Some((min, max)) = obj.extent() {
+                self.camera.zoom_to(min, max);
+                self.needs_redraw = true;
+            }
+        }
+    }
+
+    fn print_info(&mut self, msg: String) {
+        self.gui_state.print_info(msg);
+    }
+
+    fn print_warning(&mut self, msg: String) {
+        self.gui_state.print_warning(msg);
+    }
+
+    fn print_error(&mut self, msg: String) {
+        self.gui_state.print_error(msg);
+    }
+
+    fn request_redraw(&mut self) {
+        self.needs_redraw = true;
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
 }
 
 impl Default for App {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
 impl App {
     /// Create a new application
-    pub fn new() -> Self {
+    ///
+    /// # Arguments
+    /// * `headless` - If true, the window will not be displayed initially
+    pub fn new(headless: bool) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
@@ -355,13 +426,81 @@ impl App {
             frame_count: 0,
             clear_color: [0.0, 0.0, 0.0],
             key_bindings: KeyBindings::new(),
-            async_runner: AsyncTaskRunner::new(),
+            task_runner: TaskRunner::new(),
+            ipc_server: None,
+            external_commands: ExternalCommandRegistry::new(),
+            headless,
+            pending_load_file: None,
+            quit_requested: false,
         };
 
         // Set up default key bindings
         app.setup_default_key_bindings();
 
         app
+    }
+
+    /// Create a new application with IPC server enabled
+    ///
+    /// # Arguments
+    /// * `socket_path` - Path to the Unix domain socket for IPC
+    /// * `headless` - If true, the window will not be displayed initially
+    pub fn with_ipc(socket_path: &std::path::Path, headless: bool) -> Result<Self, String> {
+        let mut app = Self::new(headless);
+        
+        let server = IpcServer::bind(socket_path)
+            .map_err(|e| format!("Failed to create IPC server: {}", e))?;
+        
+        app.ipc_server = Some(server);
+        app.gui_state.print_info("IPC server enabled".to_string());
+        
+        Ok(app)
+    }
+
+    /// Check if IPC is enabled
+    pub fn ipc_enabled(&self) -> bool {
+        self.ipc_server.is_some()
+    }
+
+    /// Check if the application is running in headless mode
+    pub fn is_headless(&self) -> bool {
+        self.headless
+    }
+
+    /// Show the window (makes it visible)
+    ///
+    /// This has no effect if the window hasn't been created yet.
+    ///
+    /// # Platform-specific
+    /// - Android / Wayland / Web: Unsupported
+    pub fn show_window(&self) {
+        if let Some(window) = &self.window {
+            window.set_visible(true);
+        }
+    }
+
+    /// Hide the window (makes it invisible)
+    ///
+    /// This has no effect if the window hasn't been created yet.
+    ///
+    /// # Platform-specific
+    /// - Android / Wayland / Web: Unsupported
+    pub fn hide_window(&self) {
+        if let Some(window) = &self.window {
+            window.set_visible(false);
+        }
+    }
+
+    /// Returns whether the window is currently visible
+    ///
+    /// Returns `None` if the window hasn't been created yet or if
+    /// visibility cannot be determined on the current platform.
+    ///
+    /// # Platform-specific
+    /// - X11: Not implemented (always returns `None`)
+    /// - Wayland / iOS / Android / Web: Unsupported (always returns `None`)
+    pub fn is_window_visible(&self) -> Option<bool> {
+        self.window.as_ref().and_then(|w| w.is_visible())
     }
 
     /// Setup default keyboard shortcuts
@@ -380,7 +519,7 @@ impl App {
 
     /// Queue a file to load after initialization
     pub fn queue_load_file(&mut self, path: String) {
-        self.gui_state.pending_load_file = Some(path);
+        self.pending_load_file = Some(path);
     }
 
     /// Initialize GPU resources
@@ -755,7 +894,7 @@ impl App {
         let mut viewport_rect_logical = egui::Rect::NOTHING;
 
         // Check for pending async tasks and get their messages before entering the closure
-        let pending_messages = self.async_runner.pending_messages();
+        let pending_messages = self.task_runner.pending_messages();
 
         // Run egui with a closure that captures only what it needs
         let full_output = {
@@ -860,12 +999,88 @@ impl App {
     }
 
     /// Execute a command using the CommandExecutor with ViewerAdapter
+    ///
+    /// This method is IPC-aware - if the command is an external command
+    /// registered via IPC, it will send a callback request to the client.
     fn execute_command(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         if cmd.is_empty() {
             return;
         }
 
+        // Parse command name and arguments
+        let mut parts = cmd.split_whitespace();
+        let cmd_name = parts.next().unwrap_or("");
+        
+        // Special handling for "help <external_command>"
+        if cmd_name == "help" {
+            if let Some(target_cmd) = parts.next() {
+                if let Some(help_text) = self.external_commands.help(target_cmd) {
+                    self.gui_state.print_info(help_text);
+                    return;
+                } else if self.external_commands.contains(target_cmd) {
+                    // External command without help text
+                    self.gui_state.print_info(format!(" '{}' - external command (no help available)", target_cmd));
+                    return;
+                }
+                // Fall through to built-in help command
+            }
+        }
+        
+        // Check if it's an external command (registered via IPC)
+        if self.external_commands.contains(cmd_name) {
+            self.execute_external_command(cmd_name, cmd);
+            return;
+        }
+
+        // Execute as built-in command
+        self.execute_builtin_command_internal(cmd);
+    }
+
+    /// Execute an external command via IPC callback
+    ///
+    /// This spawns an async task that waits for the callback response.
+    fn execute_external_command(&mut self, cmd_name: &str, full_cmd: &str) {
+        let server = match self.ipc_server.as_mut() {
+            Some(s) => s,
+            None => {
+                self.gui_state.print_error("No IPC server available");
+                return;
+            }
+        };
+
+        let id = server.next_callback_id();
+        let args: Vec<String> = full_cmd
+            .split_whitespace()
+            .skip(1)
+            .map(|s| s.to_string())
+            .collect();
+
+        // Create oneshot channel for the callback response
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Register the callback with the server
+        server.register_callback(id, tx);
+
+        // Send the CallbackRequest to the client
+        let response = IpcResponse::CallbackRequest {
+            id,
+            name: cmd_name.to_string(),
+            args,
+        };
+
+        if let Err(e) = server.send(response) {
+            self.gui_state.print_error(format!("IPC error: {}", e));
+            return;
+        }
+
+        // Spawn the async task that waits for the response
+        let task = IpcCallbackTask::new(id, cmd_name.to_string(), rx);
+        self.task_runner.spawn(task);
+    }
+
+    /// Execute a built-in command (internal helper)
+    fn execute_builtin_command_internal(&mut self, cmd: &str) {
         // Create a ViewerAdapter that wraps our state
         let mut adapter = ViewerAdapter {
             registry: &mut self.registry,
@@ -874,7 +1089,7 @@ impl App {
             clear_color: &mut self.clear_color,
             needs_redraw: &mut self.needs_redraw,
             selections: &mut self.selections,
-            async_runner: &self.async_runner,
+            task_runner: &self.task_runner,
         };
 
         // Use a fresh executor to avoid borrowing issues with self
@@ -896,7 +1111,7 @@ impl App {
             }
             Err(CmdError::Aborted) => {
                 // Quit/exit command was issued - signal application to close
-                self.gui_state.quit_requested = true;
+                self.quit_requested = true;
             }
             Err(e) => {
                 // Print the error to the GUI output
@@ -948,32 +1163,167 @@ impl App {
         }
     }
 
+    /// Center on a specific object
+    pub fn center_on(&mut self, name: &str) {
+        if let Some(obj) = self.registry.get(name) {
+            if let Some((min, max)) = obj.extent() {
+                self.camera.center_to(min, max);
+                self.needs_redraw = true;
+            }
+        }
+    }
+
     /// Process completed async tasks
     ///
     /// This should be called each frame to handle results from background operations
     /// like fetch, save, etc.
     fn process_async_tasks(&mut self) {
-        while let Some(result) = self.async_runner.poll() {
-            match result {
-                AsyncTaskResult::Fetch { name, code, result } => {
-                    match result {
-                        Ok(mol) => {
-                            self.registry.add(MoleculeObject::with_name(mol, &name));
-                            self.gui_state
-                                .print_info(format!(" Fetched {} as \"{}\"", code, name));
-                            // Zoom to the new molecule
-                            self.zoom_on(&name);
-                        }
-                        Err(e) => {
-                            self.gui_state
-                                .print_error(format!("Fetch failed for {}: {}", code, e));
+        let mut had_results = false;
+        while let Some(result) = self.task_runner.poll() {
+            // Each result knows how to apply itself via the TaskResult trait
+            result.apply(self);
+            had_results = true;
+        }
+        // Request window redraw if any tasks completed
+        if had_results {
+            self.request_redraw();
+        }
+    }
+
+    /// Process IPC requests
+    ///
+    /// This should be called each frame to handle incoming IPC requests
+    /// from external clients (e.g., pymol-python).
+    fn process_ipc(&mut self) {
+        // Take the server temporarily to avoid borrow conflicts
+        let mut server = match self.ipc_server.take() {
+            Some(s) => s,
+            None => return,
+        };
+
+        // Process all pending requests
+        while let Some(request) = server.poll() {
+            let response = self.handle_ipc_request(&request, &mut server);
+            if let Some(resp) = response {
+                if let Err(e) = server.send(resp) {
+                    log::error!("Failed to send IPC response: {}", e);
+                }
+            }
+        }
+
+        // Put the server back
+        self.ipc_server = Some(server);
+    }
+
+    /// Handle a single IPC request
+    fn handle_ipc_request(&mut self, request: &IpcRequest, server: &mut IpcServer) -> Option<IpcResponse> {
+        match request {
+            IpcRequest::Execute { id, command } => {
+                log::debug!("IPC Execute: {}", command);
+                // Execute the command - errors are printed to GUI output
+                self.execute_command(command);
+                // Always return Ok since errors are handled internally
+                Some(IpcResponse::Ok { id: *id })
+            }
+
+            IpcRequest::RegisterCommand { name, help } => {
+                log::info!("IPC RegisterCommand: {}", name);
+                self.external_commands.register(name.clone(), help.clone());
+                // Update command names for autocomplete
+                self.gui_state.command_names.push(name.clone());
+                self.gui_state.command_names.sort();
+                None // No response needed
+            }
+
+            IpcRequest::UnregisterCommand { name } => {
+                log::info!("IPC UnregisterCommand: {}", name);
+                self.external_commands.unregister(name);
+                // Remove from autocomplete
+                self.gui_state.command_names.retain(|n| n != name);
+                None // No response needed
+            }
+
+            IpcRequest::CallbackResponse { id, success, error, output } => {
+                log::debug!("IPC CallbackResponse: id={}, success={}", id, success);
+                // This is handled by the async task system via the server's pending callbacks
+                let _ = server.handle_callback_response(request);
+                
+                // Also display output immediately
+                for msg in output {
+                    match msg.kind {
+                        OutputKind::Info => self.gui_state.print_info(msg.text.clone()),
+                        OutputKind::Warning => self.gui_state.print_warning(msg.text.clone()),
+                        OutputKind::Error => self.gui_state.print_error(msg.text.clone()),
+                    }
+                }
+                
+                if !success {
+                    if let Some(err) = error {
+                        self.gui_state.print_error(err.clone());
+                    }
+                }
+                
+                self.needs_redraw = true;
+                None // No response needed
+            }
+
+            IpcRequest::GetState { id } => {
+                // TODO: Implement state serialization
+                Some(IpcResponse::Value { 
+                    id: *id, 
+                    value: serde_json::json!({}) 
+                })
+            }
+
+            IpcRequest::GetNames { id } => {
+                let names: Vec<String> = self.registry.names()
+                    .map(|s| s.to_string())
+                    .collect();
+                Some(IpcResponse::Value { 
+                    id: *id, 
+                    value: serde_json::json!(names) 
+                })
+            }
+
+            IpcRequest::CountAtoms { id, selection } => {
+                let mut count = 0;
+                for name in self.registry.names() {
+                    if let Some(mol_obj) = self.registry.get_molecule(name) {
+                        if let Ok(result) = pymol_select::select(mol_obj.molecule(), selection) {
+                            count += result.count();
                         }
                     }
                 }
-                // Handle future task types here
+                Some(IpcResponse::Value { 
+                    id: *id, 
+                    value: serde_json::json!(count) 
+                })
             }
-            self.needs_redraw = true;
-            self.request_redraw();
+
+            IpcRequest::Quit => {
+                log::info!("IPC Quit received");
+                self.quit_requested = true;
+                Some(IpcResponse::Closing)
+            }
+
+            IpcRequest::Ping { id } => {
+                Some(IpcResponse::Pong { id: *id })
+            }
+
+            IpcRequest::ShowWindow { id } => {
+                log::info!("IPC ShowWindow received");
+                self.show_window();
+                self.headless = false;
+                self.needs_redraw = true;
+                Some(IpcResponse::Ok { id: *id })
+            }
+
+            IpcRequest::HideWindow { id } => {
+                log::info!("IPC HideWindow received");
+                self.hide_window();
+                self.headless = true;
+                Some(IpcResponse::Ok { id: *id })
+            }
         }
     }
 
@@ -1142,20 +1492,10 @@ impl App {
                 self.needs_redraw = true;
             }
             ObjectAction::ZoomTo(name) => {
-                if let Some(obj) = self.registry.get(&name) {
-                    if let Some((min, max)) = obj.extent() {
-                        self.camera.zoom_to(min, max);
-                        self.needs_redraw = true;
-                    }
-                }
+                self.zoom_on(&name);
             }
             ObjectAction::CenterOn(name) => {
-                if let Some(obj) = self.registry.get(&name) {
-                    if let Some((min, max)) = obj.extent() {
-                        self.camera.center_to(min, max);
-                        self.needs_redraw = true;
-                    }
-                }
+                self.center_on(&name);
             }
             ObjectAction::DeleteSelection(name) => {
                 self.selections.remove(&name);
@@ -1246,12 +1586,6 @@ impl App {
         }
     }
 
-    /// Request a redraw
-    fn request_redraw(&self) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
-    }
 }
 
 impl ApplicationHandler for App {
@@ -1260,10 +1594,11 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Create window
+        // Create window (hidden if headless mode is enabled)
         let window_attrs = Window::default_attributes()
             .with_title("PyMOL-RS")
-            .with_inner_size(PhysicalSize::new(1024, 768));
+            .with_inner_size(PhysicalSize::new(1024, 768))
+            .with_visible(!self.headless);
 
         let window = Arc::new(
             event_loop
@@ -1279,7 +1614,7 @@ impl ApplicationHandler for App {
         }
 
         // Load pending file if any
-        if let Some(path) = self.gui_state.pending_load_file.take() {
+        if let Some(path) = self.pending_load_file.take() {
             self.load_file(&path);
         }
 
@@ -1335,6 +1670,9 @@ impl ApplicationHandler for App {
                 // Process any completed async tasks (fetch, etc.)
                 self.process_async_tasks();
 
+                // Process IPC requests from external clients
+                self.process_ipc();
+
                 // Process input and update camera (only if egui doesn't want input)
                 self.process_input();
 
@@ -1362,7 +1700,7 @@ impl ApplicationHandler for App {
                 self.needs_redraw = false;
 
                 // Check if quit was requested by a command (quit/exit)
-                if self.gui_state.quit_requested {
+                if self.quit_requested {
                     event_loop.exit();
                 }
 
@@ -1371,8 +1709,6 @@ impl ApplicationHandler for App {
                 if self.frame_count < 5
                     || self.camera.is_animating()
                     || self.input.any_button_pressed()
-                    || self.gui_state.is_playing
-                    || self.gui_state.is_rocking
                 {
                     self.request_redraw();
                 }
@@ -1415,5 +1751,42 @@ impl ApplicationHandler for App {
 
             _ => {}
         }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Process IPC requests - this is essential for headless mode where
+        // no user interaction generates RedrawRequested events.
+        // We must ALWAYS call process_ipc() to accept new connections,
+        // not just when a client is already connected.
+        if self.ipc_server.is_some() {
+            self.process_ipc();
+            
+            // In headless mode with IPC, use a timeout-based wake-up
+            // to periodically check for connections and requests.
+            // This avoids 100% CPU usage while still being responsive.
+            if self.headless {
+                use std::time::{Duration, Instant};
+                use winit::event_loop::ControlFlow;
+                
+                // Wake up every 50ms to check for IPC requests
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(50)
+                ));
+                
+                // Check for quit request (in headless mode, no window events trigger this check)
+                if self.quit_requested {
+                    event_loop.exit();
+                }
+            } else {
+                // In GUI mode, request a redraw if IPC commands modified state
+                // This ensures the window updates even when not focused
+                if self.needs_redraw {
+                    self.request_redraw();
+                }
+            }
+        }
+
+        // Process async tasks
+        self.process_async_tasks();
     }
 }

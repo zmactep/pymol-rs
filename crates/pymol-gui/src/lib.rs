@@ -15,9 +15,16 @@
 
 pub mod app;
 pub mod async_tasks;
+pub mod fetch;
+pub mod ipc;
 pub mod state;
 pub mod ui;
 
 pub use app::App;
-pub use async_tasks::{AsyncTask, AsyncTaskResult, AsyncTaskRunner, FetchTask};
+pub use async_tasks::{AsyncTask, TaskContext, TaskResult, TaskRunner};
+pub use fetch::{FetchResult, FetchTask};
+pub use ipc::{
+    ExternalCommandRegistry, IpcCallbackResult, IpcCallbackTask, IpcRequest, IpcResponse,
+    IpcServer, OutputKind, OutputMessage,
+};
 pub use state::GuiState;

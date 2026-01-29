@@ -3,14 +3,14 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pymol"
+name = "pymol-rs"
 version = "0.1.0"
 description = "PyMOL-RS: A modern Rust implementation of PyMOL molecular visualization"
 readme = "../../README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-3-Clause" }
 authors = [
-    { name = "PyMOL-RS Contributors" }
+    { name = "Pavel Yakovlev" }
 ]
 keywords = ["pymol", "molecular", "visualization", "chemistry", "biology"]
 classifiers = [
@@ -36,11 +36,14 @@ numpy = ["numpy>=1.20"]
 dev = ["pytest>=7.0", "numpy>=1.20"]
 
 [project.urls]
-Homepage = "https://github.com/pymol-rs/pymol-rs"
-Repository = "https://github.com/pymol-rs/pymol-rs"
-Documentation = "https://pymol-rs.github.io/pymol-rs"
+Homepage = "https://github.com/zmactep/pymol-rs"
+Repository = "https://github.com/zmactep/pymol-rs"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "pymol._pymol"
+module-name = "pymol_rs._pymol_rs"
+
+[project.scripts]
+# Provide the pymol-rs command as a Python entry point
+pymol-rs = "pymol_rs._cli:main"

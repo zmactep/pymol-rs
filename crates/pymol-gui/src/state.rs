@@ -8,76 +8,6 @@ use std::collections::VecDeque;
 /// Maximum number of lines in the output buffer
 const MAX_OUTPUT_LINES: usize = 1000;
 
-/// Mouse interaction mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MouseMode {
-    /// 3-button viewing mode (default)
-    #[default]
-    ThreeButtonViewing,
-    /// 3-button editing mode
-    ThreeButtonEditing,
-    /// 2-button viewing mode
-    TwoButtonViewing,
-    /// 1-button viewing mode
-    OneButtonViewing,
-}
-
-impl MouseMode {
-    /// Get display name for the mouse mode
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            MouseMode::ThreeButtonViewing => "3-Button Viewing",
-            MouseMode::ThreeButtonEditing => "3-Button Editing",
-            MouseMode::TwoButtonViewing => "2-Button Viewing",
-            MouseMode::OneButtonViewing => "1-Button Viewing",
-        }
-    }
-}
-
-/// Selection granularity mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SelectingMode {
-    /// Select atoms
-    Atoms,
-    /// Select residues (default)
-    #[default]
-    Residues,
-    /// Select chains
-    Chains,
-    /// Select segments
-    Segments,
-    /// Select objects
-    Objects,
-    /// Select molecules
-    Molecules,
-}
-
-impl SelectingMode {
-    /// Get display name for the selecting mode
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            SelectingMode::Atoms => "Atoms",
-            SelectingMode::Residues => "Residues",
-            SelectingMode::Chains => "Chains",
-            SelectingMode::Segments => "Segments",
-            SelectingMode::Objects => "Objects",
-            SelectingMode::Molecules => "Molecules",
-        }
-    }
-
-    /// Cycle to the next selecting mode
-    pub fn next(&self) -> Self {
-        match self {
-            SelectingMode::Atoms => SelectingMode::Residues,
-            SelectingMode::Residues => SelectingMode::Chains,
-            SelectingMode::Chains => SelectingMode::Segments,
-            SelectingMode::Segments => SelectingMode::Objects,
-            SelectingMode::Objects => SelectingMode::Molecules,
-            SelectingMode::Molecules => SelectingMode::Atoms,
-        }
-    }
-}
-
 // ============================================================================
 // Autocomplete State
 // ============================================================================
@@ -266,32 +196,6 @@ pub struct GuiState {
     pub right_panel_width: f32,
 
     // =========================================================================
-    // Mouse/Selection Mode
-    // =========================================================================
-    /// Current mouse interaction mode
-    pub mouse_mode: MouseMode,
-    /// Current selection granularity
-    pub selecting_mode: SelectingMode,
-
-    // =========================================================================
-    // Playback State
-    // =========================================================================
-    /// Whether animation is playing
-    pub is_playing: bool,
-    /// Current state index (1-based for display)
-    pub current_state: usize,
-    /// Total number of states
-    pub total_states: usize,
-    /// Whether rocking animation is enabled
-    pub is_rocking: bool,
-
-    // =========================================================================
-    // Pending Actions
-    // =========================================================================
-    /// File path to load on next frame
-    pub pending_load_file: Option<String>,
-
-    // =========================================================================
     // Input State Tracking
     // =========================================================================
     /// Whether the command input should request focus (set after command execution)
@@ -308,12 +212,6 @@ pub struct GuiState {
     pub completion: CompletionState,
     /// Cached list of command names for autocomplete (populated on startup)
     pub command_names: Vec<String>,
-
-    // =========================================================================
-    // Application Control
-    // =========================================================================
-    /// Whether the quit command was issued
-    pub quit_requested: bool,
 }
 
 impl Default for GuiState {
@@ -336,19 +234,11 @@ impl GuiState {
             show_control_panel: true,
             output_panel_height: 150.0,
             right_panel_width: 200.0,
-            mouse_mode: MouseMode::default(),
-            selecting_mode: SelectingMode::default(),
-            is_playing: false,
-            current_state: 1,
-            total_states: 1,
-            is_rocking: false,
-            pending_load_file: None,
             command_wants_focus: true, // Focus on startup
             command_has_focus: false,
             viewport_hovered: false,
             completion: CompletionState::new(),
             command_names: Vec::new(), // Populated by App on startup
-            quit_requested: false,
         };
 
         // Add initial welcome messages

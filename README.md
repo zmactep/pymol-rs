@@ -32,18 +32,26 @@ PyMOL-RS is a modern molecular visualization system written in Rust. It aims to 
 - **PyMOL-compatible command syntax** for familiar workflows
 - **Full selection language** support for precise atom selection
 - **High performance** through Rust's zero-cost abstractions
+- **Comprehensive Python interface** for custom user extensions
 
 ## Quick Start
 
-### Requirements
+### Installing the Python Package
 
-- Rust 1.70 or later
-- GPU with Vulkan, Metal, or DirectX 12 support
+Download the appropriate Python wheel from the [latest release](https://github.com/zmactep/pymol-rs/releases/latest) for your system and install it with pip:
+
+```bash
+pip install pymol_rs-<version>-<platform>.whl
+```
+
+This will install both the `pymol-rs` command-line executable and the `pymol_rs` Python module, which you can use directly within your Python interpreter.
+
+If you do not need any Python support, just install `pymol-rs` executable from the latest release.
 
 ### Build and Run
 
 ```bash
-git clone https://github.com/pymol-rs/pymol-rs
+git clone https://github.com/zmactep/pymol-rs
 cd pymol-rs
 make release
 make run
@@ -176,7 +184,7 @@ make python-dev
 ```
 
 ```python
-from pymol import cmd
+from pymol_rs import cmd
 
 # Load a structure
 cmd.load("protein.pdb")
@@ -199,6 +207,16 @@ cmd.png("output.png", width=1920, height=1080)
 # Access atom data
 for atom in cmd.get_model("chain A and name CA").atom:
     print(f"{atom.resn} {atom.resi}: {atom.coord}")
+
+# Show GUI window
+cmd.show_gui()
+
+def color_yellow(selection):
+  """Color the selected atoms to yellow"""
+  cmd.color('yellow', selection)
+
+# Extend the command line interface at GUI with new command
+cmd.extend("color_yellow", color_yellow)
 ```
 
 ## Architecture
@@ -250,7 +268,6 @@ PyMOL-RS is in active development. The following features are planned but not ye
 - **Electron density maps** - Map visualization and contouring
 - **Movie export** - Video rendering
 - **Session files** - Save/load PyMOL sessions (.pse)
-- **Plugins** - Python plugin system
 - **Ray tracing** - High-quality offline rendering
 
 ## License

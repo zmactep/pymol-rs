@@ -2,79 +2,170 @@
 //!
 //! This module provides the `cmd` object that users interact with,
 //! following PyMOL's familiar API pattern.
+//!
+//! All operations are performed via IPC to the pymol-rs server.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
-use pymol_cmd::CommandExecutor;
-use pymol_mol::RepMask;
-
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
-use parking_lot::RwLock;
-
-use crate::error::ResultExt;
-use crate::settings::{get_setting_py, set_setting_py};
-use crate::viewer::{HeadlessViewer, SharedViewerState, ViewerHandle, ViewerMode};
-
-use pymol_scene::Viewer as GuiViewer;
+use crate::connection::{establish_connection, Connection};
+use crate::ipc::{CallbackListener, ExtendedCommands, IpcClient, IpcResponse};
 
 /// Main command interface
 ///
 /// Provides the familiar PyMOL `cmd.function()` API for molecular visualization.
+/// All operations are performed via IPC to the pymol-rs server.
+///
+/// On module import, this class automatically connects to an existing IPC server
+/// or spawns a new headless server.
 ///
 /// Example:
-///     from pymol import cmd
+///     from pymol_rs import cmd
 ///     cmd.load("protein.pdb")
 ///     cmd.show("cartoon")
 ///     cmd.color("green", "chain A")
+///     cmd.show_gui()  # Show the window
 ///     cmd.zoom()
 #[pyclass(name = "Cmd")]
 pub struct PyCmd {
-    /// Viewer state (headless or GUI)
-    viewer: ViewerMode,
-    /// Command executor for text commands (reserved for future use)
-    #[allow(dead_code)]
-    executor: CommandExecutor,
-    /// Handle to a running GUI viewer (if started with show_viewer)
-    viewer_handle: Option<ViewerHandle>,
-    /// Shared state with the GUI viewer
-    shared_state: Option<Arc<RwLock<SharedViewerState>>>,
+    /// Connection to the pymol-rs server (handles lifecycle management)
+    connection: Option<Connection>,
+    /// Background listener for callback requests (lazily started)
+    listener: Arc<Mutex<Option<CallbackListener>>>,
+    /// Extended command callbacks (shared with listener)
+    extended_commands: Arc<Mutex<ExtendedCommands>>,
 }
 
 impl PyCmd {
-    /// Create a new PyCmd instance
-    pub fn new(headless: bool) -> PyResult<Self> {
-        let viewer = if headless {
-            ViewerMode::Headless(HeadlessViewer::new())
-        } else {
-            // For now, always use headless mode
-            // GUI mode requires event loop integration
-            ViewerMode::Headless(HeadlessViewer::new())
-        };
+    /// Create a new PyCmd instance by establishing an IPC connection
+    ///
+    /// This will connect to an existing server or spawn a new headless one.
+    pub fn new() -> PyResult<Self> {
+        log::info!("PyCmd::new() - establishing connection");
+        
+        let connection = establish_connection().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to connect to pymol-rs server: {}",
+                e
+            ))
+        })?;
+
+        log::info!("PyCmd::new() - connection established");
+
+        let extended_commands = Arc::new(Mutex::new(ExtendedCommands::new()));
+        let listener = Arc::new(Mutex::new(None));
+
+        // Note: Callback listener is started lazily when first needed,
+        // to avoid issues with the listener thread competing with initial setup
+        log::info!("PyCmd::new() - complete");
 
         Ok(PyCmd {
-            viewer,
-            executor: CommandExecutor::new(),
-            viewer_handle: None,
-            shared_state: None,
+            connection: Some(connection),
+            listener,
+            extended_commands,
         })
     }
 
-    /// Get the shared state if a GUI viewer is running, otherwise return None
+    /// Get the client Arc for sharing with other components
+    fn client_arc(&self) -> Option<Arc<Mutex<Option<IpcClient>>>> {
+        self.connection.as_ref().map(|c| c.client_arc())
+    }
+
+    /// Execute a function with the locked IPC client
     ///
-    /// Note: This is intended for future use when live sync between Python
-    /// commands and the viewer is implemented.
-    #[allow(dead_code)]
-    fn get_shared_state(&self) -> Option<&Arc<RwLock<SharedViewerState>>> {
-        if self.viewer_handle.as_ref().map(|h| h.is_running()).unwrap_or(false) {
-            self.shared_state.as_ref()
-        } else {
-            None
+    /// This is the primary way to interact with the IPC client, ensuring
+    /// proper error handling and lock management.
+    fn with_client<F, R>(&self, f: F) -> PyResult<R>
+    where
+        F: FnOnce(&mut IpcClient) -> std::io::Result<R>,
+    {
+        let client_arc = self.client_arc().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Not connected to server")
+        })?;
+
+        let mut guard = client_arc.lock().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to lock client: {}", e))
+        })?;
+
+        let client = guard.as_mut().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("IPC client not available")
+        })?;
+
+        f(client).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("IPC error: {}", e))
+        })
+    }
+    
+    /// Ensure the callback listener is running
+    ///
+    /// The listener runs in a background thread and handles callback requests
+    /// from the GUI (e.g., for runpy and extended commands).
+    fn ensure_listener_running(&self) {
+        let Some(client_arc) = self.client_arc() else {
+            return;
+        };
+        
+        let mut listener_guard = self.listener.lock().unwrap();
+        if listener_guard.is_none() {
+            log::info!("Starting callback listener");
+            *listener_guard = Some(CallbackListener::start(
+                client_arc,
+                self.extended_commands.clone(),
+            ));
         }
+    }
+
+    /// Create from an existing connection
+    pub fn from_connection(connection: Connection) -> PyResult<Self> {
+        let extended_commands = Arc::new(Mutex::new(ExtendedCommands::new()));
+        let listener = Arc::new(Mutex::new(None));
+
+        Ok(PyCmd {
+            connection: Some(connection),
+            listener,
+            extended_commands,
+        })
+    }
+
+    /// Execute a command via IPC and return the result
+    fn execute_cmd(&self, command: &str) -> PyResult<()> {
+        let response = self.with_client(|client| client.execute(command))?;
+
+        match response {
+            IpcResponse::Ok { .. } => Ok(()),
+            IpcResponse::Error { message, .. } => {
+                Err(pyo3::exceptions::PyRuntimeError::new_err(message))
+            }
+            _ => Ok(()), // Other responses are OK
+        }
+    }
+
+    /// Register the runpy command with the server
+    pub fn register_runpy(&self) -> PyResult<()> {
+        // Start the listener since runpy is a callback command
+        self.ensure_listener_running();
+        
+        self.with_client(|client| {
+            client.register_command(
+                "runpy",
+                Some("Execute a Python script: runpy script.py [namespace]"),
+            )
+        })
+    }
+}
+
+impl Drop for PyCmd {
+    fn drop(&mut self) {
+        // Stop the listener first (before Connection cleanup sends quit)
+        if let Ok(mut listener_guard) = self.listener.lock() {
+            if let Some(ref mut listener) = *listener_guard {
+                listener.stop();
+            }
+        }
+        // Connection's Drop handles server cleanup automatically
     }
 }
 
@@ -98,7 +189,7 @@ impl PyCmd {
     ///     Name of the loaded object
     #[pyo3(signature = (filename, object=None, state=0, format=None, quiet=true))]
     fn load(
-        &mut self,
+        &self,
         filename: &str,
         object: Option<&str>,
         state: i32,
@@ -106,46 +197,26 @@ impl PyCmd {
         quiet: bool,
     ) -> PyResult<String> {
         let path = Path::new(filename);
-        
-        // Determine object name
-        let obj_name = object
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("obj")
-                    .to_string()
-            });
 
-        // Read the file
-        let mol = if let Some(fmt) = format {
-            let file_format = match fmt.to_lowercase().as_str() {
-                "pdb" => pymol_io::FileFormat::Pdb,
-                "sdf" | "mol" => pymol_io::FileFormat::Sdf,
-                "mol2" => pymol_io::FileFormat::Mol2,
-                "cif" | "mmcif" => pymol_io::FileFormat::Cif,
-                "xyz" => pymol_io::FileFormat::Xyz,
-                _ => pymol_io::FileFormat::Unknown,
-            };
-            pymol_io::read_file_format(path, file_format).map_py_err()?
+        // Get absolute path
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
         } else {
-            pymol_io::read_file(path).map_py_err()?
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
         };
 
-        // Set the object name
-        let mut mol = mol;
-        mol.name = obj_name.clone();
+        // Determine object name
+        let obj_name = object.map(|s| s.to_string()).unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("obj")
+                .to_string()
+        });
 
-        // Add to viewer
-        self.viewer.add_molecule(mol);
-
-        if !quiet {
-            log::info!("Loaded {} atoms from {}", 
-                self.viewer.objects().get_molecule(&obj_name)
-                    .map(|m| m.molecule().atom_count())
-                    .unwrap_or(0),
-                filename);
-        }
+        let cmd = format!("load {}, {}", abs_path.display(), obj_name);
+        self.execute_cmd(&cmd)?;
 
         Ok(obj_name)
     }
@@ -165,30 +236,8 @@ impl PyCmd {
         state: i32,
         format: Option<&str>,
     ) -> PyResult<()> {
-        let path = Path::new(filename);
-        
-        // For now, save all atoms of first matching object
-        // TODO: proper selection handling for save
-        for name in self.viewer.objects().names() {
-            if let Some(mol_obj) = self.viewer.objects().get_molecule(name) {
-                if let Some(fmt) = format {
-                    let file_format = match fmt.to_lowercase().as_str() {
-                        "pdb" => pymol_io::FileFormat::Pdb,
-                        "sdf" | "mol" => pymol_io::FileFormat::Sdf,
-                        "mol2" => pymol_io::FileFormat::Mol2,
-                        "cif" | "mmcif" => pymol_io::FileFormat::Cif,
-                        "xyz" => pymol_io::FileFormat::Xyz,
-                        _ => pymol_io::FileFormat::Unknown,
-                    };
-                    pymol_io::write_file_format(path, mol_obj.molecule(), file_format).map_py_err()?;
-                } else {
-                    pymol_io::write_file(path, mol_obj.molecule()).map_py_err()?;
-                }
-                return Ok(());
-            }
-        }
-
-        Err(pyo3::exceptions::PyValueError::new_err("No objects to save"))
+        let cmd = format!("save {}, {}", filename, selection);
+        self.execute_cmd(&cmd)
     }
 
     /// Fetch a structure from RCSB PDB
@@ -201,27 +250,24 @@ impl PyCmd {
     /// Returns:
     ///     Name of the fetched object
     #[pyo3(signature = (code, name=None, type_="cif"))]
-    fn fetch(&mut self, code: &str, name: Option<&str>, type_: &str) -> PyResult<String> {
-        let fetch_format = match type_.to_lowercase().as_str() {
-            "pdb" => pymol_io::FetchFormat::Pdb,
-            "cif" | "mmcif" => pymol_io::FetchFormat::Cif,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "Unknown fetch format: '{}'. Use 'pdb' or 'cif'.",
-                    type_
-                )))
-            }
-        };
-
-        let mol = pymol_io::fetch(code, fetch_format).map_py_err()?;
-
+    fn fetch(&self, code: &str, name: Option<&str>, type_: &str) -> PyResult<String> {
         let obj_name = name.unwrap_or(code).to_string();
-        let mut mol = mol;
-        mol.name = obj_name.clone();
-
-        self.viewer.add_molecule(mol);
-
+        let cmd = format!("fetch {}", code);
+        self.execute_cmd(&cmd)?;
         Ok(obj_name)
+    }
+
+    /// Execute a Python script file
+    ///
+    /// Args:
+    ///     filename: Path to .py file
+    ///     namespace: Execution namespace:
+    ///         - "global": Execute in pymol_rs module namespace (default)
+    ///         - "local": Execute in a fresh namespace with `cmd` pre-imported
+    ///         - "module": Import as a Python module
+    #[pyo3(signature = (filename, namespace="global"))]
+    fn run(&self, py: Python<'_>, filename: &str, namespace: &str) -> PyResult<()> {
+        crate::scripting::run_python_script(py, filename, namespace)
     }
 
     // =========================================================================
@@ -231,25 +277,13 @@ impl PyCmd {
     /// Show a representation
     ///
     /// Args:
-    ///     representation: Type of representation ("lines", "sticks", "spheres", 
+    ///     representation: Type of representation ("lines", "sticks", "spheres",
     ///                     "surface", "cartoon", "ribbon", "mesh", "dots")
     ///     selection: Atoms to show (default: all)
     #[pyo3(signature = (representation="lines", selection="all"))]
-    fn show(&mut self, representation: &str, selection: &str) -> PyResult<()> {
-        let rep = parse_representation(representation)?;
-        
-        // Collect names first
-        let names: Vec<String> = self.viewer.objects().names().map(|s| s.to_string()).collect();
-        
-        // Apply to all molecules
-        for name in names {
-            if let Some(mol_obj) = self.viewer.objects_mut().get_molecule_mut(&name) {
-                mol_obj.show(rep);
-            }
-        }
-        
-        self.viewer.request_redraw();
-        Ok(())
+    fn show(&self, representation: &str, selection: &str) -> PyResult<()> {
+        let cmd = format!("show {}, {}", representation, selection);
+        self.execute_cmd(&cmd)
     }
 
     /// Hide a representation
@@ -258,27 +292,27 @@ impl PyCmd {
     ///     representation: Type of representation (or "everything" for all)
     ///     selection: Atoms to hide (default: all)
     #[pyo3(signature = (representation="everything", selection="all"))]
-    fn hide(&mut self, representation: &str, selection: &str) -> PyResult<()> {
-        // Collect names first
-        let names: Vec<String> = self.viewer.objects().names().map(|s| s.to_string()).collect();
-        
-        if representation == "everything" {
-            for name in names {
-                if let Some(mol_obj) = self.viewer.objects_mut().get_molecule_mut(&name) {
-                    mol_obj.hide_all();
-                }
-            }
-        } else {
-            let rep = parse_representation(representation)?;
-            for name in names {
-                if let Some(mol_obj) = self.viewer.objects_mut().get_molecule_mut(&name) {
-                    mol_obj.hide(rep);
-                }
-            }
-        }
-        
-        self.viewer.request_redraw();
-        Ok(())
+    fn hide(&self, representation: &str, selection: &str) -> PyResult<()> {
+        let cmd = format!("hide {}, {}", representation, selection);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Show a representation as the only one (hide all others)
+    ///
+    /// This is equivalent to hiding everything and then showing the
+    /// specified representation for the selection.
+    ///
+    /// Args:
+    ///     representation: Type of representation ("lines", "sticks", "spheres",
+    ///                     "surface", "cartoon", "ribbon", "mesh", "dots")
+    ///     selection: Atoms to show (default: all)
+    ///
+    /// Example:
+    ///     cmd.show_as("cartoon", "chain A")  # Show only cartoon for chain A
+    #[pyo3(signature = (representation, selection="all"))]
+    fn show_as(&self, representation: &str, selection: &str) -> PyResult<()> {
+        let cmd = format!("as {}, {}", representation, selection);
+        self.execute_cmd(&cmd)
     }
 
     /// Color atoms or representations
@@ -287,37 +321,19 @@ impl PyCmd {
     ///     color: Color name (e.g., "red", "green", "blue") or hex code
     ///     selection: Atoms to color (default: all)
     #[pyo3(signature = (color, selection="all"))]
-    fn color(&mut self, color: &str, selection: &str) -> PyResult<()> {
-        // Look up color by name
-        let color_idx = self.viewer.named_colors()
-            .get_by_name(color)
-            .map(|(idx, _)| idx as i32)
-            .unwrap_or(-1); // -1 = by element
+    fn color(&self, color: &str, selection: &str) -> PyResult<()> {
+        let cmd = format!("color {}, {}", color, selection);
+        self.execute_cmd(&cmd)
+    }
 
-        // Collect names first
-        let names: Vec<String> = self.viewer.objects().names().map(|s| s.to_string()).collect();
-
-        // Apply color to matching atoms
-        for name in names {
-            if let Some(mol_obj) = self.viewer.objects_mut().get_molecule_mut(&name) {
-                let mol = mol_obj.molecule_mut();
-                
-                // Parse selection and apply color
-                if let Ok(result) = pymol_select::select(mol, selection) {
-                    for idx in result.indices() {
-                        if let Some(atom) = mol.get_atom_mut(idx) {
-                            atom.color = color_idx;
-                        }
-                    }
-                }
-                
-                // Mark molecule as needing re-rendering
-                mol_obj.invalidate(pymol_scene::DirtyFlags::COLOR);
-            }
-        }
-
-        self.viewer.request_redraw();
-        Ok(())
+    /// Set background color
+    ///
+    /// Args:
+    ///     color: Color name (e.g., "white", "black", "gray")
+    #[pyo3(signature = (color))]
+    fn bg_color(&self, color: &str) -> PyResult<()> {
+        let cmd = format!("bg_color {}", color);
+        self.execute_cmd(&cmd)
     }
 
     // =========================================================================
@@ -333,39 +349,20 @@ impl PyCmd {
     ///     quiet: Suppress output (default: True)
     ///
     /// Returns:
-    ///     Number of atoms selected
+    ///     Number of atoms selected (0 when using IPC)
     #[pyo3(signature = (name, selection, enable=-1, quiet=true))]
-    fn select(&mut self, name: &str, selection: &str, enable: i32, quiet: bool) -> PyResult<i32> {
-        let mut total = 0;
-
-        // Store the selection
-        if let ViewerMode::Headless(ref mut h) = self.viewer {
-            h.define_selection(name, selection);
-        }
-
-        // Count matching atoms
-        for obj_name in self.viewer.objects().names() {
-            if let Some(mol_obj) = self.viewer.objects().get_molecule(obj_name) {
-                if let Ok(result) = pymol_select::select(mol_obj.molecule(), selection) {
-                    total += result.count() as i32;
-                }
-            }
-        }
-
-        if !quiet {
-            log::info!("Selection '{}' created with {} atoms", name, total);
-        }
-
-        Ok(total)
+    fn select(&self, name: &str, selection: &str, enable: i32, quiet: bool) -> PyResult<i32> {
+        let cmd = format!("select {}, {}", name, selection);
+        self.execute_cmd(&cmd)?;
+        // Can't return accurate count via IPC currently
+        Ok(0)
     }
 
     /// Remove a named selection
     #[pyo3(signature = (name="sele"))]
-    fn deselect(&mut self, name: &str) -> PyResult<()> {
-        if let ViewerMode::Headless(ref mut h) = self.viewer {
-            h.selections.remove(name);
-        }
-        Ok(())
+    fn deselect(&self, name: &str) -> PyResult<()> {
+        let cmd = format!("deselect {}", name);
+        self.execute_cmd(&cmd)
     }
 
     /// Count atoms in a selection
@@ -377,17 +374,8 @@ impl PyCmd {
     ///     Number of atoms
     #[pyo3(signature = (selection="all"))]
     fn count_atoms(&self, selection: &str) -> PyResult<i32> {
-        let mut total = 0;
-
-        for name in self.viewer.objects().names() {
-            if let Some(mol_obj) = self.viewer.objects().get_molecule(name) {
-                if let Ok(result) = pymol_select::select(mol_obj.molecule(), selection) {
-                    total += result.count() as i32;
-                }
-            }
-        }
-
-        Ok(total)
+        let count = self.with_client(|client| client.count_atoms(selection))?;
+        Ok(count as i32)
     }
 
     // =========================================================================
@@ -402,9 +390,9 @@ impl PyCmd {
     ///     state: State to consider (default: all states)
     ///     complete: Whether to complete the zoom instantly (default: False)
     #[pyo3(signature = (selection="all", buffer=0.0, state=0, complete=false))]
-    fn zoom(&mut self, selection: &str, buffer: f32, state: i32, complete: bool) -> PyResult<()> {
-        self.viewer.zoom_all();
-        Ok(())
+    fn zoom(&self, selection: &str, buffer: f32, state: i32, complete: bool) -> PyResult<()> {
+        let cmd = format!("zoom {}", selection);
+        self.execute_cmd(&cmd)
     }
 
     /// Center the camera on objects
@@ -413,22 +401,21 @@ impl PyCmd {
     ///     selection: Objects/atoms to center on (default: all)
     ///     state: State to consider (default: all states)
     #[pyo3(signature = (selection="all", state=0))]
-    fn center(&mut self, selection: &str, state: i32) -> PyResult<()> {
-        self.viewer.center_all();
-        Ok(())
+    fn center(&self, selection: &str, state: i32) -> PyResult<()> {
+        let cmd = format!("center {}", selection);
+        self.execute_cmd(&cmd)
     }
 
     /// Orient the camera to show objects optimally
     #[pyo3(signature = (selection="all", state=0))]
-    fn orient(&mut self, selection: &str, state: i32) -> PyResult<()> {
-        self.viewer.zoom_all();
-        Ok(())
+    fn orient(&self, selection: &str, state: i32) -> PyResult<()> {
+        let cmd = format!("orient {}", selection);
+        self.execute_cmd(&cmd)
     }
 
     /// Reset the view to default
-    fn reset(&mut self) -> PyResult<()> {
-        self.viewer.reset_view();
-        Ok(())
+    fn reset(&self) -> PyResult<()> {
+        self.execute_cmd("reset")
     }
 
     // =========================================================================
@@ -440,40 +427,28 @@ impl PyCmd {
     /// Args:
     ///     name: Object or selection name to delete
     #[pyo3(signature = (name))]
-    fn delete(&mut self, name: &str) -> PyResult<()> {
-        if name == "all" {
-            match &mut self.viewer {
-                ViewerMode::Headless(h) => h.delete_all(),
-                ViewerMode::Gui(v) => v.objects_mut().clear(),
-            }
-        } else {
-            self.viewer.objects_mut().remove(name);
-        }
-        Ok(())
+    fn delete(&self, name: &str) -> PyResult<()> {
+        let cmd = format!("delete {}", name);
+        self.execute_cmd(&cmd)
     }
 
     /// List all object names
-    fn get_names(&self) -> Vec<String> {
-        self.viewer.objects().names().map(|s| s.to_string()).collect()
+    fn get_names(&self) -> PyResult<Vec<String>> {
+        self.with_client(|client| client.get_names())
     }
 
-    /// Check if an object exists
-    fn object_exists(&self, name: &str) -> bool {
-        self.viewer.objects().get_molecule(name).is_some()
+    /// Enable an object (make visible)
+    #[pyo3(signature = (name))]
+    fn enable(&self, name: &str) -> PyResult<()> {
+        let cmd = format!("enable {}", name);
+        self.execute_cmd(&cmd)
     }
 
-    /// Get object atom count
-    fn get_object_atom_count(&self, name: &str) -> Option<usize> {
-        self.viewer.objects().get_molecule(name).map(|mol_obj| {
-            mol_obj.molecule().atom_count()
-        })
-    }
-
-    /// Get object bond count
-    fn get_object_bond_count(&self, name: &str) -> Option<usize> {
-        self.viewer.objects().get_molecule(name).map(|mol_obj| {
-            mol_obj.molecule().bond_count()
-        })
+    /// Disable an object (make invisible)
+    #[pyo3(signature = (name))]
+    fn disable(&self, name: &str) -> PyResult<()> {
+        let cmd = format!("disable {}", name);
+        self.execute_cmd(&cmd)
     }
 
     // =========================================================================
@@ -488,47 +463,33 @@ impl PyCmd {
     ///     selection: Optional selection (for per-atom settings)
     ///     quiet: Suppress output
     #[pyo3(signature = (name, value, selection=None, quiet=true))]
-    fn set(&mut self, name: &str, value: &Bound<'_, PyAny>, selection: Option<&str>, quiet: bool) -> PyResult<()> {
-        set_setting_py(self.viewer.settings_mut(), name, value)
-    }
+    fn set(
+        &self,
+        name: &str,
+        value: &Bound<'_, PyAny>,
+        selection: Option<&str>,
+        quiet: bool,
+    ) -> PyResult<()> {
+        // Convert value to string for IPC
+        let value_str = if let Ok(b) = value.extract::<bool>() {
+            if b { "on" } else { "off" }.to_string()
+        } else if let Ok(i) = value.extract::<i64>() {
+            i.to_string()
+        } else if let Ok(f) = value.extract::<f64>() {
+            f.to_string()
+        } else if let Ok(s) = value.extract::<String>() {
+            s
+        } else {
+            format!("{:?}", value)
+        };
 
-    /// Get a PyMOL setting value
-    ///
-    /// Args:
-    ///     name: Setting name
-    ///     selection: Optional selection (for per-atom settings)
-    ///
-    /// Returns:
-    ///     The setting value
-    #[pyo3(signature = (name, selection=None))]
-    fn get<'py>(&self, py: Python<'py>, name: &str, selection: Option<&str>) -> PyResult<Py<PyAny>> {
-        get_setting_py(py, self.viewer.settings(), name)
-    }
+        let cmd = if let Some(sel) = selection {
+            format!("set {}, {}, {}", name, value_str, sel)
+        } else {
+            format!("set {}, {}", name, value_str)
+        };
 
-    // =========================================================================
-    // State Commands
-    // =========================================================================
-
-    /// Get the current state number (1-based)
-    fn get_state(&self) -> i32 {
-        match &self.viewer {
-            ViewerMode::Headless(h) => (h.current_state + 1) as i32,
-            ViewerMode::Gui(_) => 1, // TODO: implement for GUI
-        }
-    }
-
-    /// Set the current state (1-based)
-    fn set_state(&mut self, state: i32) -> PyResult<()> {
-        if state < 1 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "State must be >= 1",
-            ));
-        }
-        match &mut self.viewer {
-            ViewerMode::Headless(h) => h.current_state = (state - 1) as usize,
-            ViewerMode::Gui(_) => {} // TODO: implement for GUI
-        }
-        Ok(())
+        self.execute_cmd(&cmd)
     }
 
     // =========================================================================
@@ -540,79 +501,9 @@ impl PyCmd {
     /// Args:
     ///     command: Command string (e.g., "load file.pdb; show cartoon")
     #[pyo3(name = "do")]
-    fn do_(&mut self, command: &str) -> PyResult<()> {
-        // For now, parse and execute simple commands
-        // TODO: full command execution via CommandExecutor
-        for cmd in command.split(';') {
-            let cmd = cmd.trim();
-            if cmd.is_empty() {
-                continue;
-            }
-
-            let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
-            let name = parts[0];
-            let args = parts.get(1).unwrap_or(&"");
-
-            match name {
-                "load" => {
-                    self.load(args, None, 0, None, true)?;
-                }
-                "fetch" => {
-                    self.fetch(args, None, "cif")?;
-                }
-                "show" => {
-                    let parts: Vec<&str> = args.splitn(2, ',').collect();
-                    let rep = parts.get(0).unwrap_or(&"lines").trim();
-                    let sel = parts.get(1).unwrap_or(&"all").trim();
-                    self.show(rep, sel)?;
-                }
-                "hide" => {
-                    let parts: Vec<&str> = args.splitn(2, ',').collect();
-                    let rep = parts.get(0).unwrap_or(&"everything").trim();
-                    let sel = parts.get(1).unwrap_or(&"all").trim();
-                    self.hide(rep, sel)?;
-                }
-                "color" => {
-                    let parts: Vec<&str> = args.splitn(2, ',').collect();
-                    let color = parts.get(0).unwrap_or(&"white").trim();
-                    let sel = parts.get(1).unwrap_or(&"all").trim();
-                    self.color(color, sel)?;
-                }
-                "zoom" => {
-                    self.zoom(args, 0.0, 0, false)?;
-                }
-                "center" => {
-                    self.center(args, 0)?;
-                }
-                "reset" => {
-                    self.reset()?;
-                }
-                "delete" => {
-                    self.delete(args)?;
-                }
-                "png" => {
-                    // Parse: png filename [, width [, height]]
-                    let parts: Vec<&str> = args.split(',').map(|s| s.trim()).collect();
-                    let filename = parts.get(0).unwrap_or(&"output.png");
-                    let width = parts.get(1).and_then(|s| s.parse().ok());
-                    let height = parts.get(2).and_then(|s| s.parse().ok());
-                    self.png(filename, width, height, 0, true)?;
-                }
-                _ => {
-                    return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                        "Unknown command: {}",
-                        name
-                    )));
-                }
-            }
-        }
-
-        Ok(())
+    fn do_(&self, command: &str) -> PyResult<()> {
+        self.execute_cmd(command)
     }
-
-    // =========================================================================
-    // Utility
-    // =========================================================================
 
     // =========================================================================
     // Image Output
@@ -622,200 +513,201 @@ impl PyCmd {
     ///
     /// Args:
     ///     filename: Output file path (will add .png extension if missing)
-    ///     width: Image width in pixels (default: current window size or 1024)
-    ///     height: Image height in pixels (default: current window size or 768)
+    ///     width: Image width in pixels (default: current window size)
+    ///     height: Image height in pixels (default: current window size)
     ///     ray: Whether to ray-trace (not yet implemented, ignored)
     ///     quiet: Suppress output (default: True)
-    ///
-    /// Example:
-    ///     cmd.png("output.png")
-    ///     cmd.png("hires.png", 1920, 1080)
-    ///     cmd.png("square.png", width=800, height=800)
     #[pyo3(signature = (filename, width=None, height=None, ray=0, quiet=true))]
     fn png(
-        &mut self,
+        &self,
         filename: &str,
         width: Option<u32>,
         height: Option<u32>,
         ray: i32,
         quiet: bool,
     ) -> PyResult<()> {
-        let path = Path::new(filename);
-        
-        // Ensure the path ends with .png
-        let path = if path.extension().map(|e| e.to_ascii_lowercase()) != Some("png".into()) {
-            path.with_extension("png")
-        } else {
-            path.to_path_buf()
+        let cmd = match (width, height) {
+            (Some(w), Some(h)) => format!("png {}, {}, {}", filename, w, h),
+            (Some(w), None) => format!("png {}, {}", filename, w),
+            _ => format!("png {}", filename),
         };
-
-        match &mut self.viewer {
-            ViewerMode::Gui(viewer) => {
-                viewer.capture_png(&path, width, height).map_err(|e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to capture PNG: {}",
-                        e
-                    ))
-                })?;
-
-                if !quiet {
-                    let (w, h) = (width.unwrap_or(1024), height.unwrap_or(768));
-                    log::info!("Saved PNG image to {} ({}x{})", path.display(), w, h);
-                }
-
-                Ok(())
-            }
-            ViewerMode::Headless(_) => {
-                Err(pyo3::exceptions::PyRuntimeError::new_err(
-                    "PNG capture requires GUI mode. Initialize PyMOL with headless=False or use ray() for offline rendering (not yet implemented)."
-                ))
-            }
-        }
+        self.execute_cmd(&cmd)
     }
 
     /// Refresh the display
-    fn refresh(&mut self) {
-        self.viewer.request_redraw();
+    fn refresh(&self) -> PyResult<()> {
+        self.execute_cmd("refresh")
     }
 
-    /// Launch the interactive viewer window
+    // =========================================================================
+    // GUI Control
+    // =========================================================================
+
+    /// Show the GUI window (make it visible)
     ///
-    /// This opens a GUI window displaying the current molecular scene.
-    /// By default, the viewer runs in the background (non-blocking) so you
-    /// can continue to run commands that will update the display.
-    ///
-    /// Args:
-    ///     width: Window width in pixels (default: 1024)
-    ///     height: Window height in pixels (default: 768)
-    ///     blocking: If True, block until window is closed (default: False)
+    /// This makes the pymol-rs window visible. The server continues running
+    /// in the background regardless of window visibility.
     ///
     /// Example:
     ///     cmd.load("protein.pdb")
-    ///     cmd.show("cartoon")
-    ///     cmd.show_viewer()  # Opens window, returns immediately
-    ///     cmd.color("red", "chain A")  # Updates the display
-    ///     cmd.close_viewer()  # Close when done
-    #[pyo3(signature = (width=1024, height=768, blocking=false))]
-    fn show_viewer(&mut self, width: u32, height: u32, blocking: bool) -> PyResult<()> {
-        // Check if viewer is already running
-        if self.viewer_handle.as_ref().map(|h| h.is_running()).unwrap_or(false) {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "Viewer is already running. Use close_viewer() first."
-            ));
-        }
+    ///     cmd.show_gui()  # Window appears
+    ///     cmd.hide_gui()  # Window hidden, server still running
+    fn show_gui(&self) -> PyResult<()> {
+        self.with_client(|client| client.show_window())
+    }
 
-        // Create shared state
-        let shared_state = Arc::new(RwLock::new(SharedViewerState::new()));
-        
-        // Transfer all molecules from the current viewer to the shared state
-        {
-            let mut state = shared_state.write();
-            for name in self.viewer.objects().names() {
-                if let Some(mol_obj) = self.viewer.objects().get_molecule(name) {
-                    let mol = mol_obj.molecule().clone();
-                    state.add_molecule(mol);
-                }
+    /// Hide the GUI window (make it invisible)
+    ///
+    /// The server continues running in headless mode. Commands are still
+    /// executed and state is preserved.
+    fn hide_gui(&self) -> PyResult<()> {
+        self.with_client(|client| client.hide_window())
+    }
+
+    /// Check if connected to the server
+    ///
+    /// Returns:
+    ///     True if connected, False otherwise
+    fn is_connected(&self) -> bool {
+        self.with_client(|client| client.ping())
+            .ok()
+            .unwrap_or(false)
+    }
+
+    /// Quit the pymol-rs server
+    ///
+    /// This completely shuts down the server. After calling this,
+    /// use cmd.start() to restart the server.
+    fn quit(&mut self) -> PyResult<()> {
+        // Stop the listener first
+        if let Ok(mut listener_guard) = self.listener.lock() {
+            if let Some(ref mut listener) = *listener_guard {
+                listener.stop();
             }
-            // Copy settings
-            state.settings = self.viewer.settings().clone();
+            *listener_guard = None;
         }
 
-        // Create running flag
-        let running = Arc::new(AtomicBool::new(true));
-
-        if blocking {
-            // Run in blocking mode on this thread
-            let mut gui_viewer = GuiViewer::new();
-            
-            // Transfer from shared state to gui_viewer
-            {
-                let state = shared_state.read();
-                for name in state.objects.names() {
-                    if let Some(mol_obj) = state.objects.get_molecule(name) {
-                        let mol = mol_obj.molecule().clone();
-                        gui_viewer.add_molecule(mol);
-                    }
-                }
-                *gui_viewer.settings_mut() = state.settings.clone();
-            }
-            
-            gui_viewer.zoom_all();
-            
-            pymol_scene::run(gui_viewer).map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to run viewer: {}",
-                    e
-                ))
-            })?;
-        } else {
-            // Run in non-blocking mode in a background thread
-            let state_clone = Arc::clone(&shared_state);
-            let running_clone = Arc::clone(&running);
-            let _width = width;
-            let _height = height;
-            
-            let thread = std::thread::spawn(move || {
-                let mut gui_viewer = GuiViewer::new();
-                
-                // Transfer from shared state to gui_viewer
-                {
-                    let state = state_clone.read();
-                    for name in state.objects.names() {
-                        if let Some(mol_obj) = state.objects.get_molecule(name) {
-                            let mol = mol_obj.molecule().clone();
-                            gui_viewer.add_molecule(mol);
-                        }
-                    }
-                    *gui_viewer.settings_mut() = state.settings.clone();
-                }
-                
-                gui_viewer.zoom_all();
-                
-                // Run the viewer - this blocks until the window is closed
-                if let Err(e) = pymol_scene::run(gui_viewer) {
-                    log::error!("Viewer error: {}", e);
-                }
-                
-                // Mark as no longer running
-                running_clone.store(false, Ordering::SeqCst);
-            });
-            
-            // Store the handle
-            self.shared_state = Some(shared_state);
-            self.viewer_handle = Some(ViewerHandle::new(running, self.shared_state.clone().unwrap(), Some(thread)));
-        }
+        // Drop the connection (this triggers cleanup via Connection::Drop)
+        self.connection = None;
 
         Ok(())
     }
 
-    /// Check if the viewer window is open
+    /// Start or reconnect to a pymol-rs server
     ///
-    /// Returns:
-    ///     True if the viewer is running, False otherwise
-    fn viewer_is_open(&self) -> bool {
-        self.viewer_handle.as_ref().map(|h| h.is_running()).unwrap_or(false)
+    /// If a server is already running and connected, this does nothing.
+    /// Otherwise, it spawns a new headless server and connects to it.
+    ///
+    /// This is useful after calling cmd.quit() or if the server was
+    /// closed via the GUI.
+    ///
+    /// Example:
+    ///     cmd.quit()  # Close the server
+    ///     # ... do other things ...
+    ///     cmd.start()  # Start a new server
+    ///     cmd.load("protein.pdb")  # Works again!
+    fn start(&mut self) -> PyResult<()> {
+        // Check if already connected
+        if self.is_connected() {
+            log::info!("Server is already running");
+            return Ok(());
+        }
+
+        log::info!("Starting new pymol-rs server");
+
+        // Stop the old listener if any
+        if let Ok(mut listener_guard) = self.listener.lock() {
+            if let Some(ref mut listener) = *listener_guard {
+                listener.stop();
+            }
+            *listener_guard = None;
+        }
+
+        // Establish a new connection
+        let connection = establish_connection().map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to start pymol-rs server: {}",
+                e
+            ))
+        })?;
+
+        self.connection = Some(connection);
+
+        // Re-register runpy command
+        self.register_runpy()?;
+
+        log::info!("Server started successfully");
+        Ok(())
     }
 
-    /// Close the viewer window
+    // =========================================================================
+    // Extended Commands
+    // =========================================================================
+
+    /// Register a Python function as a command
     ///
-    /// This requests the viewer to close. The window may not close immediately.
-    fn close_viewer(&mut self) {
-        if let Some(handle) = self.viewer_handle.take() {
-            handle.request_close();
-            // Note: We don't wait for the thread to finish to avoid blocking
+    /// The function will be callable from:
+    /// - Python: cmd.do_("highlight chain A")
+    /// - GUI command line: type "highlight chain A" (with autocomplete!)
+    ///
+    /// Example:
+    ///     def highlight(selection="all"):
+    ///         cmd.show("sticks", selection)
+    ///         cmd.color("yellow", selection)
+    ///
+    ///     cmd.extend("highlight", highlight)
+    #[pyo3(signature = (name, function))]
+    fn extend(&self, py: Python<'_>, name: &str, function: Py<PyAny>) -> PyResult<()> {
+        // Start the listener if not already running (needed for callbacks)
+        self.ensure_listener_running();
+        
+        // Extract help text from docstring
+        let help = function
+            .getattr(py, "__doc__")
+            .ok()
+            .and_then(|d| d.extract::<Option<String>>(py).ok())
+            .flatten();
+
+        // Store callback
+        {
+            let mut commands = self.extended_commands.lock().map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to lock commands: {}",
+                    e
+                ))
+            })?;
+            commands.register(name.to_string(), function);
         }
-        self.shared_state = None;
+
+        // Register with server for autocomplete
+        self.with_client(|client| client.register_command(name, help.as_deref()))?;
+
+        Ok(())
     }
 
-    /// Wait for the viewer window to close (blocking)
-    ///
-    /// This blocks until the user closes the viewer window.
-    fn wait_viewer(&mut self) {
-        if let Some(handle) = self.viewer_handle.take() {
-            handle.wait();
+    /// Unregister an extended command
+    #[pyo3(signature = (name))]
+    fn unextend(&self, name: &str) -> PyResult<()> {
+        // Remove callback
+        {
+            let mut commands = self.extended_commands.lock().map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to lock commands: {}",
+                    e
+                ))
+            })?;
+            commands.unregister(name);
         }
-        self.shared_state = None;
+
+        // Unregister from server
+        self.with_client(|client| client.unregister_command(name))?;
+
+        Ok(())
     }
+
+    // =========================================================================
+    // Misc
+    // =========================================================================
 
     /// Print version information
     fn version(&self) -> String {
@@ -823,30 +715,14 @@ impl PyCmd {
     }
 
     fn __repr__(&self) -> String {
+        let connected = self.is_connected();
+        let server_info = self.connection
+            .as_ref()
+            .map(|c| if c.owns_server() { "spawned" } else { "external" })
+            .unwrap_or("disconnected");
         format!(
-            "Cmd(objects={}, mode={})",
-            self.viewer.objects().names().count(),
-            if self.viewer.is_headless() { "headless" } else { "gui" }
+            "Cmd(connected={}, server={})",
+            connected, server_info
         )
-    }
-}
-
-/// Parse a representation name to RepMask value
-fn parse_representation(name: &str) -> PyResult<u32> {
-    match name.to_lowercase().as_str() {
-        "lines" | "line" => Ok(RepMask::LINES),
-        "sticks" | "stick" => Ok(RepMask::STICKS),
-        "spheres" | "sphere" => Ok(RepMask::SPHERES),
-        "surface" | "surf" => Ok(RepMask::SURFACE),
-        "cartoon" | "cart" => Ok(RepMask::CARTOON),
-        "ribbon" | "rib" => Ok(RepMask::RIBBON),
-        "mesh" => Ok(RepMask::MESH),
-        "dots" | "dot" => Ok(RepMask::DOTS),
-        "nonbonded" | "nb" => Ok(RepMask::NONBONDED),
-        "labels" | "label" => Ok(RepMask::LABELS),
-        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
-            "Unknown representation: '{}'",
-            name
-        ))),
     }
 }

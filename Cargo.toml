@@ -17,9 +17,9 @@ exclude = ["crates/pymol-python"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["PyMOL-RS Contributors"]
+authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
-repository = "https://github.com/pymol-rs/pymol-rs"
+repository = "https://github.com/zmactep/pymol-rs"
 
 [workspace.dependencies]
 # Internal crates
