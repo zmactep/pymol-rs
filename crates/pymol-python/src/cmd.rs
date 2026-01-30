@@ -246,14 +246,51 @@ impl PyCmd {
     ///     code: 4-letter PDB ID
     ///     name: Optional object name (default: use PDB code)
     ///     type_: Download format ("pdb" or "cif", default: "cif")
+    ///     wait: If True, block until the structure is loaded (default: False)
+    ///     timeout: Maximum time to wait in seconds when wait=True (default: 30.0)
     ///
     /// Returns:
     ///     Name of the fetched object
-    #[pyo3(signature = (code, name=None, type_="cif"))]
-    fn fetch(&self, code: &str, name: Option<&str>, type_: &str) -> PyResult<String> {
+    ///
+    /// Example:
+    ///     # Non-blocking (returns immediately, fetch runs in background)
+    ///     cmd.fetch("1ubq")
+    ///
+    ///     # Blocking (waits until structure is loaded)
+    ///     cmd.fetch("1ubq", sync=True)
+    ///     cmd.show("cartoon")  # Safe to use immediately after
+    #[pyo3(signature = (code, name=None, type_="cif", sync=false, timeout=30.0))]
+    fn fetch(&self, code: &str, name: Option<&str>, type_: &str, sync: bool, timeout: f64) -> PyResult<String> {
         let obj_name = name.unwrap_or(code).to_string();
         let cmd = format!("fetch {}", code);
         self.execute_cmd(&cmd)?;
+
+        if sync {
+            // Poll get_names() until the object appears or timeout
+            let start = std::time::Instant::now();
+            let timeout_duration = std::time::Duration::from_secs_f64(timeout);
+            let poll_interval = std::time::Duration::from_millis(100);
+
+            loop {
+                // Check if object exists
+                let names = self.with_client(|client| client.get_names())?;
+                if names.iter().any(|n| n == &obj_name) {
+                    break;
+                }
+
+                // Check timeout
+                if start.elapsed() >= timeout_duration {
+                    return Err(pyo3::exceptions::PyTimeoutError::new_err(format!(
+                        "Timeout waiting for fetch of '{}' after {:.1}s",
+                        code, timeout
+                    )));
+                }
+
+                // Sleep briefly before next poll
+                std::thread::sleep(poll_interval);
+            }
+        }
+
         Ok(obj_name)
     }
 

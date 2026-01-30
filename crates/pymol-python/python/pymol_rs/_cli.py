@@ -45,9 +45,6 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Import here to avoid circular imports and slow startup for --help
-    from pymol_rs._pymol_rs import run_gui
-
     if args.python:
         from pymol_rs import cmd
         cmd.show_gui()
@@ -55,6 +52,9 @@ def main() -> int:
         cmd.quit()
         return 0
     else:
+        # Import here to avoid circular imports and slow startup for --help
+        from pymol_rs._pymol_rs import run_gui
+        
         try:
             run_gui(
                 ipc_socket=args.ipc,
