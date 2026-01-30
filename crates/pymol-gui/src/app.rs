@@ -6,18 +6,14 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use egui::ViewportId;
-use pymol_cmd::{ArgHint, CmdError, CommandExecutor, MessageKind, ParsedCommand, parse_command};
-use pymol_color::{ChainColors, ElementColors, NamedColors};
+use pymol_cmd::{CmdError, CommandExecutor, MessageKind, ParsedCommand, parse_command};
 use pymol_mol::RepMask;
-use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
-use pymol_scene::{MoleculeObject, Object, ObjectRegistry};
+use pymol_render::{ColorResolver, GlobalUniforms};
+use pymol_scene::{MoleculeObject, Object};
 use pymol_select::{EvalContext, SelectionResult};
-use pymol_scene::{Camera, KeyBinding, KeyBindings};
-use pymol_scene::{CameraDelta, InputState};
+use pymol_scene::{CameraDelta, KeyBinding, KeyBindings, InputState};
 // Re-export SelectionEntry for use in UI
 pub use pymol_scene::SelectionEntry;
-use pymol_settings::GlobalSettings;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -27,9 +23,11 @@ use winit::window::{Window, WindowId};
 
 use crate::async_tasks::{TaskContext, TaskRunner};
 use crate::ipc::{
-    ExternalCommandRegistry, IpcCallbackTask, IpcRequest, IpcResponse, IpcServer, OutputKind,
+    ExternalCommandRegistry, IpcCallbackTask, IpcRequest, IpcResponse, IpcServer,
+    OutputKind as IpcOutputKind,
 };
-use crate::state::GuiState;
+use crate::state::{AppState, CommandLineState, OutputBufferState};
+use crate::view::AppView;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
 use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel};
@@ -41,67 +39,24 @@ pub type KeyAction = Arc<dyn Fn(&mut App) + Send + Sync>;
 /// Main application state
 pub struct App {
     // =========================================================================
-    // GPU Resources
+    // Core Components
     // =========================================================================
-    /// wgpu instance
-    instance: wgpu::Instance,
-    /// Render context for molecular rendering (owns device and queue)
-    render_context: Option<RenderContext>,
+    /// Application state (scene, camera, settings, colors, executor)
+    pub state: AppState,
+    /// Application view (GPU, window, egui)
+    pub view: AppView,
 
     // =========================================================================
-    // Window State
+    // UI State (separated)
     // =========================================================================
-    /// The main window
-    window: Option<Arc<Window>>,
-    /// Window surface
-    surface: Option<wgpu::Surface<'static>>,
-    /// Surface configuration
-    surface_config: Option<wgpu::SurfaceConfiguration>,
-    /// Depth texture view
-    depth_view: Option<wgpu::TextureView>,
+    /// Output buffer state (log messages)
+    pub output: OutputBufferState,
+    /// Command line state (input, history, autocomplete)
+    pub command_line: CommandLineState,
 
     // =========================================================================
-    // egui Integration
+    // UI Panels (stateful)
     // =========================================================================
-    /// egui context
-    egui_ctx: egui::Context,
-    /// egui-winit state
-    egui_state: Option<egui_winit::State>,
-    /// egui-wgpu renderer
-    egui_renderer: Option<egui_wgpu::Renderer>,
-    /// Viewport rect for 3D rendering (in physical pixels)
-    viewport_rect: Option<egui::Rect>,
-
-    // =========================================================================
-    // Scene State
-    // =========================================================================
-    /// Camera for view control
-    camera: Camera,
-    /// Object registry
-    registry: ObjectRegistry,
-    /// Named selections (name -> entry with expression and visibility)
-    selections: std::collections::HashMap<String, SelectionEntry>,
-    /// Global settings
-    settings: GlobalSettings,
-    /// Named colors
-    named_colors: NamedColors,
-    /// Element colors
-    element_colors: ElementColors,
-    /// Chain colors
-    chain_colors: ChainColors,
-
-    // =========================================================================
-    // Command System
-    // =========================================================================
-    /// Command executor (for future use with full command parsing)
-    #[allow(dead_code)]
-    executor: CommandExecutor,
-
-    // =========================================================================
-    // GUI State
-    // =========================================================================
-    /// GUI state (output, command line, etc.)
-    gui_state: GuiState,
     /// Object list panel (stateful for menu handling)
     object_list_panel: ObjectListPanel,
 
@@ -120,12 +75,6 @@ pub struct App {
     needs_redraw: bool,
     /// Frame counter for initial setup (egui needs a few frames to layout properly)
     frame_count: u32,
-
-    // =========================================================================
-    // Appearance
-    // =========================================================================
-    /// Clear/background color
-    clear_color: [f32; 3],
 
     // =========================================================================
     // Key Bindings
@@ -172,7 +121,7 @@ pub struct App {
 
 impl TaskContext for App {
     fn add_molecule(&mut self, name: &str, mol: pymol_mol::ObjectMolecule) {
-        self.registry.add(MoleculeObject::with_name(mol, name));
+        self.state.registry.add(MoleculeObject::with_name(mol, name));
     }
 
     fn execute_command(&mut self, cmd: &str) {
@@ -180,15 +129,15 @@ impl TaskContext for App {
     }
 
     fn print_info(&mut self, msg: String) {
-        self.gui_state.print_info(msg);
+        self.output.print_info(msg);
     }
 
     fn print_warning(&mut self, msg: String) {
-        self.gui_state.print_warning(msg);
+        self.output.print_warning(msg);
     }
 
     fn print_error(&mut self, msg: String) {
-        self.gui_state.print_error(msg);
+        self.output.print_error(msg);
     }
 }
 
@@ -204,58 +153,16 @@ impl App {
     /// # Arguments
     /// * `headless` - If true, the window will not be displayed initially
     pub fn new(headless: bool) -> Self {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
-
-        // Create executor and extract command names for autocomplete
-        let executor = CommandExecutor::new();
-        let registry = executor.registry();
-        
-        // Get all command names (including aliases)
-        let command_names: Vec<String> = registry
-            .all_names()
-            .map(String::from)
-            .collect();
-        
-        // Get commands that take file paths as first argument (position 0)
-        let path_commands: Vec<String> = registry
-            .commands_with_hint(ArgHint::Path, 0)
-            .into_iter()
-            .map(String::from)
-            .collect();
-
-        let mut gui_state = GuiState::new();
-        gui_state.command_names = command_names;
-        gui_state.path_commands = path_commands;
-
         let mut app = Self {
-            instance,
-            render_context: None,
-            window: None,
-            surface: None,
-            surface_config: None,
-            depth_view: None,
-            egui_ctx: egui::Context::default(),
-            egui_state: None,
-            egui_renderer: None,
-            viewport_rect: None,
-            camera: Camera::new(),
-            registry: ObjectRegistry::new(),
-            selections: std::collections::HashMap::new(),
-            settings: GlobalSettings::new(),
-            named_colors: NamedColors::default(),
-            element_colors: ElementColors::default(),
-            chain_colors: ChainColors,
-            executor,
-            gui_state,
+            state: AppState::new(),
+            view: AppView::new(),
+            output: OutputBufferState::new(),
+            command_line: CommandLineState::new(),
             object_list_panel: ObjectListPanel::new(),
             input: InputState::new(),
             last_frame: Instant::now(),
             needs_redraw: true,
             frame_count: 0,
-            clear_color: [0.0, 0.0, 0.0],
             key_bindings: KeyBindings::new(),
             task_runner: TaskRunner::new(),
             ipc_server: None,
@@ -283,7 +190,7 @@ impl App {
             .map_err(|e| format!("Failed to create IPC server: {}", e))?;
         
         app.ipc_server = Some(server);
-        app.gui_state.print_info("IPC server enabled".to_string());
+        app.output.print_info("IPC server enabled".to_string());
         
         Ok(app)
     }
@@ -305,9 +212,7 @@ impl App {
     /// # Platform-specific
     /// - Android / Wayland / Web: Unsupported
     pub fn show_window(&self) {
-        if let Some(window) = &self.window {
-            window.set_visible(true);
-        }
+        self.view.show_window();
     }
 
     /// Hide the window (makes it invisible)
@@ -317,9 +222,7 @@ impl App {
     /// # Platform-specific
     /// - Android / Wayland / Web: Unsupported
     pub fn hide_window(&self) {
-        if let Some(window) = &self.window {
-            window.set_visible(false);
-        }
+        self.view.hide_window();
     }
 
     /// Returns whether the window is currently visible
@@ -331,7 +234,7 @@ impl App {
     /// - X11: Not implemented (always returns `None`)
     /// - Wayland / iOS / Android / Web: Unsupported (always returns `None`)
     pub fn is_window_visible(&self) -> Option<bool> {
-        self.window.as_ref().and_then(|w| w.is_visible())
+        self.view.is_window_visible()
     }
 
     /// Setup default keyboard shortcuts
@@ -354,120 +257,33 @@ impl App {
     }
 
     /// Initialize GPU resources
-    async fn init_gpu(&mut self, window: Arc<Window>) -> Result<(), String> {
-        // Create surface
-        let surface = self
-            .instance
-            .create_surface(window.clone())
-            .map_err(|e| format!("Failed to create surface: {}", e))?;
-
-        // Request adapter
-        let adapter = self
-            .instance
+    async fn init_gpu(&mut self, window: Arc<Window>) -> Result<(String, String), String> {
+        // We need to get adapter info before init_gpu consumes it
+        // For now, we'll do a quick adapter request just for info
+        let adapter = self.view.instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
+                compatible_surface: None,
                 force_fallback_adapter: false,
             })
             .await
             .map_err(|e| format!("No suitable GPU adapter found: {}", e))?;
-
-        // Log adapter info
+        
         let info = adapter.get_info();
-        self.gui_state.print_info(format!("DEVICE: {}", info.name));
-        self.gui_state.print_info(format!("ENGINE:  {}", info.backend));
-
-        // Request device
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("PyMOL-RS Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                trace: wgpu::Trace::Off,
-            })
-            .await
-            .map_err(|e| format!("Failed to create device: {}", e))?;
-
-        // Get surface capabilities
-        let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .find(|f| **f == wgpu::TextureFormat::Bgra8Unorm)
-            .or_else(|| caps.formats.iter().find(|f| **f == wgpu::TextureFormat::Rgba8Unorm))
-            .copied()
-            .unwrap_or(caps.formats[0]);
-
-        let size = window.inner_size();
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &config);
-
-        // Create depth texture
-        let depth_view = Self::create_depth_texture(&device, size.width, size.height);
-
-        // Initialize egui first (before render context takes ownership of device/queue)
-        let egui_state = egui_winit::State::new(
-            self.egui_ctx.clone(),
-            ViewportId::ROOT,
-            &window,
-            Some(window.scale_factor() as f32),
-            None,
-            None,
-        );
-
-        let egui_renderer = egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions {
-            depth_stencil_format: None,
-            msaa_samples: 1,
-            dithering: false,
-            ..Default::default()
-        });
-
-        // Create render context (takes ownership of device and queue)
-        let render_context = RenderContext::new(device, queue, format);
-
+        let device_name = info.name.clone();
+        let backend = format!("{:?}", info.backend);
+        
+        // Drop adapter so init_gpu can create its own
+        drop(adapter);
+        
+        // Initialize the view's GPU resources
+        self.view.init_gpu(window.clone()).await?;
+        
         // Set camera aspect ratio
-        self.camera.set_aspect(size.width as f32 / size.height as f32);
-
-        // Store everything
-        self.window = Some(window);
-        self.surface = Some(surface);
-        self.surface_config = Some(config);
-        self.depth_view = Some(depth_view);
-        self.render_context = Some(render_context);
-        self.egui_state = Some(egui_state);
-        self.egui_renderer = Some(egui_renderer);
-
-        Ok(())
-    }
-
-    /// Create depth texture
-    fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Depth Texture"),
-            size: wgpu::Extent3d {
-                width: width.max(1),
-                height: height.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        texture.create_view(&wgpu::TextureViewDescriptor::default())
+        let size = window.inner_size();
+        self.state.camera.set_aspect(size.width as f32 / size.height as f32);
+        
+        Ok((device_name, backend))
     }
 
     /// Handle window resize
@@ -476,49 +292,38 @@ impl App {
             return;
         }
 
-        if let (Some(surface), Some(config), Some(context)) =
-            (&self.surface, &mut self.surface_config, &self.render_context)
-        {
-            let device = context.device();
-            config.width = new_size.width;
-            config.height = new_size.height;
-            surface.configure(device, config);
-
-            // Recreate depth texture
-            self.depth_view = Some(Self::create_depth_texture(device, new_size.width, new_size.height));
-
-            // Update camera aspect ratio
-            self.camera.set_aspect(new_size.width as f32 / new_size.height as f32);
-
-            self.needs_redraw = true;
-        }
+        self.view.resize(new_size);
+        
+        // Update camera aspect ratio
+        self.state.camera.set_aspect(new_size.width as f32 / new_size.height as f32);
+        self.needs_redraw = true;
     }
 
     /// Render a frame
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         // Extract config values before any mutable borrows
         let (width, height) = {
-            let config = self.surface_config.as_ref().unwrap();
+            let config = self.view.surface_config.as_ref().unwrap();
             (config.width, config.height)
         };
 
-        let scale_factor = self.window.as_ref().map(|w| w.scale_factor()).unwrap_or(1.0) as f32;
+        let scale_factor = self.view.scale_factor();
 
         // Run egui UI first to get output (this borrows self mutably for draw_ui)
         let egui_output = self.run_egui_ui();
 
         // Update camera aspect ratio based on viewport dimensions
-        let (viewport_width, viewport_height) = if let Some(viewport) = &self.viewport_rect {
+        let (viewport_width, viewport_height) = if let Some(viewport) = &self.view.viewport_rect {
             (viewport.width().max(1.0), viewport.height().max(1.0))
         } else {
             (width as f32, height as f32)
         };
-        self.camera.set_aspect(viewport_width / viewport_height);
+        self.state.camera.set_aspect(viewport_width / viewport_height);
 
         // Now get immutable references for rendering
-        let surface = self.surface.as_ref().unwrap();
-        let depth_view = self.depth_view.as_ref().unwrap();
-        let context = self.render_context.as_ref().unwrap();
+        let surface = self.view.surface.as_ref().unwrap();
+        let depth_view = self.view.depth_view.as_ref().unwrap();
+        let context = self.view.render_context.as_ref().unwrap();
         let device = context.device();
         let queue = context.queue();
 
@@ -528,32 +333,32 @@ impl App {
 
         // Update global uniforms
         let mut uniforms = GlobalUniforms::new();
-        uniforms.set_camera(self.camera.view_matrix(), self.camera.projection_matrix());
-        uniforms.set_background(self.clear_color);
+        uniforms.set_camera(self.state.camera.view_matrix(), self.state.camera.projection_matrix());
+        uniforms.set_background(self.state.clear_color);
         uniforms.set_viewport(viewport_width, viewport_height);
 
-        let camera_pos = self.camera.world_position();
+        let camera_pos = self.state.camera.world_position();
         uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
 
         // Lighting settings
-        let ambient = self.settings.get_float(pymol_settings::id::ambient);
-        let direct = self.settings.get_float(pymol_settings::id::direct);
-        let reflect = self.settings.get_float(pymol_settings::id::reflect);
-        let specular = self.settings.get_float(pymol_settings::id::specular);
-        let shininess = self.settings.get_float(pymol_settings::id::shininess);
-        let spec_direct = self.settings.get_float(pymol_settings::id::spec_direct);
-        let spec_direct_power = self.settings.get_float(pymol_settings::id::spec_direct_power);
+        let ambient = self.state.settings.get_float(pymol_settings::id::ambient);
+        let direct = self.state.settings.get_float(pymol_settings::id::direct);
+        let reflect = self.state.settings.get_float(pymol_settings::id::reflect);
+        let specular = self.state.settings.get_float(pymol_settings::id::specular);
+        let shininess = self.state.settings.get_float(pymol_settings::id::shininess);
+        let spec_direct = self.state.settings.get_float(pymol_settings::id::spec_direct);
+        let spec_direct_power = self.state.settings.get_float(pymol_settings::id::spec_direct_power);
         uniforms.set_lighting(ambient, direct, reflect, specular, shininess, spec_direct, spec_direct_power);
 
         // Clip planes
-        let current_view = self.camera.current_view();
+        let current_view = self.state.camera.current_view();
         uniforms.set_clip_planes(current_view.clip_front, current_view.clip_back);
 
         // Fog
-        let depth_cue_enabled = self.settings.get_bool(pymol_settings::id::depth_cue);
-        let fog_density = self.settings.get_float(pymol_settings::id::fog);
+        let depth_cue_enabled = self.state.settings.get_bool(pymol_settings::id::depth_cue);
+        let fog_density = self.state.settings.get_float(pymol_settings::id::fog);
         if depth_cue_enabled && fog_density > 0.0 {
-            let fog_start_ratio = self.settings.get_float(pymol_settings::id::fog_start);
+            let fog_start_ratio = self.state.settings.get_float(pymol_settings::id::fog_start);
             let fog_start = (current_view.clip_back - current_view.clip_front) * fog_start_ratio
                 + current_view.clip_front;
             let fog_end = if (fog_density - 1.0).abs() < 0.001 {
@@ -561,26 +366,26 @@ impl App {
             } else {
                 fog_start + (current_view.clip_back - fog_start) / fog_density
             };
-            uniforms.set_fog(fog_start, fog_end, fog_density, self.clear_color);
+            uniforms.set_fog(fog_start, fog_end, fog_density, self.state.clear_color);
             uniforms.set_depth_cue(1.0);
         }
 
         context.update_uniforms(&uniforms);
 
         // Prepare molecules
-        let names: Vec<String> = self.registry.names().map(|s: &str| s.to_string()).collect();
+        let names: Vec<String> = self.state.registry.names().map(|s: &str| s.to_string()).collect();
         
         // Evaluate all visible selections
         let selection_results = self.evaluate_visible_selections(&names);
         
         // Get selection indicator size from settings (selection_width, ID 80)
         // Use a minimum size to ensure visibility
-        let selection_width = self.settings.get_float(pymol_settings::id::selection_width).max(6.0);
+        let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
         
         for name in &names {
-            let color_resolver = ColorResolver::new(&self.named_colors, &self.element_colors, &self.chain_colors);
-            if let Some(mol_obj) = self.registry.get_molecule_mut(name) {
-                mol_obj.prepare_render(context, &color_resolver, &self.settings);
+            let color_resolver = ColorResolver::new(&self.state.named_colors, &self.state.element_colors, &self.state.chain_colors);
+            if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
+                mol_obj.prepare_render(context, &color_resolver, &self.state.settings);
                 
                 // Update selection indicator if we have results for this molecule
                 if let Some((_, selection_result)) = selection_results.iter().find(|(n, _)| n == name) {
@@ -594,7 +399,7 @@ impl App {
         }
 
         // Get context again after mutable borrow ends
-        let context = self.render_context.as_ref().unwrap();
+        let context = self.view.render_context.as_ref().unwrap();
 
         // Create encoder
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -610,9 +415,9 @@ impl App {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.clear_color[0] as f64,
-                            g: self.clear_color[1] as f64,
-                            b: self.clear_color[2] as f64,
+                            r: self.state.clear_color[0] as f64,
+                            g: self.state.clear_color[1] as f64,
+                            b: self.state.clear_color[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -632,7 +437,7 @@ impl App {
             });
 
             // Set viewport and scissor rect to clip 3D rendering to the central area
-            if let Some(viewport) = &self.viewport_rect {
+            if let Some(viewport) = &self.view.viewport_rect {
                 let vp_x = viewport.min.x.max(0.0);
                 let vp_y = viewport.min.y.max(0.0);
                 let vp_w = viewport.width().max(1.0);
@@ -649,7 +454,7 @@ impl App {
 
             // Render all enabled objects
             for name in &names {
-                if let Some(mol_obj) = self.registry.get_molecule(&name) {
+                if let Some(mol_obj) = self.state.registry.get_molecule(name) {
                     if mol_obj.is_enabled() {
                         mol_obj.render(&mut render_pass, context);
                     }
@@ -659,7 +464,7 @@ impl App {
 
         // Render egui output
         if let (Some((clipped_primitives, textures_delta)), Some(egui_renderer)) =
-            (egui_output, &mut self.egui_renderer)
+            (egui_output, &mut self.view.egui_renderer)
         {
             for (id, image_delta) in &textures_delta.set {
                 egui_renderer.update_texture(device, queue, *id, image_delta);
@@ -709,7 +514,7 @@ impl App {
     fn run_egui_ui(&mut self) -> Option<(Vec<egui::ClippedPrimitive>, egui::TexturesDelta)> {
         // Take egui input first
         let raw_input = {
-            let (egui_state, window) = match (&mut self.egui_state, &self.window) {
+            let (egui_state, window) = match (&mut self.view.egui_state, &self.view.window) {
                 (Some(state), Some(window)) => (state, window),
                 _ => return None,
             };
@@ -717,7 +522,7 @@ impl App {
         };
 
         // Get scale factor for converting to physical pixels
-        let scale_factor = self.window.as_ref().map(|w| w.scale_factor()).unwrap_or(1.0) as f32;
+        let scale_factor = self.view.scale_factor();
 
         // Collect data needed for UI without borrowing self in the closure
         let mut commands_to_execute = Vec::new();
@@ -727,22 +532,30 @@ impl App {
         // Check for pending async tasks and get their messages before entering the closure
         let pending_messages = self.task_runner.pending_messages();
 
+        // Get command names for autocomplete (combine built-in + external)
+        let builtin_names: Vec<&str> = self.state.command_names().collect();
+        let external_names: Vec<&str> = self.external_commands.names().collect();
+        let all_command_names: Vec<&str> = builtin_names.into_iter().chain(external_names).collect();
+        let path_commands = self.state.path_commands();
+
         // Run egui with a closure that captures only what it needs
         let full_output = {
-            let gui_state = &mut self.gui_state;
-            let registry = &self.registry;
-            let selections = &self.selections;
+            let output = &mut self.output;
+            let command_line = &mut self.command_line;
+            let ui_config = &self.view.ui_config;
+            let registry = &self.state.registry;
+            let selections = &self.state.selections;
             let object_list_panel = &mut self.object_list_panel;
             
-            self.egui_ctx.run(raw_input, |ctx| {
+            self.view.egui_ctx.run(raw_input, |ctx| {
                 // Top panel - output and command line
                 egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-                    if gui_state.show_output_panel {
-                        OutputPanel::show(ui, gui_state);
+                    if ui_config.show_output_panel {
+                        OutputPanel::show(ui, output);
                         ui.separator();
                     }
 
-                    match CommandLinePanel::show(ui, gui_state) {
+                    match CommandLinePanel::show(ui, command_line, &all_command_names, &path_commands) {
                         CommandAction::Execute(cmd) => {
                             commands_to_execute.push(cmd);
                         }
@@ -751,9 +564,9 @@ impl App {
                 });
 
                 // Right panel - object list only
-                if gui_state.show_control_panel {
+                if ui_config.show_control_panel {
                     egui::SidePanel::right("right_panel")
-                        .default_width(gui_state.right_panel_width)
+                        .default_width(ui_config.right_panel_width)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 // Object list with selections (stateful panel)
@@ -770,9 +583,6 @@ impl App {
                         ui.allocate_response(ui.available_size(), egui::Sense::hover())
                     });
                 viewport_rect_logical = central_response.response.rect;
-                
-                // Track if mouse is over the viewport
-                gui_state.viewport_hovered = central_response.inner.hovered();
 
                 // Show notification overlay when async tasks are in progress
                 if !pending_messages.is_empty() {
@@ -792,10 +602,10 @@ impl App {
                 viewport_rect_logical.max.y * scale_factor,
             ),
         );
-        self.viewport_rect = Some(viewport_rect_physical);
+        self.view.viewport_rect = Some(viewport_rect_physical);
 
         // Handle platform output
-        if let (Some(egui_state), Some(window)) = (&mut self.egui_state, &self.window) {
+        if let (Some(egui_state), Some(window)) = (&mut self.view.egui_state, &self.view.window) {
             egui_state.handle_platform_output(window, full_output.platform_output);
         }
 
@@ -819,12 +629,10 @@ impl App {
         // This is needed because the event loop is in Wait mode and won't redraw
         // unless explicitly requested
         if has_actions || egui_needs_repaint {
-            if let Some(window) = &self.window {
-                window.request_redraw();
-            }
+            self.view.request_redraw();
         }
 
-        let clipped_primitives = self.egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let clipped_primitives = self.view.egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
         
         Some((clipped_primitives, full_output.textures_delta))
     }
@@ -843,7 +651,7 @@ impl App {
         let parsed = match parse_command(cmd) {
             Ok(p) => p,
             Err(e) => {
-                self.gui_state.print_error(format!("Parse error: {}", e));
+                self.output.print_error(format!("Parse error: {}", e));
                 return;
             }
         };
@@ -852,11 +660,11 @@ impl App {
         if parsed.name == "help" {
             if let Some(target_cmd) = parsed.get_str(0) {
                 if let Some(help_text) = self.external_commands.help(target_cmd) {
-                    self.gui_state.print_info(help_text);
+                    self.output.print_info(help_text);
                     return;
                 } else if self.external_commands.contains(target_cmd) {
                     // External command without help text
-                    self.gui_state.print_info(format!(" '{}' - external command (no help available)", target_cmd));
+                    self.output.print_info(format!(" '{}' - external command (no help available)", target_cmd));
                     return;
                 }
                 // Fall through to built-in help command
@@ -880,7 +688,7 @@ impl App {
         let server = match self.ipc_server.as_mut() {
             Some(s) => s,
             None => {
-                self.gui_state.print_error("No IPC server available");
+                self.output.print_error("No IPC server available");
                 return;
             }
         };
@@ -906,7 +714,7 @@ impl App {
         };
 
         if let Err(e) = server.send(response) {
-            self.gui_state.print_error(format!("IPC error: {}", e));
+            self.output.print_error(format!("IPC error: {}", e));
             return;
         }
 
@@ -918,25 +726,17 @@ impl App {
     /// Execute a built-in command (internal helper)
     fn execute_builtin_command_internal(&mut self, cmd: &str) {
         // Calculate default size for PNG capture from viewport or window
-        let default_size = self.viewport_rect
+        let default_size = self.view.viewport_rect
             .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))
             .unwrap_or((1024, 768));
 
         // Create a ViewerAdapter that wraps our state
         let mut adapter = ViewerAdapter {
-            registry: &mut self.registry,
-            camera: &mut self.camera,
-            named_colors: &self.named_colors,
-            clear_color: &mut self.clear_color,
-            needs_redraw: &mut self.needs_redraw,
-            selections: &mut self.selections,
+            state: &mut self.state,
             task_runner: &self.task_runner,
-            // PNG capture fields
-            render_context: self.render_context.as_ref(),
-            settings: &self.settings,
-            element_colors: &self.element_colors,
-            chain_colors: &self.chain_colors,
+            render_context: self.view.render_context.as_ref(),
             default_size,
+            needs_redraw: &mut self.needs_redraw,
         };
 
         // Use a fresh executor to avoid borrowing issues with self
@@ -950,9 +750,9 @@ impl App {
                 // Display any output messages from the command with appropriate styling
                 for msg in output.messages {
                     match msg.kind {
-                        MessageKind::Info => self.gui_state.print_info(msg.text),
-                        MessageKind::Warning => self.gui_state.print_warning(msg.text),
-                        MessageKind::Error => self.gui_state.print_error(msg.text),
+                        MessageKind::Info => self.output.print_info(msg.text),
+                        MessageKind::Warning => self.output.print_warning(msg.text),
+                        MessageKind::Error => self.output.print_error(msg.text),
                     }
                 }
             }
@@ -962,7 +762,7 @@ impl App {
             }
             Err(e) => {
                 // Print the error to the GUI output
-                self.gui_state.print_error(format!("{}", e));
+                self.output.print_error(format!("{}", e));
             }
         }
     }
@@ -970,9 +770,7 @@ impl App {
     /// Request a redraw of the window
     fn request_redraw(&mut self) {
         self.needs_redraw = true;
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        self.view.request_redraw();
     }
 
     /// Process completed async tasks
@@ -1031,17 +829,14 @@ impl App {
             IpcRequest::RegisterCommand { name, help } => {
                 log::info!("IPC RegisterCommand: {}", name);
                 self.external_commands.register(name.clone(), help.clone());
-                // Update command names for autocomplete
-                self.gui_state.command_names.push(name.clone());
-                self.gui_state.command_names.sort();
+                // Note: We no longer need to update a cached list - command names are queried on demand
                 None // No response needed
             }
 
             IpcRequest::UnregisterCommand { name } => {
                 log::info!("IPC UnregisterCommand: {}", name);
                 self.external_commands.unregister(name);
-                // Remove from autocomplete
-                self.gui_state.command_names.retain(|n| n != name);
+                // Note: We no longer need to update a cached list - command names are queried on demand
                 None // No response needed
             }
 
@@ -1053,15 +848,15 @@ impl App {
                 // Also display output immediately
                 for msg in output {
                     match msg.kind {
-                        OutputKind::Info => self.gui_state.print_info(msg.text.clone()),
-                        OutputKind::Warning => self.gui_state.print_warning(msg.text.clone()),
-                        OutputKind::Error => self.gui_state.print_error(msg.text.clone()),
+                        IpcOutputKind::Info => self.output.print_info(msg.text.clone()),
+                        IpcOutputKind::Warning => self.output.print_warning(msg.text.clone()),
+                        IpcOutputKind::Error => self.output.print_error(msg.text.clone()),
                     }
                 }
                 
                 if !success {
                     if let Some(err) = error {
-                        self.gui_state.print_error(err.clone());
+                        self.output.print_error(err.clone());
                     }
                 }
                 
@@ -1078,7 +873,7 @@ impl App {
             }
 
             IpcRequest::GetNames { id } => {
-                let names: Vec<String> = self.registry.names()
+                let names: Vec<String> = self.state.registry.names()
                     .map(|s| s.to_string())
                     .collect();
                 Some(IpcResponse::Value { 
@@ -1089,8 +884,8 @@ impl App {
 
             IpcRequest::CountAtoms { id, selection } => {
                 let mut count = 0;
-                for name in self.registry.names() {
-                    if let Some(mol_obj) = self.registry.get_molecule(name) {
+                for name in self.state.registry.names() {
+                    if let Some(mol_obj) = self.state.registry.get_molecule(name) {
                         if let Ok(result) = pymol_select::select(mol_obj.molecule(), selection) {
                             count += result.count();
                         }
@@ -1138,7 +933,7 @@ impl App {
         names: &[String],
     ) -> Vec<(String, SelectionResult)> {
         // Collect visible selection expressions
-        let visible_selections: Vec<(&str, &str)> = self.selections
+        let visible_selections: Vec<(&str, &str)> = self.state.selections
             .iter()
             .filter(|(_, entry)| entry.visible)
             .map(|(name, entry)| (name.as_str(), entry.expression.as_str()))
@@ -1154,14 +949,14 @@ impl App {
 
         // Evaluate for each molecule
         for mol_name in names {
-            if let Some(mol_obj) = self.registry.get_molecule(mol_name) {
+            if let Some(mol_obj) = self.state.registry.get_molecule(mol_name) {
                 let mol = mol_obj.molecule();
 
                 // Build context for this molecule with named selections
                 let mut ctx = EvalContext::single(mol);
 
                 // Add all named selections to context (for reference resolution)
-                for (sel_name, entry) in &self.selections {
+                for (sel_name, entry) in &self.state.selections {
                     if let Ok(sel_ast) = pymol_select::parse(&entry.expression) {
                         if let Ok(sel_result) = pymol_select::evaluate(&sel_ast, &ctx) {
                             ctx.add_selection(sel_name.clone(), sel_result);
@@ -1218,7 +1013,7 @@ impl App {
         match action {
             ObjectAction::None => {}
             ObjectAction::ToggleEnabled(name) => {
-                if let Some(obj) = self.registry.get_mut(&name) {
+                if let Some(obj) = self.state.registry.get_mut(&name) {
                     let enabled = obj.is_enabled();
                     if enabled {
                         obj.disable();
@@ -1229,50 +1024,50 @@ impl App {
                 }
             }
             ObjectAction::EnableAll => {
-                let names: Vec<String> = self.registry.names().map(|s| s.to_string()).collect();
+                let names: Vec<String> = self.state.registry.names().map(|s| s.to_string()).collect();
                 for name in names {
-                    if let Some(obj) = self.registry.get_mut(&name) {
+                    if let Some(obj) = self.state.registry.get_mut(&name) {
                         obj.enable();
                     }
                 }
                 self.needs_redraw = true;
             }
             ObjectAction::DisableAll => {
-                let names: Vec<String> = self.registry.names().map(|s| s.to_string()).collect();
+                let names: Vec<String> = self.state.registry.names().map(|s| s.to_string()).collect();
                 for name in names {
-                    if let Some(obj) = self.registry.get_mut(&name) {
+                    if let Some(obj) = self.state.registry.get_mut(&name) {
                         obj.disable();
                     }
                 }
                 self.needs_redraw = true;
             }
             ObjectAction::ShowAll(name) => {
-                if let Some(mol) = self.registry.get_molecule_mut(&name) {
+                if let Some(mol) = self.state.registry.get_molecule_mut(&name) {
                     mol.show(RepMask::ALL.0);
                     self.needs_redraw = true;
                 }
             }
             ObjectAction::HideAll(name) => {
-                if let Some(mol) = self.registry.get_molecule_mut(&name) {
+                if let Some(mol) = self.state.registry.get_molecule_mut(&name) {
                     mol.hide_all();
                     self.needs_redraw = true;
                 }
             }
             ObjectAction::ShowRep(name, rep) => {
-                if let Some(mol) = self.registry.get_molecule_mut(&name) {
+                if let Some(mol) = self.state.registry.get_molecule_mut(&name) {
                     mol.show(rep);
                     self.needs_redraw = true;
                 }
             }
             ObjectAction::HideRep(name, rep) => {
-                if let Some(mol) = self.registry.get_molecule_mut(&name) {
+                if let Some(mol) = self.state.registry.get_molecule_mut(&name) {
                     mol.hide(rep);
                     self.needs_redraw = true;
                 }
             }
             ObjectAction::SetColor(name, color) => {
-                if let Some(color_idx) = self.named_colors.get_by_name(&color).map(|(idx, _)| idx) {
-                    if let Some(mol_obj) = self.registry.get_molecule_mut(&name) {
+                if let Some(color_idx) = self.state.named_colors.get_by_name(&color).map(|(idx, _)| idx) {
+                    if let Some(mol_obj) = self.state.registry.get_molecule_mut(&name) {
                         for atom in mol_obj.molecule_mut().atoms_mut() {
                             atom.color = color_idx as i32;
                         }
@@ -1281,7 +1076,7 @@ impl App {
                 }
             }
             ObjectAction::Delete(name) => {
-                self.registry.remove(&name);
+                self.state.registry.remove(&name);
                 self.needs_redraw = true;
             }
             ObjectAction::ZoomTo(name) => {
@@ -1291,12 +1086,12 @@ impl App {
                 self.execute_command(&format!("center {}", name));
             }
             ObjectAction::DeleteSelection(name) => {
-                self.selections.remove(&name);
-                self.gui_state.print_info(format!("Deleted selection \"{}\"", name));
+                self.state.selections.remove(&name);
+                self.output.print_info(format!("Deleted selection \"{}\"", name));
                 self.needs_redraw = true;
             }
             ObjectAction::ToggleSelectionEnabled(name) => {
-                if let Some(entry) = self.selections.get_mut(&name) {
+                if let Some(entry) = self.state.selections.get_mut(&name) {
                     entry.visible = !entry.visible;
                     let state = if entry.visible { "shown" } else { "hidden" };
                     log::debug!("Selection '{}' indicators {}", name, state);
@@ -1312,11 +1107,8 @@ impl App {
     /// to the camera. Called once per frame in update().
     fn process_input(&mut self) {
         // Check if mouse is over viewport using stored rect and current mouse position
-        // This avoids timing issues with gui_state.viewport_hovered which is updated after this runs
         let mouse_pos = self.input.mouse_position();
-        let over_viewport = self.viewport_rect
-            .map(|rect| rect.contains(egui::pos2(mouse_pos.0, mouse_pos.1)))
-            .unwrap_or(true); // Default to true if no viewport rect yet (initial frames)
+        let over_viewport = self.view.is_over_viewport(mouse_pos);
 
         if !over_viewport {
             // Still need to consume the deltas to avoid accumulation
@@ -1328,20 +1120,20 @@ impl App {
         for delta in deltas {
             match delta {
                 CameraDelta::Rotate { x, y } => {
-                    self.camera.rotate_x(x);
-                    self.camera.rotate_y(y);
+                    self.state.camera.rotate_x(x);
+                    self.state.camera.rotate_y(y);
                     self.needs_redraw = true;
                 }
                 CameraDelta::Translate(v) => {
-                    self.camera.translate(v);
+                    self.state.camera.translate(v);
                     self.needs_redraw = true;
                 }
                 CameraDelta::Zoom(factor) => {
-                    self.camera.zoom(factor);
+                    self.state.camera.zoom(factor);
                     self.needs_redraw = true;
                 }
                 CameraDelta::Clip { front, back } => {
-                    let view = self.camera.view_mut();
+                    let view = self.state.camera.view_mut();
                     view.clip_front = (view.clip_front + front).max(0.01);
                     view.clip_back = (view.clip_back + back).max(view.clip_front + 0.01);
                     self.needs_redraw = true;
@@ -1358,7 +1150,7 @@ impl App {
 
         // Don't process app key bindings when command input has focus
         // Let egui handle the keyboard events for text input
-        if self.gui_state.command_has_focus {
+        if self.command_line.has_focus {
             return;
         }
 
@@ -1383,7 +1175,7 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+        if self.view.window.is_some() {
             return;
         }
 
@@ -1400,10 +1192,16 @@ impl ApplicationHandler for App {
         );
 
         // Initialize GPU
-        if let Err(e) = pollster::block_on(self.init_gpu(window.clone())) {
-            log::error!("GPU initialization failed: {}", e);
-            event_loop.exit();
-            return;
+        match pollster::block_on(self.init_gpu(window.clone())) {
+            Ok((device_name, backend)) => {
+                self.output.print_info(format!("DEVICE: {}", device_name));
+                self.output.print_info(format!("ENGINE: {}", backend));
+            }
+            Err(e) => {
+                log::error!("GPU initialization failed: {}", e);
+                event_loop.exit();
+                return;
+            }
         }
 
         // Load pending file if any (use command executor for consistency)
@@ -1435,8 +1233,8 @@ impl ApplicationHandler for App {
         }
 
         // Pass events to egui
-        let egui_wants_input = if let Some(egui_state) = &mut self.egui_state {
-            if let Some(window) = &self.window {
+        let egui_wants_input = if let Some(egui_state) = &mut self.view.egui_state {
+            if let Some(window) = &self.view.window {
                 let response = egui_state.on_window_event(window, &event);
                 response.consumed
             } else {
@@ -1471,7 +1269,7 @@ impl ApplicationHandler for App {
                 self.process_input();
 
                 // Update camera animation
-                if self.camera.update(dt) {
+                if self.state.camera.update(dt) {
                     self.needs_redraw = true;
                 }
 
@@ -1479,7 +1277,7 @@ impl ApplicationHandler for App {
                 match self.render() {
                     Ok(()) => {}
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        if let Some(config) = &self.surface_config {
+                        if let Some(config) = &self.view.surface_config {
                             self.resize(PhysicalSize::new(config.width, config.height));
                         }
                     }
@@ -1501,7 +1299,7 @@ impl ApplicationHandler for App {
                 // Request continuous redraw if needed
                 // Also request redraws for the first few frames to let egui layout properly
                 if self.frame_count < 5
-                    || self.camera.is_animating()
+                    || self.state.camera.is_animating()
                     || self.input.any_button_pressed()
                 {
                     self.request_redraw();
@@ -1525,7 +1323,9 @@ impl ApplicationHandler for App {
 
             WindowEvent::MouseWheel { .. } => {
                 // Input already handled above
-                if self.gui_state.viewport_hovered && !egui_wants_input {
+                // Use viewport_rect.contains() directly instead of the removed viewport_hovered field
+                let mouse_pos = self.input.mouse_position();
+                if self.view.is_over_viewport(mouse_pos) && !egui_wants_input {
                     self.needs_redraw = true;
                 }
                 self.request_redraw();

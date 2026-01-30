@@ -38,8 +38,8 @@ impl CompletionResult {
 pub fn generate_completions(
     input: &str,
     cursor_pos: usize,
-    command_names: &[String],
-    path_commands: &[String],
+    command_names: &[&str],
+    path_commands: &[&str],
 ) -> CompletionResult {
     // Ensure cursor position is valid
     let cursor_pos = cursor_pos.min(input.len());
@@ -65,17 +65,17 @@ pub fn generate_completions(
 }
 
 /// Check if a command name is in the path commands list (case-insensitive)
-fn is_path_command(cmd: &str, path_commands: &[String]) -> bool {
+fn is_path_command(cmd: &str, path_commands: &[&str]) -> bool {
     path_commands.iter().any(|pc| pc.eq_ignore_ascii_case(cmd))
 }
 
 /// Complete command names
-fn complete_command(prefix: &str, cursor_pos: usize, command_names: &[String]) -> CompletionResult {
+fn complete_command(prefix: &str, cursor_pos: usize, command_names: &[&str]) -> CompletionResult {
     let prefix_lower = prefix.to_lowercase();
     let mut matches: Vec<String> = command_names
         .iter()
         .filter(|cmd| cmd.to_lowercase().starts_with(&prefix_lower))
-        .cloned()
+        .map(|s| s.to_string())
         .collect();
 
     // Sort alphabetically for consistent display
@@ -211,14 +211,8 @@ mod tests {
 
     #[test]
     fn test_command_completion() {
-        let commands = vec![
-            "load".to_string(),
-            "label".to_string(),
-            "ls".to_string(),
-            "log".to_string(),
-            "zoom".to_string(),
-        ];
-        let path_commands = vec!["load".to_string(), "ls".to_string()];
+        let commands = vec!["load", "label", "ls", "log", "zoom"];
+        let path_commands = vec!["load", "ls"];
 
         // Complete "l"
         let result = generate_completions("l", 1, &commands, &path_commands);

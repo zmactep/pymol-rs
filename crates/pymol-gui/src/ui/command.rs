@@ -4,7 +4,7 @@
 
 use egui::{Key, TextEdit, Ui, Color32, RichText, ScrollArea, Sense, Id};
 
-use crate::state::GuiState;
+use crate::state::CommandLineState;
 use super::completion::generate_completions;
 
 /// ID for the command line text edit widget
@@ -23,13 +23,24 @@ pub struct CommandLinePanel;
 
 impl CommandLinePanel {
     /// Draw the command line panel and return any action to take
-    pub fn show(ui: &mut Ui, state: &mut GuiState) -> CommandAction {
+    ///
+    /// # Arguments
+    /// * `ui` - The egui UI context
+    /// * `state` - The command line state (input, history, completion)
+    /// * `command_names` - List of all available command names for autocomplete
+    /// * `path_commands` - List of commands that take file paths as first argument
+    pub fn show(
+        ui: &mut Ui,
+        state: &mut CommandLineState,
+        command_names: &[&str],
+        path_commands: &[&str],
+    ) -> CommandAction {
         let mut action = CommandAction::None;
         let mut text_edit_rect = egui::Rect::NOTHING;
         let text_edit_id = Id::new(COMMAND_INPUT_ID);
 
         // Consume Tab key before widgets to prevent focus navigation
-        let tab_pressed = if state.command_has_focus || state.completion.visible {
+        let tab_pressed = if state.has_focus || state.completion.visible {
             ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab))
         } else {
             false
@@ -50,7 +61,7 @@ impl CommandLinePanel {
                 state.completion.reset();
             }
             if ui.ctx().input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)) {
-                state.completion.apply_to_input(&mut state.command_input);
+                state.completion.apply_to_input(&mut state.input);
                 restore_focus = true;
             }
         }
@@ -63,7 +74,7 @@ impl CommandLinePanel {
             );
 
             let response = ui.add(
-                TextEdit::singleline(&mut state.command_input)
+                TextEdit::singleline(&mut state.input)
                     .id(text_edit_id)
                     .font(egui::TextStyle::Monospace)
                     .desired_width(ui.available_width() - 10.0)
@@ -72,14 +83,14 @@ impl CommandLinePanel {
             );
 
             text_edit_rect = response.rect;
-            state.command_has_focus = response.has_focus();
+            state.has_focus = response.has_focus();
 
             // Handle Tab key for completion
             if tab_pressed {
                 if state.completion.visible {
-                    state.completion.apply_to_input(&mut state.command_input);
+                    state.completion.apply_to_input(&mut state.input);
                 } else {
-                    Self::trigger_completion(state);
+                    Self::trigger_completion(state, command_names, path_commands);
                 }
                 restore_focus = true;
             }
@@ -89,7 +100,6 @@ impl CommandLinePanel {
                 let command = state.take_command();
                 if !command.is_empty() {
                     state.add_to_history(command.clone());
-                    state.print_command(format!("PyMOL> {}", command));
                     action = CommandAction::Execute(command);
                 }
                 restore_focus = true;
@@ -112,13 +122,13 @@ impl CommandLinePanel {
             // Restore focus and cursor position after completion
             if restore_focus {
                 ui.memory_mut(|mem| mem.request_focus(text_edit_id));
-                Self::set_cursor_to_end(ui, text_edit_id, &state.command_input);
+                Self::set_cursor_to_end(ui, text_edit_id, &state.input);
             }
 
             // Startup focus
-            if state.command_wants_focus {
+            if state.wants_focus {
                 response.request_focus();
-                state.command_wants_focus = false;
+                state.wants_focus = false;
             }
         });
 
@@ -132,14 +142,14 @@ impl CommandLinePanel {
 
     /// Generate completions for current input
     /// If there's exactly one match, apply it immediately without showing popup
-    fn trigger_completion(state: &mut GuiState) {
-        let cursor_pos = state.command_input.len();
-        let result = generate_completions(&state.command_input, cursor_pos, &state.command_names, &state.path_commands);
+    fn trigger_completion(state: &mut CommandLineState, command_names: &[&str], path_commands: &[&str]) {
+        let cursor_pos = state.input.len();
+        let result = generate_completions(&state.input, cursor_pos, command_names, path_commands);
 
         if result.suggestions.len() == 1 {
             // Single match - apply immediately using CompletionState temporarily
             state.completion.show(result.start_pos, result.suggestions);
-            state.completion.apply_to_input(&mut state.command_input);
+            state.completion.apply_to_input(&mut state.input);
         } else if !result.suggestions.is_empty() {
             // Multiple matches - show popup
             state.completion.show(result.start_pos, result.suggestions);
@@ -156,7 +166,7 @@ impl CommandLinePanel {
     }
 
     /// Show the completion popup
-    fn show_completion_popup(ui: &mut Ui, state: &mut GuiState, text_edit_rect: egui::Rect) {
+    fn show_completion_popup(ui: &mut Ui, state: &mut CommandLineState, text_edit_rect: egui::Rect) {
         let popup_pos = egui::pos2(text_edit_rect.left(), text_edit_rect.bottom() + 2.0);
         let mut clicked_idx: Option<usize> = None;
 
@@ -215,7 +225,7 @@ impl CommandLinePanel {
 
         if let Some(idx) = clicked_idx {
             state.completion.selected = idx;
-            state.completion.apply_to_input(&mut state.command_input);
+            state.completion.apply_to_input(&mut state.input);
         }
     }
 }

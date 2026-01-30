@@ -4,24 +4,29 @@
 
 use egui::{Color32, RichText, ScrollArea, Ui};
 
-use crate::state::{GuiState, OutputKind};
+use crate::state::{OutputBufferState, OutputKind};
 
 /// Output panel that displays log messages
 pub struct OutputPanel;
 
 impl OutputPanel {
     /// Draw the output panel
-    pub fn show(ui: &mut Ui, state: &mut GuiState) {
-        let available_height = state.output_panel_height;
+    ///
+    /// # Arguments
+    /// * `ui` - The egui UI context
+    /// * `state` - The output buffer state
+    pub fn show(ui: &mut Ui, state: &OutputBufferState) {
+        // Use a reasonable default height - the actual height is controlled by the panel
+        let available_height = 150.0;
 
         ScrollArea::vertical()
             .max_height(available_height)
             .auto_shrink([false, false])
-            .stick_to_bottom(state.output_auto_scroll)
+            .stick_to_bottom(state.auto_scroll)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
 
-                for message in &state.output_buffer {
+                for message in &state.buffer {
                     let color = match message.kind {
                         OutputKind::Normal => Color32::LIGHT_GRAY,
                         OutputKind::Info => Color32::from_rgb(100, 180, 255),

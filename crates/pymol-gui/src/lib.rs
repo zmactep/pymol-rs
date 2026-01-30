@@ -19,6 +19,7 @@ pub mod fetch;
 pub mod ipc;
 pub mod state;
 pub mod ui;
+pub mod view;
 pub mod viewer_adapter;
 
 pub use app::App;
@@ -27,6 +28,13 @@ pub use async_tasks::{AsyncTask, TaskContext, TaskResult, TaskRunner};
 pub use fetch::{FetchResult, FetchTask};
 pub use ipc::{
     ExternalCommandRegistry, IpcCallbackResult, IpcCallbackTask, IpcRequest, IpcResponse,
-    IpcServer, OutputKind, OutputMessage,
+    IpcServer, OutputKind as IpcOutputKind, OutputMessage as IpcOutputMessage,
 };
-pub use state::GuiState;
+
+// Re-export state types
+pub use state::{
+    AppState, CommandLineState, CompletionState, OutputBufferState, OutputKind, OutputMessage,
+};
+
+// Re-export view types
+pub use view::{AppView, UiConfig};
