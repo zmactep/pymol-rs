@@ -151,7 +151,25 @@ impl PyCmd {
         self.with_client(|client| {
             client.register_command(
                 "runpy",
-                Some("Execute a Python script: runpy script.py [namespace]"),
+                Some(r#"
+DESCRIPTION
+
+    "runpy" executes a Python script file (.py).
+
+USAGE
+
+    runpy filename [, namespace ]
+
+ARGUMENTS
+
+    filename = string: path to Python script file
+    namespace = string: execution namespace (default: global)
+
+EXAMPLES
+
+    runpy setup.py
+    runpy analysis.py, local
+"#),
             )
         })
     }
