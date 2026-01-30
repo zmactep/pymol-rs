@@ -1,10 +1,13 @@
-//! Control commands: quit, reinitialize, refresh, rebuild
+//! Control commands: quit, reinitialize, refresh, rebuild, run
 
 use pymol_scene::DirtyFlags;
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
+use crate::parser::parse_command;
+
+use super::io::expand_path;
 
 /// Register control commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -13,6 +16,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(RefreshCommand);
     registry.register(RebuildCommand);
     registry.register(HelpCommand);
+    registry.register(RunCommand);
 }
 
 // ============================================================================
@@ -289,7 +293,7 @@ EXAMPLES
         } else {
             // List available commands
             ctx.print(" Available commands:");
-            ctx.print("   File I/O: load, save, cd, pwd, ls");
+            ctx.print("   File I/O: load, save, cd, pwd, ls, run");
             ctx.print("   Viewing:  zoom, center, orient, reset, clip");
             ctx.print("   Display:  show, hide, as, enable, disable, color, bg_color");
             ctx.print("   Objects:  delete, rename, create, copy, group");
@@ -297,6 +301,100 @@ EXAMPLES
             ctx.print("   Control:  quit, reinitialize, refresh, rebuild, help");
             ctx.print("");
             ctx.print(" Type 'help <command>' for detailed help");
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// run command
+// ============================================================================
+
+struct RunCommand;
+
+impl Command for RunCommand {
+    fn name(&self) -> &str {
+        "run"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["@"]
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "run" executes a PyMOL script file (.pml).
+
+USAGE
+
+    run filename
+
+ARGUMENTS
+
+    filename = string: path to script file
+
+EXAMPLES
+
+    run setup.pml
+    run ~/scripts/analysis.pml
+    @ script.pml
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let filename = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("filename"))
+            .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
+
+        let path = expand_path(filename);
+        
+        // Read the script file
+        let content = std::fs::read_to_string(&path).map_err(|e| CmdError::Script {
+            line: 0,
+            message: format!("failed to read script '{}': {}", path.display(), e),
+        })?;
+
+        // Execute each line
+        for (line_num, line) in content.lines().enumerate() {
+            let line = line.trim();
+            
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Parse the command
+            let parsed = parse_command(line).map_err(|e| CmdError::Script {
+                line: line_num + 1,
+                message: format!("{}", e),
+            })?;
+
+            // Look up the command (get registry fresh each iteration to avoid borrow conflicts)
+            let command = ctx
+                .registry()
+                .ok_or_else(|| CmdError::Script {
+                    line: line_num + 1,
+                    message: "command registry not available".to_string(),
+                })?
+                .get(&parsed.name)
+                .ok_or_else(|| CmdError::Script {
+                    line: line_num + 1,
+                    message: format!("unknown command: {}", parsed.name),
+                })?;
+
+            // Execute the command
+            command.execute(ctx, &parsed).map_err(|e| CmdError::Script {
+                line: line_num + 1,
+                message: format!("{}", e),
+            })?;
         }
 
         Ok(())

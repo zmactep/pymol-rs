@@ -179,11 +179,16 @@ fn parse_single_command(input: &str) -> IResult<&str, ParsedCommand> {
     ))
 }
 
-/// Parse a command name (alphanumeric + underscore + dot for util.xxx)
+/// Parse a command name (alphanumeric + underscore + dot for util.xxx, or @ for script execution)
 fn parse_command_name(input: &str) -> IResult<&str, &str> {
-    recognize(pair(
-        take_while1(|c: char| c.is_alphanumeric() || c == '_'),
-        take_while(|c: char| c.is_alphanumeric() || c == '_' || c == '.'),
+    alt((
+        // Special case: @ command for script execution
+        tag("@"),
+        // Regular command names: alphanumeric + underscore + dot
+        recognize(pair(
+            take_while1(|c: char| c.is_alphanumeric() || c == '_'),
+            take_while(|c: char| c.is_alphanumeric() || c == '_' || c == '.'),
+        )),
     ))(input)
 }
 

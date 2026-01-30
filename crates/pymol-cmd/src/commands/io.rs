@@ -11,7 +11,7 @@ use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLi
 use crate::error::{CmdError, CmdResult};
 
 /// Expand shell-style paths: ~ to home directory, $VAR to environment variables
-fn expand_path(path: &str) -> PathBuf {
+pub fn expand_path(path: &str) -> PathBuf {
     match shellexpand::full(path) {
         Ok(expanded) => PathBuf::from(expanded.as_ref()),
         Err(_) => PathBuf::from(path), // Fall back to original if expansion fails
