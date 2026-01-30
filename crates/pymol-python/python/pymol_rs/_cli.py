@@ -16,6 +16,11 @@ def main() -> int:
         description="PyMOL-RS molecular visualization",
     )
     parser.add_argument(
+        "--python",
+        action="store_true",
+        help="Enable python extension mode (ignores other arguments)",
+    )
+    parser.add_argument(
         "--ipc",
         metavar="SOCKET_PATH",
         type=Path,
@@ -43,17 +48,24 @@ def main() -> int:
     # Import here to avoid circular imports and slow startup for --help
     from pymol_rs._pymol_rs import run_gui
 
-    try:
-        run_gui(
-            ipc_socket=args.ipc,
-            headless=args.headless,
-            files=args.files if args.files else None,
-            quiet=args.quiet,
-        )
+    if args.python:
+        from pymol_rs import cmd
+        cmd.show_gui()
+        input("Press any key to quit...")
+        cmd.quit()
         return 0
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    else:
+        try:
+            run_gui(
+                ipc_socket=args.ipc,
+                headless=args.headless,
+                files=args.files if args.files else None,
+                quiet=args.quiet,
+            )
+            return 0
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":

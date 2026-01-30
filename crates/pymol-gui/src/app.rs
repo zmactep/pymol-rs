@@ -1548,35 +1548,34 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Process IPC requests - this is essential for headless mode where
-        // no user interaction generates RedrawRequested events.
+        // Process IPC requests - this is essential for both headless mode and
+        // GUI mode when controlled externally (e.g., from Python).
         // We must ALWAYS call process_ipc() to accept new connections,
         // not just when a client is already connected.
         if self.ipc_server.is_some() {
             self.process_ipc();
             
-            // In headless mode with IPC, use a timeout-based wake-up
-            // to periodically check for connections and requests.
+            // When IPC is enabled, use a timeout-based wake-up to periodically
+            // check for connections and requests. This is needed for:
+            // - Headless mode: no user interaction generates events
+            // - GUI mode: window may be unfocused, no events coming in
             // This avoids 100% CPU usage while still being responsive.
-            if self.headless {
-                use std::time::{Duration, Instant};
-                use winit::event_loop::ControlFlow;
-                
-                // Wake up every 50ms to check for IPC requests
-                event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    Instant::now() + Duration::from_millis(50)
-                ));
-                
-                // Check for quit request (in headless mode, no window events trigger this check)
-                if self.quit_requested {
-                    event_loop.exit();
-                }
-            } else {
-                // In GUI mode, request a redraw if IPC commands modified state
-                // This ensures the window updates even when not focused
-                if self.needs_redraw {
-                    self.request_redraw();
-                }
+            use std::time::{Duration, Instant};
+            use winit::event_loop::ControlFlow;
+            
+            // Wake up every 50ms to check for IPC requests
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(50)
+            ));
+            
+            // Check for quit request
+            if self.quit_requested {
+                event_loop.exit();
+            }
+            
+            // In GUI mode, request a redraw if IPC commands modified state
+            if !self.headless && self.needs_redraw {
+                self.request_redraw();
             }
         }
 
