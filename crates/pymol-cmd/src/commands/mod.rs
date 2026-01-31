@@ -10,6 +10,7 @@ pub mod objects;
 pub mod scene;
 pub mod selecting;
 pub mod settings;
+pub mod transform;
 pub mod viewing;
 
 use crate::command::CommandRegistry;
@@ -42,4 +43,7 @@ pub fn register_all(registry: &mut CommandRegistry) {
 
     // Movie commands
     movie::register(registry);
+
+    // Transform commands (translate, rotate, transform_selection)
+    transform::register(registry);
 }

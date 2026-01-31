@@ -3,12 +3,12 @@
 //! Provides the `ObjectMolecule` struct which is the main container for molecular data.
 //! It holds atoms, bonds, coordinate sets, and settings.
 
-use lin_alg::f32::Vec3;
+use lin_alg::f32::{Mat4, Vec3};
 use pymol_settings::{GlobalSettings, UniqueSettings};
 
 use crate::atom::Atom;
 use crate::bond::{Bond, BondOrder};
-use crate::coordset::{CoordSet, Symmetry};
+use crate::coordset::{rotation_matrix, CoordSet, Symmetry};
 use crate::error::{MolError, MolResult};
 use crate::index::{AtomIndex, BondIndex, StateIndex};
 use crate::residue::{ChainIterator, ResidueIterator};
@@ -635,6 +635,118 @@ impl ObjectMolecule {
     pub fn center_origin(&mut self, state: usize) {
         if let Some(cs) = self.coord_sets.get_mut(state) {
             cs.center_origin();
+        }
+    }
+
+    /// Translate specific atoms in a state
+    pub fn translate_atoms(&mut self, state: usize, atoms: &[AtomIndex], delta: Vec3) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.translate_atoms(atoms, delta);
+        }
+    }
+
+    /// Translate all atoms in all states
+    pub fn translate_all_states(&mut self, delta: Vec3) {
+        for cs in &mut self.coord_sets {
+            cs.translate(delta);
+        }
+    }
+
+    /// Rotate all coordinates in a state
+    ///
+    /// # Arguments
+    /// * `state` - State index (0-based)
+    /// * `axis` - Rotation axis (will be normalized)
+    /// * `angle` - Rotation angle in radians
+    /// * `origin` - Center of rotation
+    pub fn rotate(&mut self, state: usize, axis: Vec3, angle: f32, origin: Vec3) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.rotate(axis, angle, origin);
+        }
+    }
+
+    /// Rotate specific atoms in a state
+    pub fn rotate_atoms(
+        &mut self,
+        state: usize,
+        atoms: &[AtomIndex],
+        axis: Vec3,
+        angle: f32,
+        origin: Vec3,
+    ) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.rotate_atoms(atoms, axis, angle, origin);
+        }
+    }
+
+    /// Rotate all atoms in all states
+    pub fn rotate_all_states(&mut self, axis: Vec3, angle: f32, origin: Vec3) {
+        let matrix = rotation_matrix(axis, angle, origin);
+        for cs in &mut self.coord_sets {
+            cs.transform(&matrix);
+        }
+    }
+
+    /// Apply a 4x4 transformation matrix to all coordinates in a state
+    pub fn transform(&mut self, state: usize, matrix: &Mat4) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.transform(matrix);
+        }
+    }
+
+    /// Apply a 4x4 transformation matrix to specific atoms in a state
+    pub fn transform_atoms(&mut self, state: usize, atoms: &[AtomIndex], matrix: &Mat4) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.transform_atoms(atoms, matrix);
+        }
+    }
+
+    /// Apply a 4x4 transformation matrix to all atoms in all states
+    pub fn transform_all_states(&mut self, matrix: &Mat4) {
+        for cs in &mut self.coord_sets {
+            cs.transform(matrix);
+        }
+    }
+
+    /// Apply a PyMOL-style TTT matrix to all coordinates in a state
+    pub fn transform_ttt(&mut self, state: usize, ttt: &[f32; 16]) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.transform_ttt(ttt);
+        }
+    }
+
+    /// Apply a PyMOL-style TTT matrix to specific atoms in a state
+    pub fn transform_ttt_atoms(&mut self, state: usize, atoms: &[AtomIndex], ttt: &[f32; 16]) {
+        if let Some(cs) = self.coord_sets.get_mut(state) {
+            cs.transform_ttt_atoms(atoms, ttt);
+        }
+    }
+
+    /// Get the geometric center of the molecule for a state
+    pub fn get_center(&self, state: usize) -> Option<Vec3> {
+        self.coord_sets.get(state).map(|cs| cs.center())
+    }
+
+    /// Get the geometric center of specific atoms for a state
+    pub fn get_atoms_center(&self, state: usize, atoms: &[AtomIndex]) -> Option<Vec3> {
+        let cs = self.coord_sets.get(state)?;
+        if atoms.is_empty() {
+            return Some(Vec3::new(0.0, 0.0, 0.0));
+        }
+
+        let mut sum = Vec3::new(0.0, 0.0, 0.0);
+        let mut count = 0;
+        for &atom in atoms {
+            if let Some(coord) = cs.get_atom_coord(atom) {
+                sum = sum + coord;
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            Some(sum * (1.0 / count as f32))
+        } else {
+            None
         }
     }
 

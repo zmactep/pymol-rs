@@ -52,7 +52,10 @@ mod secondary;
 // Re-export main types
 pub use atom::{Atom, AtomBuilder, RepMask};
 pub use bond::{Bond, BondOrder, BondStereo, SymOp};
-pub use coordset::{CoordSet, Symmetry};
+pub use coordset::{
+    mat4_to_ttt, rotation_matrix, rotation_ttt, translation_matrix, ttt_to_mat4, CoordSet,
+    Symmetry,
+};
 pub use element::{Element, DEFAULT_VDW_RADIUS, ELEMENT_COUNT};
 pub use error::{MolError, MolResult};
 pub use flags::{AtomFlags, AtomGeometry, Chirality, Stereo};
