@@ -2478,6 +2478,7 @@ name = "pymol-cmd"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "image",
  "lin_alg",
  "log",
  "nom",

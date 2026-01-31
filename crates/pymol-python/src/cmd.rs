@@ -473,6 +473,264 @@ impl PyCmd {
         self.execute_cmd("reset")
     }
 
+    /// Translate the camera along an axis
+    ///
+    /// Args:
+    ///     axis: Axis to move along ("x", "y", or "z")
+    ///     distance: Distance to move in Angstroms
+    ///
+    /// Notes:
+    ///     Positive x moves right, positive y moves up, positive z moves
+    ///     toward the viewer.
+    ///
+    /// See Also:
+    ///     turn, zoom, center, clip
+    #[pyo3(name = "move", signature = (axis, distance))]
+    fn move_(&self, axis: &str, distance: f64) -> PyResult<()> {
+        let cmd = format!("move {}, {}", axis, distance);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Rotate the camera about an axis
+    ///
+    /// Args:
+    ///     axis: Axis to rotate about ("x", "y", or "z")
+    ///     angle: Degrees of rotation
+    ///
+    /// Notes:
+    ///     Rotations follow the right-hand rule. For example, a positive
+    ///     rotation about the y-axis will rotate the view to the right.
+    ///
+    /// See Also:
+    ///     move, rotate, zoom, center
+    #[pyo3(signature = (axis, angle))]
+    fn turn(&self, axis: &str, angle: f64) -> PyResult<()> {
+        let cmd = format!("turn {}, {}", axis, angle);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Adjust near and far clipping planes
+    ///
+    /// Args:
+    ///     mode: Clipping mode ("near", "far", "move", or "slab")
+    ///     distance: Clipping distance adjustment
+    ///     selection: Selection for reference (default: all)
+    ///     state: State to consider (default: 0)
+    ///
+    /// Modes:
+    ///     near: adjust near clipping plane
+    ///     far: adjust far clipping plane
+    ///     move: move both planes
+    ///     slab: set slab thickness
+    ///
+    /// Examples:
+    ///     cmd.clip("near", -5)
+    ///     cmd.clip("far", 10)
+    ///     cmd.clip("slab", 20)
+    ///
+    /// See Also:
+    ///     zoom, move, turn
+    #[pyo3(signature = (mode, distance, selection="all", state=0))]
+    fn clip(&self, mode: &str, distance: f64, selection: &str, state: i32) -> PyResult<()> {
+        let cmd = format!("clip {}, {}", mode, distance);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Change viewport size
+    ///
+    /// Args:
+    ///     width: Width in pixels (optional)
+    ///     height: Height in pixels (optional)
+    ///
+    /// Notes:
+    ///     If only width is specified, height will be scaled to maintain
+    ///     the current aspect ratio.
+    ///     If no arguments are given, the current viewport size is displayed.
+    ///
+    /// Examples:
+    ///     cmd.viewport()            # Show current size
+    ///     cmd.viewport(800, 600)    # Set to 800x600
+    ///     cmd.viewport(1920, 1080)  # Set to 1920x1080
+    ///
+    /// See Also:
+    ///     full_screen, png
+    #[pyo3(signature = (width=None, height=None))]
+    fn viewport(&self, width: Option<u32>, height: Option<u32>) -> PyResult<()> {
+        let cmd = match (width, height) {
+            (Some(w), Some(h)) => format!("viewport {}, {}", w, h),
+            (Some(w), None) => format!("viewport {}", w),
+            _ => "viewport".to_string(),
+        };
+        self.execute_cmd(&cmd)
+    }
+
+    /// Enable or disable fullscreen mode
+    ///
+    /// Args:
+    ///     toggle: Optional mode ("on", "off", "toggle", "1", "0", "-1")
+    ///             If omitted, toggles the current state.
+    ///
+    /// Examples:
+    ///     cmd.full_screen()       # Toggle fullscreen
+    ///     cmd.full_screen("on")   # Enable fullscreen
+    ///     cmd.full_screen("off")  # Disable fullscreen
+    ///
+    /// See Also:
+    ///     viewport
+    #[pyo3(signature = (toggle=None))]
+    fn full_screen(&self, toggle: Option<&str>) -> PyResult<()> {
+        let cmd = match toggle {
+            Some(t) => format!("full_screen {}", t),
+            None => "full_screen".to_string(),
+        };
+        self.execute_cmd(&cmd)
+    }
+
+    /// Set the center of rotation
+    ///
+    /// Args:
+    ///     selection: Selection expression or name (default: all)
+    ///     object: Object name (optional)
+    ///     position: Explicit position [x, y, z] (optional)
+    ///     state: State to use for coordinates (default: 0)
+    ///
+    /// Examples:
+    ///     cmd.origin("chain A")
+    ///     cmd.origin("resi 100")
+    ///
+    /// See Also:
+    ///     zoom, orient, center, reset
+    #[pyo3(signature = (selection="all", object=None, position=None, state=0))]
+    fn origin(
+        &self,
+        selection: &str,
+        object: Option<&str>,
+        position: Option<Vec<f64>>,
+        state: i32,
+    ) -> PyResult<()> {
+        let cmd = if let Some(pos) = position {
+            if pos.len() >= 3 {
+                format!("origin position=[{}, {}, {}]", pos[0], pos[1], pos[2])
+            } else {
+                format!("origin {}", selection)
+            }
+        } else {
+            format!("origin {}", selection)
+        };
+        self.execute_cmd(&cmd)
+    }
+
+    /// Save or recall named camera views
+    ///
+    /// Unlike scenes, views only store camera state (rotation, position,
+    /// origin, clipping planes, FOV) without colors, representations, or
+    /// frame state.
+    ///
+    /// Args:
+    ///     key: View name, or "*" for all views
+    ///     action: "store", "recall", or "clear" (default: recall)
+    ///     animate: Animation duration in seconds (default: 0)
+    ///
+    /// Examples:
+    ///     cmd.view("F1", "store")      # Store current view as "F1"
+    ///     cmd.view("F1")               # Recall view "F1"
+    ///     cmd.view("F1", "recall", 1)  # Recall with 1 second animation
+    ///     cmd.view("F1", "clear")      # Delete view "F1"
+    ///     cmd.view("*", "clear")       # Delete all views
+    ///
+    /// See Also:
+    ///     scene, get_view, set_view
+    #[pyo3(signature = (key, action="recall", animate=0.0))]
+    fn view(&self, key: &str, action: &str, animate: f64) -> PyResult<()> {
+        let cmd = if animate > 0.0 {
+            format!("view {}, {}, {}", key, action, animate)
+        } else {
+            format!("view {}, {}", key, action)
+        };
+        self.execute_cmd(&cmd)
+    }
+
+    /// Get the current view matrix
+    ///
+    /// Returns the current view as a list of 18 floats representing:
+    /// - [0-8]: 3x3 rotation matrix (row-major)
+    /// - [9-11]: Camera position (x, y, z)
+    /// - [12-14]: Origin (center of rotation)
+    /// - [15]: Front clipping plane
+    /// - [16]: Back clipping plane
+    /// - [17]: Field of view
+    ///
+    /// Args:
+    ///     output: Output mode (default: 0, currently ignored)
+    ///
+    /// Returns:
+    ///     List of 18 floats, or None if not available
+    ///
+    /// Examples:
+    ///     view = cmd.get_view()
+    ///     # Later restore with:
+    ///     cmd.set_view(view)
+    ///
+    /// See Also:
+    ///     set_view, view, scene
+    #[pyo3(signature = (output=0))]
+    fn get_view(&self, output: i32) -> PyResult<Option<Vec<f64>>> {
+        // Try to get view via IPC
+        self.with_client(|client| client.get_view())
+    }
+
+    /// Set the view matrix
+    ///
+    /// Sets the camera view from a tuple of 18 floats (as returned by get_view).
+    ///
+    /// Args:
+    ///     view: Tuple or list of 18 floats:
+    ///         - [0-8]: 3x3 rotation matrix (row-major)
+    ///         - [9-11]: Camera position (x, y, z)
+    ///         - [12-14]: Origin (center of rotation)
+    ///         - [15]: Front clipping plane
+    ///         - [16]: Back clipping plane
+    ///         - [17]: Field of view
+    ///
+    /// Examples:
+    ///     # Save and restore view
+    ///     view = cmd.get_view()
+    ///     # ... make changes ...
+    ///     cmd.set_view(view)
+    ///
+    ///     # Set specific view
+    ///     cmd.set_view([
+    ///         1.0, 0.0, 0.0,
+    ///         0.0, 1.0, 0.0,
+    ///         0.0, 0.0, 1.0,
+    ///         0.0, 0.0, -50.0,
+    ///         0.0, 0.0, 0.0,
+    ///         10.0, 100.0, 20.0
+    ///     ])
+    ///
+    /// See Also:
+    ///     get_view, view, scene
+    #[pyo3(signature = (view))]
+    fn set_view(&self, view: Vec<f64>) -> PyResult<()> {
+        if view.len() < 18 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "view must have at least 18 elements",
+            ));
+        }
+
+        // Format as PyMOL-style set_view command
+        let cmd = format!(
+            "set_view ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+            view[0], view[1], view[2],
+            view[3], view[4], view[5],
+            view[6], view[7], view[8],
+            view[9], view[10], view[11],
+            view[12], view[13], view[14],
+            view[15], view[16], view[17],
+        );
+        self.execute_cmd(&cmd)
+    }
+
     // =========================================================================
     // Object Commands
     // =========================================================================
@@ -503,6 +761,161 @@ impl PyCmd {
     #[pyo3(signature = (name))]
     fn disable(&self, name: &str) -> PyResult<()> {
         let cmd = format!("disable {}", name);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Toggle object visibility
+    ///
+    /// Args:
+    ///     name: Object name to toggle
+    ///
+    /// See Also:
+    ///     enable, disable
+    #[pyo3(signature = (name))]
+    fn toggle(&self, name: &str) -> PyResult<()> {
+        let cmd = format!("toggle {}", name);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Rename an object
+    ///
+    /// Args:
+    ///     old_name: Current object name
+    ///     new_name: New object name
+    ///
+    /// See Also:
+    ///     delete, create, copy
+    #[pyo3(signature = (old_name, new_name))]
+    fn set_name(&self, old_name: &str, new_name: &str) -> PyResult<()> {
+        let cmd = format!("set_name {}, {}", old_name, new_name);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Rename an object (alias for set_name)
+    ///
+    /// Args:
+    ///     old_name: Current object name
+    ///     new_name: New object name
+    ///
+    /// See Also:
+    ///     set_name, delete
+    #[pyo3(signature = (old_name, new_name))]
+    fn rename(&self, old_name: &str, new_name: &str) -> PyResult<()> {
+        self.set_name(old_name, new_name)
+    }
+
+    /// Show visual indicator for a selection
+    ///
+    /// Displays pink dots on atoms matching the selection to help
+    /// visualize which atoms are selected.
+    ///
+    /// Args:
+    ///     selection: Selection expression (default: all)
+    ///
+    /// See Also:
+    ///     select, deselect
+    #[pyo3(signature = (selection="all"))]
+    fn indicate(&self, selection: &str) -> PyResult<()> {
+        let cmd = format!("indicate {}", selection);
+        self.execute_cmd(&cmd)
+    }
+
+    // =========================================================================
+    // Transform Commands
+    // =========================================================================
+
+    /// Translate atomic coordinates
+    ///
+    /// Modifies the actual coordinates of atoms (unlike camera movement).
+    ///
+    /// Args:
+    ///     vector: Translation vector [x, y, z]
+    ///     selection: Atoms to translate (default: all)
+    ///     state: State to modify (-1=current, 0=all, >0=specific)
+    ///     camera: Is vector in camera coordinates? (1=yes, 0=no)
+    ///
+    /// Examples:
+    ///     cmd.translate([1, 0, 0], "name CA")
+    ///     cmd.translate([0, 5, 0], "chain A")
+    ///     cmd.translate([0, 0, 10], "organic")
+    ///
+    /// See Also:
+    ///     rotate, origin, move
+    #[pyo3(signature = (vector, selection="all", state=-1, camera=1))]
+    fn translate(
+        &self,
+        vector: Vec<f64>,
+        selection: &str,
+        state: i32,
+        camera: i32,
+    ) -> PyResult<()> {
+        if vector.len() < 3 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "vector must have at least 3 elements [x, y, z]",
+            ));
+        }
+        let cmd = format!(
+            "translate [{}, {}, {}], {}, {}, {}",
+            vector[0], vector[1], vector[2], selection, state, camera
+        );
+        self.execute_cmd(&cmd)
+    }
+
+    /// Rotate atomic coordinates
+    ///
+    /// Modifies the actual coordinates of atoms (unlike camera rotation).
+    ///
+    /// Args:
+    ///     axis: Axis to rotate about - either:
+    ///         - String: "x", "y", or "z" for principal axes
+    ///         - List: [ax, ay, az] for arbitrary axis vector
+    ///     angle: Degrees of rotation
+    ///     selection: Atoms to rotate (default: all)
+    ///     state: State to modify (-1=current, 0=all, >0=specific)
+    ///     camera: Is axis in camera coordinates? (1=yes, 0=no)
+    ///     origin: Center of rotation [x, y, z] (default: view origin)
+    ///
+    /// Examples:
+    ///     cmd.rotate("x", 45, "all")
+    ///     cmd.rotate("y", 90, "chain A")
+    ///     cmd.rotate([1, 1, 0], 45, "organic")  # Rotate about diagonal axis
+    ///
+    /// See Also:
+    ///     translate, turn, origin
+    #[pyo3(signature = (axis, angle, selection="all", state=-1, camera=1, origin=None))]
+    fn rotate(
+        &self,
+        axis: &Bound<'_, PyAny>,
+        angle: f64,
+        selection: &str,
+        state: i32,
+        camera: i32,
+        origin: Option<Vec<f64>>,
+    ) -> PyResult<()> {
+        // Parse axis - either string ("x", "y", "z") or vector [ax, ay, az]
+        let axis_str = if let Ok(s) = axis.extract::<String>() {
+            s
+        } else if let Ok(v) = axis.extract::<Vec<f64>>() {
+            if v.len() < 3 {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "axis vector must have at least 3 elements [ax, ay, az]",
+                ));
+            }
+            format!("[{}, {}, {}]", v[0], v[1], v[2])
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "axis must be a string ('x', 'y', 'z') or a list [ax, ay, az]",
+            ));
+        };
+
+        let mut cmd = format!("rotate {}, {}, {}, {}, {}", axis_str, angle, selection, state, camera);
+
+        if let Some(orig) = origin {
+            if orig.len() >= 3 {
+                cmd.push_str(&format!(", origin=[{}, {}, {}]", orig[0], orig[1], orig[2]));
+            }
+        }
+
         self.execute_cmd(&cmd)
     }
 
@@ -544,6 +957,51 @@ impl PyCmd {
             format!("set {}, {}", name, value_str)
         };
 
+        self.execute_cmd(&cmd)
+    }
+
+    /// Get a setting value
+    ///
+    /// Args:
+    ///     name: Setting name
+    ///     selection: Optional selection (for per-atom settings)
+    ///     state: State to query (default: 0)
+    ///
+    /// Note:
+    ///     Currently returns None as structured return values require
+    ///     IPC protocol enhancement. Use cmd.do("get setting_name") to
+    ///     see the value printed to output.
+    ///
+    /// See Also:
+    ///     set, unset
+    #[pyo3(signature = (name, selection=None, state=0))]
+    fn get(&self, name: &str, selection: Option<&str>, state: i32) -> PyResult<Option<String>> {
+        let cmd = if let Some(sel) = selection {
+            format!("get {}, {}", name, sel)
+        } else {
+            format!("get {}", name)
+        };
+        self.execute_cmd(&cmd)?;
+        // TODO: Return actual value once IPC protocol supports it
+        Ok(None)
+    }
+
+    /// Restore a setting to its default value
+    ///
+    /// Args:
+    ///     name: Setting name
+    ///     selection: Optional selection (for per-atom settings)
+    ///     state: State to modify (default: 0)
+    ///
+    /// See Also:
+    ///     set, get
+    #[pyo3(signature = (name, selection=None, state=0))]
+    fn unset(&self, name: &str, selection: Option<&str>, state: i32) -> PyResult<()> {
+        let cmd = if let Some(sel) = selection {
+            format!("unset {}, {}", name, sel)
+        } else {
+            format!("unset {}", name)
+        };
         self.execute_cmd(&cmd)
     }
 
@@ -592,6 +1050,324 @@ impl PyCmd {
     /// Refresh the display
     fn refresh(&self) -> PyResult<()> {
         self.execute_cmd("refresh")
+    }
+
+    /// Reset PyMOL to initial state
+    ///
+    /// Args:
+    ///     what: What to reinitialize (default: "everything")
+    ///         "everything" - complete reset
+    ///         "settings" - reset settings only
+    ///     object: Object to reinitialize (optional)
+    ///
+    /// See Also:
+    ///     delete, quit
+    #[pyo3(signature = (what="everything", object=None))]
+    fn reinitialize(&self, what: &str, object: Option<&str>) -> PyResult<()> {
+        let cmd = if let Some(obj) = object {
+            format!("reinitialize {}, {}", what, obj)
+        } else {
+            format!("reinitialize {}", what)
+        };
+        self.execute_cmd(&cmd)
+    }
+
+    /// Reset PyMOL to initial state (alias for reinitialize)
+    ///
+    /// See Also:
+    ///     reinitialize
+    #[pyo3(signature = (what="everything", object=None))]
+    fn reinit(&self, what: &str, object: Option<&str>) -> PyResult<()> {
+        self.reinitialize(what, object)
+    }
+
+    /// Force rebuilding of representations
+    ///
+    /// Args:
+    ///     selection: Selection to rebuild (default: all)
+    ///
+    /// See Also:
+    ///     refresh
+    #[pyo3(signature = (selection="all"))]
+    fn rebuild(&self, selection: &str) -> PyResult<()> {
+        let cmd = format!("rebuild {}", selection);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Perform ray-tracing
+    ///
+    /// Ray tracing produces high-quality images with proper shadows, lighting,
+    /// and transparency effects.
+    ///
+    /// Args:
+    ///     width: Width in pixels (default: current window width)
+    ///     height: Height in pixels (default: current window height)
+    ///     antialias: Antialiasing level 1-4 (default: 1 = no AA)
+    ///         1 = no antialiasing
+    ///         2 = 2x2 supersampling
+    ///         3 = 3x3 supersampling
+    ///         4 = 4x4 supersampling
+    ///     filename: Output file path (optional, displays if not provided)
+    ///     quiet: Suppress feedback (default: False)
+    ///
+    /// Examples:
+    ///     cmd.ray()                          # Raytrace at current resolution
+    ///     cmd.ray(1920, 1080)                # Raytrace at 1080p
+    ///     cmd.ray(1920, 1080, 2)             # Raytrace at 1080p with 2x2 AA
+    ///     cmd.ray(filename="output.png")     # Raytrace and save to file
+    ///
+    /// See Also:
+    ///     png
+    #[pyo3(signature = (width=None, height=None, antialias=1, filename=None, quiet=false))]
+    fn ray(
+        &self,
+        width: Option<u32>,
+        height: Option<u32>,
+        antialias: i32,
+        filename: Option<&str>,
+        quiet: bool,
+    ) -> PyResult<()> {
+        // Build command with named arguments for clarity
+        let mut cmd = "ray".to_string();
+
+        if let Some(w) = width {
+            cmd.push_str(&format!(" width={}", w));
+        }
+        if let Some(h) = height {
+            cmd.push_str(&format!(", height={}", h));
+        }
+        if antialias != 1 {
+            cmd.push_str(&format!(", antialias={}", antialias));
+        }
+        if let Some(f) = filename {
+            cmd.push_str(&format!(", filename={}", f));
+        }
+
+        self.execute_cmd(&cmd)
+    }
+
+    // =========================================================================
+    // Movie Commands
+    // =========================================================================
+
+    /// Start movie playback
+    ///
+    /// Begins playing through the frames of a movie or multi-state object.
+    ///
+    /// See Also:
+    ///     mstop, mpause, mtoggle, frame
+    fn mplay(&self) -> PyResult<()> {
+        self.execute_cmd("mplay")
+    }
+
+    /// Stop movie playback
+    ///
+    /// Stops playback and resets to frame 1.
+    ///
+    /// See Also:
+    ///     mplay, mpause, mtoggle
+    fn mstop(&self) -> PyResult<()> {
+        self.execute_cmd("mstop")
+    }
+
+    /// Pause movie playback
+    ///
+    /// Pauses playback at the current frame without resetting position.
+    ///
+    /// See Also:
+    ///     mplay, mstop, mtoggle
+    fn mpause(&self) -> PyResult<()> {
+        self.execute_cmd("mpause")
+    }
+
+    /// Toggle movie playback
+    ///
+    /// Toggles between play and pause states.
+    ///
+    /// See Also:
+    ///     mplay, mstop, mpause
+    fn mtoggle(&self) -> PyResult<()> {
+        self.execute_cmd("mtoggle")
+    }
+
+    /// Advance to next frame
+    ///
+    /// Moves forward one frame in the movie.
+    ///
+    /// See Also:
+    ///     backward, frame, rewind, ending
+    fn forward(&self) -> PyResult<()> {
+        self.execute_cmd("forward")
+    }
+
+    /// Go back to previous frame
+    ///
+    /// Moves backward one frame in the movie.
+    ///
+    /// See Also:
+    ///     forward, frame, rewind, ending
+    fn backward(&self) -> PyResult<()> {
+        self.execute_cmd("backward")
+    }
+
+    /// Go to first frame
+    ///
+    /// Jumps to the beginning of the movie.
+    ///
+    /// See Also:
+    ///     ending, middle, frame
+    fn rewind(&self) -> PyResult<()> {
+        self.execute_cmd("rewind")
+    }
+
+    /// Go to middle frame
+    ///
+    /// Jumps to the middle of the movie.
+    ///
+    /// See Also:
+    ///     rewind, ending, frame
+    fn middle(&self) -> PyResult<()> {
+        self.execute_cmd("middle")
+    }
+
+    /// Go to last frame
+    ///
+    /// Jumps to the end of the movie.
+    ///
+    /// See Also:
+    ///     rewind, middle, frame
+    fn ending(&self) -> PyResult<()> {
+        self.execute_cmd("ending")
+    }
+
+    /// Set number of frames in movie
+    ///
+    /// Args:
+    ///     specification: Number of frames or frame specification string
+    ///
+    /// Examples:
+    ///     cmd.mset("100")      # Create 100 frames
+    ///     cmd.mset("1 x30")    # 30 frames of state 1
+    ///     cmd.mset("1 -60")    # Frames for states 1-60
+    ///
+    /// See Also:
+    ///     mplay, frame
+    #[pyo3(signature = (specification))]
+    fn mset(&self, specification: &str) -> PyResult<()> {
+        let cmd = format!("mset {}", specification);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Go to specific frame
+    ///
+    /// Args:
+    ///     frame_number: Frame number (1-indexed)
+    ///
+    /// See Also:
+    ///     forward, backward, rewind, ending
+    #[pyo3(signature = (frame_number))]
+    fn frame(&self, frame_number: i32) -> PyResult<()> {
+        let cmd = format!("frame {}", frame_number);
+        self.execute_cmd(&cmd)
+    }
+
+    /// Toggle Y-axis rocking animation
+    ///
+    /// When enabled, the view continuously rocks back and forth around
+    /// the Y-axis. This is useful for presentations and visual inspection.
+    ///
+    /// Args:
+    ///     mode: Optional mode ("on", "off", "1", "0"). If omitted, toggles.
+    ///
+    /// Examples:
+    ///     cmd.rock()       # Toggle rock mode
+    ///     cmd.rock("on")   # Enable rock mode
+    ///     cmd.rock("off")  # Disable rock mode
+    ///
+    /// See Also:
+    ///     mplay, turn
+    #[pyo3(signature = (mode=None))]
+    fn rock(&self, mode: Option<&str>) -> PyResult<()> {
+        let cmd = match mode {
+            Some(m) => format!("rock {}", m),
+            None => "rock".to_string(),
+        };
+        self.execute_cmd(&cmd)
+    }
+
+    // =========================================================================
+    // Scene Commands
+    // =========================================================================
+
+    /// Save or recall named scenes
+    ///
+    /// Scenes store the complete visual state including:
+    /// - Camera view (rotation, position, clipping)
+    /// - Object visibility (enabled/disabled)
+    /// - Representations (show/hide states)
+    /// - Colors
+    /// - Frame number
+    ///
+    /// Args:
+    ///     key: Scene name, or "*" for all scenes
+    ///     action: Action to perform (default: recall)
+    ///         "store" - Save current state as scene
+    ///         "recall" - Restore saved scene
+    ///         "delete" - Delete a scene
+    ///         "clear" - Delete all scenes (with key="*")
+    ///         "list" - List all scenes
+    ///         "rename" - Rename a scene (requires new_key)
+    ///     message: Optional message to store with scene
+    ///     view: Store/recall view (default: True)
+    ///     color: Store/recall colors (default: True)
+    ///     rep: Store/recall representations (default: True)
+    ///     frame: Store/recall frame number (default: True)
+    ///     animate: Animation duration in seconds (default: 0)
+    ///
+    /// Examples:
+    ///     cmd.scene("F1", "store")       # Store current state as "F1"
+    ///     cmd.scene("F1")                # Recall scene "F1"
+    ///     cmd.scene("F1", "recall", animate=2)  # Recall with 2s animation
+    ///     cmd.scene("F1", "delete")      # Delete scene "F1"
+    ///     cmd.scene("*", "clear")        # Delete all scenes
+    ///     cmd.scene("*", "list")         # List all scenes
+    ///
+    /// See Also:
+    ///     view, get_view, set_view
+    #[pyo3(signature = (key, action="recall", message=None, view=true, color=true, rep=true, frame=true, animate=0.0))]
+    fn scene(
+        &self,
+        key: &str,
+        action: &str,
+        message: Option<&str>,
+        view: bool,
+        color: bool,
+        rep: bool,
+        frame: bool,
+        animate: f64,
+    ) -> PyResult<()> {
+        let mut cmd = format!("scene {}, {}", key, action);
+
+        if let Some(msg) = message {
+            cmd.push_str(&format!(", message={}", msg));
+        }
+        if !view {
+            cmd.push_str(", view=0");
+        }
+        if !color {
+            cmd.push_str(", color=0");
+        }
+        if !rep {
+            cmd.push_str(", rep=0");
+        }
+        if !frame {
+            cmd.push_str(", frame=0");
+        }
+        if animate > 0.0 {
+            cmd.push_str(&format!(", animate={}", animate));
+        }
+
+        self.execute_cmd(&cmd)
     }
 
     // =========================================================================

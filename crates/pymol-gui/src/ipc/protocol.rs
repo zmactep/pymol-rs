@@ -140,6 +140,12 @@ pub enum IpcRequest {
         /// Request ID
         id: u64,
     },
+
+    /// Get current view matrix (18 floats)
+    GetView {
+        /// Request ID
+        id: u64,
+    },
 }
 
 /// Message FROM GUI TO client
@@ -204,6 +210,7 @@ impl IpcRequest {
             Self::Ping { id } => Some(*id),
             Self::ShowWindow { id } => Some(*id),
             Self::HideWindow { id } => Some(*id),
+            Self::GetView { id } => Some(*id),
         }
     }
 }

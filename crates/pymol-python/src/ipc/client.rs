@@ -306,4 +306,34 @@ impl IpcClient {
             _ => Ok(()), // Consider other responses as success
         }
     }
+
+    /// Get the current view matrix (18 floats)
+    pub fn get_view(&mut self) -> std::io::Result<Option<Vec<f64>>> {
+        let id = self.next_id();
+        let request = IpcRequest::GetView { id };
+        let response = self.request(&request)?;
+
+        match response {
+            IpcResponse::Value { value, .. } => {
+                // Parse the JSON array of floats
+                if let Some(arr) = value.as_array() {
+                    let values: Vec<f64> = arr
+                        .iter()
+                        .filter_map(|v| v.as_f64())
+                        .collect();
+                    if values.len() >= 18 {
+                        Ok(Some(values))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            IpcResponse::Error { message, .. } => {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, message))
+            }
+            _ => Ok(None),
+        }
+    }
 }

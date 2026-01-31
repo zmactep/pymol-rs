@@ -948,6 +948,31 @@ impl App {
                 self.headless = true;
                 Some(IpcResponse::Ok { id: *id })
             }
+
+            IpcRequest::GetView { id } => {
+                // Get current view as 18 floats
+                let view = self.state.camera.current_view();
+                let r = &view.rotation;
+
+                // Build the 18-value array:
+                // [0-8]: 3x3 rotation matrix (row-major)
+                // [9-11]: Camera position
+                // [12-14]: Origin
+                // [15]: Front clip, [16]: Back clip, [17]: FOV
+                let values: Vec<f64> = vec![
+                    r.data[0] as f64, r.data[1] as f64, r.data[2] as f64,
+                    r.data[4] as f64, r.data[5] as f64, r.data[6] as f64,
+                    r.data[8] as f64, r.data[9] as f64, r.data[10] as f64,
+                    view.position.x as f64, view.position.y as f64, view.position.z as f64,
+                    view.origin.x as f64, view.origin.y as f64, view.origin.z as f64,
+                    view.clip_front as f64, view.clip_back as f64, view.fov as f64,
+                ];
+
+                Some(IpcResponse::Value {
+                    id: *id,
+                    value: serde_json::json!(values),
+                })
+            }
         }
     }
 
