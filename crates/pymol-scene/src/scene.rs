@@ -11,7 +11,7 @@ use pymol_settings::UniqueId;
 
 use crate::camera::{Camera, SceneView};
 use crate::error::{SceneError, SceneResult};
-use crate::object::ObjectRegistry;
+use crate::object::{DirtyFlags, ObjectRegistry, ObjectType};
 
 bitflags! {
     /// Flags indicating what to store in a scene
@@ -49,6 +49,15 @@ pub struct SceneAtomData {
     pub visible_reps: RepMask,
 }
 
+/// Per-atom stored properties within an object
+#[derive(Debug, Clone)]
+pub struct ScenePerAtomData {
+    /// Atom color (i32 matching Atom.color)
+    pub color: i32,
+    /// Visible representations
+    pub visible_reps: RepMask,
+}
+
 /// Per-object stored properties in a scene
 #[derive(Debug, Clone)]
 pub struct SceneObjectData {
@@ -60,6 +69,9 @@ pub struct SceneObjectData {
     pub visible_reps: RepMask,
     /// Current state index
     pub current_state: usize,
+    /// Per-atom data (indexed parallel to molecule atoms)
+    /// Only populated for molecule objects when COLOR or REP flags are set
+    pub per_atom_data: Vec<ScenePerAtomData>,
 }
 
 /// A stored scene snapshot
@@ -120,18 +132,35 @@ impl Scene {
         if storemask.intersects(SceneStoreMask::ACTIVE | SceneStoreMask::COLOR | SceneStoreMask::REP | SceneStoreMask::FRAME) {
             for obj in registry.iter() {
                 let state = obj.state();
+                
+                // Capture per-atom data for molecule objects
+                let per_atom_data = if storemask.intersects(SceneStoreMask::COLOR | SceneStoreMask::REP)
+                    && obj.object_type() == ObjectType::Molecule
+                {
+                    if let Some(mol_obj) = registry.get_molecule(obj.name()) {
+                        mol_obj.molecule().atoms().map(|atom| {
+                            ScenePerAtomData {
+                                color: atom.color,
+                                visible_reps: atom.visible_reps,
+                            }
+                        }).collect()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                
                 let obj_data = SceneObjectData {
                     enabled: state.enabled,
                     color: state.color,
                     visible_reps: state.visible_reps,
                     current_state: obj.current_state(),
+                    per_atom_data,
                 };
                 scene.object_data.insert(obj.name().to_string(), obj_data);
             }
         }
-
-        // Note: atom_data capture would require iterating all atoms in all molecules
-        // This is deferred for now as it's expensive and rarely needed
 
         scene
     }
@@ -153,8 +182,37 @@ impl Scene {
             }
         }
 
+        // Collect names first to avoid borrow conflicts
+        let names: Vec<_> = self.object_data.keys().cloned().collect();
+
         // Apply object states
-        for (name, obj_data) in &self.object_data {
+        for name in &names {
+            let obj_data = &self.object_data[name];
+            
+            // First, apply per-atom data if this is a molecule
+            if !obj_data.per_atom_data.is_empty() {
+                if let Some(mol_obj) = registry.get_molecule_mut(name) {
+                    let atoms = mol_obj.molecule_mut().atoms_slice_mut();
+                    let per_atom = &obj_data.per_atom_data;
+                    
+                    // Only apply if atom counts match (safety check)
+                    if atoms.len() == per_atom.len() {
+                        for (atom, stored) in atoms.iter_mut().zip(per_atom.iter()) {
+                            if self.storemask.contains(SceneStoreMask::COLOR) {
+                                atom.color = stored.color;
+                            }
+                            if self.storemask.contains(SceneStoreMask::REP) {
+                                atom.visible_reps = stored.visible_reps;
+                            }
+                        }
+                    }
+                    
+                    // Mark the molecule as dirty so it rebuilds representations
+                    mol_obj.invalidate(DirtyFlags::COLOR | DirtyFlags::REPS);
+                }
+            }
+            
+            // Then apply object-level state
             if let Some(obj) = registry.get_mut(name) {
                 let state = obj.state_mut();
 

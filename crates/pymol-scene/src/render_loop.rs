@@ -316,6 +316,91 @@ pub fn capture_png_to_file(
 }
 
 // ============================================================================
+// Uniform Setup - shared logic for setting up global uniforms
+// ============================================================================
+
+/// Setup global uniforms for rendering
+///
+/// This is the single source of truth for uniform setup logic, used by both
+/// the `Viewer` and GUI's `App::render()`.
+///
+/// # Arguments
+///
+/// * `camera` - Camera for view/projection matrices
+/// * `settings` - Global settings for lighting, fog, etc.
+/// * `clear_color` - Background color RGB
+/// * `viewport_size` - Viewport dimensions (width, height)
+///
+/// # Example
+///
+/// ```ignore
+/// let uniforms = setup_uniforms(&camera, &settings, clear_color, (width, height));
+/// context.update_uniforms(&uniforms);
+/// ```
+pub fn setup_uniforms(
+    camera: &Camera,
+    settings: &GlobalSettings,
+    clear_color: [f32; 3],
+    viewport_size: (f32, f32),
+) -> GlobalUniforms {
+    let mut uniforms = GlobalUniforms::new();
+    uniforms.set_camera(camera.view_matrix(), camera.projection_matrix());
+    uniforms.set_background(clear_color);
+    uniforms.set_viewport(viewport_size.0, viewport_size.1);
+
+    let camera_pos = camera.world_position();
+    uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
+
+    // Lighting settings (PyMOL dual-light model)
+    let ambient = settings.get_float(pymol_settings::id::ambient);
+    let direct = settings.get_float(pymol_settings::id::direct);
+    let reflect = settings.get_float(pymol_settings::id::reflect);
+    let specular = settings.get_float(pymol_settings::id::specular);
+    let shininess = settings.get_float(pymol_settings::id::shininess);
+    let spec_direct = settings.get_float(pymol_settings::id::spec_direct);
+    let spec_direct_power = settings.get_float(pymol_settings::id::spec_direct_power);
+    uniforms.set_lighting(ambient, direct, reflect, specular, shininess, spec_direct, spec_direct_power);
+
+    // Clip planes from camera
+    let current_view = camera.current_view();
+    let clip_front = current_view.clip_front;
+    let clip_back = current_view.clip_back;
+    uniforms.set_clip_planes(clip_front, clip_back);
+
+    // Fog parameters (PyMOL-compatible)
+    // depth_cue controls whether fog is enabled
+    let depth_cue_enabled = settings.get_bool(pymol_settings::id::depth_cue);
+    let fog_density = settings.get_float(pymol_settings::id::fog);
+
+    if depth_cue_enabled && fog_density > 0.0 {
+        // fog_start setting is a ratio (0.0-1.0) between clip planes
+        let fog_start_ratio = settings.get_float(pymol_settings::id::fog_start);
+
+        // Compute actual fog distances based on clip planes
+        // FogStart = (back - front) * fog_start_ratio + front
+        let fog_start_actual = (clip_back - clip_front) * fog_start_ratio + clip_front;
+
+        // FogEnd depends on fog density
+        let fog_end_actual = if (fog_density - 1.0).abs() < 0.001 {
+            // If density is ~1.0, fog ends at back clip plane
+            clip_back
+        } else {
+            // Otherwise scale the fog range by density
+            fog_start_actual + (clip_back - fog_start_actual) / fog_density
+        };
+
+        // Set fog with background color (so objects fade to background)
+        uniforms.set_fog(fog_start_actual, fog_end_actual, fog_density, clear_color);
+
+        // Enable depth cue (darkening based on depth)
+        uniforms.set_depth_cue(1.0);
+    }
+    // else: fog_density and depth_cue remain at 0.0 (disabled) from defaults
+
+    uniforms
+}
+
+// ============================================================================
 // Selection Entry - stores selection expression and visibility state
 // ============================================================================
 
@@ -450,6 +535,139 @@ pub trait ViewerLike {
     fn request_async_fetch(&mut self, _code: &str, _name: &str, _format: u8) -> bool {
         false
     }
+
+    // =========================================================================
+    // Scene Management
+    // =========================================================================
+
+    /// Store the current view as a named scene
+    ///
+    /// # Arguments
+    /// * `key` - Scene name/key
+    /// * `storemask` - Bitmask of what to store (use SceneStoreMask::ALL.bits() for everything)
+    fn scene_store(&mut self, _key: &str, _storemask: u32) {
+        // Default: no-op (scene management not supported)
+    }
+
+    /// Recall a named scene
+    ///
+    /// # Arguments
+    /// * `key` - Scene name to recall
+    /// * `animate` - Whether to animate the transition
+    /// * `duration` - Animation duration in seconds
+    fn scene_recall(&mut self, _key: &str, _animate: bool, _duration: f32) -> Result<(), String> {
+        Err("Scene management not supported by this viewer".to_string())
+    }
+
+    /// Delete a named scene
+    ///
+    /// Returns true if the scene existed and was deleted
+    fn scene_delete(&mut self, _key: &str) -> bool {
+        false
+    }
+
+    /// Get list of all scene names
+    fn scene_list(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Rename a scene
+    fn scene_rename(&mut self, _old_key: &str, _new_key: &str) -> Result<(), String> {
+        Err("Scene management not supported by this viewer".to_string())
+    }
+
+    /// Clear all scenes
+    fn scene_clear(&mut self) {
+        // Default: no-op
+    }
+
+    // =========================================================================
+    // Movie Control
+    // =========================================================================
+
+    /// Start movie playback
+    fn movie_play(&mut self) {
+        // Default: no-op
+    }
+
+    /// Stop movie and reset to first frame
+    fn movie_stop(&mut self) {
+        // Default: no-op
+    }
+
+    /// Pause movie playback
+    fn movie_pause(&mut self) {
+        // Default: no-op
+    }
+
+    /// Toggle play/pause
+    fn movie_toggle(&mut self) {
+        // Default: no-op
+    }
+
+    /// Go to a specific frame (0-indexed)
+    fn movie_goto(&mut self, _frame: usize) {
+        // Default: no-op
+    }
+
+    /// Advance to next frame
+    fn movie_next(&mut self) {
+        // Default: no-op
+    }
+
+    /// Go to previous frame
+    fn movie_prev(&mut self) {
+        // Default: no-op
+    }
+
+    /// Set frames per second
+    fn movie_set_fps(&mut self, _fps: f32) {
+        // Default: no-op
+    }
+
+    /// Get total number of frames
+    fn movie_frame_count(&self) -> usize {
+        0
+    }
+
+    /// Get current frame index (0-indexed)
+    fn movie_current_frame(&self) -> usize {
+        0
+    }
+
+    /// Check if movie is currently playing
+    fn movie_is_playing(&self) -> bool {
+        false
+    }
+
+    /// Set loop mode: 0 = once, 1 = loop, 2 = swing
+    fn movie_set_loop_mode(&mut self, _mode: u8) {
+        // Default: no-op
+    }
+
+    /// Set number of movie frames
+    fn movie_set_frame_count(&mut self, _count: usize) {
+        // Default: no-op
+    }
+
+    // =========================================================================
+    // Rock Animation
+    // =========================================================================
+
+    /// Toggle rock mode (Y-axis oscillation)
+    fn rock_toggle(&mut self) {
+        // Default: no-op
+    }
+
+    /// Set rock mode explicitly
+    fn rock_set(&mut self, _enabled: bool) {
+        // Default: no-op
+    }
+
+    /// Check if rock is enabled
+    fn rock_is_enabled(&self) -> bool {
+        false
+    }
 }
 
 /// Type alias for key action callbacks
@@ -458,8 +676,9 @@ pub trait ViewerLike {
 /// and can perform any operation on it.
 pub type KeyAction = Arc<dyn Fn(&mut Viewer) + Send + Sync>;
 use crate::input::{CameraDelta, InputState};
+use crate::movie::{LoopMode, Movie};
 use crate::object::{MoleculeObject, Object};
-use crate::scene::SceneManager;
+use crate::scene::{SceneManager, SceneStoreMask};
 use crate::window::Window;
 
 /// Main molecular visualization viewer
@@ -496,6 +715,8 @@ pub struct Viewer {
     registry: ObjectRegistry,
     /// Scene manager
     scenes: SceneManager,
+    /// Movie player for frame-based animation
+    movie: Movie,
     /// Named selections (name -> entry with expression and visibility)
     selections: ahash::AHashMap<String, SelectionEntry>,
 
@@ -563,6 +784,7 @@ impl Viewer {
             camera: Camera::new(),
             registry: ObjectRegistry::new(),
             scenes: SceneManager::new(),
+            movie: Movie::new(),
             selections: ahash::AHashMap::new(),
             settings: GlobalSettings::new(),
             named_colors: NamedColors::default(),
@@ -1093,61 +1315,13 @@ impl Viewer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Update uniforms
-        let mut uniforms = GlobalUniforms::new();
-        uniforms.set_camera(self.camera.view_matrix(), self.camera.projection_matrix());
-        uniforms.set_background(self.clear_color);
-        uniforms.set_viewport(window.width() as f32, window.height() as f32);
-
-        let camera_pos = self.camera.world_position();
-        uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
-
-        // Get lighting from settings (PyMOL dual-light model)
-        let ambient = self.settings.get_float(pymol_settings::id::ambient);
-        let direct = self.settings.get_float(pymol_settings::id::direct);
-        let reflect = self.settings.get_float(pymol_settings::id::reflect);
-        let specular = self.settings.get_float(pymol_settings::id::specular);
-        let shininess = self.settings.get_float(pymol_settings::id::shininess);
-        let spec_direct = self.settings.get_float(pymol_settings::id::spec_direct);
-        let spec_direct_power = self.settings.get_float(pymol_settings::id::spec_direct_power);
-        uniforms.set_lighting(ambient, direct, reflect, specular, shininess, spec_direct, spec_direct_power);
-
-        // Set clip planes from camera
-        let current_view = self.camera.current_view();
-        let clip_front = current_view.clip_front;
-        let clip_back = current_view.clip_back;
-        uniforms.set_clip_planes(clip_front, clip_back);
-
-        // Compute fog parameters (PyMOL-compatible)
-        // depth_cue controls whether fog is enabled
-        let depth_cue_enabled = self.settings.get_bool(pymol_settings::id::depth_cue);
-        let fog_density = self.settings.get_float(pymol_settings::id::fog);
-
-        if depth_cue_enabled && fog_density > 0.0 {
-            // fog_start setting is a ratio (0.0-1.0) between clip planes
-            let fog_start_ratio = self.settings.get_float(pymol_settings::id::fog_start);
-
-            // Compute actual fog distances based on clip planes
-            // FogStart = (back - front) * fog_start_ratio + front
-            let fog_start_actual = (clip_back - clip_front) * fog_start_ratio + clip_front;
-
-            // FogEnd depends on fog density
-            let fog_end_actual = if (fog_density - 1.0).abs() < 0.001 {
-                // If density is ~1.0, fog ends at back clip plane
-                clip_back
-            } else {
-                // Otherwise scale the fog range by density
-                fog_start_actual + (clip_back - fog_start_actual) / fog_density
-            };
-
-            // Set fog with background color (so objects fade to background)
-            uniforms.set_fog(fog_start_actual, fog_end_actual, fog_density, self.clear_color);
-
-            // Enable depth cue (darkening based on depth)
-            uniforms.set_depth_cue(1.0);
-        }
-        // else: fog_density and depth_cue remain at 0.0 (disabled) from defaults
-
+        // Update uniforms using shared setup function
+        let uniforms = setup_uniforms(
+            &self.camera,
+            &self.settings,
+            self.clear_color,
+            (window.width() as f32, window.height() as f32),
+        );
         context.update_uniforms(&uniforms);
 
         // Prepare molecules for rendering
@@ -1545,6 +1719,117 @@ impl ViewerLike for Viewer {
         height: Option<u32>,
     ) -> Result<(), String> {
         Viewer::capture_png(self, path, width, height).map_err(|e| e.to_string())
+    }
+
+    // Scene management
+    fn scene_store(&mut self, key: &str, storemask: u32) {
+        let mask = SceneStoreMask::from_bits_truncate(storemask);
+        self.scenes.store(key, mask, &self.camera, &self.registry);
+        self.needs_redraw = true;
+    }
+
+    fn scene_recall(&mut self, key: &str, animate: bool, duration: f32) -> Result<(), String> {
+        self.scenes
+            .recall(key, &mut self.camera, &mut self.registry, animate, duration)
+            .map_err(|e| e.to_string())?;
+        self.needs_redraw = true;
+        Ok(())
+    }
+
+    fn scene_delete(&mut self, key: &str) -> bool {
+        self.scenes.delete(key).is_some()
+    }
+
+    fn scene_list(&self) -> Vec<String> {
+        self.scenes.list().to_vec()
+    }
+
+    fn scene_rename(&mut self, old_key: &str, new_key: &str) -> Result<(), String> {
+        self.scenes.rename(old_key, new_key).map_err(|e| e.to_string())
+    }
+
+    fn scene_clear(&mut self) {
+        self.scenes.clear();
+    }
+
+    // Movie control
+    fn movie_play(&mut self) {
+        self.movie.play();
+        self.needs_redraw = true;
+    }
+
+    fn movie_stop(&mut self) {
+        self.movie.stop();
+        self.needs_redraw = true;
+    }
+
+    fn movie_pause(&mut self) {
+        self.movie.pause();
+    }
+
+    fn movie_toggle(&mut self) {
+        self.movie.toggle();
+        self.needs_redraw = true;
+    }
+
+    fn movie_goto(&mut self, frame: usize) {
+        self.movie.goto_frame(frame);
+        self.needs_redraw = true;
+    }
+
+    fn movie_next(&mut self) {
+        self.movie.next_frame();
+        self.needs_redraw = true;
+    }
+
+    fn movie_prev(&mut self) {
+        self.movie.prev_frame();
+        self.needs_redraw = true;
+    }
+
+    fn movie_set_fps(&mut self, fps: f32) {
+        self.movie.set_fps(fps);
+    }
+
+    fn movie_frame_count(&self) -> usize {
+        self.movie.frame_count()
+    }
+
+    fn movie_current_frame(&self) -> usize {
+        self.movie.current_frame()
+    }
+
+    fn movie_is_playing(&self) -> bool {
+        self.movie.is_playing()
+    }
+
+    fn movie_set_loop_mode(&mut self, mode: u8) {
+        let loop_mode = match mode {
+            1 => LoopMode::Loop,
+            2 => LoopMode::Swing,
+            _ => LoopMode::Once,
+        };
+        self.movie.set_loop_mode(loop_mode);
+    }
+
+    fn movie_set_frame_count(&mut self, count: usize) {
+        self.movie.set_frame_count(count);
+    }
+
+    // Rock animation
+    fn rock_toggle(&mut self) {
+        let current = self.movie.is_rock_enabled();
+        self.movie.set_rock(!current);
+        self.needs_redraw = true;
+    }
+
+    fn rock_set(&mut self, enabled: bool) {
+        self.movie.set_rock(enabled);
+        self.needs_redraw = true;
+    }
+
+    fn rock_is_enabled(&self) -> bool {
+        self.movie.is_rock_enabled()
     }
 }
 

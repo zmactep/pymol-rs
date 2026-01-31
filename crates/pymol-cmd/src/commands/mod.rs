@@ -5,7 +5,9 @@
 pub mod control;
 pub mod display;
 pub mod io;
+pub mod movie;
 pub mod objects;
+pub mod scene;
 pub mod selecting;
 pub mod settings;
 pub mod viewing;
@@ -34,4 +36,10 @@ pub fn register_all(registry: &mut CommandRegistry) {
 
     // Control commands
     control::register(registry);
+
+    // Scene commands
+    scene::register(registry);
+
+    // Movie commands
+    movie::register(registry);
 }

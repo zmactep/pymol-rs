@@ -7,7 +7,7 @@ use std::path::Path;
 
 use pymol_cmd::ViewerLike;
 use pymol_render::RenderContext;
-use pymol_scene::{capture_png_to_file, Camera, ObjectRegistry, SelectionEntry};
+use pymol_scene::{capture_png_to_file, Camera, LoopMode, ObjectRegistry, SceneStoreMask, SelectionEntry};
 
 use crate::async_tasks::TaskRunner;
 use crate::fetch::FetchTask;
@@ -189,5 +189,126 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         };
         self.task_runner.spawn(FetchTask::new(code.to_string(), name.to_string(), fmt));
         true
+    }
+
+    // =========================================================================
+    // Scene Management
+    // =========================================================================
+
+    fn scene_store(&mut self, key: &str, storemask: u32) {
+        let mask = SceneStoreMask::from_bits_truncate(storemask);
+        self.state.scenes.store(key, mask, &self.state.camera, &self.state.registry);
+        *self.needs_redraw = true;
+    }
+
+    fn scene_recall(&mut self, key: &str, animate: bool, duration: f32) -> Result<(), String> {
+        self.state
+            .scenes
+            .recall(key, &mut self.state.camera, &mut self.state.registry, animate, duration)
+            .map_err(|e| e.to_string())?;
+        *self.needs_redraw = true;
+        Ok(())
+    }
+
+    fn scene_delete(&mut self, key: &str) -> bool {
+        self.state.scenes.delete(key).is_some()
+    }
+
+    fn scene_list(&self) -> Vec<String> {
+        self.state.scenes.list().to_vec()
+    }
+
+    fn scene_rename(&mut self, old_key: &str, new_key: &str) -> Result<(), String> {
+        self.state.scenes.rename(old_key, new_key).map_err(|e| e.to_string())
+    }
+
+    fn scene_clear(&mut self) {
+        self.state.scenes.clear();
+    }
+
+    // =========================================================================
+    // Movie Control
+    // =========================================================================
+
+    fn movie_play(&mut self) {
+        self.state.movie.play();
+        *self.needs_redraw = true;
+    }
+
+    fn movie_stop(&mut self) {
+        self.state.movie.stop();
+        *self.needs_redraw = true;
+    }
+
+    fn movie_pause(&mut self) {
+        self.state.movie.pause();
+    }
+
+    fn movie_toggle(&mut self) {
+        self.state.movie.toggle();
+        *self.needs_redraw = true;
+    }
+
+    fn movie_goto(&mut self, frame: usize) {
+        self.state.movie.goto_frame(frame);
+        *self.needs_redraw = true;
+    }
+
+    fn movie_next(&mut self) {
+        self.state.movie.next_frame();
+        *self.needs_redraw = true;
+    }
+
+    fn movie_prev(&mut self) {
+        self.state.movie.prev_frame();
+        *self.needs_redraw = true;
+    }
+
+    fn movie_set_fps(&mut self, fps: f32) {
+        self.state.movie.set_fps(fps);
+    }
+
+    fn movie_frame_count(&self) -> usize {
+        self.state.movie.frame_count()
+    }
+
+    fn movie_current_frame(&self) -> usize {
+        self.state.movie.current_frame()
+    }
+
+    fn movie_is_playing(&self) -> bool {
+        self.state.movie.is_playing()
+    }
+
+    fn movie_set_loop_mode(&mut self, mode: u8) {
+        let loop_mode = match mode {
+            1 => LoopMode::Loop,
+            2 => LoopMode::Swing,
+            _ => LoopMode::Once,
+        };
+        self.state.movie.set_loop_mode(loop_mode);
+    }
+
+    fn movie_set_frame_count(&mut self, count: usize) {
+        self.state.movie.set_frame_count(count);
+    }
+
+    // =========================================================================
+    // Rock Animation
+    // =========================================================================
+
+    fn rock_toggle(&mut self) {
+        let current = self.state.movie.is_rock_enabled();
+        self.state.movie.set_rock(!current);
+        *self.needs_redraw = true;
+    }
+
+    fn rock_set(&mut self, enabled: bool) {
+        self.state.movie.set_rock(enabled);
+        *self.needs_redraw = true;
+    }
+
+    fn rock_is_enabled(&self) -> bool {
+        self.state.movie.is_rock_enabled()
     }
 }

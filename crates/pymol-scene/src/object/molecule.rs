@@ -193,6 +193,7 @@ impl MoleculeObject {
         for atom in self.molecule.atoms_mut() {
             atom.visible_reps.set_hidden(rep);
         }
+        self.dirty |= DirtyFlags::REPS;
     }
 
     /// Toggle a representation

@@ -8,10 +8,10 @@ use std::time::Instant;
 
 use pymol_cmd::{CmdError, CommandExecutor, MessageKind, ParsedCommand, parse_command};
 use pymol_mol::RepMask;
-use pymol_render::{ColorResolver, GlobalUniforms};
+use pymol_render::ColorResolver;
 use pymol_scene::{MoleculeObject, Object};
 use pymol_select::{EvalContext, SelectionResult};
-use pymol_scene::{CameraDelta, KeyBinding, KeyBindings, InputState};
+use pymol_scene::{CameraDelta, KeyBinding, KeyBindings, InputState, setup_uniforms};
 // Re-export SelectionEntry for use in UI
 pub use pymol_scene::SelectionEntry;
 use winit::application::ApplicationHandler;
@@ -331,45 +331,13 @@ impl App {
         let output = surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Update global uniforms
-        let mut uniforms = GlobalUniforms::new();
-        uniforms.set_camera(self.state.camera.view_matrix(), self.state.camera.projection_matrix());
-        uniforms.set_background(self.state.clear_color);
-        uniforms.set_viewport(viewport_width, viewport_height);
-
-        let camera_pos = self.state.camera.world_position();
-        uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
-
-        // Lighting settings
-        let ambient = self.state.settings.get_float(pymol_settings::id::ambient);
-        let direct = self.state.settings.get_float(pymol_settings::id::direct);
-        let reflect = self.state.settings.get_float(pymol_settings::id::reflect);
-        let specular = self.state.settings.get_float(pymol_settings::id::specular);
-        let shininess = self.state.settings.get_float(pymol_settings::id::shininess);
-        let spec_direct = self.state.settings.get_float(pymol_settings::id::spec_direct);
-        let spec_direct_power = self.state.settings.get_float(pymol_settings::id::spec_direct_power);
-        uniforms.set_lighting(ambient, direct, reflect, specular, shininess, spec_direct, spec_direct_power);
-
-        // Clip planes
-        let current_view = self.state.camera.current_view();
-        uniforms.set_clip_planes(current_view.clip_front, current_view.clip_back);
-
-        // Fog
-        let depth_cue_enabled = self.state.settings.get_bool(pymol_settings::id::depth_cue);
-        let fog_density = self.state.settings.get_float(pymol_settings::id::fog);
-        if depth_cue_enabled && fog_density > 0.0 {
-            let fog_start_ratio = self.state.settings.get_float(pymol_settings::id::fog_start);
-            let fog_start = (current_view.clip_back - current_view.clip_front) * fog_start_ratio
-                + current_view.clip_front;
-            let fog_end = if (fog_density - 1.0).abs() < 0.001 {
-                current_view.clip_back
-            } else {
-                fog_start + (current_view.clip_back - fog_start) / fog_density
-            };
-            uniforms.set_fog(fog_start, fog_end, fog_density, self.state.clear_color);
-            uniforms.set_depth_cue(1.0);
-        }
-
+        // Update global uniforms using shared setup function
+        let uniforms = setup_uniforms(
+            &self.state.camera,
+            &self.state.settings,
+            self.state.clear_color,
+            (viewport_width, viewport_height),
+        );
         context.update_uniforms(&uniforms);
 
         // Prepare molecules
@@ -646,6 +614,9 @@ impl App {
         if cmd.is_empty() || cmd.starts_with('#') {
             return;
         }
+
+        // Echo the command to output
+        self.output.print_command(format!("PyMOL> {}", cmd));
 
         // Parse using pymol-cmd parser for proper handling of quotes, commas, etc.
         let parsed = match parse_command(cmd) {
@@ -1268,6 +1239,27 @@ impl ApplicationHandler for App {
                 // Process input and update camera (only if egui doesn't want input)
                 self.process_input();
 
+                // Update movie (before camera animation)
+                let movie_frame_changed = self.state.movie.update();
+                if movie_frame_changed {
+                    // Apply movie frame (view interpolation)
+                    if let Some(view) = self.state.movie.interpolated_view() {
+                        self.state.camera.set_view(view);
+                    }
+                    self.needs_redraw = true;
+                }
+
+                // Update rock animation (Y-axis oscillation)
+                if self.state.movie.is_rock_enabled() {
+                    // Rock parameters: ~15 degrees amplitude, smooth oscillation
+                    let amplitude = 45.0_f32.to_radians();
+                    let speed = 5.0; // radians per second for the sine wave phase
+                    let rock_delta = self.state.movie.update_rock(dt, amplitude, speed);
+                    // Apply the delta rotation directly (update_rock returns the instantaneous angle)
+                    self.state.camera.rotate_y(rock_delta * dt);
+                    self.needs_redraw = true;
+                }
+
                 // Update camera animation
                 if self.state.camera.update(dt) {
                     self.needs_redraw = true;
@@ -1300,6 +1292,8 @@ impl ApplicationHandler for App {
                 // Also request redraws for the first few frames to let egui layout properly
                 if self.frame_count < 5
                     || self.state.camera.is_animating()
+                    || self.state.movie.is_playing()
+                    || self.state.movie.is_rock_enabled()
                     || self.input.any_button_pressed()
                 {
                     self.request_redraw();
