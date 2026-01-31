@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use pymol_cmd::{ArgHint, CommandExecutor};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
-use pymol_scene::{Camera, Movie, ObjectRegistry, SceneManager, SelectionEntry};
+use pymol_scene::{Camera, Movie, ObjectRegistry, SceneManager, SelectionEntry, ViewManager};
 use pymol_settings::GlobalSettings;
 
 /// Application state containing all scene/domain data
@@ -23,6 +23,8 @@ pub struct AppState {
     pub selections: HashMap<String, SelectionEntry>,
     /// Scene manager for named view snapshots
     pub scenes: SceneManager,
+    /// Named views (simpler than scenes - just camera state)
+    pub views: ViewManager,
     /// Movie player for frame-based animation
     pub movie: Movie,
 
@@ -65,6 +67,7 @@ impl AppState {
             camera: Camera::new(),
             selections: HashMap::new(),
             scenes: SceneManager::new(),
+            views: ViewManager::new(),
             movie: Movie::new(),
             settings: GlobalSettings::new(),
             named_colors: NamedColors::default(),

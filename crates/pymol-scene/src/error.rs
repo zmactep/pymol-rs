@@ -21,6 +21,14 @@ pub enum SceneError {
     #[error("Scene not found: {0}")]
     SceneNotFound(String),
 
+    /// View not found
+    #[error("View not found: {0}")]
+    ViewNotFound(String),
+
+    /// View already exists with this name
+    #[error("View already exists: {0}")]
+    ViewExists(String),
+
     /// Invalid state index
     #[error("Invalid state index: {index} (object has {count} states)")]
     InvalidState { index: usize, count: usize },

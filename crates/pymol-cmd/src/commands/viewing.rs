@@ -1,6 +1,9 @@
-//! Viewing commands: zoom, center, orient, reset, clip, view
+//! Viewing commands: zoom, center, orient, reset, clip, move, turn, origin, view
+
+use std::f32::consts::PI;
 
 use lin_alg::f32::{Mat4, Vec3};
+use pymol_scene::Object; // For extent() method on MoleculeObject
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
@@ -15,6 +18,12 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(ClipCommand);
     registry.register(GetViewCommand);
     registry.register(SetViewCommand);
+    registry.register(MoveCommand);
+    registry.register(TurnCommand);
+    registry.register(OriginCommand);
+    registry.register(ViewCommand);
+    registry.register(ViewportCommand);
+    registry.register(FullScreenCommand);
 }
 
 // ============================================================================
@@ -539,6 +548,751 @@ EXAMPLES
 
         if !ctx.quiet {
             ctx.print(" View set");
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// move command
+// ============================================================================
+
+struct MoveCommand;
+
+impl Command for MoveCommand {
+    fn name(&self) -> &str {
+        "move"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "move" translates the camera about one of the three primary axes.
+
+USAGE
+
+    move axis, distance
+
+ARGUMENTS
+
+    axis = x, y, or z: axis along which to translate
+
+    distance = float: distance to move in Angstroms
+
+EXAMPLES
+
+    move x, 3
+    move y, -1
+    move z, 10
+
+NOTES
+
+    Positive x moves right, positive y moves up, positive z moves
+    toward the viewer.
+
+SEE ALSO
+
+    turn, rotate, translate, zoom, center, clip
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        // Parse axis argument (required)
+        let axis = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("axis"))
+            .ok_or_else(|| CmdError::MissingArgument("axis".to_string()))?;
+
+        // Parse distance argument (required)
+        let distance = args
+            .get_float(1)
+            .or_else(|| args.get_named_float("distance"))
+            .ok_or_else(|| CmdError::MissingArgument("distance".to_string()))?
+            as f32;
+
+        // Create translation vector based on axis
+        let delta = match axis.to_lowercase().as_str() {
+            "x" => Vec3::new(distance, 0.0, 0.0),
+            "y" => Vec3::new(0.0, distance, 0.0),
+            "z" => Vec3::new(0.0, 0.0, distance),
+            _ => {
+                return Err(CmdError::invalid_arg(
+                    "axis",
+                    format!("unknown axis '{}'. Use x, y, or z.", axis),
+                ));
+            }
+        };
+
+        // Apply translation to camera
+        ctx.viewer.camera_mut().translate(delta);
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            ctx.print(&format!(" Moved {} by {:.3}", axis, distance));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// turn command
+// ============================================================================
+
+struct TurnCommand;
+
+impl Command for TurnCommand {
+    fn name(&self) -> &str {
+        "turn"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "turn" rotates the camera about one of the three primary axes,
+    centered at the origin.
+
+USAGE
+
+    turn axis, angle
+
+ARGUMENTS
+
+    axis = x, y, or z: axis about which to rotate
+
+    angle = float: degrees of rotation
+
+EXAMPLES
+
+    turn x, 90
+    turn y, 45
+    turn z, -30
+
+NOTES
+
+    Rotations follow the right-hand rule. For example, a positive
+    rotation about the y-axis will rotate the view to the right.
+
+SEE ALSO
+
+    move, rotate, translate, zoom, center, clip
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        // Parse axis argument (required)
+        let axis = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("axis"))
+            .ok_or_else(|| CmdError::MissingArgument("axis".to_string()))?;
+
+        // Parse angle argument (required)
+        let angle_deg = args
+            .get_float(1)
+            .or_else(|| args.get_named_float("angle"))
+            .ok_or_else(|| CmdError::MissingArgument("angle".to_string()))?
+            as f32;
+
+        // Convert to radians
+        let angle_rad = angle_deg * PI / 180.0;
+
+        // Apply rotation based on axis
+        match axis.to_lowercase().as_str() {
+            "x" => ctx.viewer.camera_mut().rotate_x(angle_rad),
+            "y" => ctx.viewer.camera_mut().rotate_y(angle_rad),
+            "z" => ctx.viewer.camera_mut().rotate_z(angle_rad),
+            _ => {
+                return Err(CmdError::invalid_arg(
+                    "axis",
+                    format!("unknown axis '{}'. Use x, y, or z.", axis),
+                ));
+            }
+        };
+
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            ctx.print(&format!(" Turned {} by {:.1} degrees", axis, angle_deg));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// origin command
+// ============================================================================
+
+struct OriginCommand;
+
+impl Command for OriginCommand {
+    fn name(&self) -> &str {
+        "origin"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "origin" sets the center of rotation about a selection or position.
+    If an object name is specified, it can be used to set the center of
+    rotation for the object (for use in animation and editing).
+
+USAGE
+
+    origin [ selection [, object [, position [, state ]]]]
+
+ARGUMENTS
+
+    selection = string: selection-expression or name-list {default: (all)}
+
+    object = string: object name (optional)
+
+    position = [x, y, z]: explicit position coordinates {default: None}
+
+    state = integer: state to use for coordinates {default: 0}
+
+EXAMPLES
+
+    origin chain A
+    origin position=[1.0, 2.0, 3.0]
+    origin resi 100
+
+SEE ALSO
+
+    zoom, orient, center, reset
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        // Check for explicit position first
+        if let Some(position_arg) = args.get_named("position") {
+            let position = parse_position_from_arg(position_arg)?;
+            ctx.viewer.camera_mut().view_mut().origin = position.clone();
+            ctx.viewer.request_redraw();
+
+            if !ctx.quiet {
+                ctx.print(&format!(
+                    " Origin set to [{:.3}, {:.3}, {:.3}]",
+                    position.x, position.y, position.z
+                ));
+            }
+            return Ok(());
+        }
+
+        // Get selection (default: "all")
+        let selection = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("selection"))
+            .unwrap_or("all");
+
+        // For "all", set origin to center of all objects
+        if selection == "all" || selection == "*" {
+            // Get bounding box of all objects
+            if let Some((min, max)) = ctx.viewer.objects().extent() {
+                let center = Vec3::new(
+                    (min.x + max.x) * 0.5,
+                    (min.y + max.y) * 0.5,
+                    (min.z + max.z) * 0.5,
+                );
+                ctx.viewer.camera_mut().view_mut().origin = center.clone();
+                ctx.viewer.request_redraw();
+
+                if !ctx.quiet {
+                    ctx.print(&format!(
+                        " Origin set to [{:.3}, {:.3}, {:.3}]",
+                        center.x, center.y, center.z
+                    ));
+                }
+            } else if !ctx.quiet {
+                ctx.print(" No objects to set origin from");
+            }
+            return Ok(());
+        }
+
+        // Try to set origin to a specific object's center
+        if ctx.viewer.objects().contains(selection) {
+            if let Some(mol) = ctx.viewer.objects().get_molecule(selection) {
+                if let Some((min, max)) = mol.extent() {
+                    let center = Vec3::new(
+                        (min.x + max.x) * 0.5,
+                        (min.y + max.y) * 0.5,
+                        (min.z + max.z) * 0.5,
+                    );
+                    ctx.viewer.camera_mut().view_mut().origin = center.clone();
+                    ctx.viewer.request_redraw();
+
+                    if !ctx.quiet {
+                        ctx.print(&format!(
+                            " Origin set to \"{}\" at [{:.3}, {:.3}, {:.3}]",
+                            selection, center.x, center.y, center.z
+                        ));
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        // Try pattern matching
+        let matches: Vec<String> = ctx
+            .viewer
+            .objects()
+            .matching(selection)
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if !matches.is_empty() {
+            // Use first match
+            if let Some(name) = matches.first() {
+                if let Some(mol) = ctx.viewer.objects().get_molecule(name) {
+                    if let Some((min, max)) = mol.extent() {
+                        let center = Vec3::new(
+                            (min.x + max.x) * 0.5,
+                            (min.y + max.y) * 0.5,
+                            (min.z + max.z) * 0.5,
+                        );
+                        ctx.viewer.camera_mut().view_mut().origin = center.clone();
+                        ctx.viewer.request_redraw();
+
+                        if !ctx.quiet {
+                            ctx.print(&format!(
+                                " Origin set to \"{}\" at [{:.3}, {:.3}, {:.3}]",
+                                name, center.x, center.y, center.z
+                            ));
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // TODO: Use pymol-select for atom selections
+
+        Err(CmdError::Selection(format!(
+            "No objects matching '{}'",
+            selection
+        )))
+    }
+}
+
+/// Parse a position vector from an argument value
+fn parse_position_from_arg(arg: &crate::args::ArgValue) -> Result<Vec3, CmdError> {
+    use crate::args::ArgValue;
+
+    match arg {
+        ArgValue::List(items) if items.len() >= 3 => {
+            let x = items
+                .get(0)
+                .and_then(|v| v.as_float())
+                .ok_or_else(|| CmdError::invalid_arg("position", "invalid x coordinate"))?
+                as f32;
+            let y = items
+                .get(1)
+                .and_then(|v| v.as_float())
+                .ok_or_else(|| CmdError::invalid_arg("position", "invalid y coordinate"))?
+                as f32;
+            let z = items
+                .get(2)
+                .and_then(|v| v.as_float())
+                .ok_or_else(|| CmdError::invalid_arg("position", "invalid z coordinate"))?
+                as f32;
+            Ok(Vec3::new(x, y, z))
+        }
+        ArgValue::String(s) => {
+            // Try to parse "[x, y, z]" format
+            let s = s.trim().trim_matches(|c| c == '[' || c == ']');
+            let parts: Vec<&str> = s.split(',').collect();
+            if parts.len() >= 3 {
+                let x = parts[0]
+                    .trim()
+                    .parse::<f32>()
+                    .map_err(|_| CmdError::invalid_arg("position", "invalid x coordinate"))?;
+                let y = parts[1]
+                    .trim()
+                    .parse::<f32>()
+                    .map_err(|_| CmdError::invalid_arg("position", "invalid y coordinate"))?;
+                let z = parts[2]
+                    .trim()
+                    .parse::<f32>()
+                    .map_err(|_| CmdError::invalid_arg("position", "invalid z coordinate"))?;
+                Ok(Vec3::new(x, y, z))
+            } else {
+                Err(CmdError::invalid_arg(
+                    "position",
+                    "expected [x, y, z] format",
+                ))
+            }
+        }
+        _ => Err(CmdError::invalid_arg(
+            "position",
+            "expected [x, y, z] format",
+        )),
+    }
+}
+
+// ============================================================================
+// view command
+// ============================================================================
+
+struct ViewCommand;
+
+impl Command for ViewCommand {
+    fn name(&self) -> &str {
+        "view"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "view" saves and restores named camera views.
+
+    Unlike "scene", "view" only stores camera state (rotation, position,
+    origin, clipping planes, FOV) without colors, representations, or
+    frame state.
+
+USAGE
+
+    view key [, action [, animate ]]
+
+ARGUMENTS
+
+    key = string or *: view name, or * for all views
+
+    action = store, recall, clear: {default: recall}
+
+    animate = float: animation duration in seconds {default: 0}
+
+NOTES
+
+    Views F1 through F12 are automatically bound to function keys
+    provided that "set_key" has not been used to redefine the
+    behavior of the respective key, and that a "scene" has not been
+    defined for that key.
+
+EXAMPLES
+
+    view F1, store          # Store current view as "F1"
+    view F1                 # Recall view "F1"
+    view F1, recall, 1.0    # Recall with 1 second animation
+    view F1, clear          # Delete view "F1"
+    view *, clear           # Delete all views
+
+SEE ALSO
+
+    scene, get_view, set_view
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let key = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("key"))
+            .unwrap_or("");
+
+        let action = args
+            .get_str(1)
+            .or_else(|| args.get_named_str("action"))
+            .unwrap_or("recall");
+
+        let animate = args
+            .get_float(2)
+            .or_else(|| args.get_named_float("animate"))
+            .unwrap_or(0.0) as f32;
+
+        // Handle wildcard key for listing/clearing
+        if key == "*" {
+            match action.to_lowercase().as_str() {
+                "clear" => {
+                    ctx.viewer.view_clear();
+                    if !ctx.quiet {
+                        ctx.print(" All views cleared.");
+                    }
+                }
+                _ => {
+                    // List all views
+                    let views = ctx.viewer.view_list();
+                    if views.is_empty() {
+                        ctx.print(" No views stored.");
+                    } else {
+                        ctx.print(&format!(" Stored views: {}", views.join(", ")));
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        match action.to_lowercase().as_str() {
+            "store" => {
+                if key.is_empty() {
+                    return Err(CmdError::MissingArgument("key".to_string()));
+                }
+                ctx.viewer.view_store(key);
+                if !ctx.quiet {
+                    ctx.print(&format!(" View \"{}\" stored.", key));
+                }
+            }
+
+            "recall" | "" => {
+                if key.is_empty() {
+                    return Err(CmdError::MissingArgument("key".to_string()));
+                }
+                ctx.viewer
+                    .view_recall(key, animate)
+                    .map_err(|e| CmdError::InvalidArgument {
+                        name: "key".to_string(),
+                        reason: e,
+                    })?;
+                if !ctx.quiet {
+                    ctx.print(&format!(" View \"{}\" recalled.", key));
+                }
+            }
+
+            "clear" | "delete" => {
+                if key.is_empty() {
+                    ctx.viewer.view_clear();
+                    if !ctx.quiet {
+                        ctx.print(" All views cleared.");
+                    }
+                } else if ctx.viewer.view_delete(key) {
+                    if !ctx.quiet {
+                        ctx.print(&format!(" View \"{}\" deleted.", key));
+                    }
+                } else {
+                    return Err(CmdError::InvalidArgument {
+                        name: "key".to_string(),
+                        reason: format!("View '{}' not found.", key),
+                    });
+                }
+            }
+
+            _ => {
+                return Err(CmdError::invalid_arg(
+                    "action",
+                    format!("unknown action '{}'. Use store, recall, or clear.", action),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// viewport command
+// ============================================================================
+
+struct ViewportCommand;
+
+impl Command for ViewportCommand {
+    fn name(&self) -> &str {
+        "viewport"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "viewport" changes the size of the graphics display area.
+
+USAGE
+
+    viewport [ width [, height ]]
+
+ARGUMENTS
+
+    width = integer: width in pixels {default: current}
+
+    height = integer: height in pixels {default: current}
+
+NOTES
+
+    If only width is specified, height will be scaled to maintain
+    the current aspect ratio.
+
+    If no arguments are given, the current viewport size is displayed.
+
+EXAMPLES
+
+    viewport                # Show current size
+    viewport 800, 600       # Set to 800x600
+    viewport 1920, 1080     # Set to 1920x1080
+
+SEE ALSO
+
+    full_screen, get_view, set_view
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let width = args
+            .get_int(0)
+            .or_else(|| args.get_named_int("width"));
+
+        let height = args
+            .get_int(1)
+            .or_else(|| args.get_named_int("height"));
+
+        match (width, height) {
+            (None, None) => {
+                // Display current viewport size
+                let (w, h) = ctx.viewer.viewport_size();
+                if w > 0 && h > 0 {
+                    ctx.print(&format!(" Viewport: {} x {}", w, h));
+                } else {
+                    ctx.print(" Viewport size not available.");
+                }
+            }
+            (Some(w), None) => {
+                // Width only - maintain aspect ratio
+                let (current_w, current_h) = ctx.viewer.viewport_size();
+                let aspect = if current_w > 0 {
+                    current_h as f64 / current_w as f64
+                } else {
+                    0.75 // Default 4:3 aspect
+                };
+                let h = (w as f64 * aspect).round() as u32;
+                ctx.viewer.viewport_set_size(w as u32, h);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Viewport set to {} x {}", w, h));
+                }
+            }
+            (Some(w), Some(h)) => {
+                // Both specified
+                ctx.viewer.viewport_set_size(w as u32, h as u32);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Viewport set to {} x {}", w, h));
+                }
+            }
+            (None, Some(h)) => {
+                // Height only - maintain aspect ratio
+                let (current_w, current_h) = ctx.viewer.viewport_size();
+                let aspect = if current_h > 0 {
+                    current_w as f64 / current_h as f64
+                } else {
+                    4.0 / 3.0 // Default 4:3 aspect
+                };
+                let w = (h as f64 * aspect).round() as u32;
+                ctx.viewer.viewport_set_size(w, h as u32);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Viewport set to {} x {}", w, h));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// full_screen command
+// ============================================================================
+
+struct FullScreenCommand;
+
+impl Command for FullScreenCommand {
+    fn name(&self) -> &str {
+        "full_screen"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["fullscreen"]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "full_screen" enables or disables full screen mode.
+
+USAGE
+
+    full_screen [ toggle ]
+
+ARGUMENTS
+
+    toggle = on, off, or toggle {default: toggle}
+        "on" or "1" enables fullscreen
+        "off" or "0" disables fullscreen
+        "toggle" or "-1" toggles the current state (default)
+
+EXAMPLES
+
+    full_screen             # Toggle fullscreen
+    full_screen on          # Enable fullscreen
+    full_screen off         # Disable fullscreen
+
+NOTES
+
+    This does not work correctly on all platforms. If you encounter
+    trouble, try using the maximize button on the viewer window
+    instead.
+
+SEE ALSO
+
+    viewport
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let toggle = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("toggle"));
+
+        match toggle {
+            None | Some("toggle") | Some("-1") => {
+                // Toggle
+                ctx.viewer.toggle_fullscreen();
+                let state = if ctx.viewer.is_fullscreen() { "on" } else { "off" };
+                if !ctx.quiet {
+                    ctx.print(&format!(" Fullscreen {}.", state));
+                }
+            }
+            Some("on") | Some("1") | Some("true") | Some("yes") => {
+                ctx.viewer.set_fullscreen(true);
+                if !ctx.quiet {
+                    ctx.print(" Fullscreen on.");
+                }
+            }
+            Some("off") | Some("0") | Some("false") | Some("no") => {
+                ctx.viewer.set_fullscreen(false);
+                if !ctx.quiet {
+                    ctx.print(" Fullscreen off.");
+                }
+            }
+            Some(other) => {
+                return Err(CmdError::invalid_arg(
+                    "toggle",
+                    format!("unknown value '{}'. Use on, off, or toggle.", other),
+                ));
+            }
         }
 
         Ok(())

@@ -7,7 +7,7 @@ use std::path::Path;
 
 use pymol_cmd::ViewerLike;
 use pymol_render::RenderContext;
-use pymol_scene::{capture_png_to_file, Camera, LoopMode, ObjectRegistry, SceneStoreMask, SelectionEntry};
+use pymol_scene::{capture_png_to_file, Camera, LoopMode, Object, ObjectRegistry, SceneStoreMask, SelectionEntry};
 
 use crate::async_tasks::TaskRunner;
 use crate::fetch::FetchTask;
@@ -57,7 +57,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
 
     fn zoom_on(&mut self, name: &str) {
         if let Some(obj) = self.state.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
+            if let Some((min, max)) = Object::extent(obj) {
                 self.state.camera.zoom_to(min, max);
                 *self.needs_redraw = true;
             }
@@ -73,7 +73,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
 
     fn center_on(&mut self, name: &str) {
         if let Some(obj) = self.state.registry.get(name) {
-            if let Some((min, max)) = obj.extent() {
+            if let Some((min, max)) = Object::extent(obj) {
                 self.state.camera.center_to(min, max);
                 *self.needs_redraw = true;
             }
@@ -205,7 +205,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         self.state
             .scenes
             .recall(key, &mut self.state.camera, &mut self.state.registry, animate, duration)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e: pymol_scene::SceneError| e.to_string())?;
         *self.needs_redraw = true;
         Ok(())
     }
@@ -219,7 +219,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
     }
 
     fn scene_rename(&mut self, old_key: &str, new_key: &str) -> Result<(), String> {
-        self.state.scenes.rename(old_key, new_key).map_err(|e| e.to_string())
+        self.state.scenes.rename(old_key, new_key).map_err(|e: pymol_scene::SceneError| e.to_string())
     }
 
     fn scene_clear(&mut self) {
@@ -311,4 +311,45 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
     fn rock_is_enabled(&self) -> bool {
         self.state.movie.is_rock_enabled()
     }
+
+    // =========================================================================
+    // Named View Storage - delegate to ViewManager
+    // =========================================================================
+
+    fn view_store(&mut self, key: &str) {
+        self.state.views.store(key, &self.state.camera);
+    }
+
+    fn view_recall(&mut self, key: &str, animate: f32) -> Result<(), String> {
+        self.state
+            .views
+            .recall(key, &mut self.state.camera, animate)
+            .map_err(|e| e.to_string())?;
+        *self.needs_redraw = true;
+        Ok(())
+    }
+
+    fn view_delete(&mut self, key: &str) -> bool {
+        self.state.views.delete(key).is_some()
+    }
+
+    fn view_list(&self) -> Vec<String> {
+        self.state.views.list().to_vec()
+    }
+
+    fn view_clear(&mut self) {
+        self.state.views.clear();
+    }
+
+    // =========================================================================
+    // Viewport / Window Size
+    // =========================================================================
+
+    fn viewport_size(&self) -> (u32, u32) {
+        // Return the default size as we don't have direct window access
+        self.default_size
+    }
+
+    // Note: viewport_set_size and fullscreen methods use default implementations
+    // since we don't have direct window access from the adapter
 }

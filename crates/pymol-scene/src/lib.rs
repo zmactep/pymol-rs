@@ -7,6 +7,7 @@
 //! - [`Object`] trait and [`ObjectRegistry`] - Named object management
 //! - [`MoleculeObject`] - Molecular object with cached representations
 //! - [`Scene`] and [`SceneManager`] - Named scene snapshots
+//! - [`ViewManager`] - Named view storage (camera state only)
 //! - [`Window`] - winit window with wgpu surface
 //! - [`Viewer`] - Main application coordinating rendering
 //!
@@ -39,26 +40,36 @@
 //! ```
 
 mod camera;
+mod capture;
 mod error;
 mod input;
 mod keybindings;
 mod movie;
 mod object;
 mod pick;
-mod render_loop;
 mod scene;
+mod selection;
+mod uniform;
+mod view;
+mod viewer;
+mod viewer_trait;
 mod window;
 
 // Re-export main types
 pub use camera::{Camera, CameraAnimation, Projection, SceneView};
+pub use capture::capture_png_to_file;
 pub use error::{SceneError, SceneResult, ViewerError, WindowError};
 pub use input::{CameraDelta, InputState};
 pub use keybindings::{KeyBinding, KeyBindings, KeyCode};
 pub use movie::{LoopMode, Movie, MovieFrame, PlaybackState, PlayDirection};
 pub use object::{DirtyFlags, Label, LabelAnchor, LabelObject, MoleculeObject, Object, ObjectRegistry, ObjectState, ObjectType};
 pub use pick::{PickHit, Picker};
-pub use render_loop::{capture_png_to_file, run, setup_uniforms, SelectionEntry, Viewer, ViewerLike};
 pub use scene::{Scene, SceneAtomData, SceneManager, SceneObjectData, ScenePerAtomData, SceneStoreMask};
+pub use selection::{SelectionEntry, SelectionManager};
+pub use uniform::setup_uniforms;
+pub use view::ViewManager;
+pub use viewer::{run, Viewer};
+pub use viewer_trait::ViewerLike;
 pub use window::Window;
 
 // Re-export types from dependencies that are part of the public API
@@ -69,6 +80,8 @@ pub mod prelude {
     pub use crate::camera::{Camera, Projection, SceneView};
     pub use crate::error::{SceneError, SceneResult, ViewerError};
     pub use crate::object::{MoleculeObject, Object, ObjectRegistry, ObjectState, ObjectType};
-    pub use crate::render_loop::Viewer;
+    pub use crate::viewer::Viewer;
+    pub use crate::viewer_trait::ViewerLike;
     pub use crate::scene::{Scene, SceneManager};
+    pub use crate::view::ViewManager;
 }
