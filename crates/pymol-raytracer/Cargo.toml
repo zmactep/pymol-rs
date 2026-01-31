@@ -1,0 +1,23 @@
+[package]
+name = "pymol-raytracer"
+description = "GPU compute shader-based raytracer for PyMOL-RS molecular visualization"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pymol-mol = { workspace = true }
+pymol-color = { workspace = true }
+pymol-settings = { workspace = true }
+wgpu = { workspace = true }
+lin_alg = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+pymol-io = { workspace = true }

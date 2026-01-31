@@ -51,6 +51,14 @@ pub struct AppView {
     // =========================================================================
     /// UI layout configuration
     pub ui_config: UiConfig,
+
+    // =========================================================================
+    // Raytraced Image Overlay
+    // =========================================================================
+    /// egui texture ID for the raytraced overlay
+    pub ray_overlay_texture_id: Option<egui::TextureId>,
+    /// Size of the current raytraced overlay texture
+    pub ray_overlay_size: Option<(u32, u32)>,
 }
 
 impl Default for AppView {
@@ -79,6 +87,8 @@ impl AppView {
             egui_renderer: None,
             viewport_rect: None,
             ui_config: UiConfig::new(),
+            ray_overlay_texture_id: None,
+            ray_overlay_size: None,
         }
     }
 
@@ -101,12 +111,12 @@ impl AppView {
             .await
             .map_err(|e| format!("No suitable GPU adapter found: {}", e))?;
 
-        // Request device
+        // Request device with adapter's actual limits (not conservative defaults)
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("PyMOL-RS Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: adapter.limits(), // Use hardware limits, not WebGL2 defaults
                 memory_hints: wgpu::MemoryHints::Performance,
                 experimental_features: wgpu::ExperimentalFeatures::default(),
                 trace: wgpu::Trace::Off,
@@ -259,5 +269,101 @@ impl AppView {
         self.viewport_rect
             .map(|rect| rect.contains(egui::pos2(mouse_pos.0, mouse_pos.1)))
             .unwrap_or(true) // Default to true if no viewport rect yet
+    }
+
+    /// Update the raytraced overlay texture from image data
+    ///
+    /// Returns the TextureId for rendering, or None if update failed
+    pub fn update_ray_overlay(&mut self, data: &[u8], width: u32, height: u32) -> Option<egui::TextureId> {
+        let egui_renderer = self.egui_renderer.as_mut()?;
+        let context = self.render_context.as_ref()?;
+        let device = context.device();
+        let queue = context.queue();
+
+        // Convert RGBA data to egui ColorImage
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize],
+            data,
+        );
+
+        // Create or update the texture
+        let texture_id = if let Some(existing_id) = self.ray_overlay_texture_id {
+            // Free the old texture and create a new one (size may have changed)
+            egui_renderer.free_texture(&existing_id);
+            let id = egui_renderer.register_native_texture(
+                device,
+                &Self::create_egui_texture(device, queue, &color_image),
+                wgpu::FilterMode::Linear,
+            );
+            self.ray_overlay_texture_id = Some(id);
+            id
+        } else {
+            // Create new texture
+            let id = egui_renderer.register_native_texture(
+                device,
+                &Self::create_egui_texture(device, queue, &color_image),
+                wgpu::FilterMode::Linear,
+            );
+            self.ray_overlay_texture_id = Some(id);
+            id
+        };
+
+        self.ray_overlay_size = Some((width, height));
+        Some(texture_id)
+    }
+
+    /// Clear the raytraced overlay texture
+    pub fn clear_ray_overlay(&mut self) {
+        if let (Some(id), Some(renderer)) = (self.ray_overlay_texture_id.take(), &mut self.egui_renderer) {
+            renderer.free_texture(&id);
+        }
+        self.ray_overlay_size = None;
+    }
+
+    /// Create a wgpu texture view from an egui ColorImage
+    fn create_egui_texture(device: &wgpu::Device, queue: &wgpu::Queue, image: &egui::ColorImage) -> wgpu::TextureView {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Ray Overlay Texture"),
+            size: wgpu::Extent3d {
+                width: image.width() as u32,
+                height: image.height() as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Convert ColorImage pixels to bytes (RGBA)
+        let pixels: Vec<u8> = image
+            .pixels
+            .iter()
+            .flat_map(|c| c.to_array())
+            .collect();
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * image.width() as u32),
+                rows_per_image: Some(image.height() as u32),
+            },
+            wgpu::Extent3d {
+                width: image.width() as u32,
+                height: image.height() as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
     }
 }

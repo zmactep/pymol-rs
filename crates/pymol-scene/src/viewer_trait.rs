@@ -9,6 +9,20 @@ use std::path::Path;
 use crate::camera::Camera;
 use crate::object::ObjectRegistry;
 
+/// Stored raytraced image for display in the viewport
+///
+/// When `ray` is called without a filename, the raytraced image is stored
+/// here for display. It persists until camera or scene changes occur.
+#[derive(Clone)]
+pub struct RaytracedImage {
+    /// RGBA image data, row-major, top-to-bottom
+    pub data: Vec<u8>,
+    /// Image width in pixels
+    pub width: u32,
+    /// Image height in pixels
+    pub height: u32,
+}
+
 /// Trait for types that can serve as a viewer backend for command execution
 ///
 /// This trait abstracts the viewer interface, allowing commands to work with
@@ -101,6 +115,72 @@ pub trait ViewerLike {
         _height: Option<u32>,
     ) -> Result<(), String> {
         Err("Screenshot capture not supported by this viewer".to_string())
+    }
+
+    // =========================================================================
+    // Raytracing
+    // =========================================================================
+
+    /// Perform raytracing and return the image data as RGBA bytes
+    ///
+    /// # Arguments
+    /// * `width` - Image width (None = use viewport width)
+    /// * `height` - Image height (None = use viewport height)
+    /// * `antialias` - Antialiasing level (1 = no AA, 2-4 = supersampling)
+    ///
+    /// # Returns
+    /// * `Ok(Vec<u8>)` - RGBA image data, row-major
+    /// * `Err(String)` - If raytracing fails or is not supported
+    fn raytrace(
+        &mut self,
+        _width: Option<u32>,
+        _height: Option<u32>,
+        _antialias: u32,
+    ) -> Result<Vec<u8>, String> {
+        Err("Raytracing not supported by this viewer".to_string())
+    }
+
+    /// Perform raytracing and save to a PNG file
+    ///
+    /// # Arguments
+    /// * `path` - Output file path
+    /// * `width` - Image width (None = use viewport width)
+    /// * `height` - Image height (None = use viewport height)
+    /// * `antialias` - Antialiasing level (1 = no AA, 2-4 = supersampling)
+    ///
+    /// # Returns
+    /// * `Ok((u32, u32))` - Actual image dimensions (width, height)
+    /// * `Err(String)` - If raytracing or file save fails
+    fn raytrace_to_file(
+        &mut self,
+        _path: &Path,
+        _width: Option<u32>,
+        _height: Option<u32>,
+        _antialias: u32,
+    ) -> Result<(u32, u32), String> {
+        Err("Raytracing not supported by this viewer".to_string())
+    }
+
+    /// Store a raytraced image for display in the viewport
+    ///
+    /// Called by the `ray` command when no filename is provided.
+    /// The image will be displayed as an overlay until cleared.
+    fn set_raytraced_image(&mut self, _image: Option<RaytracedImage>) {
+        // Default: do nothing (viewer doesn't support raytraced overlay)
+    }
+
+    /// Get the stored raytraced image, if any
+    ///
+    /// Returns the raytraced image that should be displayed as an overlay.
+    fn get_raytraced_image(&self) -> Option<&RaytracedImage> {
+        None
+    }
+
+    /// Clear the stored raytraced image
+    ///
+    /// Should be called when camera or scene changes invalidate the image.
+    fn clear_raytraced_image(&mut self) {
+        self.set_raytraced_image(None);
     }
 
     // =========================================================================

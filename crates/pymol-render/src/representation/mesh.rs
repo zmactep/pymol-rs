@@ -112,6 +112,16 @@ impl MeshRep {
         self.index_count = 0;
     }
 
+    /// Get the vertices (for raytracing)
+    pub fn vertices(&self) -> &[MeshVertex] {
+        &self.vertices
+    }
+
+    /// Get the indices (for raytracing)
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+
     fn normalize(v: [f32; 3]) -> [f32; 3] {
         let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         if len > 0.0 {

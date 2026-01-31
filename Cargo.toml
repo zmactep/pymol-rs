@@ -7,6 +7,7 @@ members = [
     "crates/pymol-select",
     "crates/pymol-io",
     "crates/pymol-render",
+    "crates/pymol-raytracer",
     "crates/pymol-scene",
     "crates/pymol-cmd",
     "crates/pymol-gui",
@@ -29,6 +30,7 @@ pymol-mol = { path = "crates/pymol-mol" }
 pymol-select = { path = "crates/pymol-select" }
 pymol-io = { path = "crates/pymol-io" }
 pymol-render = { path = "crates/pymol-render" }
+pymol-raytracer = { path = "crates/pymol-raytracer" }
 pymol-scene = { path = "crates/pymol-scene" }
 pymol-cmd = { path = "crates/pymol-cmd" }
 pymol-gui = { path = "crates/pymol-gui" }

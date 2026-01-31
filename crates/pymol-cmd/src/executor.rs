@@ -190,18 +190,6 @@ impl CommandExecutor {
         Ok(())
     }
 
-    /// Execute a .pml script file
-    pub fn run_script(&mut self, viewer: &mut dyn ViewerLike, path: &Path) -> CmdResult {
-        let content = std::fs::read_to_string(path).map_err(|e| CmdError::Io(e))?;
-        self.do_multi(viewer, &content).map_err(|e| match e {
-            CmdError::Parse(pe) => CmdError::Script {
-                line: 0, // TODO: track line numbers
-                message: pe.to_string(),
-            },
-            other => other,
-        })
-    }
-
     /// Open a log file
     pub fn log_open(&mut self, path: &Path) -> CmdResult {
         self.logger.log_open(path)

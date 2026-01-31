@@ -21,6 +21,10 @@ pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
 pymol-color = { workspace = true }
 pymol-render = { workspace = true }
+pymol-raytracer = { workspace = true }
+
+# Image handling
+image = { workspace = true }
 
 # egui integration
 egui = { workspace = true }

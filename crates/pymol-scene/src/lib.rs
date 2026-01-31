@@ -47,6 +47,7 @@ mod keybindings;
 mod movie;
 mod object;
 mod pick;
+mod raytrace;
 mod scene;
 mod selection;
 mod uniform;
@@ -66,10 +67,11 @@ pub use object::{DirtyFlags, Label, LabelAnchor, LabelObject, MoleculeObject, Ob
 pub use pick::{PickHit, Picker};
 pub use scene::{Scene, SceneAtomData, SceneManager, SceneObjectData, ScenePerAtomData, SceneStoreMask};
 pub use selection::{SelectionEntry, SelectionManager};
+pub use raytrace::{raytrace_scene, raytrace_to_file, RaytraceError, RaytraceInput};
 pub use uniform::setup_uniforms;
 pub use view::ViewManager;
 pub use viewer::{run, Viewer};
-pub use viewer_trait::ViewerLike;
+pub use viewer_trait::{RaytracedImage, ViewerLike};
 pub use window::Window;
 
 // Re-export types from dependencies that are part of the public API
@@ -81,7 +83,7 @@ pub mod prelude {
     pub use crate::error::{SceneError, SceneResult, ViewerError};
     pub use crate::object::{MoleculeObject, Object, ObjectRegistry, ObjectState, ObjectType};
     pub use crate::viewer::Viewer;
-    pub use crate::viewer_trait::ViewerLike;
+    pub use crate::viewer_trait::{RaytracedImage, ViewerLike};
     pub use crate::scene::{Scene, SceneManager};
     pub use crate::view::ViewManager;
 }

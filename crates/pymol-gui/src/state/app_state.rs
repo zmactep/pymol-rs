@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use pymol_cmd::{ArgHint, CommandExecutor};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
-use pymol_scene::{Camera, Movie, ObjectRegistry, SceneManager, SelectionEntry, ViewManager};
+use pymol_scene::{Camera, Movie, ObjectRegistry, RaytracedImage, SceneManager, SelectionEntry, ViewManager};
 use pymol_settings::GlobalSettings;
 
 /// Application state containing all scene/domain data
@@ -51,6 +51,12 @@ pub struct AppState {
     // =========================================================================
     /// Clear/background color
     pub clear_color: [f32; 3],
+
+    // =========================================================================
+    // Raytraced Image Overlay
+    // =========================================================================
+    /// Stored raytraced image for display (from `ray` command without filename)
+    pub raytraced_image: Option<RaytracedImage>,
 }
 
 impl Default for AppState {
@@ -75,6 +81,7 @@ impl AppState {
             chain_colors: ChainColors,
             executor: CommandExecutor::new(),
             clear_color: [0.0, 0.0, 0.0],
+            raytraced_image: None,
         }
     }
 

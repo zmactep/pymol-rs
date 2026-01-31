@@ -599,6 +599,52 @@ impl MoleculeObject {
         self.representations.clear();
         self.dirty = DirtyFlags::ALL;
     }
+
+    /// Get cartoon mesh data for raytracing
+    ///
+    /// Returns (vertices, indices) if cartoon representation is visible and built.
+    /// Each vertex contains position, normal, and color.
+    pub fn get_cartoon_mesh(&self) -> Option<(&[pymol_render::MeshVertex], &[u32])> {
+        if !self.state.visible_reps.is_visible(RepMask::CARTOON) {
+            return None;
+        }
+        self.representations.cartoon.as_ref().map(|c| (c.vertices(), c.indices()))
+    }
+
+    /// Get surface mesh data for raytracing
+    ///
+    /// Returns (vertices, indices) if surface representation is visible and built.
+    pub fn get_surface_mesh(&self) -> Option<(&[pymol_render::MeshVertex], &[u32])> {
+        if !self.state.visible_reps.is_visible(RepMask::SURFACE) {
+            return None;
+        }
+        self.representations.surface.as_ref().map(|s| (s.vertices(), s.indices()))
+    }
+
+    /// Get mesh data for raytracing
+    ///
+    /// Returns (vertices, indices) if mesh representation is visible and built.
+    pub fn get_mesh_data(&self) -> Option<(&[pymol_render::MeshVertex], &[u32])> {
+        if !self.state.visible_reps.is_visible(RepMask::MESH) {
+            return None;
+        }
+        self.representations.mesh.as_ref().map(|m| (m.vertices(), m.indices()))
+    }
+
+    /// Check if cartoon representation is visible
+    pub fn is_cartoon_visible(&self) -> bool {
+        self.state.visible_reps.is_visible(RepMask::CARTOON)
+    }
+
+    /// Check if surface representation is visible
+    pub fn is_surface_visible(&self) -> bool {
+        self.state.visible_reps.is_visible(RepMask::SURFACE)
+    }
+
+    /// Check if mesh representation is visible
+    pub fn is_mesh_visible(&self) -> bool {
+        self.state.visible_reps.is_visible(RepMask::MESH)
+    }
 }
 
 impl Object for MoleculeObject {

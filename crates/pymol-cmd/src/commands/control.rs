@@ -5,7 +5,7 @@ use pymol_scene::DirtyFlags;
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
-use crate::parser::parse_command;
+use crate::script::ScriptEngine;
 
 use super::io::expand_path;
 
@@ -360,47 +360,8 @@ EXAMPLES
 
         let path = expand_path(filename);
         
-        // Read the script file
-        let content = std::fs::read_to_string(&path).map_err(|e| CmdError::Script {
-            line: 0,
-            message: format!("failed to read script '{}': {}", path.display(), e),
-        })?;
-
-        // Execute each line
-        for (line_num, line) in content.lines().enumerate() {
-            let line = line.trim();
-            
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            // Parse the command
-            let parsed = parse_command(line).map_err(|e| CmdError::Script {
-                line: line_num + 1,
-                message: format!("{}", e),
-            })?;
-
-            // Look up the command (get registry fresh each iteration to avoid borrow conflicts)
-            let command = ctx
-                .registry()
-                .ok_or_else(|| CmdError::Script {
-                    line: line_num + 1,
-                    message: "command registry not available".to_string(),
-                })?
-                .get(&parsed.name)
-                .ok_or_else(|| CmdError::Script {
-                    line: line_num + 1,
-                    message: format!("unknown command: {}", parsed.name),
-                })?;
-
-            // Execute the command
-            command.execute(ctx, &parsed).map_err(|e| CmdError::Script {
-                line: line_num + 1,
-                message: format!("{}", e),
-            })?;
-        }
-
-        Ok(())
+        // Delegate to ScriptEngine - the single source of truth for script execution
+        let mut engine = ScriptEngine::new();
+        engine.run_pml(ctx.viewer, &path)
     }
 }

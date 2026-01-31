@@ -292,8 +292,8 @@ EXAMPLES
             .get_float(3)
             .or_else(|| args.get_named_float("dpi"));
 
-        // Get ray flag (optional, not yet implemented)
-        let _ray = args
+        // Get ray flag
+        let ray = args
             .get_bool(4)
             .or_else(|| args.get_named_bool("ray"))
             .unwrap_or(false);
@@ -312,24 +312,62 @@ EXAMPLES
             path.to_path_buf()
         };
 
-        // Capture the screenshot
-        ctx.viewer
-            .capture_png(&path, width, height)
-            .map_err(|e| CmdError::execution(format!("Failed to capture PNG: {}", e)))?;
+        if ray {
+            // Use raytracing
+            use std::time::Instant;
+            let start = Instant::now();
 
-        if !quiet {
-            let (w, h) = match (width, height) {
-                (Some(w), Some(h)) => (w, h),
-                _ => {
-                    // Report actual captured dimensions
-                    // For now just report the requested or window size
-                    (width.unwrap_or(0), height.unwrap_or(0))
-                }
-            };
-            if w > 0 && h > 0 {
-                ctx.print(&format!(" Ray: render time --:--:--  ({}x{})", w, h));
+            let (final_width, final_height) = ctx.viewer
+                .raytrace_to_file(&path, width, height, 1) // Default antialias = 1
+                .map_err(|e| CmdError::execution(format!("Failed to raytrace: {}", e)))?;
+
+            if !quiet {
+                let elapsed = start.elapsed();
+                ctx.print(&format!(
+                    " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
+                    elapsed.as_secs() / 3600,
+                    (elapsed.as_secs() % 3600) / 60,
+                    elapsed.as_secs() % 60,
+                    elapsed.subsec_millis() / 10,
+                    final_width,
+                    final_height
+                ));
+                ctx.print(&format!(" Saved \"{}\"", path.display()));
             }
-            ctx.print(&format!(" Saved \"{}\"", path.display()));
+        } else if let Some(ray_img) = ctx.viewer.get_raytraced_image() {
+            // Export stored raytraced image
+            use image::RgbaImage;
+            
+            let img = RgbaImage::from_raw(ray_img.width, ray_img.height, ray_img.data.clone())
+                .ok_or_else(|| CmdError::execution("Invalid raytraced image data".to_string()))?;
+            
+            img.save(&path)
+                .map_err(|e| CmdError::execution(format!("Failed to save PNG: {}", e)))?;
+
+            if !quiet {
+                ctx.print(&format!(" ({}x{})", ray_img.width, ray_img.height));
+                ctx.print(&format!(" Saved raytraced image to \"{}\"", path.display()));
+            }
+        } else {
+            // Capture rasterized screenshot
+            ctx.viewer
+                .capture_png(&path, width, height)
+                .map_err(|e| CmdError::execution(format!("Failed to capture PNG: {}", e)))?;
+
+            if !quiet {
+                let (w, h) = match (width, height) {
+                    (Some(w), Some(h)) => (w, h),
+                    _ => {
+                        // Report actual captured dimensions
+                        // For now just report the requested or window size
+                        (width.unwrap_or(0), height.unwrap_or(0))
+                    }
+                };
+                if w > 0 && h > 0 {
+                    ctx.print(&format!(" ({}x{})", w, h));
+                }
+                ctx.print(&format!(" Saved \"{}\"", path.display()));
+            }
         }
 
         Ok(())

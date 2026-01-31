@@ -54,7 +54,7 @@ pub use error::{CmdError, CmdResult, ParseError};
 pub use executor::{CommandExecutor, CommandOutput};
 pub use history::CommandHistory;
 pub use logger::{CommandLogger, LogFormat};
-pub use parser::{parse_command, parse_commands};
+pub use parser::{join_continued_lines, parse_command, parse_commands};
 pub use script::ScriptEngine;
 
 /// Prelude for convenient imports

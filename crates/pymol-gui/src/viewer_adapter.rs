@@ -7,7 +7,11 @@ use std::path::Path;
 
 use pymol_cmd::ViewerLike;
 use pymol_render::RenderContext;
-use pymol_scene::{capture_png_to_file, Camera, LoopMode, Object, ObjectRegistry, SceneStoreMask, SelectionEntry};
+use pymol_render::ColorResolver;
+use pymol_scene::{
+    capture_png_to_file, raytrace_scene, raytrace_to_file, Camera, LoopMode, Object,
+    ObjectRegistry, RaytraceInput, SceneStoreMask, SelectionEntry,
+};
 
 use crate::async_tasks::TaskRunner;
 use crate::fetch::FetchTask;
@@ -51,6 +55,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
     fn zoom_all(&mut self) {
         if let Some((min, max)) = self.state.registry.extent() {
             self.state.camera.zoom_to(min, max);
+            self.state.raytraced_image = None; // Clear raytraced overlay on camera change
             *self.needs_redraw = true;
         }
     }
@@ -59,6 +64,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         if let Some(obj) = self.state.registry.get(name) {
             if let Some((min, max)) = Object::extent(obj) {
                 self.state.camera.zoom_to(min, max);
+                self.state.raytraced_image = None; // Clear raytraced overlay on camera change
                 *self.needs_redraw = true;
             }
         }
@@ -67,6 +73,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
     fn center_all(&mut self) {
         if let Some((min, max)) = self.state.registry.extent() {
             self.state.camera.center_to(min, max);
+            self.state.raytraced_image = None; // Clear raytraced overlay on camera change
             *self.needs_redraw = true;
         }
     }
@@ -75,6 +82,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         if let Some(obj) = self.state.registry.get(name) {
             if let Some((min, max)) = Object::extent(obj) {
                 self.state.camera.center_to(min, max);
+                self.state.raytraced_image = None; // Clear raytraced overlay on camera change
                 *self.needs_redraw = true;
             }
         }
@@ -82,6 +90,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
 
     fn reset_view(&mut self) {
         self.state.camera = Camera::new();
+        self.state.raytraced_image = None; // Clear raytraced overlay on camera change
         if let Some((min, max)) = self.state.registry.extent() {
             self.state.camera.reset_view(min, max);
             *self.needs_redraw = true;
@@ -127,6 +136,75 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
             self.state.clear_color,
             self.default_size,
         ).map_err(|e| e.to_string())
+    }
+
+    fn raytrace(
+        &mut self,
+        width: Option<u32>,
+        height: Option<u32>,
+        antialias: u32,
+    ) -> Result<Vec<u8>, String> {
+        self.prepare_representations_for_raytrace()?;
+
+        let context = self.render_context.ok_or(
+            "No render context available. GUI may not be fully initialized yet."
+        )?;
+
+        let mut input = RaytraceInput {
+            device: context.device(),
+            queue: context.queue(),
+            camera: &mut self.state.camera,
+            registry: &self.state.registry,
+            settings: &self.state.settings,
+            named_colors: &self.state.named_colors,
+            element_colors: &self.state.element_colors,
+            chain_colors: &self.state.chain_colors,
+            clear_color: self.state.clear_color,
+            default_size: self.default_size,
+        };
+
+        raytrace_scene(&mut input, width, height, antialias)
+            .map(|(data, _, _)| data)
+            .map_err(|e| e.to_string())
+    }
+
+    fn raytrace_to_file(
+        &mut self,
+        path: &Path,
+        width: Option<u32>,
+        height: Option<u32>,
+        antialias: u32,
+    ) -> Result<(u32, u32), String> {
+        self.prepare_representations_for_raytrace()?;
+
+        let context = self.render_context.ok_or(
+            "No render context available. GUI may not be fully initialized yet."
+        )?;
+
+        let mut input = RaytraceInput {
+            device: context.device(),
+            queue: context.queue(),
+            camera: &mut self.state.camera,
+            registry: &self.state.registry,
+            settings: &self.state.settings,
+            named_colors: &self.state.named_colors,
+            element_colors: &self.state.element_colors,
+            chain_colors: &self.state.chain_colors,
+            clear_color: self.state.clear_color,
+            default_size: self.default_size,
+        };
+
+        raytrace_to_file(&mut input, path, width, height, antialias)
+            .map_err(|e| e.to_string())
+    }
+
+    fn set_raytraced_image(&mut self, image: Option<pymol_scene::RaytracedImage>) {
+        self.state.raytraced_image = image;
+        *self.needs_redraw = true;
+    }
+
+    fn get_raytraced_image(&self) -> Option<&pymol_scene::RaytracedImage> {
+        self.state.raytraced_image.as_ref()
     }
 
     fn get_selection(&self, name: &str) -> Option<&str> {
@@ -352,4 +430,29 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
 
     // Note: viewport_set_size and fullscreen methods use default implementations
     // since we don't have direct window access from the adapter
+}
+
+impl<'a> ViewerAdapter<'a> {
+    /// Ensure all representations are built before raytracing.
+    ///
+    /// This is needed when raytracing from scripts where the render loop hasn't run.
+    fn prepare_representations_for_raytrace(&mut self) -> Result<(), String> {
+        let context = self.render_context.ok_or(
+            "No render context available. GUI may not be fully initialized yet."
+        )?;
+
+        let names: Vec<String> = self.state.registry.names().map(|s| s.to_string()).collect();
+        for name in &names {
+            let color_resolver = ColorResolver::new(
+                &self.state.named_colors,
+                &self.state.element_colors,
+                &self.state.chain_colors,
+            );
+            if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
+                mol_obj.prepare_render(context, &color_resolver, &self.state.settings);
+            }
+        }
+
+        Ok(())
+    }
 }

@@ -506,6 +506,23 @@ impl App {
         let all_command_names: Vec<&str> = builtin_names.into_iter().chain(external_names).collect();
         let path_commands = self.state.path_commands();
 
+        // Update raytraced overlay texture if there's a new image
+        // This must happen outside the egui closure to avoid borrow conflicts
+        let ray_overlay_info = if let Some(ray_img) = &self.state.raytraced_image {
+            // Check if we need to update the texture (new image or size changed)
+            let needs_update = self.view.ray_overlay_size != Some((ray_img.width, ray_img.height));
+            if needs_update {
+                self.view.update_ray_overlay(&ray_img.data, ray_img.width, ray_img.height);
+            }
+            self.view.ray_overlay_texture_id.map(|id| (id, ray_img.width, ray_img.height))
+        } else {
+            // Clear overlay if raytraced image was removed
+            if self.view.ray_overlay_texture_id.is_some() {
+                self.view.clear_ray_overlay();
+            }
+            None
+        };
+
         // Run egui with a closure that captures only what it needs
         let full_output = {
             let output = &mut self.output;
@@ -547,8 +564,47 @@ impl App {
                 let central_response = egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
-                        // Make the central panel interactive to detect hover
-                        ui.allocate_response(ui.available_size(), egui::Sense::hover())
+                        let available = ui.available_size();
+                        
+                        // If we have a raytraced overlay, render it scaled to fit the viewport
+                        if let Some((texture_id, img_width, img_height)) = ray_overlay_info {
+                            // Calculate scaling to fit the image in the viewport while maintaining aspect ratio
+                            let img_aspect = img_width as f32 / img_height as f32;
+                            let vp_aspect = available.x / available.y;
+                            
+                            let (display_width, display_height) = if img_aspect > vp_aspect {
+                                // Image is wider than viewport - fit to width
+                                (available.x, available.x / img_aspect)
+                            } else {
+                                // Image is taller than viewport - fit to height
+                                (available.y * img_aspect, available.y)
+                            };
+                            
+                            // Center the image in the viewport
+                            let offset_x = (available.x - display_width) / 2.0;
+                            let offset_y = (available.y - display_height) / 2.0;
+                            
+                            // Allocate space for interaction
+                            let (rect, response) = ui.allocate_exact_size(available, egui::Sense::hover());
+                            
+                            let image_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.min.x + offset_x, rect.min.y + offset_y),
+                                egui::vec2(display_width, display_height),
+                            );
+                            
+                            // Render the raytraced image
+                            ui.painter().image(
+                                texture_id,
+                                image_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                            
+                            response
+                        } else {
+                            // No overlay - just allocate the space for 3D rendering
+                            ui.allocate_response(available, egui::Sense::hover())
+                        }
                     });
                 viewport_rect_logical = central_response.response.rect;
 
@@ -1089,6 +1145,10 @@ impl App {
 
         let deltas = self.input.take_camera_deltas();
         for delta in deltas {
+            // Clear raytraced overlay on any camera change
+            if self.state.raytraced_image.is_some() {
+                self.state.raytraced_image = None;
+            }
             match delta {
                 CameraDelta::Rotate { x, y } => {
                     self.state.camera.rotate_x(x);
@@ -1257,6 +1317,8 @@ impl ApplicationHandler for App {
                     let rock_delta = self.state.movie.update_rock(dt, amplitude, speed);
                     // Apply the delta rotation directly (update_rock returns the instantaneous angle)
                     self.state.camera.rotate_y(rock_delta * dt);
+                    // Clear raytraced overlay on camera change
+                    self.state.raytraced_image = None;
                     self.needs_redraw = true;
                 }
 

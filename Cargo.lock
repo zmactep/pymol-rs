@@ -2401,6 +2401,7 @@ name = "pymol-cmd"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "image",
  "lin_alg",
  "log",
  "nom",
@@ -2432,6 +2433,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "env_logger",
+ "image",
  "lin_alg",
  "log",
  "pollster",
@@ -2439,6 +2441,7 @@ dependencies = [
  "pymol-color",
  "pymol-io",
  "pymol-mol",
+ "pymol-raytracer",
  "pymol-render",
  "pymol-scene",
  "pymol-select",
@@ -2479,6 +2482,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pymol-raytracer"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "env_logger",
+ "lin_alg",
+ "log",
+ "pymol-color",
+ "pymol-io",
+ "pymol-mol",
+ "pymol-settings",
+ "rayon",
+ "thiserror 2.0.18",
+ "wgpu",
+]
+
+[[package]]
 name = "pymol-render"
 version = "0.1.0"
 dependencies = [
@@ -2511,6 +2531,7 @@ dependencies = [
  "pymol-color",
  "pymol-io",
  "pymol-mol",
+ "pymol-raytracer",
  "pymol-render",
  "pymol-select",
  "pymol-settings",

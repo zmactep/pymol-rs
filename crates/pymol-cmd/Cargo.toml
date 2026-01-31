@@ -28,3 +28,4 @@ ahash = { workspace = true }
 log = { workspace = true }
 lin_alg = { workspace = true }
 shellexpand = { workspace = true }
+image = { workspace = true }

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::command::ViewerLike;
 use crate::error::{CmdError, CmdResult};
 use crate::executor::CommandExecutor;
+use crate::parser::join_continued_lines;
 
 /// Script engine for executing .pml files and command batches
 pub struct ScriptEngine {
@@ -113,6 +114,8 @@ impl ScriptEngine {
         script: &str,
         base_dir: Option<&Path>,
     ) -> CmdResult {
+        // Preprocess: join lines ending with backslash (line continuation)
+        let script = join_continued_lines(script);
         let lines: Vec<&str> = script.lines().collect();
 
         for (line_num, line) in lines.iter().enumerate() {

@@ -113,6 +113,16 @@ impl SurfaceRep {
         self.bind_group = Some(bind_group);
     }
 
+    /// Get the vertices (for raytracing)
+    pub fn vertices(&self) -> &[MeshVertex] {
+        &self.vertices
+    }
+
+    /// Get the indices (for raytracing)
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
+    }
+
     /// Set surface type
     pub fn set_surface_type(&mut self, surface_type: SurfaceType) {
         if self.surface_type != surface_type {

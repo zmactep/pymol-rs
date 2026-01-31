@@ -3,7 +3,7 @@
 use std::f32::consts::PI;
 
 use lin_alg::f32::{Mat4, Vec3};
-use pymol_scene::Object; // For extent() method on MoleculeObject
+use pymol_scene::{Object, RaytracedImage}; // For extent() method on MoleculeObject
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
@@ -24,6 +24,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(ViewCommand);
     registry.register(ViewportCommand);
     registry.register(FullScreenCommand);
+    registry.register(RayCommand);
 }
 
 // ============================================================================
@@ -1292,6 +1293,157 @@ SEE ALSO
                     "toggle",
                     format!("unknown value '{}'. Use on, off, or toggle.", other),
                 ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// ray command
+// ============================================================================
+
+struct RayCommand;
+
+impl Command for RayCommand {
+    fn name(&self) -> &str {
+        "ray"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "ray" performs ray-tracing and saves the resulting image to a file.
+    Ray tracing produces high-quality images with proper shadows, lighting,
+    and transparency effects.
+
+USAGE
+
+    ray [ width [, height [, antialias [, filename [, quiet ]]]]]
+
+ARGUMENTS
+
+    width = integer: width in pixels (default: current window width)
+    height = integer: height in pixels (default: current window height)
+    antialias = integer: antialiasing level 1-4 (default: 1 = no AA)
+        1 = no antialiasing
+        2 = 2x2 supersampling
+        3 = 3x3 supersampling
+        4 = 4x4 supersampling
+    filename = string: output file path (default: no file saved, returns to display)
+    quiet = 0/1: suppress feedback (default: 0)
+
+EXAMPLES
+
+    ray                          # Raytrace at current resolution
+    ray 1920, 1080               # Raytrace at 1080p
+    ray 1920, 1080, 2            # Raytrace at 1080p with 2x2 AA
+    ray width=1920, height=1080, filename=output.png
+
+NOTES
+
+    Raytracing is performed using GPU compute shaders for optimal performance.
+    The resulting image quality is significantly higher than real-time rendering,
+    with accurate shadows, soft lighting, and proper transparency handling.
+
+SEE ALSO
+
+    png, draw
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        use std::time::Instant;
+
+        // Parse arguments
+        let width = args
+            .get_int(0)
+            .or_else(|| args.get_named_int("width"))
+            .map(|v| v as u32);
+
+        let height = args
+            .get_int(1)
+            .or_else(|| args.get_named_int("height"))
+            .map(|v| v as u32);
+
+        let antialias = args
+            .get_int(2)
+            .or_else(|| args.get_named_int("antialias"))
+            .unwrap_or(1) as u32;
+
+        let filename = args
+            .get_str(3)
+            .or_else(|| args.get_named_str("filename"));
+
+        let quiet = args
+            .get_bool(4)
+            .or_else(|| args.get_named_bool("quiet"))
+            .unwrap_or(false);
+
+        // Perform raytracing
+        let start = Instant::now();
+
+        if let Some(path) = filename {
+            // Save to file
+            let path = crate::commands::io::expand_path(path);
+            let path = if path.extension().map(|e| e.to_ascii_lowercase()) != Some("png".into()) {
+                path.with_extension("png")
+            } else {
+                path.to_path_buf()
+            };
+
+            let (final_width, final_height) = ctx.viewer
+                .raytrace_to_file(&path, width, height, antialias)
+                .map_err(|e| CmdError::execution(format!("Ray tracing failed: {}", e)))?;
+
+            let elapsed = start.elapsed();
+            if !quiet {
+                ctx.print(&format!(
+                    " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
+                    elapsed.as_secs() / 3600,
+                    (elapsed.as_secs() % 3600) / 60,
+                    elapsed.as_secs() % 60,
+                    elapsed.subsec_millis() / 10,
+                    final_width,
+                    final_height
+                ));
+                ctx.print(&format!(" Saved \"{}\"", path.display()));
+            }
+        } else {
+            // Raytrace and store for display in viewport
+            let viewport = ctx.viewer.viewport_size();
+            let final_width = width.unwrap_or(viewport.0.max(1024));
+            let final_height = height.unwrap_or(viewport.1.max(768));
+
+            let image_data = ctx.viewer
+                .raytrace(Some(final_width), Some(final_height), antialias)
+                .map_err(|e| CmdError::execution(format!("Ray tracing failed: {}", e)))?;
+
+            // Store the raytraced image for display in the viewport
+            ctx.viewer.set_raytraced_image(Some(RaytracedImage {
+                data: image_data,
+                width: final_width,
+                height: final_height,
+            }));
+
+            let elapsed = start.elapsed();
+            if !quiet {
+                ctx.print(&format!(
+                    " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
+                    elapsed.as_secs() / 3600,
+                    (elapsed.as_secs() % 3600) / 60,
+                    elapsed.as_secs() % 60,
+                    elapsed.subsec_millis() / 10,
+                    final_width,
+                    final_height
+                ));
+                ctx.print(" Ray trace complete. Use 'png filename' to save, or interact to dismiss.");
             }
         }
 

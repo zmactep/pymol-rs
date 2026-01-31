@@ -26,6 +26,89 @@ use nom::{
 use crate::args::{ArgValue, ParsedCommand};
 use crate::error::ParseError;
 
+/// Normalize line continuations in a script/command string.
+///
+/// Handles:
+/// - `\` followed by newline (standard line continuation)
+/// - `\` followed by whitespace (collapsed line continuation, e.g. when newlines are removed)
+///
+/// This allows PyMOL-style multi-line commands like:
+/// ```text
+/// set_view (\
+///   1.0, 0.0, 0.0,\
+///   0.0, 1.0, 0.0)
+/// ```
+fn normalize_continuations(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            // Check what follows the backslash
+            if let Some(&next) = chars.peek() {
+                if next == '\n' {
+                    // Skip \ and newline (line continuation)
+                    chars.next();
+                    // Also skip any leading whitespace on next line
+                    while chars.peek().map_or(false, |c| *c == ' ' || *c == '\t') {
+                        chars.next();
+                    }
+                    continue;
+                } else if next == ' ' || next == '\t' {
+                    // Skip \ followed by whitespace (collapsed continuation)
+                    chars.next();
+                    // Skip any additional whitespace
+                    while chars.peek().map_or(false, |c| *c == ' ' || *c == '\t') {
+                        chars.next();
+                    }
+                    continue;
+                }
+            }
+        }
+        result.push(c);
+    }
+    result
+}
+
+/// Join lines that end with backslash (line continuation).
+///
+/// This handles PyMOL's line continuation syntax where a line ending with `\`
+/// continues on the next line. This is useful for preprocessing script files
+/// before line-by-line execution.
+///
+/// # Example
+/// ```
+/// use pymol_cmd::join_continued_lines;
+///
+/// let input = "set_view (\\\n  1.0, 2.0)";
+/// let result = join_continued_lines(input);
+/// assert!(result.contains("set_view"));
+/// assert!(result.contains("1.0"));
+/// ```
+pub fn join_continued_lines(script: &str) -> String {
+    let mut result = String::with_capacity(script.len());
+    let mut continuation = false;
+
+    for line in script.lines() {
+        if continuation {
+            // Continuing from previous line - add a space instead of newline
+            result.push(' ');
+        }
+
+        if line.trim_end().ends_with('\\') {
+            // Line continues - add without trailing backslash
+            let trimmed = line.trim_end().trim_end_matches('\\');
+            result.push_str(trimmed);
+            continuation = true;
+        } else {
+            result.push_str(line);
+            result.push('\n');
+            continuation = false;
+        }
+    }
+    result
+}
+
 /// Parse a single command from a string
 ///
 /// # Example
@@ -38,6 +121,7 @@ use crate::error::ParseError;
 /// assert_eq!(cmd.get_named_str("object"), Some("mol"));
 /// ```
 pub fn parse_command(input: &str) -> Result<ParsedCommand, ParseError> {
+    let input = normalize_continuations(input);
     let input = input.trim();
     if input.is_empty() {
         return Err(ParseError::EmptyCommand);
@@ -66,13 +150,14 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, ParseError> {
 /// assert_eq!(cmds[2].name, "show");
 /// ```
 pub fn parse_commands(input: &str) -> Result<Vec<ParsedCommand>, ParseError> {
+    let input = normalize_continuations(input);
     let input = input.trim();
     if input.is_empty() {
         return Ok(Vec::new());
     }
 
     let mut commands = Vec::new();
-    let mut current = input;
+    let mut current: &str = &input;
 
     while !current.is_empty() {
         // Skip leading whitespace and semicolons
@@ -554,5 +639,178 @@ mod tests {
         // "notable" should not match "no" - it's an identifier
         let cmd = parse_command("select notable").unwrap();
         assert_eq!(cmd.get_str(0), Some("notable"));
+    }
+
+    #[test]
+    fn test_line_continuation_with_newline() {
+        // Backslash followed by newline should join lines
+        let cmd = parse_command("set_view (\\\n  1.0, 2.0, 3.0)").unwrap();
+        assert_eq!(cmd.name, "set_view");
+        // The argument should be the parenthesized expression
+        assert!(cmd.get_str(0).is_some());
+    }
+
+    #[test]
+    fn test_line_continuation_collapsed() {
+        // Backslash followed by space (collapsed continuation from copy-paste)
+        let cmd = parse_command("set_view (\\ 1.0, 2.0,\\ 3.0)").unwrap();
+        assert_eq!(cmd.name, "set_view");
+        let arg = cmd.get_str(0).unwrap();
+        // The backslashes should be stripped, leaving just the values
+        assert!(arg.contains("1.0"));
+        assert!(arg.contains("2.0"));
+        assert!(arg.contains("3.0"));
+        // Backslashes should not be present
+        assert!(!arg.contains('\\'));
+    }
+
+    #[test]
+    fn test_set_view_with_18_values() {
+        // Full set_view command with collapsed line continuations (like from test.pml)
+        let cmd = parse_command(
+            "set_view (\\ 0.381124, -0.381788, -0.842011,\\ -0.911104, -0.309719, -0.271964,\\ -0.156954, 0.870811, -0.465889,\\ 0.0, 0.0, 639.042053,\\ -1.574999, -16.596998, 9.544001,\\ 561.162231, 794.801453, 14.0 )"
+        ).unwrap();
+        assert_eq!(cmd.name, "set_view");
+        let arg = cmd.get_str(0).unwrap();
+        // Should have all 18 values parseable (no backslashes blocking them)
+        let s = arg.trim_matches(|c| c == '(' || c == ')');
+        let values: Vec<f32> = s
+            .split(',')
+            .filter_map(|v| v.trim().parse::<f32>().ok())
+            .collect();
+        assert_eq!(values.len(), 18, "Expected 18 values, got {}: {:?}", values.len(), values);
+    }
+
+    #[test]
+    fn test_multiline_commands() {
+        // Multiple commands with line continuation
+        let cmds = parse_commands("set_view (\\\n  1.0, 2.0, 3.0)\nzoom").unwrap();
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].name, "set_view");
+        assert_eq!(cmds[1].name, "zoom");
+    }
+
+    #[test]
+    fn test_normalize_continuations() {
+        // Test the normalization function directly
+        assert_eq!(normalize_continuations("a\\\nb"), "ab");
+        assert_eq!(normalize_continuations("a\\ b"), "ab");
+        assert_eq!(normalize_continuations("a\\  b"), "ab");
+        assert_eq!(normalize_continuations("a\\\n  b"), "ab");
+        // Regular backslash (not followed by newline or space) should be preserved
+        assert_eq!(normalize_continuations("a\\xb"), "a\\xb");
+    }
+
+    #[test]
+    fn test_set_view_multiline_exact_format() {
+        // Exact format from test.pml with actual newlines
+        let input = r#"set_view (\ 0.381124,    -0.381788,    -0.842011,\
+           -0.911104,    -0.309719,    -0.271964,\
+           -0.156954,     0.870811,    -0.465889,\
+            0.000000,     0.000000,   639.042053,\
+           -1.574999,   -16.596998,     9.544001,\
+            561.162231,   794.801453,   14.000000 )"#;
+        
+        let cmd = parse_command(input).unwrap();
+        assert_eq!(cmd.name, "set_view");
+        let arg = cmd.get_str(0).unwrap();
+        
+        // Should have all 18 values parseable
+        let s = arg.trim_matches(|c| c == '(' || c == ')');
+        let values: Vec<f32> = s
+            .split(',')
+            .filter_map(|v| v.trim().parse::<f32>().ok())
+            .collect();
+        assert_eq!(values.len(), 18, "Expected 18 values, got {}: {:?}", values.len(), values);
+    }
+
+    #[test]
+    fn test_parse_commands_full_test_pml() {
+        // Full test.pml content
+        let input = r#"load ~/Downloads/1IGT.cif
+as sticks
+set_view (\ 0.381124,    -0.381788,    -0.842011,\
+           -0.911104,    -0.309719,    -0.271964,\
+           -0.156954,     0.870811,    -0.465889,\
+            0.000000,     0.000000,   639.042053,\
+           -1.574999,   -16.596998,     9.544001,\
+            561.162231,   794.801453,   14.000000 )
+ray 1920, 1080, filename=test.png"#;
+        
+        let cmds = parse_commands(input).unwrap();
+        assert_eq!(cmds.len(), 4, "Expected 4 commands");
+        assert_eq!(cmds[0].name, "load");
+        assert_eq!(cmds[1].name, "as");
+        assert_eq!(cmds[2].name, "set_view");
+        assert_eq!(cmds[3].name, "ray");
+    }
+
+    // ========================================================================
+    // join_continued_lines tests
+    // ========================================================================
+
+    #[test]
+    fn test_join_continued_lines_simple() {
+        let input = "line1\\\nline2";
+        let result = join_continued_lines(input);
+        assert_eq!(result.trim(), "line1 line2");
+    }
+
+    #[test]
+    fn test_join_continued_lines_multiple() {
+        let input = "set_view (\\\n  1.0, 2.0,\\\n  3.0)";
+        let result = join_continued_lines(input);
+        // Should join all three lines
+        assert!(result.contains("set_view"));
+        assert!(result.contains("1.0"));
+        assert!(result.contains("3.0"));
+        // Should only have one line (newlines removed)
+        assert_eq!(result.lines().count(), 1);
+    }
+
+    #[test]
+    fn test_join_continued_lines_no_continuation() {
+        let input = "line1\nline2\nline3";
+        let result = join_continued_lines(input);
+        assert_eq!(result.lines().count(), 3);
+    }
+
+    #[test]
+    fn test_join_continued_lines_preserves_content() {
+        let input = "load file.pdb\nzoom\nshow cartoon";
+        let result = join_continued_lines(input);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "load file.pdb");
+        assert_eq!(lines[1], "zoom");
+        assert_eq!(lines[2], "show cartoon");
+    }
+
+    #[test]
+    fn test_join_continued_lines_test_pml_format() {
+        // Exact format from test.pml
+        let input = r#"load ~/Downloads/1IGT.cif
+as sticks
+set_view (\ 0.381124,    -0.381788,    -0.842011,\
+           -0.911104,    -0.309719,    -0.271964,\
+           -0.156954,     0.870811,    -0.465889,\
+            0.000000,     0.000000,   639.042053,\
+           -1.574999,   -16.596998,     9.544001,\
+            561.162231,   794.801453,   14.000000 )
+ray 1920, 1080, filename=test.png"#;
+        
+        let result = join_continued_lines(input);
+        let lines: Vec<&str> = result.lines().collect();
+        
+        // Should have 4 lines: load, as, set_view (joined), ray
+        assert_eq!(lines.len(), 4, "Expected 4 lines, got {}", lines.len());
+        assert!(lines[0].starts_with("load"));
+        assert!(lines[1].starts_with("as"));
+        assert!(lines[2].starts_with("set_view"));
+        assert!(lines[3].starts_with("ray"));
+        
+        // The set_view line should contain all values
+        assert!(lines[2].contains("0.381124"));
+        assert!(lines[2].contains("14.000000"));
     }
 }
