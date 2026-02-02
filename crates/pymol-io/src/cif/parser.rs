@@ -28,6 +28,82 @@ struct SecondaryStructureRange {
     end_seq: i32,
 }
 
+/// Category of secondary structure annotation in mmCIF
+#[derive(Debug, Clone, Copy)]
+enum SsCategory {
+    /// _struct_conf (helices)
+    StructConf,
+    /// _struct_sheet_range (beta sheets)
+    StructSheetRange,
+}
+
+impl SsCategory {
+    /// Returns the mmCIF column prefix for this category
+    fn prefix(&self) -> &'static str {
+        match self {
+            SsCategory::StructConf => "_struct_conf.",
+            SsCategory::StructSheetRange => "_struct_sheet_range.",
+        }
+    }
+}
+
+/// Parse a single secondary structure record from a field map.
+///
+/// This is the unified function that extracts chain, residue range, and SS type
+/// from either loop rows or single-item data.
+fn parse_ss_record(
+    category: SsCategory,
+    fields: &HashMap<String, String>,
+) -> Option<SecondaryStructureRange> {
+    let get_field = |name: &str| fields.get(name).map(|s| s.as_str());
+
+    // Determine SS type based on category
+    let ss_type = match category {
+        SsCategory::StructConf => {
+            let conf_type = get_field("conf_type_id").unwrap_or("");
+            if !conf_type.starts_with("HELX") {
+                return None; // Skip non-helix entries
+            }
+            // HELX_P = alpha helix, HELX_OT_P = other helix types
+            if conf_type.contains("310") || conf_type == "HELX_LH_3T_P" {
+                SecondaryStructure::Helix310
+            } else if conf_type.contains("PI") || conf_type == "HELX_LH_PI_P" {
+                SecondaryStructure::HelixPi
+            } else {
+                SecondaryStructure::Helix
+            }
+        }
+        SsCategory::StructSheetRange => SecondaryStructure::Sheet,
+    };
+
+    // Extract chain and residue range (same logic for both categories)
+    // Prefer auth_ columns if available (matches atom coordinates)
+    let chain = get_field("beg_auth_asym_id")
+        .or_else(|| get_field("beg_label_asym_id"))
+        .filter(|s| !s.is_empty())?
+        .to_string();
+
+    let auth_chain = get_field("beg_auth_asym_id").map(|s| s.to_string());
+
+    let start_seq = get_field("beg_auth_seq_id")
+        .or_else(|| get_field("beg_label_seq_id"))
+        .and_then(|s| s.parse().ok())
+        .filter(|&n: &i32| n > 0)?;
+
+    let end_seq = get_field("end_auth_seq_id")
+        .or_else(|| get_field("end_label_seq_id"))
+        .and_then(|s| s.parse().ok())
+        .filter(|&n: &i32| n > 0)?;
+
+    Some(SecondaryStructureRange {
+        ss_type,
+        chain,
+        auth_chain,
+        start_seq,
+        end_seq,
+    })
+}
+
 /// mmCIF file reader
 pub struct CifReader<R> {
     reader: BufReader<R>,
@@ -103,6 +179,13 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
                     pos += 1;
                 }
             }
+            // Handle single-item secondary structure format (when not in a loop)
+            Token::DataName(name) if name.starts_with("_struct_conf.") => {
+                pos = parse_ss_single(tokens, pos, SsCategory::StructConf, &mut ss_ranges);
+            }
+            Token::DataName(name) if name.starts_with("_struct_sheet_range.") => {
+                pos = parse_ss_single(tokens, pos, SsCategory::StructSheetRange, &mut ss_ranges);
+            }
             Token::DataBlock(_) => {
                 // New data block - stop parsing this one
                 break;
@@ -161,9 +244,9 @@ fn parse_loop(
     if is_atom_site {
         pos = parse_atom_site_loop(tokens, pos, &columns, mol)?;
     } else if is_struct_conf {
-        pos = parse_struct_conf_loop(tokens, pos, &columns, ss_ranges)?;
+        pos = parse_ss_loop(tokens, pos, &columns, SsCategory::StructConf, ss_ranges)?;
     } else if is_struct_sheet {
-        pos = parse_struct_sheet_range_loop(tokens, pos, &columns, ss_ranges)?;
+        pos = parse_ss_loop(tokens, pos, &columns, SsCategory::StructSheetRange, ss_ranges)?;
     } else {
         // Skip other loops
         while pos < tokens.len() {
@@ -386,19 +469,22 @@ fn parse_cell(tokens: &[Token], mut pos: usize, mol: &mut ObjectMolecule) -> IoR
     Ok(pos)
 }
 
-/// Parse _struct_conf loop (helices)
+/// Parse secondary structure loop (_struct_conf or _struct_sheet_range)
 ///
-/// This parses the mmCIF _struct_conf category which contains helix annotations.
-fn parse_struct_conf_loop(
+/// This unified function handles both helix and sheet annotations in loop format.
+fn parse_ss_loop(
     tokens: &[Token],
     mut pos: usize,
     columns: &[String],
+    category: SsCategory,
     ss_ranges: &mut Vec<SecondaryStructureRange>,
 ) -> IoResult<usize> {
-    let col_idx: HashMap<&str, usize> = columns
+    let prefix = category.prefix();
+
+    // Map column indices to short field names (without prefix)
+    let col_to_field: Vec<Option<String>> = columns
         .iter()
-        .enumerate()
-        .map(|(i, s)| (s.as_str(), i))
+        .map(|col| col.strip_prefix(prefix).map(|s| s.to_string()))
         .collect();
 
     let n_cols = columns.len();
@@ -436,143 +522,72 @@ fn parse_struct_conf_loop(
             break;
         }
 
-        let get_col = |name: &str| -> Option<&str> {
-            col_idx.get(name).and_then(|&i| row.get(i).and_then(|v| v.as_deref()))
-        };
-
-        // Get helix type - check conf_type_id for HELX variants
-        let conf_type = get_col("_struct_conf.conf_type_id").unwrap_or("");
-        let ss_type = if conf_type.starts_with("HELX") {
-            // HELX_P = alpha helix, HELX_OT_P = other helix types
-            if conf_type.contains("310") || conf_type == "HELX_LH_3T_P" {
-                SecondaryStructure::Helix310
-            } else if conf_type.contains("PI") || conf_type == "HELX_LH_PI_P" {
-                SecondaryStructure::HelixPi
-            } else {
-                SecondaryStructure::Helix
+        // Build field map from row values
+        let mut fields: HashMap<String, String> = HashMap::new();
+        for (i, field_name) in col_to_field.iter().enumerate() {
+            if let (Some(name), Some(Some(value))) = (field_name, row.get(i)) {
+                fields.insert(name.clone(), value.clone());
             }
-        } else {
-            continue; // Skip non-helix entries
-        };
+        }
 
-        // Get chain and residue range
-        // Prefer auth_ columns if available (matches atom coordinates)
-        let chain = get_col("_struct_conf.beg_auth_asym_id")
-            .or_else(|| get_col("_struct_conf.beg_label_asym_id"))
-            .unwrap_or("")
-            .to_string();
-
-        let auth_chain = get_col("_struct_conf.beg_auth_asym_id").map(|s| s.to_string());
-
-        let start_seq = get_col("_struct_conf.beg_auth_seq_id")
-            .or_else(|| get_col("_struct_conf.beg_label_seq_id"))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        let end_seq = get_col("_struct_conf.end_auth_seq_id")
-            .or_else(|| get_col("_struct_conf.end_label_seq_id"))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        if !chain.is_empty() && start_seq > 0 && end_seq > 0 {
-            ss_ranges.push(SecondaryStructureRange {
-                ss_type,
-                chain,
-                auth_chain,
-                start_seq,
-                end_seq,
-            });
+        // Use unified record parser
+        if let Some(range) = parse_ss_record(category, &fields) {
+            ss_ranges.push(range);
         }
     }
 
     Ok(pos)
 }
 
-/// Parse _struct_sheet_range loop (beta sheets)
+/// Parse secondary structure from single-item (non-loop) format
 ///
-/// This parses the mmCIF _struct_sheet_range category which contains sheet annotations.
-fn parse_struct_sheet_range_loop(
+/// This handles cases where there's only one helix or sheet entry,
+/// stored as individual data items rather than a loop.
+fn parse_ss_single(
     tokens: &[Token],
     mut pos: usize,
-    columns: &[String],
+    category: SsCategory,
     ss_ranges: &mut Vec<SecondaryStructureRange>,
-) -> IoResult<usize> {
-    let col_idx: HashMap<&str, usize> = columns
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (s.as_str(), i))
-        .collect();
+) -> usize {
+    let prefix = category.prefix();
+    let mut fields: HashMap<String, String> = HashMap::new();
 
-    let n_cols = columns.len();
-
-    loop {
-        if pos >= tokens.len() {
-            break;
-        }
-        match &tokens[pos] {
-            Token::Loop | Token::DataName(_) | Token::DataBlock(_) | Token::Eof => break,
-            _ => {}
-        }
-
-        // Read one row
-        let mut row: Vec<Option<String>> = Vec::with_capacity(n_cols);
-        for _ in 0..n_cols {
-            if pos >= tokens.len() {
-                break;
+    // Collect consecutive data items with matching prefix
+    while pos < tokens.len() {
+        if let Token::DataName(name) = &tokens[pos] {
+            if let Some(field) = name.strip_prefix(prefix) {
+                pos += 1;
+                // Read the value token
+                if pos < tokens.len() {
+                    match &tokens[pos] {
+                        Token::Value(v)
+                        | Token::SingleQuoted(v)
+                        | Token::DoubleQuoted(v)
+                        | Token::TextField(v) => {
+                            fields.insert(field.to_string(), v.clone());
+                            pos += 1;
+                        }
+                        Token::Missing | Token::Unknown => {
+                            // Skip missing/unknown values
+                            pos += 1;
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
             }
-            match &tokens[pos] {
-                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) | Token::TextField(v) => {
-                    row.push(Some(v.clone()));
-                }
-                Token::Missing | Token::Unknown => {
-                    row.push(None);
-                }
-                Token::Loop | Token::DataName(_) | Token::DataBlock(_) | Token::Eof => {
-                    break;
-                }
-            }
-            pos += 1;
         }
+        break;
+    }
 
-        if row.len() < n_cols {
-            break;
-        }
-
-        let get_col = |name: &str| -> Option<&str> {
-            col_idx.get(name).and_then(|&i| row.get(i).and_then(|v| v.as_deref()))
-        };
-
-        // Get chain and residue range
-        // Prefer auth_ columns if available (matches atom coordinates)
-        let chain = get_col("_struct_sheet_range.beg_auth_asym_id")
-            .or_else(|| get_col("_struct_sheet_range.beg_label_asym_id"))
-            .unwrap_or("")
-            .to_string();
-
-        let auth_chain = get_col("_struct_sheet_range.beg_auth_asym_id").map(|s| s.to_string());
-
-        let start_seq = get_col("_struct_sheet_range.beg_auth_seq_id")
-            .or_else(|| get_col("_struct_sheet_range.beg_label_seq_id"))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        let end_seq = get_col("_struct_sheet_range.end_auth_seq_id")
-            .or_else(|| get_col("_struct_sheet_range.end_label_seq_id"))
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        if !chain.is_empty() && start_seq > 0 && end_seq > 0 {
-            ss_ranges.push(SecondaryStructureRange {
-                ss_type: SecondaryStructure::Sheet,
-                chain,
-                auth_chain,
-                start_seq,
-                end_seq,
-            });
+    // Use unified record parser
+    if !fields.is_empty() {
+        if let Some(range) = parse_ss_record(category, &fields) {
+            ss_ranges.push(range);
         }
     }
 
-    Ok(pos)
+    pos
 }
 
 /// Apply secondary structure annotations to atoms in the molecule
@@ -665,5 +680,97 @@ _atom_site.Cartn_z
         assert!(mol.symmetry.is_some());
         let sym = mol.symmetry.as_ref().unwrap();
         assert!((sym.cell_lengths[0] - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_single_item_secondary_structure() {
+        // Test single-item (non-loop) secondary structure format
+        let cif_data = r#"data_TEST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 N N ALA A 1 0.0 0.0 0.0
+2 C CA ALA A 1 1.5 0.0 0.0
+3 N N GLU A 2 3.0 0.0 0.0
+4 C CA GLU A 2 4.5 0.0 0.0
+5 N N LEU A 3 6.0 0.0 0.0
+6 C CA LEU A 3 7.5 0.0 0.0
+#
+_struct_conf.conf_type_id HELX_P
+_struct_conf.id HELX_P1
+_struct_conf.beg_auth_asym_id A
+_struct_conf.beg_auth_seq_id 1
+_struct_conf.end_auth_asym_id A
+_struct_conf.end_auth_seq_id 3
+"#;
+
+        let mut reader = CifReader::new(cif_data.as_bytes());
+        let mol = reader.read().unwrap();
+
+        assert_eq!(mol.atom_count(), 6);
+
+        // All atoms should have helix secondary structure
+        for atom in mol.atoms() {
+            assert_eq!(
+                atom.ss_type,
+                SecondaryStructure::Helix,
+                "Atom {} resv={} should be Helix",
+                atom.name,
+                atom.resv
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_loop_secondary_structure() {
+        // Test loop format secondary structure (existing behavior)
+        let cif_data = r#"data_TEST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 N N ALA A 1 0.0 0.0 0.0
+2 C CA ALA A 1 1.5 0.0 0.0
+3 N N GLU A 2 3.0 0.0 0.0
+4 C CA GLU A 2 4.5 0.0 0.0
+#
+loop_
+_struct_conf.conf_type_id
+_struct_conf.id
+_struct_conf.beg_auth_asym_id
+_struct_conf.beg_auth_seq_id
+_struct_conf.end_auth_asym_id
+_struct_conf.end_auth_seq_id
+HELX_P HELX_P1 A 1 A 2
+"#;
+
+        let mut reader = CifReader::new(cif_data.as_bytes());
+        let mol = reader.read().unwrap();
+
+        assert_eq!(mol.atom_count(), 4);
+
+        // All atoms should have helix secondary structure
+        for atom in mol.atoms() {
+            assert_eq!(
+                atom.ss_type,
+                SecondaryStructure::Helix,
+                "Atom {} resv={} should be Helix",
+                atom.name,
+                atom.resv
+            );
+        }
     }
 }

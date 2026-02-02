@@ -1,4 +1,5 @@
 __pycache__
+_tests
 *.so
 pymol-open-source
 target
