@@ -3,6 +3,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::bvh::Bvh;
+use crate::edge_pipeline::{CompositePipeline, CompositeParams, EdgeDetectPipeline, EdgeParams};
 use crate::error::{RaytraceError, RaytraceResult};
 use crate::pipeline::RaytracePipeline;
 use crate::primitive::Primitives;
@@ -124,9 +125,13 @@ pub fn raytrace(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    // Create output texture
-    let output_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Raytrace Output"),
+    // Get ray_trace_mode from settings
+    let ray_trace_mode = params.settings.ray_trace_mode as u32;
+    let use_multipass = ray_trace_mode > 0;
+
+    // Create output texture (color)
+    let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Raytrace Color Output"),
         size: wgpu::Extent3d {
             width: render_width,
             height: render_height,
@@ -136,13 +141,49 @@ pub fn raytrace(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    // Create bind group
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    // Create depth texture (for edge detection)
+    let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Raytrace Depth Output"),
+        size: wgpu::Extent3d {
+            width: render_width,
+            height: render_height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Float,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // Create normal texture (for edge detection)
+    let normal_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Raytrace Normal Output"),
+        size: wgpu::Extent3d {
+            width: render_width,
+            height: render_height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let normal_view = normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // Create bind group for pass 1 (raytrace)
+    let raytrace_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Raytrace Bind Group"),
         layout: pipeline.bind_group_layout(),
         entries: &[
@@ -172,29 +213,208 @@ pub fn raytrace(
             },
             wgpu::BindGroupEntry {
                 binding: 6,
-                resource: wgpu::BindingResource::TextureView(&output_view),
+                resource: wgpu::BindingResource::TextureView(&color_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&depth_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::TextureView(&normal_view),
             },
         ],
     });
 
-    // Dispatch compute shader
+    // Create encoder
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Raytrace Encoder"),
     });
 
+    // Workgroup size is 8x8
+    let workgroups_x = (render_width + 7) / 8;
+    let workgroups_y = (render_height + 7) / 8;
+
+    // Pass 1: Raytrace
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Raytrace Pass"),
+            label: Some("Raytrace Pass 1"),
             timestamp_writes: None,
         });
         pass.set_pipeline(pipeline.compute_pipeline());
-        pass.set_bind_group(0, &bind_group, &[]);
-
-        // Workgroup size is 8x8
-        let workgroups_x = (render_width + 7) / 8;
-        let workgroups_y = (render_height + 7) / 8;
+        pass.set_bind_group(0, &raytrace_bind_group, &[]);
         pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
     }
+
+    // For modes 1, 2, 3: run edge detection and composite passes
+    // The final output texture depends on whether we're doing multipass
+    let output_texture = if use_multipass {
+        // Create edge detection pipeline
+        let edge_pipeline = EdgeDetectPipeline::new(device)?;
+
+        // Create edge texture (use R32Float for storage binding support)
+        let edge_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Edge Detection Output"),
+            size: wgpu::Extent3d {
+                width: render_width,
+                height: render_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let edge_view = edge_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create edge params uniform using PyMOL's gradient-of-gradient algorithm
+        // Scale PyMOL parameters for our normalized depth buffer (0-1 range)
+        // PyMOL uses screen-space depth, so their thresholds need scaling
+        //
+        // Balanced thresholds for both surface (smooth) and cartoon (sharp) geometry
+        // slope_factor: PyMOL 0.6 -> 0.004 for our depth range
+        // depth_factor: PyMOL 0.1 -> ~0.000005 for our depth range
+        // gain: Controls gradient amplification
+        let edge_params = EdgeParams {
+            viewport: [render_width as f32, render_height as f32],
+            slope_factor: params.settings.ray_trace_slope_factor / 150.0, // 0.6 -> 0.004 (balanced)
+            depth_factor: (params.settings.ray_trace_depth_factor / 45.0).powi(2), // 0.1 -> ~0.000005
+            disco_factor: params.settings.ray_trace_disco_factor * 5.0, // 0.05 -> 0.25
+            gain: 1.0 / (params.settings.ray_trace_gain + 0.001) * 12.0, // 0.12 -> ~100
+            _pad: [0.0; 2],
+        };
+        let edge_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Edge Params"),
+            contents: bytemuck::bytes_of(&edge_params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        // Create edge detection bind group
+        let edge_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Edge Detect Bind Group"),
+            layout: edge_pipeline.bind_group_layout(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&normal_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&edge_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: edge_params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Pass 2: Edge detection
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Edge Detect Pass 2"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(edge_pipeline.compute_pipeline());
+            pass.set_bind_group(0, &edge_bind_group, &[]);
+            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+        }
+
+        // Create composite pipeline
+        let composite_pipeline = CompositePipeline::new(device)?;
+
+        // Create final output texture
+        let final_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Composite Output"),
+            size: wgpu::Extent3d {
+                width: render_width,
+                height: render_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let final_view = final_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create composite params uniform
+        let use_transparent_bg = params.settings.ray_opaque_background == 0;
+        let composite_params = CompositeParams {
+            viewport: [render_width as f32, render_height as f32],
+            mode: ray_trace_mode,
+            use_transparent_bg: if use_transparent_bg { 1 } else { 0 },
+            edge_color: [
+                params.settings.ray_trace_color[0],
+                params.settings.ray_trace_color[1],
+                params.settings.ray_trace_color[2],
+            ],
+            quantize_levels: 4.0,
+            bg_color: [
+                params.settings.bg_color[0],
+                params.settings.bg_color[1],
+                params.settings.bg_color[2],
+            ],
+            _pad: 0.0,
+        };
+        let composite_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Composite Params"),
+            contents: bytemuck::bytes_of(&composite_params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        // Create composite bind group
+        let composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Composite Bind Group"),
+            layout: composite_pipeline.bind_group_layout(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&edge_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&final_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: composite_params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        // Pass 3: Composite
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Composite Pass 3"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(composite_pipeline.compute_pipeline());
+            pass.set_bind_group(0, &composite_bind_group, &[]);
+            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+        }
+
+        final_texture
+    } else {
+        // Mode 0: use color texture directly as output
+        color_texture
+    };
 
     // Copy texture to buffer for readback
     let bytes_per_pixel = 4u32;
@@ -392,6 +612,13 @@ pub struct RaytraceUniforms {
     pub ray_max_passes: u32,
     pub ray_trace_fog: u32,
     pub ray_transparency_shadows: u32,
+
+    // Ray trace mode settings
+    pub ray_trace_mode: u32,
+    pub ray_opaque_background: i32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+    pub ray_trace_color: [f32; 4],
 }
 
 impl RaytraceUniforms {
@@ -432,6 +659,11 @@ impl RaytraceUniforms {
             ray_max_passes: settings.ray_max_passes,
             ray_trace_fog: if settings.ray_trace_fog { 1 } else { 0 },
             ray_transparency_shadows: if settings.ray_transparency_shadows { 1 } else { 0 },
+            ray_trace_mode: settings.ray_trace_mode as u32,
+            ray_opaque_background: settings.ray_opaque_background,
+            _pad1: 0,
+            _pad2: 0,
+            ray_trace_color: settings.ray_trace_color,
         }
     }
 }

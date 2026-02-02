@@ -70,6 +70,17 @@ impl ArgValue {
         }
     }
 
+    /// Get a string representation of any value type
+    pub fn to_string_repr(&self) -> Option<String> {
+        match self {
+            ArgValue::String(s) => Some(s.clone()),
+            ArgValue::Int(i) => Some(i.to_string()),
+            ArgValue::Float(f) => Some(f.to_string()),
+            ArgValue::Bool(b) => Some(if *b { "on".to_string() } else { "off".to_string() }),
+            ArgValue::List(_) | ArgValue::None => None,
+        }
+    }
+
     /// Try to get as an integer
     pub fn as_int(&self) -> Option<i64> {
         match self {

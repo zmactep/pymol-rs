@@ -240,6 +240,29 @@ pub fn raytrace_scene(
     let specular = input.settings.get_float(pymol_settings::id::specular);
     let shininess = input.settings.get_float(pymol_settings::id::shininess);
 
+    // Ray trace mode settings
+    let ray_trace_mode = input.settings.get_int(pymol_settings::id::ray_trace_mode);
+    let ray_opaque_background = input.settings.get_int(pymol_settings::id::ray_opaque_background);
+
+    // Resolve ray_trace_color (default -6 = black in PyMOL)
+    let ray_trace_color_idx = input.settings.get_color(pymol_settings::id::ray_trace_color);
+    let ray_trace_color = if ray_trace_color_idx >= 0 {
+        // Positive index: look up in named colors
+        input.named_colors
+            .get_by_index(ray_trace_color_idx as u32)
+            .map(|c| c.to_rgba(1.0))
+            .unwrap_or([0.0, 0.0, 0.0, 1.0])
+    } else {
+        // Negative index: PyMOL special colors, -6 = black
+        [0.0, 0.0, 0.0, 1.0]
+    };
+
+    // Edge detection parameters (PyMOL gradient-of-gradient algorithm)
+    let ray_trace_slope_factor = input.settings.get_float(pymol_settings::id::ray_trace_slope_factor);
+    let ray_trace_depth_factor = input.settings.get_float(pymol_settings::id::ray_trace_depth_factor);
+    let ray_trace_disco_factor = input.settings.get_float(pymol_settings::id::ray_trace_disco_factor);
+    let ray_trace_gain = input.settings.get_float(pymol_settings::id::ray_trace_gain);
+
     let settings = RaytraceSettings {
         // PyMOL default light direction (from upper-left-front)
         light_dir: [-0.4, -0.4, -1.0, 0.0],
@@ -257,6 +280,13 @@ pub fn raytrace_scene(
         ray_max_passes,
         ray_trace_fog,
         ray_transparency_shadows,
+        ray_trace_mode,
+        ray_trace_color,
+        ray_opaque_background,
+        ray_trace_slope_factor,
+        ray_trace_depth_factor,
+        ray_trace_disco_factor,
+        ray_trace_gain,
         ..Default::default()
     };
 

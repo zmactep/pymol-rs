@@ -33,6 +33,7 @@
 pub mod bvh;
 pub mod collect;
 pub mod context;
+pub mod edge_pipeline;
 pub mod error;
 pub mod pipeline;
 pub mod primitive;

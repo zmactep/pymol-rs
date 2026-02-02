@@ -602,6 +602,75 @@ pub fn extract_isosurface_smooth(grid: &Grid3D, isovalue: f32) -> MarchingCubesR
     }
 }
 
+/// Weld vertices that are at the same position (within tolerance) and average their normals.
+/// This eliminates the faceted appearance caused by marching cubes creating duplicate vertices.
+pub fn weld_vertices(result: &MarchingCubesResult, tolerance: f32) -> MarchingCubesResult {
+    use std::collections::HashMap;
+    
+    if result.positions.is_empty() {
+        return MarchingCubesResult {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            indices: Vec::new(),
+        };
+    }
+    
+    // Quantize positions to grid cells for fast lookup
+    // Use tolerance as the cell size
+    let inv_tolerance = 1.0 / tolerance;
+    
+    // Map from quantized position to (new_index, accumulated_normal, count)
+    let mut vertex_map: HashMap<(i32, i32, i32), (u32, [f32; 3], u32)> = HashMap::new();
+    
+    // Map from old index to new index
+    let mut index_remap: Vec<u32> = Vec::with_capacity(result.positions.len());
+    
+    // New vertex data
+    let mut new_positions: Vec<[f32; 3]> = Vec::new();
+    
+    // First pass: identify unique vertices and accumulate normals
+    for (i, pos) in result.positions.iter().enumerate() {
+        // Quantize position to grid cell
+        let key = (
+            (pos[0] * inv_tolerance).round() as i32,
+            (pos[1] * inv_tolerance).round() as i32,
+            (pos[2] * inv_tolerance).round() as i32,
+        );
+        
+        let normal = result.normals[i];
+        
+        if let Some((new_idx, acc_normal, count)) = vertex_map.get_mut(&key) {
+            // Vertex already exists, accumulate normal
+            acc_normal[0] += normal[0];
+            acc_normal[1] += normal[1];
+            acc_normal[2] += normal[2];
+            *count += 1;
+            index_remap.push(*new_idx);
+        } else {
+            // New vertex
+            let new_idx = new_positions.len() as u32;
+            new_positions.push(*pos);
+            vertex_map.insert(key, (new_idx, normal, 1));
+            index_remap.push(new_idx);
+        }
+    }
+    
+    // Build final normals by averaging
+    let mut new_normals: Vec<[f32; 3]> = vec![[0.0; 3]; new_positions.len()];
+    for (_, (new_idx, acc_normal, _count)) in vertex_map.iter() {
+        new_normals[*new_idx as usize] = normalize(*acc_normal);
+    }
+    
+    // Remap indices
+    let new_indices: Vec<u32> = result.indices.iter().map(|&i| index_remap[i as usize]).collect();
+    
+    MarchingCubesResult {
+        positions: new_positions,
+        normals: new_normals,
+        indices: new_indices,
+    }
+}
+
 #[inline]
 fn normalize(v: [f32; 3]) -> [f32; 3] {
     let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();

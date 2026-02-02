@@ -130,6 +130,20 @@ pub struct RaytraceSettings {
     pub ray_direct_shade: f32,
     /// Orthographic mode (-1 = auto)
     pub ray_orthoscopic: i32,
+    /// Ray trace mode (0=normal, 1=normal+outline, 2=outline only, 3=quantized+outline)
+    pub ray_trace_mode: i32,
+    /// Color for outlines in modes 1, 2, and 3 (RGBA)
+    pub ray_trace_color: [f32; 4],
+    /// Opaque background (-1=auto, 0=transparent, 1=opaque)
+    pub ray_opaque_background: i32,
+    /// Edge detection: gradient magnitude difference threshold (PyMOL default: 0.6)
+    pub ray_trace_slope_factor: f32,
+    /// Edge detection: gradient direction difference threshold (PyMOL default: 0.1)
+    pub ray_trace_depth_factor: f32,
+    /// Edge detection: gradient discontinuity threshold (PyMOL default: 0.05)
+    pub ray_trace_disco_factor: f32,
+    /// Edge detection: pixel radius adjustment factor (PyMOL default: 0.12)
+    pub ray_trace_gain: f32,
 }
 
 impl Default for RaytraceSettings {
@@ -154,6 +168,13 @@ impl Default for RaytraceSettings {
             ray_interior_shadows: false,
             ray_direct_shade: 0.0,
             ray_orthoscopic: -1,
+            ray_trace_mode: 0,
+            ray_trace_color: [0.0, 0.0, 0.0, 1.0], // Black outline by default
+            ray_opaque_background: -1, // Auto
+            ray_trace_slope_factor: 0.6, // PyMOL default
+            ray_trace_depth_factor: 0.1, // PyMOL default
+            ray_trace_disco_factor: 0.05, // PyMOL default
+            ray_trace_gain: 0.12, // PyMOL default
         }
     }
 }

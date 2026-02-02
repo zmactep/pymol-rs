@@ -8,6 +8,7 @@ use std::path::Path;
 
 use crate::camera::Camera;
 use crate::object::ObjectRegistry;
+use pymol_settings::GlobalSettings;
 
 /// Stored raytraced image for display in the viewport
 ///
@@ -29,7 +30,7 @@ pub struct RaytracedImage {
 /// different viewer implementations (e.g., `Viewer`, GUI adapters).
 pub trait ViewerLike {
     // =========================================================================
-    // Core - Objects and Camera
+    // Core - Objects, Camera, and Settings
     // =========================================================================
 
     /// Get a reference to the object registry
@@ -43,6 +44,12 @@ pub trait ViewerLike {
 
     /// Get a mutable reference to the camera
     fn camera_mut(&mut self) -> &mut Camera;
+
+    /// Get a reference to the global settings
+    fn settings(&self) -> &GlobalSettings;
+
+    /// Get a mutable reference to the global settings
+    fn settings_mut(&mut self) -> &mut GlobalSettings;
 
     /// Zoom to fit all objects while preserving rotation
     fn zoom_all(&mut self);

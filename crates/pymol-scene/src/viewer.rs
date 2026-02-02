@@ -1025,6 +1025,14 @@ impl ViewerLike for Viewer {
         &mut self.camera
     }
 
+    fn settings(&self) -> &GlobalSettings {
+        &self.settings
+    }
+
+    fn settings_mut(&mut self) -> &mut GlobalSettings {
+        &mut self.settings
+    }
+
     fn zoom_all(&mut self) {
         Viewer::zoom_all(self)
     }

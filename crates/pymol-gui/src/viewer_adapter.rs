@@ -52,6 +52,14 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         &mut self.state.camera
     }
 
+    fn settings(&self) -> &pymol_settings::GlobalSettings {
+        &self.state.settings
+    }
+
+    fn settings_mut(&mut self) -> &mut pymol_settings::GlobalSettings {
+        &mut self.state.settings
+    }
+
     fn zoom_all(&mut self) {
         if let Some((min, max)) = self.state.registry.extent() {
             self.state.camera.zoom_to(min, max);

@@ -344,6 +344,10 @@ impl SurfaceRep {
             return;
         }
 
+        // Weld duplicate vertices and average normals for smooth shading
+        // Use spacing/2 as tolerance to catch vertices that should be the same
+        let result = marching_cubes::weld_vertices(&result, spacing * 0.5);
+
         // Color vertices based on nearest atoms
         let colors = coloring::color_vertices(&result.positions, atom_colors);
 

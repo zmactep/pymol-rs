@@ -42,6 +42,12 @@ struct Uniforms {
     ray_max_passes: u32,
     ray_trace_fog: u32,
     ray_transparency_shadows: u32,
+    // Ray trace mode settings
+    ray_trace_mode: u32,        // 0=normal, 1=normal+outline, 2=outline only, 3=quantized+outline
+    ray_opaque_background: i32, // -1=auto, 0=transparent, 1=opaque
+    _pad1: u32,
+    _pad2: u32,
+    ray_trace_color: vec4<f32>, // Color for outlines
 }
 
 // Sphere primitive
@@ -111,6 +117,8 @@ struct HitInfo {
 @group(0) @binding(4) var<storage, read> bvh_nodes: array<BvhNode>;
 @group(0) @binding(5) var<storage, read> bvh_indices: array<u32>;
 @group(0) @binding(6) var output: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(7) var depth_output: texture_storage_2d<r32float, write>;
+@group(0) @binding(8) var normal_output: texture_storage_2d<rgba16float, write>;
 
 // Constants
 const EPSILON: f32 = 0.0001;
@@ -572,6 +580,7 @@ fn generate_ray(pixel: vec2<f32>) -> Ray {
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let pixel = vec2<f32>(f32(global_id.x), f32(global_id.y));
+    let pixel_coord = vec2<i32>(global_id.xy);
     
     // Bounds check
     if pixel.x >= uniforms.viewport.x || pixel.y >= uniforms.viewport.y {
@@ -586,28 +595,59 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     var color: vec3<f32>;
     var alpha: f32;
+    var depth: f32;
+    var normal: vec3<f32>;
+    
+    // Determine background behavior
+    // ray_opaque_background: -1=auto (opaque), 0=transparent, 1=opaque  
+    // Only transparent when explicitly set to 0
+    let use_transparent_bg = uniforms.ray_opaque_background == 0;
     
     if hit.hit {
         // Shade hit point
         color = shade(ray, hit);
         alpha = 1.0;
         
+        // Store depth (normalized to 0-1 range, 0 = near, approaching 1 = far)
+        // Use a large far value for normalization
+        let far_clip = 10000.0;
+        depth = clamp(hit.t / far_clip, 0.0, 0.999);
+        
+        // Store normal (encode from -1..1 to 0..1)
+        normal = hit.normal * 0.5 + 0.5;
+        
         // Apply fog based on depth
-        let depth = hit.t;
-        color = apply_fog(color, depth);
+        color = apply_fog(color, hit.t);
         
         // Handle transparency (simplified)
         if hit.transparency > 0.001 {
             alpha = 1.0 - hit.transparency;
             color = mix(uniforms.bg_color.rgb, color, alpha);
         }
+        
+        // Note: ray_trace_mode effects (outlines, quantization) are now handled
+        // in pass 2 (edge detection) and pass 3 (composite) for better quality
     } else {
-        // Transparent background (alpha=0) like PyMOL
-        color = vec3<f32>(0.0, 0.0, 0.0);
-        alpha = 0.0;
+        // No hit - background
+        depth = 1.0;  // Max depth for background
+        normal = vec3<f32>(0.5, 0.5, 1.0);  // Encoded (0,0,1) - facing camera
+        
+        if use_transparent_bg {
+            // Transparent background (alpha = 0)
+            color = vec3<f32>(0.0, 0.0, 0.0);
+            alpha = 0.0;
+        } else {
+            // Opaque background
+            color = uniforms.bg_color.rgb;
+            alpha = 1.0;
+        }
     }
     
-    // Clamp and output with alpha
+    // Clamp and output color with alpha
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
-    textureStore(output, vec2<i32>(global_id.xy), vec4<f32>(color, alpha));
+    textureStore(output, pixel_coord, vec4<f32>(color, alpha));
+    
+    // Output depth and normal for edge detection pass
+    textureStore(depth_output, pixel_coord, vec4<f32>(depth, 0.0, 0.0, 1.0));
+    textureStore(normal_output, pixel_coord, vec4<f32>(normal, 1.0));
 }
