@@ -74,7 +74,7 @@ pub struct RaytraceInput<'a> {
     pub default_size: (u32, u32),
 }
 
-/// Collect triangles from mesh-based representations (cartoon, surface, mesh)
+/// Collect triangles from mesh-based representations (cartoon, surface, mesh, ribbon)
 pub fn collect_triangles_from_mesh_reps(mol_obj: &MoleculeObject) -> Vec<GpuTriangle> {
     let mut triangles = Vec::new();
 
@@ -125,6 +125,11 @@ pub fn collect_triangles_from_mesh_reps(mol_obj: &MoleculeObject) -> Vec<GpuTria
 
     // Collect from mesh representation
     if let Some((vertices, indices)) = mol_obj.get_mesh_data() {
+        triangles.extend(convert_mesh(vertices, indices));
+    }
+
+    // Collect from ribbon representation
+    if let Some((vertices, indices)) = mol_obj.get_ribbon_mesh() {
         triangles.extend(convert_mesh(vertices, indices));
     }
 

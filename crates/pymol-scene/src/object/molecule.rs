@@ -631,6 +631,16 @@ impl MoleculeObject {
         self.representations.mesh.as_ref().map(|m| (m.vertices(), m.indices()))
     }
 
+    /// Get ribbon mesh data for raytracing
+    ///
+    /// Returns (vertices, indices) if ribbon representation is visible and built.
+    pub fn get_ribbon_mesh(&self) -> Option<(&[pymol_render::MeshVertex], &[u32])> {
+        if !self.state.visible_reps.is_visible(RepMask::RIBBON) {
+            return None;
+        }
+        self.representations.ribbon.as_ref().map(|r| (r.vertices(), r.indices()))
+    }
+
     /// Check if cartoon representation is visible
     pub fn is_cartoon_visible(&self) -> bool {
         self.state.visible_reps.is_visible(RepMask::CARTOON)
