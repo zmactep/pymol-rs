@@ -151,7 +151,7 @@ pub fn extract_backbone_segments(
     coord_set: &CoordSet,
     colors: &crate::color_resolver::ColorResolver,
     gap_cutoff: i32,
-    rep_mask: u32,
+    rep_mask: RepMask,
 ) -> Vec<BackboneSegment> {
     let mut segments = Vec::new();
 

@@ -13,6 +13,45 @@ use crate::error::{MolError, MolResult};
 use crate::index::{AtomIndex, BondIndex, StateIndex};
 use crate::residue::{ChainIterator, ResidueIterator};
 
+// ============================================================================
+// Protein Double Bond Lookup Table
+// ============================================================================
+
+/// Double bonds in standard amino acid residues.
+/// Format: (residue_pattern, atom1, atom2)
+/// - "*" matches all residues (for backbone carbonyl)
+/// - Multiple residue names separated by "|" for variants
+static PROTEIN_DOUBLE_BONDS: &[(&[&str], &str, &str)] = &[
+    // Backbone carbonyl C=O (all amino acids)
+    (&["*"], "C", "O"),
+    // ARG: guanidinium group CZ=NH1
+    (&["ARG", "ARGP"], "CZ", "NH1"),
+    // ASP: carboxylate CG=OD1
+    (&["ASP", "ASPM"], "CG", "OD1"),
+    // ASN: amide CG=OD1
+    (&["ASN"], "CG", "OD1"),
+    // GLU: carboxylate CD=OE1
+    (&["GLU", "GLUM"], "CD", "OE1"),
+    // GLN: amide CD=OE1
+    (&["GLN"], "CD", "OE1"),
+    // HIS and variants: imidazole ring (Kekulé alternating pattern)
+    (&["HIS", "HID", "HIE", "HIP"], "ND1", "CE1"),
+    (&["HIS", "HID", "HIE", "HIP"], "NE2", "CD2"),
+    // PHE: benzene ring (Kekulé alternating pattern)
+    (&["PHE"], "CG", "CD1"),
+    (&["PHE"], "CE1", "CZ"),
+    (&["PHE"], "CE2", "CD2"),
+    // TYR: benzene ring (same Kekulé pattern as PHE)
+    (&["TYR"], "CG", "CD1"),
+    (&["TYR"], "CE1", "CZ"),
+    (&["TYR"], "CE2", "CD2"),
+    // TRP: indole ring system (Kekulé alternating pattern)
+    (&["TRP"], "CG", "CD1"),
+    (&["TRP"], "CE2", "CZ2"),
+    (&["TRP"], "CH2", "CZ3"),
+    (&["TRP"], "CE3", "CD2"),
+];
+
 /// Get bond order for a bond between two atoms in a known protein residue
 ///
 /// Based on PyMOL's assign_pdb_known_residue() function.
@@ -23,73 +62,15 @@ fn get_protein_bond_order(resn: &str, name1: &str, name2: &str) -> BondOrder {
         (name1 == a && name2 == b) || (name1 == b && name2 == a)
     };
 
-    // Backbone carbonyl C=O (all amino acids)
-    if is_bond("C", "O") {
-        return BondOrder::Double;
-    }
-
-    // Side chain double bonds by residue
-    match resn {
-        // ARG: guanidinium group CZ=NH1
-        "ARG" | "ARGP" => {
-            if is_bond("CZ", "NH1") {
+    // Look up in the double bonds table
+    for &(residues, atom1, atom2) in PROTEIN_DOUBLE_BONDS {
+        if is_bond(atom1, atom2) {
+            // Check if residue matches
+            let matches = residues.iter().any(|&r| r == "*" || r == resn);
+            if matches {
                 return BondOrder::Double;
             }
         }
-        // ASP: carboxylate CG=OD1
-        "ASP" | "ASPM" => {
-            if is_bond("CG", "OD1") {
-                return BondOrder::Double;
-            }
-        }
-        // ASN: amide CG=OD1
-        "ASN" => {
-            if is_bond("CG", "OD1") {
-                return BondOrder::Double;
-            }
-        }
-        // GLU: carboxylate CD=OE1
-        "GLU" | "GLUM" => {
-            if is_bond("CD", "OE1") {
-                return BondOrder::Double;
-            }
-        }
-        // GLN: amide CD=OE1
-        "GLN" => {
-            if is_bond("CD", "OE1") {
-                return BondOrder::Double;
-            }
-        }
-        // HIS and variants: imidazole ring (Kekulé alternating pattern)
-        // Pattern: CG-ND1 single, ND1-CE1 double, CE1-NE2 single, NE2-CD2 double, CD2-CG single
-        "HIS" | "HID" | "HIE" | "HIP" => {
-            if is_bond("ND1", "CE1") || is_bond("NE2", "CD2") {
-                return BondOrder::Double;
-            }
-        }
-        // PHE: benzene ring (Kekulé alternating pattern)
-        // Pattern: CG-CD1 double, CD1-CE1 single, CE1-CZ double, CZ-CE2 single, CE2-CD2 double, CD2-CG single
-        "PHE" => {
-            if is_bond("CG", "CD1") || is_bond("CE1", "CZ") || is_bond("CE2", "CD2") {
-                return BondOrder::Double;
-            }
-        }
-        // TYR: benzene ring (same Kekulé pattern as PHE)
-        "TYR" => {
-            if is_bond("CG", "CD1") || is_bond("CE1", "CZ") || is_bond("CE2", "CD2") {
-                return BondOrder::Double;
-            }
-        }
-        // TRP: indole ring system (Kekulé alternating pattern)
-        // Five-membered ring: CG-CD1 double, CD1-NE1 single, NE1-CE2 single, CE2-CD2 single, CD2-CG single
-        // Six-membered ring: CE2-CZ2 double, CZ2-CH2 single, CH2-CZ3 double, CZ3-CE3 single, CE3-CD2 double
-        "TRP" => {
-            // Double bonds in the fused ring system
-            if is_bond("CG", "CD1") || is_bond("CE2", "CZ2") || is_bond("CH2", "CZ3") || is_bond("CE3", "CD2") {
-                return BondOrder::Double;
-            }
-        }
-        _ => {}
     }
 
     BondOrder::Single
@@ -853,8 +834,9 @@ impl ObjectMolecule {
     }
 
     /// Get the geometric center of the molecule for a state
+    #[deprecated(since = "0.2.0", note = "Use center() instead")]
     pub fn get_center(&self, state: usize) -> Option<Vec3> {
-        self.coord_sets.get(state).map(|cs| cs.center())
+        self.center(state)
     }
 
     /// Get the geometric center of specific atoms for a state
@@ -868,7 +850,7 @@ impl ObjectMolecule {
         let mut count = 0;
         for &atom in atoms {
             if let Some(coord) = cs.get_atom_coord(atom) {
-                sum = sum + coord;
+                sum += coord;
                 count += 1;
             }
         }

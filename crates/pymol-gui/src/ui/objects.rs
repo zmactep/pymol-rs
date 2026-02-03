@@ -34,7 +34,7 @@ mod colors {
 }
 
 /// Available molecular representations for show/hide menus
-const REPRESENTATIONS: &[(&str, u32)] = &[
+const REPRESENTATIONS: &[(&str, RepMask)] = &[
     ("lines", RepMask::LINES),
     ("sticks", RepMask::STICKS),
     ("spheres", RepMask::SPHERES),
@@ -140,9 +140,9 @@ pub enum ObjectAction {
     /// Hide all representations
     HideAll(String),
     /// Show specific representation
-    ShowRep(String, u32),
+    ShowRep(String, RepMask),
     /// Hide specific representation  
-    HideRep(String, u32),
+    HideRep(String, RepMask),
     /// Set color
     SetColor(String, String),
     /// Delete object

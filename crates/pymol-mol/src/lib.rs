@@ -46,6 +46,7 @@ mod element;
 mod error;
 mod flags;
 mod index;
+mod iterator;
 mod molecule;
 mod residue;
 mod secondary;

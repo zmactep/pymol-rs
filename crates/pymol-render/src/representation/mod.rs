@@ -44,7 +44,7 @@ pub enum RepType {
 
 impl RepType {
     /// Get the RepMask bit for this representation type
-    pub fn mask_bit(&self) -> u32 {
+    pub fn mask_bit(&self) -> pymol_mol::RepMask {
         use pymol_mol::RepMask;
         match self {
             RepType::Lines => RepMask::LINES,

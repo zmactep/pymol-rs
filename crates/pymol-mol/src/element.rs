@@ -3,7 +3,9 @@
 //! Provides the `Element` enum representing chemical elements with their
 //! atomic numbers, symbols, names, VdW radii, and atomic masses.
 
+use ahash::AHashMap;
 use std::fmt;
+use std::sync::OnceLock;
 
 /// Chemical element with atomic properties
 ///
@@ -392,6 +394,35 @@ pub const DEFAULT_VDW_RADIUS: f32 = 1.80;
 /// Number of elements in the table (including Unknown/LP at index 0)
 pub const ELEMENT_COUNT: usize = 119;
 
+/// Static symbol lookup map for O(1) symbol-to-element conversion.
+/// Initialized lazily on first access.
+static SYMBOL_MAP: OnceLock<AHashMap<&'static str, Element>> = OnceLock::new();
+
+/// Initialize the symbol lookup map
+fn init_symbol_map() -> AHashMap<&'static str, Element> {
+    let mut map = AHashMap::with_capacity(ELEMENT_COUNT + 10); // Extra for aliases
+
+    // Add all elements from the data table
+    for (i, data) in ELEMENT_DATA.iter().enumerate() {
+        if let Some(elem) = Element::from_atomic_number(i as u8) {
+            map.insert(data.symbol, elem);
+        }
+    }
+
+    // Add special aliases
+    map.insert("D", Element::Hydrogen); // Deuterium
+    map.insert("Q", Element::Hydrogen); // Unspecified hydrogen
+    map.insert("Lp", Element::Unknown); // Lone pair
+    map.insert("LP", Element::Unknown); // Lone pair (uppercase)
+
+    map
+}
+
+/// Get the symbol lookup map (initializes on first access)
+fn symbol_map() -> &'static AHashMap<&'static str, Element> {
+    SYMBOL_MAP.get_or_init(init_symbol_map)
+}
+
 impl Element {
     /// Create an element from its atomic number
     ///
@@ -436,7 +467,7 @@ impl Element {
             };
         }
 
-        // Titlecase the symbol for lookup
+        // Titlecase the symbol for lookup (e.g., "HE" -> "He", "ca" -> "Ca")
         let mut titlecase = String::with_capacity(symbol.len());
         for (i, c) in symbol.chars().enumerate() {
             if i == 0 {
@@ -446,18 +477,8 @@ impl Element {
             }
         }
 
-        // Linear search through element table
-        for (i, data) in ELEMENT_DATA.iter().enumerate() {
-            if data.symbol == titlecase {
-                return Element::from_atomic_number(i as u8);
-            }
-        }
-
-        // Check special cases
-        match titlecase.as_str() {
-            "Lp" => Some(Element::Unknown), // Lone pair
-            _ => None,
-        }
+        // O(1) lookup using the hash map
+        symbol_map().get(titlecase.as_str()).copied()
     }
 
     /// Get the atomic number

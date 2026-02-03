@@ -123,17 +123,17 @@ impl ObjectState {
     }
 
     /// Check if a representation is visible
-    pub fn rep_visible(&self, rep: u32) -> bool {
+    pub fn rep_visible(&self, rep: RepMask) -> bool {
         self.visible_reps.is_visible(rep)
     }
 
     /// Show a representation
-    pub fn show_rep(&mut self, rep: u32) {
+    pub fn show_rep(&mut self, rep: RepMask) {
         self.visible_reps.set_visible(rep);
     }
 
     /// Hide a representation
-    pub fn hide_rep(&mut self, rep: u32) {
+    pub fn hide_rep(&mut self, rep: RepMask) {
         self.visible_reps.set_hidden(rep);
     }
 }

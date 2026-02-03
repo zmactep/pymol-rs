@@ -400,7 +400,7 @@ impl Viewer {
     ///
     /// If the representation is currently visible on any molecule, it will be hidden.
     /// Otherwise, it will be shown on all molecules.
-    pub fn toggle_representation(&mut self, rep: u32) {
+    pub fn toggle_representation(&mut self, rep: pymol_mol::RepMask) {
         let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
         for name in names {
             if let Some(mol) = self.registry.get_molecule_mut(&name) {
@@ -411,7 +411,7 @@ impl Viewer {
     }
 
     /// Show a representation for all molecules
-    pub fn show_representation(&mut self, rep: u32) {
+    pub fn show_representation(&mut self, rep: pymol_mol::RepMask) {
         let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
         for name in names {
             if let Some(mol) = self.registry.get_molecule_mut(&name) {
@@ -422,7 +422,7 @@ impl Viewer {
     }
 
     /// Hide a representation for all molecules
-    pub fn hide_representation(&mut self, rep: u32) {
+    pub fn hide_representation(&mut self, rep: pymol_mol::RepMask) {
         let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
         for name in names {
             if let Some(mol) = self.registry.get_molecule_mut(&name) {

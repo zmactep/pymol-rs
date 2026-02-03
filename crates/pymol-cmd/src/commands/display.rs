@@ -22,7 +22,7 @@ pub fn register(registry: &mut CommandRegistry) {
 }
 
 /// Parse a representation name into a RepMask value
-fn parse_rep(name: &str) -> Option<u32> {
+fn parse_rep(name: &str) -> Option<RepMask> {
     match name.to_lowercase().as_str() {
         "lines" | "line" => Some(RepMask::LINES),
         "sticks" | "stick" => Some(RepMask::STICKS),
@@ -39,7 +39,7 @@ fn parse_rep(name: &str) -> Option<u32> {
         "callback" => Some(RepMask::CALLBACK),
         "extent" => Some(RepMask::EXTENT),
         "slice" => Some(RepMask::SLICE),
-        "everything" | "all" => Some(RepMask::ALL.0), // Extract inner u32
+        "everything" | "all" => Some(RepMask::ALL),
         _ => None,
     }
 }
@@ -96,7 +96,7 @@ EXAMPLES
                 CmdError::invalid_arg("representation", format!("unknown representation: {}", name))
             })?
         } else {
-            RepMask::ALL.0
+            RepMask::ALL
         };
 
         // Evaluate selection with named selection support
@@ -190,7 +190,7 @@ EXAMPLES
                 CmdError::invalid_arg("representation", format!("unknown representation: {}", name))
             })?
         } else {
-            RepMask::ALL.0
+            RepMask::ALL
         };
 
         // Evaluate selection with named selection support
@@ -207,7 +207,7 @@ EXAMPLES
                     let mol_mut = mol_obj.molecule_mut();
                     for idx in selected.indices() {
                         if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            if rep == RepMask::ALL.0 {
+                            if rep == RepMask::ALL {
                                 atom.visible_reps = RepMask::NONE;
                             } else {
                                 atom.visible_reps.set_hidden(rep);

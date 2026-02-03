@@ -11,6 +11,7 @@
 //! - PyMOL's layer3/Selector.cpp - SelectorAssignSS function
 //! - PyMOL's layer2/ObjectMolecule.cpp - ObjectMoleculeGetPhiPsi function
 
+use bitflags::bitflags;
 use lin_alg::f32::Vec3;
 use std::f32::consts::PI;
 
@@ -91,34 +92,34 @@ pub fn dihedral_angle(v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3) -> f32 {
     let d21 = v2 - v1;
     let d01 = v0 - v1;
     let d32 = v3 - v2;
-    
+
     let d21_len = d21.magnitude();
     if d21_len < 1e-6 {
         // Degenerate case: fall back to angle between vectors
         return angle_between(d01, d32);
     }
-    
+
     // Normal vectors to the two planes
     let dd1 = d21.cross(d01);
     let dd3 = d21.cross(d32);
-    
+
     let dd1_len = dd1.magnitude();
     let dd3_len = dd3.magnitude();
-    
+
     if dd1_len < 1e-6 || dd3_len < 1e-6 {
         // Degenerate case: fall back to angle between vectors
         return angle_between(d01, d32);
     }
-    
+
     // Angle between the normal vectors
     let mut result = angle_between(dd1, dd3);
-    
+
     // Determine sign of the dihedral angle
     let pos_d = d21.cross(dd1);
     if dd3.dot(pos_d) < 0.0 {
         result = -result;
     }
-    
+
     result
 }
 
@@ -126,11 +127,11 @@ pub fn dihedral_angle(v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3) -> f32 {
 fn angle_between(v1: Vec3, v2: Vec3) -> f32 {
     let len1 = v1.magnitude();
     let len2 = v2.magnitude();
-    
+
     if len1 < 1e-6 || len2 < 1e-6 {
         return 0.0;
     }
-    
+
     let cos_angle = v1.dot(v2) / (len1 * len2);
     // Clamp to [-1, 1] to avoid NaN from acos
     cos_angle.clamp(-1.0, 1.0).acos()
@@ -161,6 +162,32 @@ pub struct PhiPsi {
     pub psi: f32,
 }
 
+// ============================================================================
+// Classification Flags (using bitflags instead of raw constants)
+// ============================================================================
+
+bitflags! {
+    /// Flags for secondary structure classification during DSS calculation.
+    /// These match PyMOL's cSS* flags.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    struct SsFlags: u32 {
+        /// Phi/psi angles were successfully calculated
+        const GOT_PHI_PSI = 0x0001;
+        /// Phi/psi angles are in helix range
+        const PHI_PSI_HELIX = 0x0002;
+        /// Phi/psi angles are outside helix range
+        const PHI_PSI_NOT_HELIX = 0x0004;
+        /// Phi/psi angles are in strand range
+        const PHI_PSI_STRAND = 0x0008;
+        /// Phi/psi angles are outside strand range
+        const PHI_PSI_NOT_STRAND = 0x0010;
+        /// Assigned as helix
+        const HELIX = 0x0020;
+        /// Assigned as strand
+        const STRAND = 0x0040;
+    }
+}
+
 /// Internal structure for residue data during DSS calculation
 #[derive(Debug, Clone)]
 struct ResidueData {
@@ -175,17 +202,8 @@ struct ResidueData {
     /// Phi/psi angles (if calculable)
     phi_psi: Option<PhiPsi>,
     /// Classification flags
-    flags: u32,
+    flags: SsFlags,
 }
-
-// Classification flags (matching PyMOL's cSS* flags)
-const SS_GOT_PHI_PSI: u32 = 0x0001;
-const SS_PHI_PSI_HELIX: u32 = 0x0002;
-const SS_PHI_PSI_NOT_HELIX: u32 = 0x0004;
-const SS_PHI_PSI_STRAND: u32 = 0x0008;
-const SS_PHI_PSI_NOT_STRAND: u32 = 0x0010;
-const SS_HELIX: u32 = 0x0020;
-const SS_STRAND: u32 = 0x0040;
 
 // Break size for helix/strand detection (PyMOL's cSSBreakSize = 3)
 const SS_BREAK_SIZE: usize = 3;
@@ -201,19 +219,13 @@ const SS_BREAK_SIZE: usize = 3;
 ///
 /// # Returns
 /// Phi and psi angles in degrees, or None if calculation failed
-pub fn calculate_phi_psi(
-    c_prev: Vec3,
-    n: Vec3,
-    ca: Vec3,
-    c: Vec3,
-    n_next: Vec3,
-) -> PhiPsi {
+pub fn calculate_phi_psi(c_prev: Vec3, n: Vec3, ca: Vec3, c: Vec3, n_next: Vec3) -> PhiPsi {
     // Phi: dihedral(C-1, N, CA, C)
     let phi = rad_to_deg(dihedral_angle(c_prev, n, ca, c));
-    
+
     // Psi: dihedral(N, CA, C, N+1)
     let psi = rad_to_deg(dihedral_angle(n, ca, c, n_next));
-    
+
     PhiPsi { phi, psi }
 }
 
@@ -245,42 +257,42 @@ pub fn assign_secondary_structure(
         Some(cs) => cs,
         None => return 0,
     };
-    
+
     // Collect residue data
-    let mut residue_data = collect_residue_data(molecule, coord_set);
-    
+    let mut residue_data = collect_residue_data(molecule);
+
     if residue_data.len() < 3 {
         return 0; // Need at least 3 residues
     }
-    
+
     // Calculate phi/psi angles for each residue
-    calculate_all_phi_psi(&mut residue_data, molecule, coord_set);
-    
+    calculate_all_phi_psi(&mut residue_data, coord_set);
+
     // Classify residues based on phi/psi angles
     classify_residues(&mut residue_data, settings);
-    
+
     // Assign secondary structure based on consecutive patterns
     assign_ss_from_classification(&mut residue_data);
-    
+
     // Apply the assignments to the molecule
     apply_ss_assignments(molecule, &residue_data)
 }
 
 /// Collect backbone atom information for all protein residues
-fn collect_residue_data(molecule: &ObjectMolecule, _coord_set: &CoordSet) -> Vec<ResidueData> {
+fn collect_residue_data(molecule: &ObjectMolecule) -> Vec<ResidueData> {
     let mut residue_data = Vec::new();
-    
+
     for residue in molecule.residues() {
         // Skip non-amino acids
         if !crate::residue::is_amino_acid(&residue.key.resn) {
             continue;
         }
-        
+
         // Find backbone atoms
         let ca_idx = find_atom_by_name(&residue, "CA");
         let n_idx = find_atom_by_name(&residue, "N");
         let c_idx = find_atom_by_name(&residue, "C");
-        
+
         // Only include if we have at least CA
         if ca_idx.is_some() {
             residue_data.push(ResidueData {
@@ -290,11 +302,11 @@ fn collect_residue_data(molecule: &ObjectMolecule, _coord_set: &CoordSet) -> Vec
                 chain: residue.key.chain.clone(),
                 resv: residue.key.resv,
                 phi_psi: None,
-                flags: 0,
+                flags: SsFlags::empty(),
             });
         }
     }
-    
+
     residue_data
 }
 
@@ -309,42 +321,38 @@ fn find_atom_by_name(residue: &ResidueView, name: &str) -> Option<AtomIndex> {
 }
 
 /// Calculate phi/psi angles for all residues
-fn calculate_all_phi_psi(
-    residue_data: &mut [ResidueData],
-    _molecule: &ObjectMolecule,
-    coord_set: &CoordSet,
-) {
+fn calculate_all_phi_psi(residue_data: &mut [ResidueData], coord_set: &CoordSet) {
     let n_res = residue_data.len();
-    
+
     for i in 1..n_res.saturating_sub(1) {
         let prev = &residue_data[i - 1];
         let curr = &residue_data[i];
         let next = &residue_data[i + 1];
-        
+
         // Check chain continuity
         if prev.chain != curr.chain || curr.chain != next.chain {
             continue;
         }
-        
+
         // Check residue number continuity (allow gaps up to 1)
         if curr.resv - prev.resv > 1 || next.resv - curr.resv > 1 {
             continue;
         }
-        
+
         // Get atom positions
         let c_prev = get_atom_pos(prev.c_idx, coord_set);
         let n_curr = get_atom_pos(curr.n_idx, coord_set);
         let ca_curr = get_atom_pos(curr.ca_idx, coord_set);
         let c_curr = get_atom_pos(curr.c_idx, coord_set);
         let n_next = get_atom_pos(next.n_idx, coord_set);
-        
+
         // Need all positions for phi/psi calculation
         if let (Some(c_prev), Some(n_curr), Some(ca_curr), Some(c_curr), Some(n_next)) =
             (c_prev, n_curr, ca_curr, c_curr, n_next)
         {
             let phi_psi = calculate_phi_psi(c_prev, n_curr, ca_curr, c_curr, n_next);
             residue_data[i].phi_psi = Some(phi_psi);
-            residue_data[i].flags |= SS_GOT_PHI_PSI;
+            residue_data[i].flags |= SsFlags::GOT_PHI_PSI;
         }
     }
 }
@@ -363,27 +371,27 @@ fn classify_residues(residue_data: &mut [ResidueData], settings: &DssSettings) {
             let helix_psi_delta = angle_delta(phi_psi.psi, settings.helix_psi_target);
             let strand_phi_delta = angle_delta(phi_psi.phi, settings.strand_phi_target);
             let strand_psi_delta = angle_delta(phi_psi.psi, settings.strand_psi_target);
-            
+
             // Helix classification
             if helix_phi_delta > settings.helix_phi_exclude
                 || helix_psi_delta > settings.helix_psi_exclude
             {
-                res.flags |= SS_PHI_PSI_NOT_HELIX;
+                res.flags |= SsFlags::PHI_PSI_NOT_HELIX;
             } else if helix_phi_delta < settings.helix_phi_include
                 && helix_psi_delta < settings.helix_psi_include
             {
-                res.flags |= SS_PHI_PSI_HELIX;
+                res.flags |= SsFlags::PHI_PSI_HELIX;
             }
-            
+
             // Strand classification
             if strand_phi_delta > settings.strand_phi_exclude
                 || strand_psi_delta > settings.strand_psi_exclude
             {
-                res.flags |= SS_PHI_PSI_NOT_STRAND;
+                res.flags |= SsFlags::PHI_PSI_NOT_STRAND;
             } else if strand_phi_delta < settings.strand_phi_include
                 && strand_psi_delta < settings.strand_psi_include
             {
-                res.flags |= SS_PHI_PSI_STRAND;
+                res.flags |= SsFlags::PHI_PSI_STRAND;
             }
         }
     }
@@ -404,65 +412,65 @@ fn angle_delta(angle: f32, target: f32) -> f32 {
 /// to assign secondary structure
 fn assign_ss_from_classification(residue_data: &mut [ResidueData]) {
     let n_res = residue_data.len();
-    
+
     // Skip if too few residues
     if n_res < 2 * SS_BREAK_SIZE + 1 {
         return;
     }
-    
+
     // First pass: tentatively assign helices
     // Look for runs of residues with helix-compatible phi/psi
     for i in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
         let flags = residue_data[i].flags;
-        
+
         // Check if this residue is a potential helix residue
-        if (flags & SS_PHI_PSI_HELIX) != 0 {
+        if flags.contains(SsFlags::PHI_PSI_HELIX) {
             // Check if we have a run of helix-compatible residues
             let mut helix_run = true;
             for j in (i.saturating_sub(1))..=(i + 1).min(n_res - 1) {
                 if j != i {
                     let neighbor_flags = residue_data[j].flags;
                     // Allow if neighbor is helix-compatible OR not explicitly non-helix
-                    if (neighbor_flags & SS_PHI_PSI_NOT_HELIX) != 0 
-                        && (neighbor_flags & SS_PHI_PSI_HELIX) == 0 
+                    if neighbor_flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
+                        && !neighbor_flags.contains(SsFlags::PHI_PSI_HELIX)
                     {
                         helix_run = false;
                         break;
                     }
                 }
             }
-            
+
             if helix_run {
-                residue_data[i].flags |= SS_HELIX;
+                residue_data[i].flags |= SsFlags::HELIX;
             }
         }
     }
-    
+
     // Second pass: tentatively assign strands
     for i in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
         let flags = residue_data[i].flags;
-        
+
         // Don't overwrite helix assignments
-        if (flags & SS_HELIX) != 0 {
+        if flags.contains(SsFlags::HELIX) {
             continue;
         }
-        
-        if (flags & SS_PHI_PSI_STRAND) != 0 {
+
+        if flags.contains(SsFlags::PHI_PSI_STRAND) {
             let mut strand_run = true;
             for j in (i.saturating_sub(1))..=(i + 1).min(n_res - 1) {
                 if j != i {
                     let neighbor_flags = residue_data[j].flags;
-                    if (neighbor_flags & SS_PHI_PSI_NOT_STRAND) != 0
-                        && (neighbor_flags & SS_PHI_PSI_STRAND) == 0
+                    if neighbor_flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
+                        && !neighbor_flags.contains(SsFlags::PHI_PSI_STRAND)
                     {
                         strand_run = false;
                         break;
                     }
                 }
             }
-            
+
             if strand_run {
-                residue_data[i].flags |= SS_STRAND;
+                residue_data[i].flags |= SsFlags::STRAND;
             }
         }
     }
@@ -471,20 +479,20 @@ fn assign_ss_from_classification(residue_data: &mut [ResidueData]) {
 /// Apply secondary structure assignments to the molecule
 fn apply_ss_assignments(molecule: &mut ObjectMolecule, residue_data: &[ResidueData]) -> usize {
     let mut updated_count = 0;
-    
+
     // Build a map from residue (chain, resv) to secondary structure
     let mut ss_map = std::collections::HashMap::new();
     for res in residue_data {
-        let ss = if (res.flags & SS_HELIX) != 0 {
+        let ss = if res.flags.contains(SsFlags::HELIX) {
             SecondaryStructure::Helix
-        } else if (res.flags & SS_STRAND) != 0 {
+        } else if res.flags.contains(SsFlags::STRAND) {
             SecondaryStructure::Sheet
         } else {
             SecondaryStructure::Loop
         };
         ss_map.insert((res.chain.clone(), res.resv), ss);
     }
-    
+
     // Apply to all atoms in matching residues
     for atom_idx in 0..molecule.atom_count() {
         let idx = AtomIndex(atom_idx as u32);
@@ -500,7 +508,7 @@ fn apply_ss_assignments(molecule: &mut ObjectMolecule, residue_data: &[ResidueDa
             }
         }
     }
-    
+
     updated_count
 }
 
@@ -519,7 +527,7 @@ mod tests {
         let v1 = Vec3::new(1.0, 0.0, 0.0);
         let v2 = Vec3::new(2.0, 0.0, 0.0);
         let v3 = Vec3::new(3.0, 0.0, 0.0);
-        
+
         let angle = rad_to_deg(dihedral_angle(v0, v1, v2, v3));
         // Collinear points should give 0 (degenerate case)
         assert!(angle.abs() < 10.0 || (angle.abs() - 180.0).abs() < 10.0);
@@ -532,7 +540,7 @@ mod tests {
         let v1 = Vec3::new(0.0, 0.0, 0.0);
         let v2 = Vec3::new(1.0, 0.0, 0.0);
         let v3 = Vec3::new(1.0, 0.0, 1.0);
-        
+
         let angle = rad_to_deg(dihedral_angle(v0, v1, v2, v3));
         assert!((angle.abs() - 90.0).abs() < 1.0);
     }
@@ -549,5 +557,18 @@ mod tests {
         let settings = DssSettings::default();
         assert!((settings.helix_phi_target - (-57.0)).abs() < 0.01);
         assert!((settings.helix_psi_target - (-48.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_ss_flags() {
+        let mut flags = SsFlags::empty();
+        assert!(!flags.contains(SsFlags::HELIX));
+
+        flags |= SsFlags::PHI_PSI_HELIX;
+        assert!(flags.contains(SsFlags::PHI_PSI_HELIX));
+
+        flags |= SsFlags::HELIX;
+        assert!(flags.contains(SsFlags::HELIX));
+        assert!(flags.contains(SsFlags::PHI_PSI_HELIX));
     }
 }

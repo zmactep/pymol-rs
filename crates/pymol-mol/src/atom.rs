@@ -18,60 +18,72 @@ impl RepMask {
 
     // Representation bit positions (matching PyMOL's cRepCyl, cRepSphere, etc.)
     /// Lines representation
-    pub const LINES: u32 = 1 << 0;
+    pub const LINES: RepMask = RepMask(1 << 0);
     /// Spheres representation
-    pub const SPHERES: u32 = 1 << 1;
+    pub const SPHERES: RepMask = RepMask(1 << 1);
     /// Surface representation
-    pub const SURFACE: u32 = 1 << 2;
+    pub const SURFACE: RepMask = RepMask(1 << 2);
     /// Labels representation
-    pub const LABELS: u32 = 1 << 3;
+    pub const LABELS: RepMask = RepMask(1 << 3);
     /// Non-bonded spheres representation
-    pub const NONBONDED: u32 = 1 << 4;
+    pub const NONBONDED: RepMask = RepMask(1 << 4);
     /// Cartoon representation
-    pub const CARTOON: u32 = 1 << 5;
+    pub const CARTOON: RepMask = RepMask(1 << 5);
     /// Ribbon representation
-    pub const RIBBON: u32 = 1 << 6;
+    pub const RIBBON: RepMask = RepMask(1 << 6);
     /// Sticks representation
-    pub const STICKS: u32 = 1 << 7;
+    pub const STICKS: RepMask = RepMask(1 << 7);
     /// Mesh representation
-    pub const MESH: u32 = 1 << 8;
+    pub const MESH: RepMask = RepMask(1 << 8);
     /// Dots representation
-    pub const DOTS: u32 = 1 << 9;
+    pub const DOTS: RepMask = RepMask(1 << 9);
     /// Dashes representation
-    pub const DASHES: u32 = 1 << 10;
+    pub const DASHES: RepMask = RepMask(1 << 10);
     /// Cell representation
-    pub const CELL: u32 = 1 << 11;
+    pub const CELL: RepMask = RepMask(1 << 11);
     /// CGO representation
-    pub const CGO: u32 = 1 << 12;
+    pub const CGO: RepMask = RepMask(1 << 12);
     /// Callback representation
-    pub const CALLBACK: u32 = 1 << 13;
+    pub const CALLBACK: RepMask = RepMask(1 << 13);
     /// Extent representation
-    pub const EXTENT: u32 = 1 << 14;
+    pub const EXTENT: RepMask = RepMask(1 << 14);
     /// Slice representation
-    pub const SLICE: u32 = 1 << 15;
+    pub const SLICE: RepMask = RepMask(1 << 15);
 
     /// Check if a representation is visible
     #[inline]
-    pub fn is_visible(&self, rep: u32) -> bool {
-        (self.0 & rep) != 0
+    pub fn is_visible(&self, rep: RepMask) -> bool {
+        (self.0 & rep.0) != 0
     }
 
     /// Set a representation visible
     #[inline]
-    pub fn set_visible(&mut self, rep: u32) {
-        self.0 |= rep;
+    pub fn set_visible(&mut self, rep: RepMask) {
+        self.0 |= rep.0;
     }
 
     /// Set a representation hidden
     #[inline]
-    pub fn set_hidden(&mut self, rep: u32) {
-        self.0 &= !rep;
+    pub fn set_hidden(&mut self, rep: RepMask) {
+        self.0 &= !rep.0;
     }
 
     /// Toggle a representation
     #[inline]
-    pub fn toggle(&mut self, rep: u32) {
-        self.0 ^= rep;
+    pub fn toggle(&mut self, rep: RepMask) {
+        self.0 ^= rep.0;
+    }
+
+    /// Combine two masks (union)
+    #[inline]
+    pub const fn union(self, other: RepMask) -> RepMask {
+        RepMask(self.0 | other.0)
+    }
+
+    /// Intersect two masks
+    #[inline]
+    pub const fn intersection(self, other: RepMask) -> RepMask {
+        RepMask(self.0 & other.0)
     }
 }
 
@@ -255,7 +267,7 @@ impl Default for Atom {
             color: -1, // -1 = by element
             cartoon_color: None, // None = use atom.color
             ribbon_color: None, // None = use atom.color
-            visible_reps: RepMask(RepMask::LINES), // Default to lines visible like PyMOL
+            visible_reps: RepMask::LINES, // Default to lines visible like PyMOL
             cartoon: 0,
             text_type: String::new(),
             label: String::new(),

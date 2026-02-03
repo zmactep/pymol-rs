@@ -252,7 +252,7 @@ impl CoordSet {
         }
     }
 
-    /// Get a pointer to the coordinate data for a coordinate index
+    /// Get a reference to the coordinate data for a coordinate index as a fixed-size array
     #[inline]
     pub fn coord_ptr(&self, idx: CoordIndex) -> Option<&[f32; 3]> {
         let i = idx.as_usize();
@@ -260,13 +260,11 @@ impl CoordSet {
             return None;
         }
         let base = i * 3;
-        // SAFETY: We checked bounds above, and coords is always a multiple of 3
-        Some(unsafe {
-            &*(self.coords.as_ptr().add(base) as *const [f32; 3])
-        })
+        // Safe conversion: get slice and convert to array reference
+        self.coords.get(base..base + 3)?.try_into().ok()
     }
 
-    /// Get a mutable pointer to the coordinate data
+    /// Get a mutable reference to the coordinate data as a fixed-size array
     #[inline]
     pub fn coord_ptr_mut(&mut self, idx: CoordIndex) -> Option<&mut [f32; 3]> {
         let i = idx.as_usize();
@@ -274,10 +272,8 @@ impl CoordSet {
             return None;
         }
         let base = i * 3;
-        // SAFETY: We checked bounds above, and coords is always a multiple of 3
-        Some(unsafe {
-            &mut *(self.coords.as_mut_ptr().add(base) as *mut [f32; 3])
-        })
+        // Safe conversion: get mutable slice and convert to array reference
+        self.coords.get_mut(base..base + 3)?.try_into().ok()
     }
 
     /// Get the raw coordinate slice
@@ -346,7 +342,7 @@ impl CoordSet {
 
         let mut sum = Vec3::new(0.0, 0.0, 0.0);
         for coord in self.iter() {
-            sum = sum + coord;
+            sum += coord;
         }
         sum * (1.0 / self.n_index as f32)
     }
@@ -448,19 +444,7 @@ impl CoordSet {
     /// ```
     pub fn transform(&mut self, matrix: &Mat4) {
         for i in 0..self.n_index {
-            let base = i * 3;
-            let x = self.coords[base];
-            let y = self.coords[base + 1];
-            let z = self.coords[base + 2];
-
-            // Apply transformation: v' = M * v
-            // Using row-major matrix layout
-            self.coords[base] =
-                matrix.data[0] * x + matrix.data[1] * y + matrix.data[2] * z + matrix.data[3];
-            self.coords[base + 1] =
-                matrix.data[4] * x + matrix.data[5] * y + matrix.data[6] * z + matrix.data[7];
-            self.coords[base + 2] =
-                matrix.data[8] * x + matrix.data[9] * y + matrix.data[10] * z + matrix.data[11];
+            apply_mat4(&mut self.coords, i * 3, matrix);
         }
     }
 
@@ -469,19 +453,7 @@ impl CoordSet {
         for &idx in indices {
             let i = idx.as_usize();
             if i < self.n_index {
-                let base = i * 3;
-                let x = self.coords[base];
-                let y = self.coords[base + 1];
-                let z = self.coords[base + 2];
-
-                self.coords[base] =
-                    matrix.data[0] * x + matrix.data[1] * y + matrix.data[2] * z + matrix.data[3];
-                self.coords[base + 1] =
-                    matrix.data[4] * x + matrix.data[5] * y + matrix.data[6] * z + matrix.data[7];
-                self.coords[base + 2] = matrix.data[8] * x
-                    + matrix.data[9] * y
-                    + matrix.data[10] * z
-                    + matrix.data[11];
+                apply_mat4(&mut self.coords, i * 3, matrix);
             }
         }
     }
@@ -490,20 +462,7 @@ impl CoordSet {
     pub fn transform_atoms(&mut self, atoms: &[AtomIndex], matrix: &Mat4) {
         for &atom in atoms {
             if let Some(coord_idx) = self.atom_to_coord(atom) {
-                let i = coord_idx.as_usize();
-                let base = i * 3;
-                let x = self.coords[base];
-                let y = self.coords[base + 1];
-                let z = self.coords[base + 2];
-
-                self.coords[base] =
-                    matrix.data[0] * x + matrix.data[1] * y + matrix.data[2] * z + matrix.data[3];
-                self.coords[base + 1] =
-                    matrix.data[4] * x + matrix.data[5] * y + matrix.data[6] * z + matrix.data[7];
-                self.coords[base + 2] = matrix.data[8] * x
-                    + matrix.data[9] * y
-                    + matrix.data[10] * z
-                    + matrix.data[11];
+                apply_mat4(&mut self.coords, coord_idx.as_usize() * 3, matrix);
             }
         }
     }
@@ -519,16 +478,7 @@ impl CoordSet {
     /// Transform: y = R * (x + pre_trans) + post_trans
     pub fn transform_ttt(&mut self, ttt: &[f32; 16]) {
         for i in 0..self.n_index {
-            let base = i * 3;
-            // Add pre-translation
-            let x = self.coords[base] + ttt[12];
-            let y = self.coords[base + 1] + ttt[13];
-            let z = self.coords[base + 2] + ttt[14];
-
-            // Apply rotation and post-translation
-            self.coords[base] = ttt[0] * x + ttt[1] * y + ttt[2] * z + ttt[3];
-            self.coords[base + 1] = ttt[4] * x + ttt[5] * y + ttt[6] * z + ttt[7];
-            self.coords[base + 2] = ttt[8] * x + ttt[9] * y + ttt[10] * z + ttt[11];
+            apply_ttt(&mut self.coords, i * 3, ttt);
         }
     }
 
@@ -536,24 +486,101 @@ impl CoordSet {
     pub fn transform_ttt_atoms(&mut self, atoms: &[AtomIndex], ttt: &[f32; 16]) {
         for &atom in atoms {
             if let Some(coord_idx) = self.atom_to_coord(atom) {
-                let i = coord_idx.as_usize();
-                let base = i * 3;
-                // Add pre-translation
-                let x = self.coords[base] + ttt[12];
-                let y = self.coords[base + 1] + ttt[13];
-                let z = self.coords[base + 2] + ttt[14];
-
-                // Apply rotation and post-translation
-                self.coords[base] = ttt[0] * x + ttt[1] * y + ttt[2] * z + ttt[3];
-                self.coords[base + 1] = ttt[4] * x + ttt[5] * y + ttt[6] * z + ttt[7];
-                self.coords[base + 2] = ttt[8] * x + ttt[9] * y + ttt[10] * z + ttt[11];
+                apply_ttt(&mut self.coords, coord_idx.as_usize() * 3, ttt);
             }
         }
     }
 }
 
 // =============================================================================
-// Transformation Utilities
+// Transformation Helpers (private)
+// =============================================================================
+
+/// Apply a 4x4 transformation matrix to a coordinate at the given base index.
+/// This is an inline helper to eliminate code duplication in transform methods.
+#[inline]
+fn apply_mat4(coords: &mut [f32], base: usize, matrix: &Mat4) {
+    let x = coords[base];
+    let y = coords[base + 1];
+    let z = coords[base + 2];
+
+    coords[base] = matrix.data[0] * x + matrix.data[1] * y + matrix.data[2] * z + matrix.data[3];
+    coords[base + 1] =
+        matrix.data[4] * x + matrix.data[5] * y + matrix.data[6] * z + matrix.data[7];
+    coords[base + 2] =
+        matrix.data[8] * x + matrix.data[9] * y + matrix.data[10] * z + matrix.data[11];
+}
+
+/// Apply a TTT transformation to a coordinate at the given base index.
+/// TTT format: y = R * (x + pre_trans) + post_trans
+#[inline]
+fn apply_ttt(coords: &mut [f32], base: usize, ttt: &[f32; 16]) {
+    // Add pre-translation
+    let x = coords[base] + ttt[12];
+    let y = coords[base + 1] + ttt[13];
+    let z = coords[base + 2] + ttt[14];
+
+    // Apply rotation and post-translation
+    coords[base] = ttt[0] * x + ttt[1] * y + ttt[2] * z + ttt[3];
+    coords[base + 1] = ttt[4] * x + ttt[5] * y + ttt[6] * z + ttt[7];
+    coords[base + 2] = ttt[8] * x + ttt[9] * y + ttt[10] * z + ttt[11];
+}
+
+/// 3x3 rotation matrix elements computed using Rodrigues' rotation formula.
+/// Used internally by `rotation_matrix` and `rotation_ttt`.
+struct RotationElements {
+    r00: f32,
+    r01: f32,
+    r02: f32,
+    r10: f32,
+    r11: f32,
+    r12: f32,
+    r20: f32,
+    r21: f32,
+    r22: f32,
+}
+
+/// Compute rotation matrix elements using Rodrigues' rotation formula.
+/// Returns None if the axis is degenerate (zero length).
+fn rodrigues_rotation(axis: Vec3, angle: f32) -> Option<RotationElements> {
+    let len = (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt();
+    if len < 1e-10 {
+        return None;
+    }
+
+    let x = axis.x / len;
+    let y = axis.y / len;
+    let z = axis.z / len;
+
+    let c = angle.cos();
+    let s = angle.sin();
+    let t = 1.0 - c;
+
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let xy = x * y;
+    let yz = y * z;
+    let zx = z * x;
+    let xs = x * s;
+    let ys = y * s;
+    let zs = z * s;
+
+    Some(RotationElements {
+        r00: t * xx + c,
+        r01: t * xy - zs,
+        r02: t * zx + ys,
+        r10: t * xy + zs,
+        r11: t * yy + c,
+        r12: t * yz - xs,
+        r20: t * zx - ys,
+        r21: t * yz + xs,
+        r22: t * zz + c,
+    })
+}
+
+// =============================================================================
+// Transformation Utilities (public)
 // =============================================================================
 
 /// Create a rotation matrix for rotation about an axis through an origin
@@ -569,65 +596,31 @@ impl CoordSet {
 /// # Returns
 /// A 4x4 homogeneous transformation matrix (row-major: data[row*4 + col] = M[row][col])
 pub fn rotation_matrix(axis: Vec3, angle: f32, origin: Vec3) -> Mat4 {
-    // Normalize axis
-    let len = (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt();
-    if len < 1e-10 {
-        return Mat4::new_identity();
-    }
-    let x = axis.x / len;
-    let y = axis.y / len;
-    let z = axis.z / len;
-
-    // Rodrigues' rotation formula
-    let c = angle.cos();
-    let s = angle.sin();
-    let t = 1.0 - c;
-
-    let xx = x * x;
-    let yy = y * y;
-    let zz = z * z;
-    let xy = x * y;
-    let yz = y * z;
-    let zx = z * x;
-    let xs = x * s;
-    let ys = y * s;
-    let zs = z * s;
-
-    // Rotation matrix elements (row-major)
-    let r00 = t * xx + c;
-    let r01 = t * xy - zs;
-    let r02 = t * zx + ys;
-    let r10 = t * xy + zs;
-    let r11 = t * yy + c;
-    let r12 = t * yz - xs;
-    let r20 = t * zx - ys;
-    let r21 = t * yz + xs;
-    let r22 = t * zz + c;
+    let r = match rodrigues_rotation(axis, angle) {
+        Some(r) => r,
+        None => return Mat4::new_identity(),
+    };
 
     // Combine with translation: T(origin) * R * T(-origin)
     // Result is: R * (v - origin) + origin = R*v + (origin - R*origin)
-    let tx = origin.x - (r00 * origin.x + r01 * origin.y + r02 * origin.z);
-    let ty = origin.y - (r10 * origin.x + r11 * origin.y + r12 * origin.z);
-    let tz = origin.z - (r20 * origin.x + r21 * origin.y + r22 * origin.z);
+    let tx = origin.x - (r.r00 * origin.x + r.r01 * origin.y + r.r02 * origin.z);
+    let ty = origin.y - (r.r10 * origin.x + r.r11 * origin.y + r.r12 * origin.z);
+    let tz = origin.z - (r.r20 * origin.x + r.r21 * origin.y + r.r22 * origin.z);
 
     // Build matrix directly in row-major format: data[row*4 + col] = M[row][col]
     let mut result = Mat4::new_identity();
-    // Row 0
-    result.data[0] = r00;
-    result.data[1] = r01;
-    result.data[2] = r02;
+    result.data[0] = r.r00;
+    result.data[1] = r.r01;
+    result.data[2] = r.r02;
     result.data[3] = tx;
-    // Row 1
-    result.data[4] = r10;
-    result.data[5] = r11;
-    result.data[6] = r12;
+    result.data[4] = r.r10;
+    result.data[5] = r.r11;
+    result.data[6] = r.r12;
     result.data[7] = ty;
-    // Row 2
-    result.data[8] = r20;
-    result.data[9] = r21;
-    result.data[10] = r22;
+    result.data[8] = r.r20;
+    result.data[9] = r.r21;
+    result.data[10] = r.r22;
     result.data[11] = tz;
-    // Row 3 is already [0, 0, 0, 1] from new_identity()
 
     result
 }
@@ -723,49 +716,18 @@ pub fn mat4_to_ttt(matrix: &Mat4) -> [f32; 16] {
 /// - The origin goes in positions [3, 7, 11] (post-translation)
 /// - The negative origin goes in positions [12, 13, 14] (pre-translation)
 pub fn rotation_ttt(axis: Vec3, angle: f32, origin: Vec3) -> [f32; 16] {
-    // Normalize axis
-    let len = (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt();
-    if len < 1e-10 {
-        return [
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-        ];
-    }
-    let x = axis.x / len;
-    let y = axis.y / len;
-    let z = axis.z / len;
-
-    // Rodrigues' rotation formula
-    let c = angle.cos();
-    let s = angle.sin();
-    let t = 1.0 - c;
-
-    let xx = x * x;
-    let yy = y * y;
-    let zz = z * z;
-    let xy = x * y;
-    let yz = y * z;
-    let zx = z * x;
-    let xs = x * s;
-    let ys = y * s;
-    let zs = z * s;
+    let r = match rodrigues_rotation(axis, angle) {
+        Some(r) => r,
+        None => {
+            return [
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            ];
+        }
+    };
 
     [
-        t * xx + c,
-        t * xy - zs,
-        t * zx + ys,
-        origin.x,
-        t * xy + zs,
-        t * yy + c,
-        t * yz - xs,
-        origin.y,
-        t * zx - ys,
-        t * yz + xs,
-        t * zz + c,
-        origin.z,
-        -origin.x,
-        -origin.y,
-        -origin.z,
-        1.0,
+        r.r00, r.r01, r.r02, origin.x, r.r10, r.r11, r.r12, origin.y, r.r20, r.r21, r.r22,
+        origin.z, -origin.x, -origin.y, -origin.z, 1.0,
     ]
 }
 

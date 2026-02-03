@@ -8,351 +8,127 @@ use std::fmt;
 /// Invalid index marker value
 pub const INVALID_INDEX: u32 = u32::MAX;
 
-/// Type-safe index into an atom array
-///
-/// Prevents accidentally using a bond index where an atom index is expected.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-#[repr(transparent)]
-pub struct AtomIndex(pub u32);
+/// Macro to generate type-safe index types with common implementations.
+/// This eliminates code duplication across AtomIndex, BondIndex, StateIndex, and CoordIndex.
+macro_rules! define_index {
+    (
+        $(#[$meta:meta])*
+        $name:ident, $debug_name:literal
+    ) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+        #[repr(transparent)]
+        pub struct $name(pub u32);
 
-impl AtomIndex {
-    /// Create a new atom index
-    #[inline]
-    pub const fn new(index: u32) -> Self {
-        AtomIndex(index)
-    }
+        impl $name {
+            /// Create a new index
+            #[inline]
+            pub const fn new(index: u32) -> Self {
+                $name(index)
+            }
 
-    /// Get the raw index value
-    #[inline]
-    pub const fn as_usize(&self) -> usize {
-        self.0 as usize
-    }
+            /// Get the raw index value as usize
+            #[inline]
+            pub const fn as_usize(&self) -> usize {
+                self.0 as usize
+            }
 
-    /// Get the raw u32 value
-    #[inline]
-    pub const fn as_u32(&self) -> u32 {
-        self.0
-    }
+            /// Get the raw u32 value
+            #[inline]
+            pub const fn as_u32(&self) -> u32 {
+                self.0
+            }
 
-    /// Check if this is a valid index
-    #[inline]
-    pub const fn is_valid(&self) -> bool {
-        self.0 != INVALID_INDEX
-    }
+            /// Check if this is a valid index
+            #[inline]
+            pub const fn is_valid(&self) -> bool {
+                self.0 != INVALID_INDEX
+            }
 
-    /// Create an invalid index
-    #[inline]
-    pub const fn invalid() -> Self {
-        AtomIndex(INVALID_INDEX)
-    }
-}
-
-impl fmt::Debug for AtomIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "AtomIndex({})", self.0)
-        } else {
-            write!(f, "AtomIndex(INVALID)")
+            /// Create an invalid index
+            #[inline]
+            pub const fn invalid() -> Self {
+                $name(INVALID_INDEX)
+            }
         }
-    }
-}
 
-impl fmt::Display for AtomIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "{}", self.0)
-        } else {
-            write!(f, "INVALID")
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                if self.is_valid() {
+                    write!(f, "{}({})", $debug_name, self.0)
+                } else {
+                    write!(f, "{}(INVALID)", $debug_name)
+                }
+            }
         }
-    }
-}
 
-impl From<u32> for AtomIndex {
-    #[inline]
-    fn from(index: u32) -> Self {
-        AtomIndex(index)
-    }
-}
-
-impl From<usize> for AtomIndex {
-    #[inline]
-    fn from(index: usize) -> Self {
-        AtomIndex(index as u32)
-    }
-}
-
-impl From<AtomIndex> for u32 {
-    #[inline]
-    fn from(index: AtomIndex) -> Self {
-        index.0
-    }
-}
-
-impl From<AtomIndex> for usize {
-    #[inline]
-    fn from(index: AtomIndex) -> Self {
-        index.0 as usize
-    }
-}
-
-/// Type-safe index into a bond array
-///
-/// Prevents accidentally using an atom index where a bond index is expected.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-#[repr(transparent)]
-pub struct BondIndex(pub u32);
-
-impl BondIndex {
-    /// Create a new bond index
-    #[inline]
-    pub const fn new(index: u32) -> Self {
-        BondIndex(index)
-    }
-
-    /// Get the raw index value
-    #[inline]
-    pub const fn as_usize(&self) -> usize {
-        self.0 as usize
-    }
-
-    /// Get the raw u32 value
-    #[inline]
-    pub const fn as_u32(&self) -> u32 {
-        self.0
-    }
-
-    /// Check if this is a valid index
-    #[inline]
-    pub const fn is_valid(&self) -> bool {
-        self.0 != INVALID_INDEX
-    }
-
-    /// Create an invalid index
-    #[inline]
-    pub const fn invalid() -> Self {
-        BondIndex(INVALID_INDEX)
-    }
-}
-
-impl fmt::Debug for BondIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "BondIndex({})", self.0)
-        } else {
-            write!(f, "BondIndex(INVALID)")
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                if self.is_valid() {
+                    write!(f, "{}", self.0)
+                } else {
+                    write!(f, "INVALID")
+                }
+            }
         }
-    }
-}
 
-impl fmt::Display for BondIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "{}", self.0)
-        } else {
-            write!(f, "INVALID")
+        impl From<u32> for $name {
+            #[inline]
+            fn from(index: u32) -> Self {
+                $name(index)
+            }
         }
-    }
-}
 
-impl From<u32> for BondIndex {
-    #[inline]
-    fn from(index: u32) -> Self {
-        BondIndex(index)
-    }
-}
-
-impl From<usize> for BondIndex {
-    #[inline]
-    fn from(index: usize) -> Self {
-        BondIndex(index as u32)
-    }
-}
-
-impl From<BondIndex> for u32 {
-    #[inline]
-    fn from(index: BondIndex) -> Self {
-        index.0
-    }
-}
-
-impl From<BondIndex> for usize {
-    #[inline]
-    fn from(index: BondIndex) -> Self {
-        index.0 as usize
-    }
-}
-
-/// Type-safe index into a coordinate set array
-///
-/// Used to identify a specific state/frame in a multi-state molecule.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-#[repr(transparent)]
-pub struct StateIndex(pub u32);
-
-impl StateIndex {
-    /// Create a new state index
-    #[inline]
-    pub const fn new(index: u32) -> Self {
-        StateIndex(index)
-    }
-
-    /// Get the raw index value
-    #[inline]
-    pub const fn as_usize(&self) -> usize {
-        self.0 as usize
-    }
-
-    /// Get the raw u32 value
-    #[inline]
-    pub const fn as_u32(&self) -> u32 {
-        self.0
-    }
-
-    /// Check if this is a valid index
-    #[inline]
-    pub const fn is_valid(&self) -> bool {
-        self.0 != INVALID_INDEX
-    }
-
-    /// Create an invalid index
-    #[inline]
-    pub const fn invalid() -> Self {
-        StateIndex(INVALID_INDEX)
-    }
-}
-
-impl fmt::Debug for StateIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "StateIndex({})", self.0)
-        } else {
-            write!(f, "StateIndex(INVALID)")
+        impl From<usize> for $name {
+            #[inline]
+            fn from(index: usize) -> Self {
+                $name(index as u32)
+            }
         }
-    }
-}
 
-impl fmt::Display for StateIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "{}", self.0)
-        } else {
-            write!(f, "INVALID")
+        impl From<$name> for u32 {
+            #[inline]
+            fn from(index: $name) -> Self {
+                index.0
+            }
         }
-    }
-}
 
-impl From<u32> for StateIndex {
-    #[inline]
-    fn from(index: u32) -> Self {
-        StateIndex(index)
-    }
-}
-
-impl From<usize> for StateIndex {
-    #[inline]
-    fn from(index: usize) -> Self {
-        StateIndex(index as u32)
-    }
-}
-
-impl From<StateIndex> for u32 {
-    #[inline]
-    fn from(index: StateIndex) -> Self {
-        index.0
-    }
-}
-
-impl From<StateIndex> for usize {
-    #[inline]
-    fn from(index: StateIndex) -> Self {
-        index.0 as usize
-    }
-}
-
-/// Index within a coordinate set (maps to atom index via lookup table)
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-#[repr(transparent)]
-pub struct CoordIndex(pub u32);
-
-impl CoordIndex {
-    /// Create a new coord index
-    #[inline]
-    pub const fn new(index: u32) -> Self {
-        CoordIndex(index)
-    }
-
-    /// Get the raw index value
-    #[inline]
-    pub const fn as_usize(&self) -> usize {
-        self.0 as usize
-    }
-
-    /// Get the raw u32 value
-    #[inline]
-    pub const fn as_u32(&self) -> u32 {
-        self.0
-    }
-
-    /// Check if this is a valid index
-    #[inline]
-    pub const fn is_valid(&self) -> bool {
-        self.0 != INVALID_INDEX
-    }
-
-    /// Create an invalid index
-    #[inline]
-    pub const fn invalid() -> Self {
-        CoordIndex(INVALID_INDEX)
-    }
-}
-
-impl fmt::Debug for CoordIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "CoordIndex({})", self.0)
-        } else {
-            write!(f, "CoordIndex(INVALID)")
+        impl From<$name> for usize {
+            #[inline]
+            fn from(index: $name) -> Self {
+                index.0 as usize
+            }
         }
-    }
+    };
 }
 
-impl fmt::Display for CoordIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_valid() {
-            write!(f, "{}", self.0)
-        } else {
-            write!(f, "INVALID")
-        }
-    }
-}
+// Generate all index types using the macro
 
-impl From<u32> for CoordIndex {
-    #[inline]
-    fn from(index: u32) -> Self {
-        CoordIndex(index)
-    }
-}
+define_index!(
+    /// Type-safe index into an atom array
+    ///
+    /// Prevents accidentally using a bond index where an atom index is expected.
+    AtomIndex, "AtomIndex"
+);
 
-impl From<usize> for CoordIndex {
-    #[inline]
-    fn from(index: usize) -> Self {
-        CoordIndex(index as u32)
-    }
-}
+define_index!(
+    /// Type-safe index into a bond array
+    ///
+    /// Prevents accidentally using an atom index where a bond index is expected.
+    BondIndex, "BondIndex"
+);
 
-impl From<CoordIndex> for u32 {
-    #[inline]
-    fn from(index: CoordIndex) -> Self {
-        index.0
-    }
-}
+define_index!(
+    /// Type-safe index into a coordinate set array
+    ///
+    /// Used to identify a specific state/frame in a multi-state molecule.
+    StateIndex, "StateIndex"
+);
 
-impl From<CoordIndex> for usize {
-    #[inline]
-    fn from(index: CoordIndex) -> Self {
-        index.0 as usize
-    }
-}
+define_index!(
+    /// Index within a coordinate set (maps to atom index via lookup table)
+    CoordIndex, "CoordIndex"
+);
 
 #[cfg(test)]
 mod tests {
@@ -406,5 +182,13 @@ mod tests {
         let b = AtomIndex::new(2);
         assert!(a < b);
         assert!(b > a);
+    }
+
+    #[test]
+    fn test_coord_index() {
+        let idx = CoordIndex::new(7);
+        assert_eq!(idx.as_usize(), 7);
+        assert!(idx.is_valid());
+        assert_eq!(format!("{:?}", idx), "CoordIndex(7)");
     }
 }

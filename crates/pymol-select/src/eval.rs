@@ -100,7 +100,7 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
         SelectionExpr::Rep(pattern) => eval_property(ctx, |atom, _| {
             // Map representation names to their bitmask values
             use pymol_mol::RepMask;
-            let rep_map: &[(&str, u32)] = &[
+            let rep_map: &[(&str, RepMask)] = &[
                 ("lines", RepMask::LINES),
                 ("line", RepMask::LINES),
                 ("spheres", RepMask::SPHERES),

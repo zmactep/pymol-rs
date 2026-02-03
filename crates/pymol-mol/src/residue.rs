@@ -8,6 +8,9 @@ use crate::atom::Atom;
 use crate::index::AtomIndex;
 use std::ops::Range;
 
+// Re-export iterators from the dedicated iterator module
+pub use crate::iterator::{ChainIterator, ResidueIterator};
+
 /// Key for uniquely identifying a residue within a molecule
 ///
 /// A residue is uniquely identified by its chain, name, number, and insertion code.
@@ -246,104 +249,6 @@ pub fn atoms_same_chain(a: &Atom, b: &Atom) -> bool {
 #[inline]
 pub fn atoms_same_segment(a: &Atom, b: &Atom) -> bool {
     a.segi == b.segi
-}
-
-/// Iterator over residues in a slice of atoms
-pub struct ResidueIterator<'a> {
-    atoms: &'a [Atom],
-    base_index: usize,
-    current: usize,
-}
-
-impl<'a> ResidueIterator<'a> {
-    /// Create a new residue iterator
-    pub fn new(atoms: &'a [Atom], base_index: usize) -> Self {
-        ResidueIterator {
-            atoms,
-            base_index,
-            current: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for ResidueIterator<'a> {
-    type Item = ResidueView<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current >= self.atoms.len() {
-            return None;
-        }
-
-        let start = self.current;
-        let first_atom = &self.atoms[start];
-        let key = ResidueKey::from_atom(first_atom);
-
-        // Find the end of this residue
-        let mut end = start + 1;
-        while end < self.atoms.len() {
-            if !atoms_same_residue(&self.atoms[end], first_atom) {
-                break;
-            }
-            end += 1;
-        }
-
-        self.current = end;
-
-        Some(ResidueView {
-            key,
-            atoms: &self.atoms[start..end],
-            atom_range: (self.base_index + start)..(self.base_index + end),
-        })
-    }
-}
-
-/// Iterator over chains in a slice of atoms
-pub struct ChainIterator<'a> {
-    atoms: &'a [Atom],
-    base_index: usize,
-    current: usize,
-}
-
-impl<'a> ChainIterator<'a> {
-    /// Create a new chain iterator
-    pub fn new(atoms: &'a [Atom], base_index: usize) -> Self {
-        ChainIterator {
-            atoms,
-            base_index,
-            current: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for ChainIterator<'a> {
-    type Item = ChainView<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current >= self.atoms.len() {
-            return None;
-        }
-
-        let start = self.current;
-        let first_atom = &self.atoms[start];
-        let chain_id = first_atom.chain.clone();
-
-        // Find the end of this chain
-        let mut end = start + 1;
-        while end < self.atoms.len() {
-            if !atoms_same_chain(&self.atoms[end], first_atom) {
-                break;
-            }
-            end += 1;
-        }
-
-        self.current = end;
-
-        Some(ChainView {
-            chain_id,
-            atoms: &self.atoms[start..end],
-            atom_range: (self.base_index + start)..(self.base_index + end),
-        })
-    }
 }
 
 /// Standard amino acid residue names (3-letter codes)

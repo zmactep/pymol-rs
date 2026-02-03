@@ -1116,7 +1116,7 @@ impl App {
             }
             ObjectAction::ShowAll(name) => {
                 if let Some(mol) = self.state.registry.get_molecule_mut(&name) {
-                    mol.show(RepMask::ALL.0);
+                    mol.show(RepMask::ALL);
                     self.needs_redraw = true;
                 }
             }

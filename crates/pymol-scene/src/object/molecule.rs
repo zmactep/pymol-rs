@@ -175,7 +175,7 @@ impl MoleculeObject {
     /// Show a representation
     ///
     /// This sets visibility both at the object level and for all atoms.
-    pub fn show(&mut self, rep: u32) {
+    pub fn show(&mut self, rep: RepMask) {
         self.state.visible_reps.set_visible(rep);
         // Also update all atoms to have this rep visible
         for atom in self.molecule.atoms_mut() {
@@ -187,7 +187,7 @@ impl MoleculeObject {
     /// Hide a representation
     ///
     /// This hides the representation both at the object level and for all atoms.
-    pub fn hide(&mut self, rep: u32) {
+    pub fn hide(&mut self, rep: RepMask) {
         self.state.visible_reps.set_hidden(rep);
         // Also update all atoms to hide this rep
         for atom in self.molecule.atoms_mut() {
@@ -199,7 +199,7 @@ impl MoleculeObject {
     /// Toggle a representation
     ///
     /// This toggles visibility both at the object level and for all atoms.
-    pub fn toggle(&mut self, rep: u32) {
+    pub fn toggle(&mut self, rep: RepMask) {
         self.state.visible_reps.toggle(rep);
         // Also update all atoms' visibility to match
         if self.state.visible_reps.is_visible(rep) {
