@@ -106,11 +106,12 @@ impl Representation for SphereRep {
                 continue;
             }
 
-            // Get VdW radius
-            let radius = atom.effective_vdw() * sphere_scale;
+            // Get VdW radius - use per-atom sphere_scale if set, otherwise global
+            let scale = atom.sphere_scale.unwrap_or(sphere_scale);
+            let radius = atom.effective_vdw() * scale;
 
             // Get color
-            let color = colors.resolve_atom(atom, molecule);
+            let color = colors.resolve_sphere(atom, molecule);
 
             // Add sphere instance
             self.instances.push(SphereVertex {

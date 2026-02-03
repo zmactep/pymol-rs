@@ -166,7 +166,7 @@ impl Representation for MeshRep {
             }
 
             let radius = atom.effective_vdw();
-            let color = colors.resolve_atom(atom, molecule);
+            let color = colors.resolve_mesh(atom, molecule);
             let center = [coord.x, coord.y, coord.z];
 
             // Generate a simple icosahedron mesh

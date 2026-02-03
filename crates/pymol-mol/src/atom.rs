@@ -87,6 +87,110 @@ impl RepMask {
     }
 }
 
+/// Per-atom color settings for different representations
+///
+/// Contains the base color index and optional per-representation color overrides.
+/// When a representation-specific color is `None`, the base color is used instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AtomColors {
+    /// Base color index (resolved via pymol-color crate)
+    /// -1 = by element, -2 = by chain, -3 = by ss, -4 = by b-factor
+    pub base: i32,
+
+    /// Cartoon-specific color (None = use base)
+    pub cartoon: Option<i32>,
+
+    /// Ribbon-specific color (None = use base)
+    pub ribbon: Option<i32>,
+
+    /// Stick-specific color (None = use base)
+    pub stick: Option<i32>,
+
+    /// Line-specific color (None = use base)
+    pub line: Option<i32>,
+
+    /// Surface-specific color (None = use base)
+    pub surface: Option<i32>,
+
+    /// Mesh-specific color (None = use base)
+    pub mesh: Option<i32>,
+
+    /// Sphere-specific color (None = use base)
+    pub sphere: Option<i32>,
+}
+
+impl Default for AtomColors {
+    fn default() -> Self {
+        AtomColors {
+            base: -1, // -1 = by element
+            cartoon: None,
+            ribbon: None,
+            stick: None,
+            line: None,
+            surface: None,
+            mesh: None,
+            sphere: None,
+        }
+    }
+}
+
+impl AtomColors {
+    /// Create a new AtomColors with default values (by element coloring)
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create AtomColors with a specific base color index
+    pub fn with_base(base: i32) -> Self {
+        AtomColors {
+            base,
+            ..Default::default()
+        }
+    }
+
+    /// Get the effective color for cartoon representation
+    #[inline]
+    pub fn cartoon_or_base(&self) -> i32 {
+        self.cartoon.unwrap_or(self.base)
+    }
+
+    /// Get the effective color for ribbon representation
+    #[inline]
+    pub fn ribbon_or_base(&self) -> i32 {
+        self.ribbon.unwrap_or(self.base)
+    }
+
+    /// Get the effective color for stick representation
+    #[inline]
+    pub fn stick_or_base(&self) -> i32 {
+        self.stick.unwrap_or(self.base)
+    }
+
+    /// Get the effective color for line representation
+    #[inline]
+    pub fn line_or_base(&self) -> i32 {
+        self.line.unwrap_or(self.base)
+    }
+
+    /// Get the effective color for surface representation
+    #[inline]
+    pub fn surface_or_base(&self) -> i32 {
+        self.surface.unwrap_or(self.base)
+    }
+
+    /// Get the effective color for mesh representation
+    #[inline]
+    pub fn mesh_or_base(&self) -> i32 {
+        self.mesh.unwrap_or(self.base)
+    }
+
+    /// Get the effective color for sphere representation
+    #[inline]
+    pub fn sphere_or_base(&self) -> i32 {
+        self.sphere.unwrap_or(self.base)
+    }
+}
+
 /// Atom data structure
 ///
 /// Contains all properties of an atom including identity, residue information,
@@ -192,16 +296,11 @@ pub struct Atom {
     // =========================================================================
     // Display Properties
     // =========================================================================
-    /// Color index (resolved via pymol-color crate)
-    /// -1 = by element, -2 = by chain, -3 = by ss, -4 = by b-factor
-    pub color: i32,
+    /// Color settings for different representations
+    pub colors: AtomColors,
 
-    /// Cartoon-specific color index (None = use atom.color)
-    /// This allows cartoon to have a different color than other representations
-    pub cartoon_color: Option<i32>,
-
-    /// Ribbon-specific color index (None = use atom.color)
-    pub ribbon_color: Option<i32>,
+    /// Sphere-specific scale factor (None = use global sphere_scale setting)
+    pub sphere_scale: Option<f32>,
 
     /// Visible representations bitmask
     pub visible_reps: RepMask,
@@ -264,9 +363,8 @@ impl Default for Atom {
             masked: false,
             hb_donor: false,
             hb_acceptor: false,
-            color: -1, // -1 = by element
-            cartoon_color: None, // None = use atom.color
-            ribbon_color: None, // None = use atom.color
+            colors: AtomColors::default(),
+            sphere_scale: None, // None = use global sphere_scale setting
             visible_reps: RepMask::LINES, // Default to lines visible like PyMOL
             cartoon: 0,
             text_type: String::new(),

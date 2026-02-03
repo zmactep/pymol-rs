@@ -91,12 +91,15 @@ pub fn collect_triangles_from_mesh_reps(mol_obj: &MoleculeObject) -> Vec<GpuTria
                     let v1 = &vertices[i1];
                     let v2 = &vertices[i2];
                     // Use average color for the triangle
+                    let avg_alpha = (v0.color[3] + v1.color[3] + v2.color[3]) / 3.0;
                     let color = [
                         (v0.color[0] + v1.color[0] + v2.color[0]) / 3.0,
                         (v0.color[1] + v1.color[1] + v2.color[1]) / 3.0,
                         (v0.color[2] + v1.color[2] + v2.color[2]) / 3.0,
-                        (v0.color[3] + v1.color[3] + v2.color[3]) / 3.0,
+                        avg_alpha,
                     ];
+                    // Convert alpha (1=opaque) to transparency (0=opaque)
+                    let transparency = 1.0 - avg_alpha;
                     tris.push(GpuTriangle::new(
                         v0.position,
                         v1.position,
@@ -105,7 +108,7 @@ pub fn collect_triangles_from_mesh_reps(mol_obj: &MoleculeObject) -> Vec<GpuTria
                         v1.normal,
                         v2.normal,
                         color,
-                        0.0, // transparency
+                        transparency,
                     ));
                 }
             }
@@ -248,6 +251,7 @@ pub fn raytrace_scene(
     // Ray trace mode settings
     let ray_trace_mode = input.settings.get_int(pymol_settings::id::ray_trace_mode);
     let ray_opaque_background = input.settings.get_int(pymol_settings::id::ray_opaque_background);
+    let transparency_mode = input.settings.get_int(pymol_settings::id::transparency_mode);
 
     // Resolve ray_trace_color (default -6 = black in PyMOL)
     let ray_trace_color_idx = input.settings.get_color(pymol_settings::id::ray_trace_color);
@@ -288,6 +292,7 @@ pub fn raytrace_scene(
         ray_trace_mode,
         ray_trace_color,
         ray_opaque_background,
+        transparency_mode,
         ray_trace_slope_factor,
         ray_trace_depth_factor,
         ray_trace_disco_factor,

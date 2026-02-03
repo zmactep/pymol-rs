@@ -233,8 +233,8 @@ impl Representation for LineRep {
             };
 
             // Get colors
-            let color1 = colors.resolve_atom(atom1, molecule);
-            let color2 = colors.resolve_atom(atom2, molecule);
+            let color1 = colors.resolve_line(atom1, molecule);
+            let color2 = colors.resolve_line(atom2, molecule);
 
             // Get offsets for multiple bonds (or single offset of 0.0 for single bonds)
             let offsets = if valence_enabled {

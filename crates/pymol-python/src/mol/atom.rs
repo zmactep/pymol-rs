@@ -62,7 +62,7 @@ impl PyAtom {
             vdw: atom.vdw,
             partial_charge: atom.partial_charge,
             formal_charge: atom.formal_charge,
-            color: atom.color,
+            color: atom.colors.base,
             hetatm: atom.hetatm,
             ss_type: atom.ss_type,
             coord,

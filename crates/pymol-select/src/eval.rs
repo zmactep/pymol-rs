@@ -127,13 +127,13 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
             })
         }),
         SelectionExpr::Color(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.color.to_string(), false)
+            pattern.matches(&atom.colors.base.to_string(), false)
         }),
         SelectionExpr::CartoonColor(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.color.to_string(), false)
+            pattern.matches(&atom.colors.cartoon_or_base().to_string(), false)
         }),
         SelectionExpr::RibbonColor(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.color.to_string(), false)
+            pattern.matches(&atom.colors.ribbon_or_base().to_string(), false)
         }),
         SelectionExpr::Label(pattern) => eval_property(ctx, |atom, _| {
             pattern.matches(&atom.label, false)

@@ -140,7 +140,7 @@ impl Scene {
                     if let Some(mol_obj) = registry.get_molecule(obj.name()) {
                         mol_obj.molecule().atoms().map(|atom| {
                             ScenePerAtomData {
-                                color: atom.color,
+                                color: atom.colors.base,
                                 visible_reps: atom.visible_reps,
                             }
                         }).collect()
@@ -199,7 +199,7 @@ impl Scene {
                     if atoms.len() == per_atom.len() {
                         for (atom, stored) in atoms.iter_mut().zip(per_atom.iter()) {
                             if self.storemask.contains(SceneStoreMask::COLOR) {
-                                atom.color = stored.color;
+                                atom.colors.base = stored.color;
                             }
                             if self.storemask.contains(SceneStoreMask::REP) {
                                 atom.visible_reps = stored.visible_reps;

@@ -78,6 +78,8 @@ pub struct SurfaceRep {
     quality: i32,
     /// Algorithm to use for surface generation
     algorithm: SurfaceAlgorithm,
+    /// Whether any vertices have transparency (alpha < 1.0)
+    has_transparency: bool,
 }
 
 impl SurfaceRep {
@@ -96,7 +98,15 @@ impl SurfaceRep {
             probe_radius: 1.4,
             quality: 0,
             algorithm: SurfaceAlgorithm::Auto,
+            has_transparency: false,
         }
+    }
+
+    /// Check if any vertices have transparency (alpha < 1.0)
+    ///
+    /// When true, the surface should be rendered with a transparent blend mode.
+    pub fn has_transparency(&self) -> bool {
+        self.has_transparency
     }
 
     /// Set the surface generation algorithm
@@ -185,6 +195,7 @@ impl SurfaceRep {
         self.vertices.clear();
         self.indices.clear();
         self.index_count = 0;
+        self.has_transparency = false;
     }
 
     /// Build surface from pre-computed atoms
@@ -386,9 +397,16 @@ impl Representation for SurfaceRep {
 
         // Get settings
         // Setting IDs from pymol-settings definitions:
+        // 138 = transparency (float, 0.0 = opaque, 1.0 = invisible)
         // 331 = surface_type
         // 338 = surface_solvent (bool)
         // Note: surface_quality (38) is controlled via set_quality() API
+        
+        // Get transparency and convert to alpha
+        // PyMOL uses transparency (0=opaque, 1=invisible), we need alpha (1=opaque, 0=invisible)
+        // Use get_float() which always returns a value (set value or default of 0.0)
+        let transparency = settings.get_float(138).clamp(0.0, 1.0);
+        let alpha = 1.0 - transparency;
         
         let surface_type_setting = settings.get_int_if_defined(331).unwrap_or(0);
         let surface_solvent = settings.get_bool_if_defined(338).unwrap_or(false);
@@ -415,7 +433,10 @@ impl Representation for SurfaceRep {
 
             let position = [coord.x, coord.y, coord.z];
             let radius = atom.effective_vdw();
-            let color = colors.resolve_atom(atom, molecule);
+            let color = colors.resolve_surface(atom, molecule);
+            
+            // Apply transparency to the color's alpha channel
+            let color_with_alpha = [color[0], color[1], color[2], alpha];
 
             atoms.push(SurfaceAtom {
                 position,
@@ -423,11 +444,16 @@ impl Representation for SurfaceRep {
                 atom_index: atom_idx.into(),
             });
 
-            atom_colors.push(AtomColor { position, color });
+            atom_colors.push(AtomColor { position, color: color_with_alpha });
         }
 
-        // Build from collected atoms
+        // Build from collected atoms (this calls clear() internally)
         self.build_from_atoms(&atoms, &atom_colors);
+        
+        // Set has_transparency AFTER build_from_atoms() since it calls clear() which resets the flag
+        self.has_transparency = transparency > 0.0;
+        
+        log::debug!("Surface built with transparency={}, has_transparency={}", transparency, self.has_transparency);
     }
 
     fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {

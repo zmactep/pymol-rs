@@ -136,6 +136,8 @@ pub struct RaytraceSettings {
     pub ray_trace_color: [f32; 4],
     /// Opaque background (-1=auto, 0=transparent, 1=opaque)
     pub ray_opaque_background: i32,
+    /// Transparency rendering mode (0=fast/opaque, 1=multi-layer, 2=uni-layer)
+    pub transparency_mode: i32,
     /// Edge detection: gradient magnitude difference threshold (PyMOL default: 0.6)
     pub ray_trace_slope_factor: f32,
     /// Edge detection: gradient direction difference threshold (PyMOL default: 0.1)
@@ -171,6 +173,7 @@ impl Default for RaytraceSettings {
             ray_trace_mode: 0,
             ray_trace_color: [0.0, 0.0, 0.0, 1.0], // Black outline by default
             ray_opaque_background: -1, // Auto
+            transparency_mode: 2, // uni-layer (PyMOL default)
             ray_trace_slope_factor: 0.6, // PyMOL default
             ray_trace_depth_factor: 0.1, // PyMOL default
             ray_trace_disco_factor: 0.05, // PyMOL default

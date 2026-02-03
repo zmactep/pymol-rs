@@ -5,6 +5,7 @@ use std::f32::consts::PI;
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_mol::AtomIndex;
 use pymol_scene::{Object, RaytracedImage}; // For extent() method on MoleculeObject
+use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
@@ -1384,7 +1385,7 @@ ARGUMENTS
 
     width = integer: width in pixels (default: current window width)
     height = integer: height in pixels (default: current window height)
-    antialias = integer: antialiasing level 1-4 (default: 1 = no AA)
+    antialias = integer: antialiasing level 1-4 (default: antialias setting)
         1 = no antialiasing
         2 = 2x2 supersampling
         3 = 3x3 supersampling
@@ -1432,7 +1433,7 @@ SEE ALSO
         let antialias = args
             .get_int(2)
             .or_else(|| args.get_named_int("antialias"))
-            .unwrap_or(1) as u32;
+            .unwrap_or_else(|| ctx.viewer.settings().get_int(setting_id::antialias) as i64) as u32;
 
         let filename = args
             .get_str(3)

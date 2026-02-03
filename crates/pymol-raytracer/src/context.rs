@@ -616,7 +616,7 @@ pub struct RaytraceUniforms {
     // Ray trace mode settings
     pub ray_trace_mode: u32,
     pub ray_opaque_background: i32,
-    pub _pad1: u32,
+    pub transparency_mode: u32,
     pub _pad2: u32,
     pub ray_trace_color: [f32; 4],
 }
@@ -661,7 +661,7 @@ impl RaytraceUniforms {
             ray_transparency_shadows: if settings.ray_transparency_shadows { 1 } else { 0 },
             ray_trace_mode: settings.ray_trace_mode as u32,
             ray_opaque_background: settings.ray_opaque_background,
-            _pad1: 0,
+            transparency_mode: settings.transparency_mode as u32,
             _pad2: 0,
             ray_trace_color: settings.ray_trace_color,
         }

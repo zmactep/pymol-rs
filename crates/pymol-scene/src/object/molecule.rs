@@ -162,6 +162,14 @@ impl MoleculeObject {
         self.dirty |= flags;
     }
 
+    /// Invalidate all representations so they get rebuilt
+    ///
+    /// This is a convenience method for marking all representations as dirty,
+    /// typically used when settings like transparency change.
+    pub fn invalidate_representations(&mut self) {
+        self.dirty |= DirtyFlags::REPS;
+    }
+
     /// Check if the molecule needs rebuilding
     pub fn is_dirty(&self) -> bool {
         !self.dirty.is_empty()
@@ -554,7 +562,13 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::SURFACE) {
             if let Some(ref surface) = self.representations.surface {
                 if !surface.is_empty() {
-                    let pipeline = context.mesh_pipeline(pymol_render::pipeline::BlendMode::Opaque);
+                    // Use transparent blend mode if the surface has any transparency
+                    let blend_mode = if surface.has_transparency() {
+                        pymol_render::pipeline::BlendMode::Transparent
+                    } else {
+                        pymol_render::pipeline::BlendMode::Opaque
+                    };
+                    let pipeline = context.mesh_pipeline(blend_mode);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
                     surface.render(render_pass);

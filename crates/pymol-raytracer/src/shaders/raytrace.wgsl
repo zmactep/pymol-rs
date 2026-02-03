@@ -45,7 +45,7 @@ struct Uniforms {
     // Ray trace mode settings
     ray_trace_mode: u32,        // 0=normal, 1=normal+outline, 2=outline only, 3=quantized+outline
     ray_opaque_background: i32, // -1=auto, 0=transparent, 1=opaque
-    _pad1: u32,
+    transparency_mode: u32,     // 0=fast/opaque, 1=multi-layer, 2=uni-layer
     _pad2: u32,
     ray_trace_color: vec4<f32>, // Color for outlines
 }
@@ -588,64 +588,119 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     
     // Generate ray
-    let ray = generate_ray(pixel);
+    var current_ray = generate_ray(pixel);
     
-    // Trace primary ray
-    let hit = trace_ray(ray);
-    
-    var color: vec3<f32>;
-    var alpha: f32;
-    var depth: f32;
-    var normal: vec3<f32>;
+    var final_color = vec3<f32>(0.0, 0.0, 0.0);
+    var accumulated_alpha = 0.0;
+    var depth: f32 = 1.0;
+    var normal = vec3<f32>(0.5, 0.5, 1.0);
+    var first_hit = true;
     
     // Determine background behavior
     // ray_opaque_background: -1=auto (opaque), 0=transparent, 1=opaque  
     // Only transparent when explicitly set to 0
     let use_transparent_bg = uniforms.ray_opaque_background == 0;
     
-    if hit.hit {
-        // Shade hit point
-        color = shade(ray, hit);
-        alpha = 1.0;
+    // Transparency mode handling:
+    // Mode 0: fast/ugly - treat everything as opaque, single pass
+    // Mode 1: multi-layer - trace through and composite all transparent layers
+    // Mode 2: uni-layer - only first transparent layer contributes, then find what's behind
+    
+    let max_passes = max(uniforms.ray_max_passes, 1u);
+    var transparent_layer_count = 0u;
+    
+    for (var layer_idx = 0u; layer_idx < max_passes; layer_idx++) {
+        let hit = trace_ray(current_ray);
         
-        // Store depth (normalized to 0-1 range, 0 = near, approaching 1 = far)
-        // Use a large far value for normalization
-        let far_clip = 10000.0;
-        depth = clamp(hit.t / far_clip, 0.0, 0.999);
-        
-        // Store normal (encode from -1..1 to 0..1)
-        normal = hit.normal * 0.5 + 0.5;
-        
-        // Apply fog based on depth
-        color = apply_fog(color, hit.t);
-        
-        // Handle transparency (simplified)
-        if hit.transparency > 0.001 {
-            alpha = 1.0 - hit.transparency;
-            color = mix(uniforms.bg_color.rgb, color, alpha);
+        if !hit.hit {
+            // No hit - add background color weighted by remaining transparency
+            let remaining = 1.0 - accumulated_alpha;
+            if remaining > 0.001 {
+                if use_transparent_bg {
+                    // Transparent background - don't add color, leave alpha as is
+                } else {
+                    final_color += uniforms.bg_color.rgb * remaining;
+                    accumulated_alpha = 1.0;
+                }
+            }
+            break;
         }
         
-        // Note: ray_trace_mode effects (outlines, quantization) are now handled
-        // in pass 2 (edge detection) and pass 3 (composite) for better quality
-    } else {
-        // No hit - background
-        depth = 1.0;  // Max depth for background
-        normal = vec3<f32>(0.5, 0.5, 1.0);  // Encoded (0,0,1) - facing camera
+        // Store depth and normal from first hit only
+        if first_hit {
+            let far_clip = 10000.0;
+            depth = clamp(hit.t / far_clip, 0.0, 0.999);
+            normal = hit.normal * 0.5 + 0.5;
+            first_hit = false;
+        }
         
-        if use_transparent_bg {
-            // Transparent background (alpha = 0)
-            color = vec3<f32>(0.0, 0.0, 0.0);
-            alpha = 0.0;
+        // Shade the hit point
+        var hit_color = shade(current_ray, hit);
+        hit_color = apply_fog(hit_color, hit.t);
+        
+        // Check if this is a transparent surface
+        let is_transparent = hit.transparency > 0.001;
+        
+        // Calculate this layer's contribution based on transparency_mode
+        var layer_alpha: f32;
+        if uniforms.transparency_mode == 0u {
+            // Mode 0: fast/ugly - ignore transparency, treat as fully opaque
+            layer_alpha = 1.0;
+        } else if uniforms.transparency_mode == 2u && is_transparent && transparent_layer_count > 0u {
+            // Mode 2: uni-layer - skip additional transparent layers (don't contribute)
+            // Continue ray to find what's behind
+            let hit_point = current_ray.origin + hit.t * current_ray.direction;
+            current_ray.origin = hit_point + current_ray.direction * EPSILON * 10.0;
+            continue;
         } else {
-            // Opaque background
-            color = uniforms.bg_color.rgb;
-            alpha = 1.0;
+            // Mode 1: multi-layer, or first transparent layer in mode 2
+            layer_alpha = 1.0 - hit.transparency;
         }
+        
+        // Track transparent layers for mode 2
+        if is_transparent {
+            transparent_layer_count += 1u;
+        }
+        
+        let remaining = 1.0 - accumulated_alpha;
+        let contribution = remaining * layer_alpha;
+        
+        // Add this layer's color contribution
+        final_color += hit_color * contribution;
+        accumulated_alpha += contribution;
+        
+        // If we've accumulated enough opacity, stop
+        if accumulated_alpha > 0.999 {
+            accumulated_alpha = 1.0;
+            break;
+        }
+        
+        // Mode 0: always stop after first hit (treat as opaque)
+        if uniforms.transparency_mode == 0u {
+            break;
+        }
+        
+        // If this surface is opaque, stop
+        if !is_transparent {
+            break;
+        }
+        
+        // Continue ray from hit point (with small offset to avoid self-intersection)
+        let hit_point = current_ray.origin + hit.t * current_ray.direction;
+        current_ray.origin = hit_point + current_ray.direction * EPSILON * 10.0;
+        // Direction stays the same for transparency (no refraction)
+    }
+    
+    // If we didn't hit anything and haven't filled alpha yet, add background
+    if accumulated_alpha < 0.999 && !use_transparent_bg {
+        let remaining = 1.0 - accumulated_alpha;
+        final_color += uniforms.bg_color.rgb * remaining;
+        accumulated_alpha = 1.0;
     }
     
     // Clamp and output color with alpha
-    color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
-    textureStore(output, pixel_coord, vec4<f32>(color, alpha));
+    final_color = clamp(final_color, vec3<f32>(0.0), vec3<f32>(1.0));
+    textureStore(output, pixel_coord, vec4<f32>(final_color, accumulated_alpha));
     
     // Output depth and normal for edge detection pass
     textureStore(depth_output, pixel_coord, vec4<f32>(depth, 0.0, 0.0, 1.0));

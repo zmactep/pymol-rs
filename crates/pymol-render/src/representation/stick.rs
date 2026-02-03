@@ -286,8 +286,8 @@ impl Representation for StickRep {
             };
 
             // Get colors
-            let color1 = colors.resolve_atom(atom1, molecule);
-            let color2 = colors.resolve_atom(atom2, molecule);
+            let color1 = colors.resolve_stick(atom1, molecule);
+            let color2 = colors.resolve_stick(atom2, molecule);
 
             // Use smaller radius for multiple bonds (like PyMOL)
             let radius = if bond.order.is_multiple() && valence_enabled {

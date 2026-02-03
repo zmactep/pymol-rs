@@ -613,16 +613,16 @@ EXAMPLES
                     for idx in selected.indices() {
                         if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
                             // If preserving cartoon/ribbon colors and the atom has these reps visible,
-                            // save the current color to the rep-specific field before changing atom.color
+                            // save the current color to the rep-specific field before changing colors.base
                             if preserve_cartoon_color {
-                                if atom.cartoon_color.is_none() && atom.visible_reps.is_visible(RepMask::CARTOON) {
-                                    atom.cartoon_color = Some(atom.color);
+                                if atom.colors.cartoon.is_none() && atom.visible_reps.is_visible(RepMask::CARTOON) {
+                                    atom.colors.cartoon = Some(atom.colors.base);
                                 }
-                                if atom.ribbon_color.is_none() && atom.visible_reps.is_visible(RepMask::RIBBON) {
-                                    atom.ribbon_color = Some(atom.color);
+                                if atom.colors.ribbon.is_none() && atom.visible_reps.is_visible(RepMask::RIBBON) {
+                                    atom.colors.ribbon = Some(atom.colors.base);
                                 }
                             }
-                            atom.color = color_index;
+                            atom.colors.base = color_index;
                         }
                     }
                     total_colored += count;
