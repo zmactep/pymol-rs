@@ -1,12 +1,12 @@
 //! Reference frame calculation for cartoon representation
 //!
-//! Calculates local coordinate frames along the backbone spline for
+//! Calculates local coordinate frames along the backbone curve for
 //! orienting ribbon cross-sections.
 
 use lin_alg::f32::Vec3;
 
 use super::backbone::GuidePoint;
-use super::spline::{interpolate_with_tangents, CatmullRomSpline, InterpolatedPoint};
+use super::spline::{compute_tangents, interpolate_backbone, InterpolationSettings};
 
 /// A reference frame at a point along the cartoon backbone
 ///
@@ -27,16 +27,11 @@ pub struct ReferenceFrame {
 }
 
 impl ReferenceFrame {
-    /// Create a new reference frame using PyMOL's get_system2f3f algorithm
+    /// Create a new reference frame from position, tangent, and orientation
     ///
-    /// This is equivalent to PyMOL's `get_system2f3f` function:
-    /// 1. Takes tangent (along curve) and orientation (from CA->O) as input
-    /// 2. Computes binormal = tangent × orientation (then normalize)
-    /// 3. Recomputes normal = binormal × tangent (ensures orthogonality)
-    ///
-    /// The result is an orthonormal frame where:
+    /// Computes an orthonormal frame where:
     /// - tangent: points along the backbone direction
-    /// - normal: points in the ribbon width direction (perpendicular to tangent, in the plane defined by tangent and orientation)
+    /// - normal: points in the ribbon width direction
     /// - binormal: perpendicular to both (ribbon thickness direction)
     pub fn new(position: Vec3, tangent: Vec3, orientation: Vec3) -> Self {
         let t = normalize_safe(tangent);
@@ -45,9 +40,8 @@ impl ReferenceFrame {
         let b = t.cross(orientation);
         let b = normalize_safe(b);
         
-        // Normal = binormal × tangent (ensures orthogonality, lies in tangent-orientation plane)
+        // Normal = binormal × tangent (ensures orthogonality)
         let n = b.cross(t);
-        // n is already normalized since b and t are orthonormal
 
         Self {
             position,
@@ -58,46 +52,13 @@ impl ReferenceFrame {
     }
 
     /// Create a frame with explicit binormal (for pre-computed frames)
+    #[allow(dead_code)]
     pub fn from_tnb(position: Vec3, tangent: Vec3, normal: Vec3, binormal: Vec3) -> Self {
         Self {
             position,
             tangent: normalize_safe(tangent),
             normal: normalize_safe(normal),
             binormal: normalize_safe(binormal),
-        }
-    }
-    
-    /// Build frame using PyMOL's get_system1f approach (for tubes/loops)
-    ///
-    /// This is for circular cross-sections where orientation doesn't matter
-    /// as much - it uses parallel transport to minimize twist.
-    #[allow(dead_code)]
-    pub fn new_tube(position: Vec3, tangent: Vec3, prev_binormal: Option<Vec3>) -> Self {
-        let t = normalize_safe(tangent);
-        
-        // Use previous binormal if available (parallel transport)
-        // Otherwise, find an arbitrary perpendicular
-        let b = match prev_binormal {
-            Some(prev_b) => {
-                // Project previous binormal to be perpendicular to new tangent
-                let proj = prev_b - t * prev_b.dot(t);
-                let len = proj.magnitude();
-                if len > 1e-6 {
-                    proj / len
-                } else {
-                    find_perpendicular(t)
-                }
-            }
-            None => find_perpendicular(t),
-        };
-        
-        let n = b.cross(t);
-        
-        Self {
-            position,
-            tangent: t,
-            normal: n,
-            binormal: b,
         }
     }
 
@@ -130,82 +91,6 @@ fn normalize_safe(v: Vec3) -> Vec3 {
     }
 }
 
-/// Generate reference frames along a backbone segment
-///
-/// This interpolates positions and orientations, then calculates proper
-/// orthonormal frames for geometry extrusion.
-pub fn generate_frames(
-    guide_points: &[GuidePoint],
-    spline: &CatmullRomSpline,
-    subdivisions: u32,
-    smooth_cycles: u32,
-) -> Vec<FrameWithMetadata> {
-    if guide_points.is_empty() {
-        return Vec::new();
-    }
-
-    if guide_points.len() == 1 {
-        let gp = &guide_points[0];
-        return vec![FrameWithMetadata {
-            frame: ReferenceFrame::new(gp.position, Vec3::new(0.0, 0.0, 1.0), gp.orientation),
-            color: gp.color,
-            ss_type: gp.ss_type,
-            b_factor: gp.b_factor,
-            segment_idx: 0,
-            local_t: 0.0,
-        }];
-    }
-
-    // Extract positions for spline interpolation
-    let positions: Vec<Vec3> = guide_points.iter().map(|gp| gp.position).collect();
-
-    // Interpolate positions with tangents
-    let interp_points = interpolate_with_tangents(spline, &positions, subdivisions);
-
-    // Interpolate orientations
-    let orientations: Vec<Vec3> = guide_points.iter().map(|gp| gp.orientation).collect();
-    let interp_orientations = interpolate_orientations(&orientations, &interp_points);
-
-    // Build initial frames
-    let mut frames: Vec<FrameWithMetadata> = interp_points
-        .iter()
-        .zip(interp_orientations.iter())
-        .map(|(ip, orientation)| {
-            // Get metadata from source guide points
-            let seg = ip.segment.min(guide_points.len() - 2);
-            let gp1 = &guide_points[seg];
-            let gp2 = &guide_points[seg + 1];
-
-            // Interpolate color
-            let color = interpolate_color_linear(&gp1.color, &gp2.color, ip.local_t);
-
-            // Interpolate B-factor
-            let b_factor = gp1.b_factor + (gp2.b_factor - gp1.b_factor) * ip.local_t;
-
-            // Use SS type from the nearest guide point (discrete assignment)
-            // This ensures proper sheet termini detection and smooth visual transitions
-            let ss_type = if ip.local_t < 0.5 { gp1.ss_type } else { gp2.ss_type };
-
-            // Create frame
-            let frame = ReferenceFrame::new(ip.position, ip.tangent, *orientation);
-
-            FrameWithMetadata {
-                frame,
-                color,
-                ss_type,
-                b_factor,
-                segment_idx: ip.segment,
-                local_t: ip.local_t,
-            }
-        })
-        .collect();
-
-    // Apply smoothing to prevent normal flips
-    smooth_frames(&mut frames, smooth_cycles);
-
-    frames
-}
-
 /// Reference frame with associated metadata
 #[derive(Debug, Clone)]
 pub struct FrameWithMetadata {
@@ -226,98 +111,117 @@ pub struct FrameWithMetadata {
     pub local_t: f32,
 }
 
-/// Interpolate orientation vectors along the spline
-/// 
-/// First ensures orientation continuity (no sudden flips), then interpolates.
-fn interpolate_orientations(orientations: &[Vec3], interp_points: &[InterpolatedPoint]) -> Vec<Vec3> {
+/// Generate reference frames along a backbone segment
+///
+/// Uses displacement-based interpolation to create smooth curves through
+/// the guide points, then builds orthonormal frames for geometry extrusion.
+pub fn generate_frames(
+    guide_points: &[GuidePoint],
+    settings: &InterpolationSettings,
+    subdivisions: u32,
+    smooth_cycles: u32,
+) -> Vec<FrameWithMetadata> {
+    if guide_points.is_empty() {
+        return Vec::new();
+    }
+
+    if guide_points.len() == 1 {
+        let gp = &guide_points[0];
+        return vec![FrameWithMetadata {
+            frame: ReferenceFrame::new(gp.position, Vec3::new(0.0, 0.0, 1.0), gp.orientation),
+            color: gp.color,
+            ss_type: gp.ss_type,
+            b_factor: gp.b_factor,
+            segment_idx: 0,
+            local_t: 0.0,
+        }];
+    }
+
+    // Extract data from guide points
+    let positions: Vec<Vec3> = guide_points.iter().map(|gp| gp.position).collect();
+    let orientations: Vec<Vec3> = guide_points.iter().map(|gp| gp.orientation).collect();
+    
+    // Ensure orientation consistency (no sudden flips)
+    let consistent_orientations = ensure_orientation_consistency(&orientations);
+    
+    // Compute tangent vectors at each guide point
+    let tangents = compute_tangents(&positions);
+
+    // Interpolate using displacement-based algorithm
+    let interp_points = interpolate_backbone(
+        &positions,
+        &tangents,
+        &consistent_orientations,
+        subdivisions,
+        settings,
+    );
+
+    // Build frames from interpolated points
+    let mut frames: Vec<FrameWithMetadata> = interp_points
+        .iter()
+        .map(|ip| {
+            // Get metadata from source guide points
+            let seg = ip.segment.min(guide_points.len() - 2);
+            let gp1 = &guide_points[seg];
+            let gp2 = &guide_points[seg + 1];
+
+            // Interpolate color
+            let color = interpolate_color_linear(&gp1.color, &gp2.color, ip.local_t);
+
+            // Interpolate B-factor
+            let b_factor = gp1.b_factor + (gp2.b_factor - gp1.b_factor) * ip.local_t;
+
+            // Use SS type from the nearest guide point (discrete assignment)
+            let ss_type = if ip.local_t < 0.5 { gp1.ss_type } else { gp2.ss_type };
+
+            // Create frame from interpolated point
+            // The interpolation already provides position, tangent, and normal
+            let frame = ReferenceFrame::new(ip.position, ip.tangent, ip.normal);
+
+            FrameWithMetadata {
+                frame,
+                color,
+                ss_type,
+                b_factor,
+                segment_idx: ip.segment,
+                local_t: ip.local_t,
+            }
+        })
+        .collect();
+
+    // Apply smoothing to prevent normal flips
+    smooth_frames(&mut frames, smooth_cycles);
+
+    frames
+}
+
+/// Ensure orientation vectors are consistent (no sudden flips)
+fn ensure_orientation_consistency(orientations: &[Vec3]) -> Vec<Vec3> {
     if orientations.is_empty() {
-        return vec![Vec3::new(0.0, 1.0, 0.0); interp_points.len()];
+        return Vec::new();
     }
 
-    if orientations.len() == 1 {
-        return vec![orientations[0]; interp_points.len()];
-    }
-
-    // First pass: ensure orientation continuity by flipping vectors that point
-    // opposite to their predecessor. This prevents sudden 180° rotations.
-    let mut consistent_orientations = Vec::with_capacity(orientations.len());
-    consistent_orientations.push(orientations[0]);
+    let mut consistent = Vec::with_capacity(orientations.len());
+    consistent.push(orientations[0]);
     
     for i in 1..orientations.len() {
-        let prev = consistent_orientations[i - 1];
+        let prev = consistent[i - 1];
         let curr = orientations[i];
         
         // If current orientation points opposite to previous, flip it
         if prev.dot(curr) < 0.0 {
-            consistent_orientations.push(curr * -1.0);
+            consistent.push(curr * -1.0);
         } else {
-            consistent_orientations.push(curr);
+            consistent.push(curr);
         }
     }
-
-    // Now interpolate using the consistent orientations
-    interp_points
-        .iter()
-        .map(|ip| {
-            let seg = ip.segment.min(consistent_orientations.len() - 2);
-            let o1 = consistent_orientations[seg];
-            let o2 = consistent_orientations[seg + 1];
-
-            // Spherical linear interpolation (slerp) for better orientation blending
-            slerp_vec3(o1, o2, ip.local_t)
-        })
-        .collect()
-}
-
-/// Spherical linear interpolation between two direction vectors
-/// 
-/// Takes the shortest path between vectors - if they point in opposite directions,
-/// v2 is negated to ensure continuity.
-fn slerp_vec3(v1: Vec3, v2: Vec3, t: f32) -> Vec3 {
-    let v1 = normalize_safe(v1);
-    let mut v2 = normalize_safe(v2);
-
-    let mut dot = v1.dot(v2);
-
-    // If vectors point in opposite directions, negate v2 to take the shortest path
-    // This is crucial for maintaining orientation continuity along the backbone
-    if dot < 0.0 {
-        v2 = v2 * -1.0;
-        dot = -dot;
-    }
-
-    // Clamp to avoid numerical issues
-    dot = dot.min(1.0);
-
-    // If vectors are nearly parallel, use linear interpolation
-    if dot > 0.9995 {
-        let result = v1 + (v2 - v1) * t;
-        return normalize_safe(result);
-    }
-
-    let theta = dot.acos();
-    let sin_theta = theta.sin();
-
-    if sin_theta.abs() < 1e-6 {
-        return v1;
-    }
-
-    let a = ((1.0 - t) * theta).sin() / sin_theta;
-    let b = (t * theta).sin() / sin_theta;
-
-    normalize_safe(v1 * a + v2 * b)
+    
+    consistent
 }
 
 /// Smooth reference frames while preserving consistent ribbon orientation
 ///
-/// This function ensures smooth, continuous frames by:
-/// 1. Propagating a consistent binormal direction using parallel transport
-/// 2. Blending with the original orientation-based binormal to preserve ribbon direction
-/// 3. Smoothing to reduce local variations
-///
-/// The approach uses parallel transport (projecting previous binormal forward)
-/// but blends it with the original orientation-based frame to maintain the
-/// intended ribbon direction from the CA→O vectors.
+/// Uses parallel transport with blending to ensure smooth, continuous frames.
 fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
     if frames.len() < 2 {
         return;
@@ -339,20 +243,18 @@ fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
         if transport_len > 1e-6 {
             let transported_norm = transported / transport_len;
             
-            // Blend between transported and original based on how much they agree
-            // If they point the same way, use more of the original (preserves orientation)
-            // If they point opposite, use the transported (ensures continuity)
+            // Blend between transported and original based on agreement
             let agreement = transported_norm.dot(orig_binormal);
             
             let new_binormal = if agreement > 0.5 {
                 // Good agreement - blend towards original
-                let blend = agreement; // 0.5 to 1.0 → more original
+                let blend = agreement;
                 normalize_safe(transported_norm * (1.0 - blend * 0.5) + orig_binormal * (blend * 0.5))
             } else if agreement < -0.5 {
-                // Opposite - transported is flipped, use negated original
+                // Opposite - use transported for continuity
                 normalize_safe(transported_norm)
             } else {
-                // Poor agreement - use transported for continuity
+                // Poor agreement - use transported
                 transported_norm
             };
             
@@ -410,101 +312,6 @@ fn interpolate_color_linear(c1: &[f32; 4], c2: &[f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
-/// Calculate frames using the parallel transport method
-///
-/// This is an alternative to using O-atom orientations that produces
-/// frames with minimal twist along the curve.
-#[allow(dead_code)]
-pub fn parallel_transport_frames(
-    positions: &[Vec3],
-    subdivisions: u32,
-    spline: &CatmullRomSpline,
-) -> Vec<ReferenceFrame> {
-    let interp_points = interpolate_with_tangents(spline, positions, subdivisions);
-
-    if interp_points.is_empty() {
-        return Vec::new();
-    }
-
-    let mut frames = Vec::with_capacity(interp_points.len());
-
-    // Initialize first frame
-    let first_tangent = interp_points[0].tangent;
-    let initial_normal = find_perpendicular(first_tangent);
-    let initial_binormal = first_tangent.cross(initial_normal);
-
-    frames.push(ReferenceFrame::from_tnb(
-        interp_points[0].position,
-        first_tangent,
-        initial_normal,
-        initial_binormal,
-    ));
-
-    // Propagate frames using parallel transport
-    for i in 1..interp_points.len() {
-        let prev_frame = &frames[i - 1];
-        let curr_tangent = interp_points[i].tangent;
-
-        // Rotate previous normal to be perpendicular to new tangent
-        let axis = prev_frame.tangent.cross(curr_tangent);
-        let axis_len_sq = axis.magnitude_squared();
-
-        let new_normal = if axis_len_sq > 1e-10 {
-            let axis = axis / axis_len_sq.sqrt();
-            let cos_angle = prev_frame.tangent.dot(curr_tangent).max(-1.0).min(1.0);
-            let angle = cos_angle.acos();
-
-            rotate_around_axis(prev_frame.normal, axis, angle)
-        } else {
-            prev_frame.normal
-        };
-
-        let new_binormal = curr_tangent.cross(new_normal);
-
-        frames.push(ReferenceFrame::from_tnb(
-            interp_points[i].position,
-            curr_tangent,
-            new_normal,
-            new_binormal,
-        ));
-    }
-
-    frames
-}
-
-/// Find a vector perpendicular to the given vector
-#[allow(dead_code)]
-fn find_perpendicular(v: Vec3) -> Vec3 {
-    let abs_x = v.x.abs();
-    let abs_y = v.y.abs();
-    let abs_z = v.z.abs();
-
-    let other = if abs_x <= abs_y && abs_x <= abs_z {
-        Vec3::new(1.0, 0.0, 0.0)
-    } else if abs_y <= abs_z {
-        Vec3::new(0.0, 1.0, 0.0)
-    } else {
-        Vec3::new(0.0, 0.0, 1.0)
-    };
-
-    let perp = v.cross(other);
-    normalize_safe(perp)
-}
-
-/// Rotate a vector around an axis by an angle (radians)
-#[allow(dead_code)]
-fn rotate_around_axis(v: Vec3, axis: Vec3, angle: f32) -> Vec3 {
-    let cos_a = angle.cos();
-    let sin_a = angle.sin();
-
-    // Rodrigues' rotation formula
-    let term1 = v * cos_a;
-    let term2 = axis.cross(v) * sin_a;
-    let term3 = axis * axis.dot(v) * (1.0 - cos_a);
-
-    normalize_safe(term1 + term2 + term3)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,24 +346,6 @@ mod tests {
     }
 
     #[test]
-    fn test_slerp() {
-        let v1 = Vec3::new(1.0, 0.0, 0.0);
-        let v2 = Vec3::new(0.0, 1.0, 0.0);
-
-        // At t=0, should be v1
-        let at_0 = slerp_vec3(v1, v2, 0.0);
-        assert!((at_0 - v1).magnitude_squared() < 1e-6);
-
-        // At t=1, should be v2
-        let at_1 = slerp_vec3(v1, v2, 1.0);
-        assert!((at_1 - v2).magnitude_squared() < 1e-6);
-
-        // At t=0.5, should be normalized average direction
-        let at_05 = slerp_vec3(v1, v2, 0.5);
-        assert!((at_05.magnitude_squared() - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
     fn test_generate_frames() {
         let guide_points = vec![
             GuidePoint::new(
@@ -569,7 +358,7 @@ mod tests {
                 20.0,
             ),
             GuidePoint::new(
-                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(3.8, 0.0, 0.0),
                 Vec3::new(0.0, 1.0, 0.0),
                 [0.0, 1.0, 0.0, 1.0],
                 SecondaryStructure::Helix,
@@ -578,7 +367,7 @@ mod tests {
                 25.0,
             ),
             GuidePoint::new(
-                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(7.6, 0.0, 0.0),
                 Vec3::new(0.0, 1.0, 0.0),
                 [0.0, 0.0, 1.0, 1.0],
                 SecondaryStructure::Helix,
@@ -588,13 +377,29 @@ mod tests {
             ),
         ];
 
-        let spline = CatmullRomSpline::new();
-        let frames = generate_frames(&guide_points, &spline, 2, 1);
+        let settings = InterpolationSettings::default();
+        let frames = generate_frames(&guide_points, &settings, 7, 2);
 
         // Should have interpolated frames
         assert!(frames.len() > guide_points.len());
 
-        // First and last positions should match guide points
-        assert!((frames[0].frame.position - guide_points[0].position).magnitude_squared() < 1e-6);
+        // First position should be near first guide point
+        assert!((frames[0].frame.position - guide_points[0].position).magnitude() < 0.1);
+    }
+
+    #[test]
+    fn test_ensure_orientation_consistency() {
+        let orientations = vec![
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0), // Flipped
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+
+        let consistent = ensure_orientation_consistency(&orientations);
+
+        // All should now point in same general direction
+        for i in 1..consistent.len() {
+            assert!(consistent[i - 1].dot(consistent[i]) > 0.0);
+        }
     }
 }

@@ -1,8 +1,9 @@
-//! Settings commands: set, get, unset
+//! Settings commands: set, get, unset, dss
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
+use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_settings::{get_setting, get_setting_id, id as setting_id, SettingType, SettingValue};
 
 /// Register settings commands
@@ -10,6 +11,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(SetCommand);
     registry.register(GetCommand);
     registry.register(UnsetCommand);
+    registry.register(DssCommand);
 }
 
 /// Parse a string value into a SettingValue based on the setting type
@@ -321,6 +323,104 @@ EXAMPLES
 
         if !ctx.quiet {
             ctx.print(&format!(" {} reset to default: {}", name, format_setting_value(&setting.default)));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// dss command
+// ============================================================================
+
+/// Define secondary structure using backbone geometry
+struct DssCommand;
+
+impl Command for DssCommand {
+    fn name(&self) -> &str {
+        "dss"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "dss" calculates secondary structure assignments using backbone
+    phi/psi dihedral angles, similar to PyMOL's DSS algorithm.
+
+    This overwrites any existing secondary structure assignments from
+    the PDB/CIF file with computed values based on backbone geometry.
+
+USAGE
+
+    dss [selection [, state [, quiet ]]]
+
+ARGUMENTS
+
+    selection = string: atoms to process (default: all)
+    state = integer: coordinate state to use (default: 1)
+    quiet = 0/1: suppress feedback (default: 0)
+
+NOTES
+
+    The algorithm classifies residues based on phi/psi angles:
+    - Alpha helix: phi ~-57°, psi ~-48°
+    - Beta strand: phi ~-124°, psi ~124°
+
+    This is automatically applied when loading structures if the
+    auto_dss setting is enabled (default: on).
+
+EXAMPLES
+
+    dss
+    dss protein
+    dss all, 1, quiet=1
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let _selection = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("selection"))
+            .unwrap_or("all");
+
+        let state = args
+            .get_int(1)
+            .or_else(|| args.get_named_int("state"))
+            .unwrap_or(1) as usize;
+        
+        // Convert to 0-indexed state
+        let state_idx = if state > 0 { state - 1 } else { 0 };
+
+        let quiet = args
+            .get_bool(2)
+            .or_else(|| args.get_named_bool("quiet"))
+            .unwrap_or(false);
+
+        // Get molecule names first to avoid borrowing conflicts
+        let mol_names: Vec<String> = ctx.viewer
+            .objects()
+            .names()
+            .map(|s| s.to_string())
+            .collect();
+
+        let settings = DssSettings::default();
+        let mut total_updated = 0usize;
+
+        // Apply DSS to all molecule objects
+        // TODO: Support selection filtering when selection system is more developed
+        for name in mol_names {
+            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&name) {
+                let mol = mol_obj.molecule_mut();
+                let updated = assign_secondary_structure(mol, state_idx, &settings);
+                total_updated += updated;
+            }
+        }
+
+        ctx.viewer.request_redraw();
+
+        if !quiet {
+            ctx.print(&format!(" Assigned secondary structure to {} atoms", total_updated));
         }
 
         Ok(())

@@ -38,7 +38,7 @@ use super::cartoon::backbone::{
 };
 use super::cartoon::frame::generate_frames;
 use super::cartoon::geometry::{generate_cartoon_mesh, CartoonGeometrySettings};
-use super::cartoon::spline::CatmullRomSpline;
+use super::cartoon::spline::InterpolationSettings;
 
 /// Ribbon representation for protein secondary structure
 ///
@@ -168,9 +168,12 @@ impl Representation for RibbonRep {
             (sampling as u32).max(7)
         };
 
-        // Create spline with low tension for smooth curves
-        let tension = 0.0;
-        let spline = CatmullRomSpline::with_tension(tension);
+        // Create interpolation settings
+        let interp_settings = InterpolationSettings {
+            power_a: power,
+            power_b,
+            throw_factor: throw,
+        };
 
         // Ribbon uses a UNIFORM tube profile for ALL secondary structures
         // This is different from cartoon which uses different profiles for helix/sheet/loop
@@ -213,11 +216,11 @@ impl Representation for RibbonRep {
             // Additional orientation smoothing
             smooth_orientations(segment, smooth_settings.smooth_cycles);
 
-            // Generate reference frames
-            let frame_smooth_cycles = smooth_settings.smooth_cycles.max(8);
+            // Generate reference frames using displacement-based interpolation
+            let frame_smooth_cycles = smooth_settings.smooth_cycles.max(4);
             let frames = generate_frames(
                 &segment.guide_points,
-                &spline,
+                &interp_settings,
                 subdivisions,
                 frame_smooth_cycles,
             );

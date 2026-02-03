@@ -13,6 +13,88 @@ use crate::error::{MolError, MolResult};
 use crate::index::{AtomIndex, BondIndex, StateIndex};
 use crate::residue::{ChainIterator, ResidueIterator};
 
+/// Get bond order for a bond between two atoms in a known protein residue
+///
+/// Based on PyMOL's assign_pdb_known_residue() function.
+/// Uses atom names and residue names to determine bond orders.
+fn get_protein_bond_order(resn: &str, name1: &str, name2: &str) -> BondOrder {
+    // Helper to check if a bond connects two specific atoms (in either order)
+    let is_bond = |a: &str, b: &str| -> bool {
+        (name1 == a && name2 == b) || (name1 == b && name2 == a)
+    };
+
+    // Backbone carbonyl C=O (all amino acids)
+    if is_bond("C", "O") {
+        return BondOrder::Double;
+    }
+
+    // Side chain double bonds by residue
+    match resn {
+        // ARG: guanidinium group CZ=NH1
+        "ARG" | "ARGP" => {
+            if is_bond("CZ", "NH1") {
+                return BondOrder::Double;
+            }
+        }
+        // ASP: carboxylate CG=OD1
+        "ASP" | "ASPM" => {
+            if is_bond("CG", "OD1") {
+                return BondOrder::Double;
+            }
+        }
+        // ASN: amide CG=OD1
+        "ASN" => {
+            if is_bond("CG", "OD1") {
+                return BondOrder::Double;
+            }
+        }
+        // GLU: carboxylate CD=OE1
+        "GLU" | "GLUM" => {
+            if is_bond("CD", "OE1") {
+                return BondOrder::Double;
+            }
+        }
+        // GLN: amide CD=OE1
+        "GLN" => {
+            if is_bond("CD", "OE1") {
+                return BondOrder::Double;
+            }
+        }
+        // HIS and variants: imidazole ring (Kekulé alternating pattern)
+        // Pattern: CG-ND1 single, ND1-CE1 double, CE1-NE2 single, NE2-CD2 double, CD2-CG single
+        "HIS" | "HID" | "HIE" | "HIP" => {
+            if is_bond("ND1", "CE1") || is_bond("NE2", "CD2") {
+                return BondOrder::Double;
+            }
+        }
+        // PHE: benzene ring (Kekulé alternating pattern)
+        // Pattern: CG-CD1 double, CD1-CE1 single, CE1-CZ double, CZ-CE2 single, CE2-CD2 double, CD2-CG single
+        "PHE" => {
+            if is_bond("CG", "CD1") || is_bond("CE1", "CZ") || is_bond("CE2", "CD2") {
+                return BondOrder::Double;
+            }
+        }
+        // TYR: benzene ring (same Kekulé pattern as PHE)
+        "TYR" => {
+            if is_bond("CG", "CD1") || is_bond("CE1", "CZ") || is_bond("CE2", "CD2") {
+                return BondOrder::Double;
+            }
+        }
+        // TRP: indole ring system (Kekulé alternating pattern)
+        // Five-membered ring: CG-CD1 double, CD1-NE1 single, NE1-CE2 single, CE2-CD2 single, CD2-CG single
+        // Six-membered ring: CE2-CZ2 double, CZ2-CH2 single, CH2-CZ3 double, CZ3-CE3 single, CE3-CD2 double
+        "TRP" => {
+            // Double bonds in the fused ring system
+            if is_bond("CG", "CD1") || is_bond("CE2", "CZ2") || is_bond("CH2", "CZ3") || is_bond("CE3", "CD2") {
+                return BondOrder::Double;
+            }
+        }
+        _ => {}
+    }
+
+    BondOrder::Single
+}
+
 /// A molecular object containing atoms, bonds, and coordinate sets
 ///
 /// This is the Rust equivalent of PyMOL's `ObjectMolecule`.
@@ -409,6 +491,54 @@ impl ObjectMolecule {
         }
         for atom in &mut self.atoms {
             atom.bonded = false;
+        }
+    }
+
+    /// Assign bond orders for known protein residues based on atom names
+    ///
+    /// This function uses PDB atom name conventions to assign bond orders for
+    /// standard amino acids. Unlike distance-based inference, this method is
+    /// chemically accurate because it uses the known structure of amino acids.
+    ///
+    /// Bond orders assigned:
+    /// - Backbone C=O (carbonyl): all amino acids
+    /// - ARG: CZ=NH1 (guanidinium)
+    /// - ASP: CG=OD1 (carboxylate)
+    /// - ASN: CG=OD1 (amide)
+    /// - GLU: CD=OE1 (carboxylate)
+    /// - GLN: CD=OE1 (amide)
+    pub fn assign_known_residue_bond_orders(&mut self) {
+        use crate::residue::{atoms_same_residue, is_amino_acid};
+
+        for bond in &mut self.bonds {
+            let atom1 = match self.atoms.get(bond.atom1.as_usize()) {
+                Some(a) => a,
+                None => continue,
+            };
+            let atom2 = match self.atoms.get(bond.atom2.as_usize()) {
+                Some(a) => a,
+                None => continue,
+            };
+
+            // Only assign bond orders within the same residue
+            if !atoms_same_residue(atom1, atom2) {
+                continue;
+            }
+
+            // Only for amino acid residues
+            if !is_amino_acid(&atom1.resn) {
+                continue;
+            }
+
+            let name1 = atom1.name.as_str();
+            let name2 = atom2.name.as_str();
+            let resn = atom1.resn.as_str();
+
+            // Check for double bonds based on atom names
+            let order = get_protein_bond_order(resn, name1, name2);
+            if order != BondOrder::Single {
+                bond.order = order;
+            }
         }
     }
 

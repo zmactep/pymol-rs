@@ -210,6 +210,9 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
     // CIF files typically don't include explicit bond information
     mol.generate_bonds(0.6);
 
+    // Assign bond orders for known protein residues using atom name templates
+    mol.assign_known_residue_bond_orders();
+
     Ok(mol)
 }
 

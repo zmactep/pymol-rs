@@ -4,7 +4,10 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use pymol_io::{read_file, write_file, FileFormat};
+use pymol_mol::dss::{assign_secondary_structure, DssSettings};
+use pymol_mol::ObjectMolecule;
 use pymol_scene::MoleculeObject;
+use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
@@ -16,6 +19,17 @@ pub fn expand_path(path: &str) -> PathBuf {
         Ok(expanded) => PathBuf::from(expanded.as_ref()),
         Err(_) => PathBuf::from(path), // Fall back to original if expansion fails
     }
+}
+
+/// Apply DSS (Define Secondary Structure) algorithm to a molecule
+///
+/// This recalculates secondary structure based on backbone phi/psi angles,
+/// similar to PyMOL's auto_dss functionality. It overwrites the secondary
+/// structure assignments from the PDB/CIF file with computed values.
+fn apply_dss(mol: &mut ObjectMolecule) {
+    let settings = DssSettings::default();
+    let state = 0; // First state
+    assign_secondary_structure(mol, state, &settings);
 }
 
 /// Register I/O commands
@@ -120,12 +134,19 @@ EXAMPLES
 
         // Load the file
         let path = expand_path(filename);
-        let mol = if let Some(fmt) = format {
+        let mut mol = if let Some(fmt) = format {
             pymol_io::read_file_format(&path, fmt)
         } else {
             read_file(&path)
         }
         .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+
+        // Apply DSS (Define Secondary Structure) if auto_dss is enabled
+        // This recalculates secondary structure based on backbone geometry
+        let auto_dss = ctx.viewer.settings().get_bool(setting_id::auto_dss);
+        if auto_dss {
+            apply_dss(&mut mol);
+        }
 
         // Create molecule object and add to viewer
         let mol_obj = MoleculeObject::with_name(mol, &object_name);
@@ -627,8 +648,14 @@ EXAMPLES
         // Sync fallback for non-GUI viewers (headless, scripts, etc.)
         #[cfg(feature = "fetch")]
         {
-            let mol = pymol_io::fetch(code, format)
+            let mut mol = pymol_io::fetch(code, format)
                 .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+
+            // Apply DSS if auto_dss is enabled
+            let auto_dss = ctx.viewer.settings().get_bool(setting_id::auto_dss);
+            if auto_dss {
+                apply_dss(&mut mol);
+            }
 
             // Add to viewer
             ctx.viewer

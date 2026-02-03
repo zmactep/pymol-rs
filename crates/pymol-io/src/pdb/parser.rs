@@ -233,6 +233,9 @@ impl<R: Read> PdbReader<R> {
         // CONECT records only contain special bonds (disulfide, etc.), not standard covalent bonds
         mol.generate_bonds(0.6);
 
+        // Assign bond orders for known protein residues using atom name templates
+        mol.assign_known_residue_bond_orders();
+
         Ok(mol)
     }
 }

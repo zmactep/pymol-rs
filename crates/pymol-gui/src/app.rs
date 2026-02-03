@@ -120,7 +120,15 @@ pub struct App {
 // ============================================================================
 
 impl TaskContext for App {
-    fn add_molecule(&mut self, name: &str, mol: pymol_mol::ObjectMolecule) {
+    fn add_molecule(&mut self, name: &str, mut mol: pymol_mol::ObjectMolecule) {
+        // Apply DSS (Define Secondary Structure) if auto_dss is enabled
+        let auto_dss = self.state.settings.get_bool(pymol_settings::id::auto_dss);
+        if auto_dss {
+            use pymol_mol::dss::{assign_secondary_structure, DssSettings};
+            let settings = DssSettings::default();
+            assign_secondary_structure(&mut mol, 0, &settings);
+        }
+        
         self.state.registry.add(MoleculeObject::with_name(mol, name));
     }
 

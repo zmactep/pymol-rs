@@ -534,6 +534,20 @@ fn apply_transition_blending(
         return base_profile.clone();
     };
     
+    // Skip blending for helix transitions (creates arrow-like flaring)
+    // PyMOL uses sharp transitions at helix boundaries
+    let involves_helix = matches!(
+        before_ss,
+        SecondaryStructure::Helix | SecondaryStructure::Helix310 | SecondaryStructure::HelixPi
+    ) || matches!(
+        after_ss,
+        SecondaryStructure::Helix | SecondaryStructure::Helix310 | SecondaryStructure::HelixPi
+    );
+    
+    if involves_helix {
+        return base_profile.clone();
+    }
+    
     // Get the "other" profile (the one we're transitioning to/from)
     let other_ss = if frame_idx < trans_idx { after_ss } else { before_ss };
     

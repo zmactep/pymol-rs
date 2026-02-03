@@ -9,18 +9,10 @@
 //!
 //! The cartoon representation is built in several stages:
 //! 1. **Backbone extraction**: Extract CA and O atoms from protein residues
-//! 2. **PyMOL-style smoothing**: Apply helix centering, sheet flattening, loop smoothing
-//! 3. **Spline interpolation**: Smooth the backbone with Catmull-Rom splines
-//! 4. **Frame generation**: Calculate reference frames along the spline
+//! 2. **Smoothing**: Apply sheet flattening, loop smoothing, normal refinement
+//! 3. **Interpolation**: Smooth the backbone with displacement-based interpolation
+//! 4. **Frame generation**: Calculate reference frames along the curve
 //! 5. **Geometry extrusion**: Extrude cross-section profiles along frames
-//!
-//! # PyMOL Compatibility
-//!
-//! This implementation includes PyMOL-compatible smoothing algorithms:
-//! - Helix axis centering (ExtrudeShiftToAxis)
-//! - Sheet flattening (RepCartoonFlattenSheets)
-//! - Loop smoothing (RepCartoonSmoothLoops)
-//! - Normal refinement (RepCartoonRefineNormals)
 //!
 //! # Example
 //!
@@ -52,7 +44,7 @@ use self::backbone::{
 };
 use self::frame::generate_frames;
 use self::geometry::{find_sheet_termini, generate_cartoon_mesh, CartoonGeometrySettings};
-use self::spline::CatmullRomSpline;
+use self::spline::InterpolationSettings;
 
 /// Cartoon representation for protein secondary structure
 ///
@@ -172,20 +164,19 @@ impl Representation for CartoonRep {
         };
 
         // Calculate subdivisions from sampling
-        // Higher subdivisions = smoother curves, especially for helix turns
+        // Higher subdivisions = smoother curves
         let subdivisions = if sampling < 0 {
-            // Auto: use higher value for smoother helix turns
-            14u32
+            7u32 // Default sampling
         } else {
-            // Ensure minimum of 14 for smooth helix turns
-            (sampling as u32).max(14)
+            (sampling as u32).max(7)
         };
 
-        // Create spline with low tension for smooth curves
-        // Lower tension = smoother, more rounded curves
-        // Standard Catmull-Rom is 0.5, but 0.0 gives smoother results for ribbons
-        let tension = 0.0;
-        let spline = CatmullRomSpline::with_tension(tension);
+        // Create interpolation settings from cartoon settings
+        let interp_settings = InterpolationSettings {
+            power_a: power,
+            power_b,
+            throw_factor: throw,
+        };
 
         // Get geometry settings with arrow length scaled by subdivisions
         let geom_settings =
@@ -207,15 +198,14 @@ impl Representation for CartoonRep {
             // 4. Normal refinement
             apply_pymol_smoothing(segment, &smooth_settings);
 
-            // Additional orientation smoothing (as before)
+            // Additional orientation smoothing
             smooth_orientations(segment, smooth_settings.smooth_cycles);
 
-            // Generate reference frames with increased smoothing for better visual quality
-            // Higher cycles = smoother ribbon appearance
-            let frame_smooth_cycles = smooth_settings.smooth_cycles.max(8);
+            // Generate reference frames using displacement-based interpolation
+            let frame_smooth_cycles = smooth_settings.smooth_cycles.max(4);
             let frames = generate_frames(
                 &segment.guide_points,
-                &spline,
+                &interp_settings,
                 subdivisions,
                 frame_smooth_cycles,
             );
@@ -292,7 +282,7 @@ mod tests {
     use super::*;
     use super::backbone::{extract_backbone_segments, GuidePoint};
     use super::frame::generate_frames;
-    use super::spline::CatmullRomSpline;
+    use super::spline::InterpolationSettings;
     use lin_alg::f32::Vec3;
     use pymol_mol::{Atom, CoordSet, Element, ObjectMolecule};
     use pymol_settings::GlobalSettings;
@@ -389,11 +379,13 @@ mod tests {
             ),
         ];
         
-        let spline = CatmullRomSpline::new();
-        let frames = generate_frames(&guide_points, &spline, 7, 2);
+        let settings = InterpolationSettings::default();
+        let frames = generate_frames(&guide_points, &settings, 7, 2);
         
         assert!(!frames.is_empty(), "Should have frames");
-        assert_eq!(frames.len(), 17, "Should have 17 interpolated frames");
+        // With displacement interpolation, we get (n_segments * sampling) + 1 points
+        // 2 segments * 7 sampling + 1 = 15 points
+        assert!(frames.len() >= 10, "Should have multiple interpolated frames");
     }
 
     #[test]

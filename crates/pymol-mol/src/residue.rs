@@ -350,8 +350,16 @@ impl<'a> Iterator for ChainIterator<'a> {
 pub const AMINO_ACIDS: &[&str] = &[
     "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
     "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    // Histidine protonation variants
+    "HID", "HIE", "HIP",
+    // Cysteine variants
+    "CYX",
+    // N/C-terminal variants
+    "ACE", "NME",
     // Non-standard but common
     "MSE", "SEC", "PYL",
+    // Charged variants
+    "ARGP", "ASPM", "GLUM", "LYSP",
 ];
 
 /// Standard nucleotide residue names

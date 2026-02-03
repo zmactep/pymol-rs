@@ -41,6 +41,7 @@
 mod atom;
 mod bond;
 mod coordset;
+pub mod dss;
 mod element;
 mod error;
 mod flags;
@@ -67,6 +68,9 @@ pub use residue::{
     AMINO_ACIDS, NUCLEOTIDES, WATER_NAMES,
 };
 pub use secondary::SecondaryStructure;
+
+// Re-export DSS types
+pub use dss::{assign_secondary_structure, DssSettings, PhiPsi};
 
 /// Re-export commonly used types for convenience
 pub mod prelude {

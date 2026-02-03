@@ -3,10 +3,12 @@
 use std::f32::consts::PI;
 
 use lin_alg::f32::{Mat4, Vec3};
+use pymol_mol::AtomIndex;
 use pymol_scene::{Object, RaytracedImage}; // For extent() method on MoleculeObject
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
 /// Register viewing commands
@@ -167,25 +169,80 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .unwrap_or("all");
 
-        // Delegate to zoom for now
+        // Center on all objects
         if selection == "all" || selection == "*" {
             ctx.viewer.center_all();
-        } else if ctx.viewer.objects().contains(selection) {
+            if !ctx.quiet {
+                ctx.print(" Centered on all objects");
+            }
+            return Ok(());
+        }
+
+        // Try to center on a specific object by name
+        if ctx.viewer.objects().contains(selection) {
             ctx.viewer.center_on(selection);
-        } else {
-            // Try pattern matching
-            let matches: Vec<String> = ctx.viewer.objects().matching(selection)
-                .iter().map(|s| s.to_string()).collect();
+            if !ctx.quiet {
+                ctx.print(&format!(" Centered on \"{}\"", selection));
+            }
+            return Ok(());
+        }
+
+        // Try pattern matching on object names
+        let matches: Vec<String> = ctx.viewer.objects().matching(selection)
+            .iter().map(|s| s.to_string()).collect();
+        if !matches.is_empty() {
+            // For now, center on first match
             if let Some(name) = matches.first() {
                 ctx.viewer.center_on(name);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Centered on \"{}\"", name));
+                }
+            }
+            return Ok(());
+        }
+
+        // Try as selection expression (resi 28, chain A, name CA, etc.)
+        let selection_results = evaluate_selection(ctx.viewer, selection)?;
+        if !selection_results.is_empty() {
+            // Compute bounding box of selected atoms
+            let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+            let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+            let mut has_coords = false;
+
+            for (obj_name, selected) in &selection_results {
+                if selected.count() > 0 {
+                    if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
+                        let mol = mol_obj.molecule();
+                        let state = mol.current_state;
+                        for idx in selected.indices() {
+                            if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
+                                min.x = min.x.min(coord.x);
+                                min.y = min.y.min(coord.y);
+                                min.z = min.z.min(coord.z);
+                                max.x = max.x.max(coord.x);
+                                max.y = max.y.max(coord.y);
+                                max.z = max.z.max(coord.z);
+                                has_coords = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if has_coords {
+                ctx.viewer.camera_mut().center_to(min, max);
+                ctx.viewer.request_redraw();
+                if !ctx.quiet {
+                    ctx.print(&format!(" Centered on \"{}\"", selection));
+                }
+                return Ok(());
             }
         }
 
-        if !ctx.quiet {
-            ctx.print(&format!(" Centered on \"{}\"", selection));
-        }
-
-        Ok(())
+        Err(CmdError::Selection(format!(
+            "No atoms matching '{}'",
+            selection
+        )))
     }
 }
 

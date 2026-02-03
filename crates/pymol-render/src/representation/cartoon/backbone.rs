@@ -304,25 +304,26 @@ pub fn smooth_orientations(segment: &mut BackboneSegment, cycles: u32) {
 
 /// Apply all PyMOL-style smoothing operations to a backbone segment
 ///
-/// This applies smoothing in the correct order matching PyMOL's RepCartoon:
-/// 1. Sheet flattening (make sheets planar) - RepCartoonFlattenSheets
-/// 2. Loop smoothing (progressive window smoothing) - RepCartoonSmoothLoops  
-/// 3. Normal refinement (orthogonalize and fix kinks) - RepCartoonRefineNormals
-///
-/// Note: Helix axis centering (ExtrudeShiftToAxis) is NOT applied for ribbon/oval
-/// helices - it's only used for cylindrical helix mode which is not implemented here.
+/// This applies smoothing in the correct order:
+/// 1. Helix smoothing (heavy orientation smoothing to prevent ribbon twist)
+/// 2. Sheet flattening (make sheets planar) - RepCartoonFlattenSheets
+/// 3. Loop smoothing (progressive window smoothing) - RepCartoonSmoothLoops  
+/// 4. Normal refinement (orthogonalize and fix kinks) - RepCartoonRefineNormals
 pub fn apply_pymol_smoothing(segment: &mut BackboneSegment, settings: &CartoonSmoothSettings) {
     if segment.len() < 2 {
         return;
     }
 
-    // 1. Flatten sheets (RepCartoonFlattenSheets)
+    // 1. Smooth helices (heavy orientation smoothing to prevent ribbon twist)
+    smooth_helices(segment, settings.smooth_cycles);
+
+    // 2. Flatten sheets (RepCartoonFlattenSheets)
     flatten_sheets(segment, settings.flat_cycles);
 
-    // 2. Smooth loops (RepCartoonSmoothLoops)
+    // 3. Smooth loops (RepCartoonSmoothLoops)
     smooth_loops(segment, settings.smooth_first, settings.smooth_last, settings.smooth_cycles);
 
-    // 3. Refine normals (RepCartoonRefineNormals)
+    // 4. Refine normals (RepCartoonRefineNormals)
     if settings.refine_normals {
         refine_normals(segment);
     }
@@ -737,6 +738,98 @@ fn smooth_loops(segment: &mut BackboneSegment, smooth_first: u32, smooth_last: u
                 }
             }
         }
+    }
+}
+
+// ============================================================================
+// Helix Smoothing
+// ============================================================================
+
+/// Ensure helix orientations are consistent (no sudden flips)
+///
+/// Smooth helices and handle helix-loop transitions
+///
+/// This ensures orientation consistency within helices and creates smooth
+/// transitions at helix termini to prevent pinching/twisting artifacts.
+fn smooth_helices(segment: &mut BackboneSegment, _smooth_cycles: u32) {
+    let len = segment.guide_points.len();
+    if len < 2 {
+        return;
+    }
+
+    let runs = detect_ss_runs(segment);
+
+    for (first, last, ss_type) in runs {
+        // Only process helix regions
+        if !is_helix(ss_type) {
+            continue;
+        }
+
+        // Ensure orientation consistency within the helix
+        // Propagate from the first residue, flipping any that point opposite
+        for i in (first + 1)..=last.min(len - 1) {
+            let prev_orient = segment.guide_points[i - 1].orientation;
+            let curr_orient = segment.guide_points[i].orientation;
+
+            if prev_orient.dot(curr_orient) < 0.0 {
+                segment.guide_points[i].orientation = curr_orient * -1.0;
+            }
+        }
+
+        // Handle helix-loop transition at the C-terminus (end of helix)
+        // Extend the helix orientation pattern into 1-2 adjacent loop residues
+        if last + 1 < len {
+            let helix_end_orient = segment.guide_points[last].orientation;
+            let next_idx = last + 1;
+            let next_orient = segment.guide_points[next_idx].orientation;
+            
+            // Check if the next residue is a loop (not helix or sheet)
+            let next_ss = segment.guide_points[next_idx].ss_type;
+            if !is_helix(next_ss) && next_ss != SecondaryStructure::Sheet {
+                // Ensure consistent direction with helix end
+                if helix_end_orient.dot(next_orient) < 0.0 {
+                    segment.guide_points[next_idx].orientation = next_orient * -1.0;
+                }
+                
+                // Blend the first loop residue's orientation toward the helix end
+                let blended = normalize_safe(
+                    helix_end_orient * 0.6 + segment.guide_points[next_idx].orientation * 0.4
+                );
+                segment.guide_points[next_idx].orientation = blended;
+            }
+        }
+
+        // Handle loop-helix transition at the N-terminus (start of helix)
+        if first > 0 {
+            let helix_start_orient = segment.guide_points[first].orientation;
+            let prev_idx = first - 1;
+            let prev_orient = segment.guide_points[prev_idx].orientation;
+            
+            // Check if the previous residue is a loop
+            let prev_ss = segment.guide_points[prev_idx].ss_type;
+            if !is_helix(prev_ss) && prev_ss != SecondaryStructure::Sheet {
+                // Ensure consistent direction with helix start
+                if helix_start_orient.dot(prev_orient) < 0.0 {
+                    segment.guide_points[prev_idx].orientation = prev_orient * -1.0;
+                }
+                
+                // Blend the last loop residue's orientation toward the helix start
+                let blended = normalize_safe(
+                    helix_start_orient * 0.6 + segment.guide_points[prev_idx].orientation * 0.4
+                );
+                segment.guide_points[prev_idx].orientation = blended;
+            }
+        }
+    }
+}
+
+/// Normalize a vector safely
+fn normalize_safe(v: Vec3) -> Vec3 {
+    let len_sq = v.magnitude_squared();
+    if len_sq > 1e-10 {
+        v / len_sq.sqrt()
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
     }
 }
 
