@@ -201,11 +201,24 @@ EXAMPLES
             if let Ok(v) = value_str.parse::<i32>() {
                 SettingValue::Color(v)
             } else {
-                // Try to resolve as color name
-                let color_index = ctx.viewer
-                    .color_index(&value_str)
-                    .map(|idx| idx as i32)
-                    .ok_or_else(|| CmdError::invalid_arg("value", format!("Unknown color: {}", value_str)))?;
+                // Check for special color schemes first (these use negative indices)
+                // -1: by element (atomic/CPK)
+                // -2: by chain
+                // -3: by secondary structure
+                // -4: by B-factor
+                let color_index = match value_str.to_lowercase().as_str() {
+                    "atomic" | "cpk" | "element" | "by_element" => -1,
+                    "chain" | "by_chain" | "chainbow" => -2,
+                    "ss" | "secondary_structure" | "by_ss" | "dssp" => -3,
+                    "b" | "b_factor" | "bfactor" | "by_b" => -4,
+                    _ => {
+                        // Try to resolve as named color
+                        ctx.viewer
+                            .color_index(&value_str)
+                            .map(|idx| idx as i32)
+                            .ok_or_else(|| CmdError::invalid_arg("value", format!("Unknown color: {}", value_str)))?
+                    }
+                };
                 SettingValue::Color(color_index)
             }
         } else {
