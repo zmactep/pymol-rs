@@ -161,7 +161,7 @@ impl Representation for MeshRep {
             };
 
             // Check if mesh representation is visible for this atom
-            if !atom.visible_reps.is_visible(RepMask::MESH) {
+            if !atom.repr.visible_reps.is_visible(RepMask::MESH) {
                 continue;
             }
 

@@ -187,7 +187,7 @@ impl MoleculeObject {
         self.state.visible_reps.set_visible(rep);
         // Also update all atoms to have this rep visible
         for atom in self.molecule.atoms_mut() {
-            atom.visible_reps.set_visible(rep);
+            atom.repr.visible_reps.set_visible(rep);
         }
         self.dirty |= DirtyFlags::REPS;
     }
@@ -199,7 +199,7 @@ impl MoleculeObject {
         self.state.visible_reps.set_hidden(rep);
         // Also update all atoms to hide this rep
         for atom in self.molecule.atoms_mut() {
-            atom.visible_reps.set_hidden(rep);
+            atom.repr.visible_reps.set_hidden(rep);
         }
         self.dirty |= DirtyFlags::REPS;
     }
@@ -212,11 +212,11 @@ impl MoleculeObject {
         // Also update all atoms' visibility to match
         if self.state.visible_reps.is_visible(rep) {
             for atom in self.molecule.atoms_mut() {
-                atom.visible_reps.set_visible(rep);
+                atom.repr.visible_reps.set_visible(rep);
             }
         } else {
             for atom in self.molecule.atoms_mut() {
-                atom.visible_reps.set_hidden(rep);
+                atom.repr.visible_reps.set_hidden(rep);
             }
         }
         self.dirty |= DirtyFlags::REPS;

@@ -497,7 +497,7 @@ fn apply_ss_assignments(molecule: &mut ObjectMolecule, residue_data: &[ResidueDa
     for atom_idx in 0..molecule.atom_count() {
         let idx = AtomIndex(atom_idx as u32);
         if let Some(atom) = molecule.get_atom(idx) {
-            let key = (atom.chain.clone(), atom.resv);
+            let key = (atom.residue.chain.clone(), atom.residue.resv);
             if let Some(&ss) = ss_map.get(&key) {
                 if let Some(atom_mut) = molecule.get_atom_mut(idx) {
                     if atom_mut.ss_type != ss {

@@ -44,16 +44,16 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
             pattern.matches(&atom.name, false)
         }),
         SelectionExpr::Resn(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.resn, false)
+            pattern.matches(&atom.residue.resn, false)
         }),
         SelectionExpr::Resi(spec) => eval_property(ctx, |atom, _| {
-            spec.matches(atom.resv, atom.inscode)
+            spec.matches(atom.residue.resv, atom.residue.inscode)
         }),
         SelectionExpr::Chain(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.chain, false)
+            pattern.matches(&atom.residue.chain, false)
         }),
         SelectionExpr::Segi(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.segi, false)
+            pattern.matches(&atom.residue.segi, false)
         }),
         SelectionExpr::Elem(pattern) => eval_property(ctx, |atom, _| {
             pattern.matches(atom.element.symbol(), false)
@@ -90,10 +90,10 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
             // Check if any flag in the spec matches
             spec.items.iter().any(|item| match item {
                 crate::pattern::IntItem::Single(flag) => {
-                    (atom.flags.bits() & (1 << flag)) != 0
+                    (atom.state.flags.bits() & (1 << flag)) != 0
                 }
                 crate::pattern::IntItem::Range(start, end) => {
-                    (*start..=*end).any(|flag| (atom.flags.bits() & (1 << flag)) != 0)
+                    (*start..=*end).any(|flag| (atom.state.flags.bits() & (1 << flag)) != 0)
                 }
             })
         }),
@@ -123,31 +123,31 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
             ];
             // Check if the atom has the specific representation visible
             rep_map.iter().any(|(rep_name, rep_mask)| {
-                pattern.matches(rep_name, false) && atom.visible_reps.is_visible(*rep_mask)
+                pattern.matches(rep_name, false) && atom.repr.visible_reps.is_visible(*rep_mask)
             })
         }),
         SelectionExpr::Color(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.colors.base.to_string(), false)
+            pattern.matches(&atom.repr.colors.base.to_string(), false)
         }),
         SelectionExpr::CartoonColor(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.colors.cartoon_or_base().to_string(), false)
+            pattern.matches(&atom.repr.colors.cartoon_or_base().to_string(), false)
         }),
         SelectionExpr::RibbonColor(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.colors.ribbon_or_base().to_string(), false)
+            pattern.matches(&atom.repr.colors.ribbon_or_base().to_string(), false)
         }),
         SelectionExpr::Label(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.label, false)
+            pattern.matches(&atom.repr.label, false)
         }),
         SelectionExpr::Custom(pattern) => eval_property(ctx, |atom, _| {
             // Custom properties would need additional support
-            pattern.matches(&atom.text_type, false)
+            pattern.matches(&atom.repr.text_type, false)
         }),
         SelectionExpr::TextType(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.text_type, false)
+            pattern.matches(&atom.repr.text_type, false)
         }),
         SelectionExpr::NumericType(pattern) => eval_property(ctx, |atom, _| {
             // Numeric type is typically an integer
-            pattern.matches(&atom.text_type, false)
+            pattern.matches(&atom.repr.text_type, false)
         }),
         SelectionExpr::Stereo(pattern) => eval_property(ctx, |atom, _| {
             let stereo_str = format!("{:?}", atom.stereo);
@@ -178,52 +178,52 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
         // Special selections
         SelectionExpr::All => Ok(SelectionResult::all(ctx.total_atoms())),
         SelectionExpr::None => Ok(SelectionResult::none(ctx.total_atoms())),
-        SelectionExpr::Visible => eval_property(ctx, |atom, _| atom.visible_reps.0 != 0),
-        SelectionExpr::Enabled => eval_property(ctx, |atom, _| !atom.masked),
+        SelectionExpr::Visible => eval_property(ctx, |atom, _| atom.repr.visible_reps.0 != 0),
+        SelectionExpr::Enabled => eval_property(ctx, |atom, _| !atom.repr.masked),
         SelectionExpr::Hydrogens => eval_property(ctx, |atom, _| atom.element.is_hydrogen()),
-        SelectionExpr::Hetatm => eval_property(ctx, |atom, _| atom.hetatm),
-        SelectionExpr::Bonded => eval_property(ctx, |atom, _| atom.bonded),
+        SelectionExpr::Hetatm => eval_property(ctx, |atom, _| atom.state.hetatm),
+        SelectionExpr::Bonded => eval_property(ctx, |atom, _| atom.state.bonded),
         SelectionExpr::Polymer => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::POLYMER)
+            atom.state.flags.contains(AtomFlags::POLYMER)
         }),
         SelectionExpr::PolymerProtein => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::PROTEIN)
+            atom.state.flags.contains(AtomFlags::PROTEIN)
         }),
         SelectionExpr::PolymerNucleic => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::NUCLEIC)
+            atom.state.flags.contains(AtomFlags::NUCLEIC)
         }),
         SelectionExpr::Organic => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::ORGANIC)
+            atom.state.flags.contains(AtomFlags::ORGANIC)
         }),
         SelectionExpr::Inorganic => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::INORGANIC)
+            atom.state.flags.contains(AtomFlags::INORGANIC)
         }),
         SelectionExpr::Solvent => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::SOLVENT)
+            atom.state.flags.contains(AtomFlags::SOLVENT)
         }),
         SelectionExpr::Metals => eval_property(ctx, |atom, _| atom.element.is_metal()),
         SelectionExpr::Backbone => eval_property(ctx, |atom, _| atom.is_backbone()),
         SelectionExpr::Sidechain => eval_property(ctx, |atom, _| atom.is_sidechain()),
-        SelectionExpr::Donors => eval_property(ctx, |atom, _| atom.hb_donor),
-        SelectionExpr::Acceptors => eval_property(ctx, |atom, _| atom.hb_acceptor),
+        SelectionExpr::Donors => eval_property(ctx, |atom, _| atom.state.hb_donor),
+        SelectionExpr::Acceptors => eval_property(ctx, |atom, _| atom.state.hb_acceptor),
         SelectionExpr::Delocalized => eval_property(ctx, |_atom, _| {
             // Simplified: check if atom is in aromatic system
             // In reality, this needs bond analysis
             false
         }),
         SelectionExpr::Fixed => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::FIX)
+            atom.state.flags.contains(AtomFlags::FIX)
         }),
         SelectionExpr::Restrained => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::RESTRAIN)
+            atom.state.flags.contains(AtomFlags::RESTRAIN)
         }),
-        SelectionExpr::Masked => eval_property(ctx, |atom, _| atom.masked),
+        SelectionExpr::Masked => eval_property(ctx, |atom, _| atom.repr.masked),
         SelectionExpr::Protected => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::EXCLUDE)
+            atom.state.flags.contains(AtomFlags::EXCLUDE)
         }),
         SelectionExpr::Present => eval_present(ctx),
         SelectionExpr::Guide => eval_property(ctx, |atom, _| {
-            atom.flags.contains(AtomFlags::GUIDE)
+            atom.state.flags.contains(AtomFlags::GUIDE)
         }),
         SelectionExpr::Origin => {
             // Origin is a special point, not atom selection
@@ -373,7 +373,7 @@ fn eval_pepseq(ctx: &EvalContext, pattern: &Pattern) -> EvalResult<SelectionResu
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
             for (resn, code) in aa_map {
-                if atom.resn.eq_ignore_ascii_case(resn) {
+                if atom.residue.resn.eq_ignore_ascii_case(resn) {
                     if pattern.matches(&code.to_string(), false) {
                         result.set_index(offset + local_idx);
                     }
@@ -638,10 +638,10 @@ fn eval_byres(ctx: &EvalContext, inner: &SelectionExpr) -> EvalResult<SelectionR
         for (local_idx, atom) in mol.atoms().enumerate() {
             if inner_result.contains_index(offset + local_idx) {
                 let key = (
-                    atom.chain.clone(),
-                    atom.resv,
-                    atom.inscode,
-                    atom.segi.clone(),
+                    atom.residue.chain.clone(),
+                    atom.residue.resv,
+                    atom.residue.inscode,
+                    atom.residue.segi.clone(),
                 );
                 if !selected_residues.contains(&key) {
                     selected_residues.push(key);
@@ -652,10 +652,10 @@ fn eval_byres(ctx: &EvalContext, inner: &SelectionExpr) -> EvalResult<SelectionR
         // Select all atoms in those residues
         for (local_idx, atom) in mol.atoms().enumerate() {
             let key = (
-                atom.chain.clone(),
-                atom.resv,
-                atom.inscode,
-                atom.segi.clone(),
+                atom.residue.chain.clone(),
+                atom.residue.resv,
+                atom.residue.inscode,
+                atom.residue.segi.clone(),
             );
             if selected_residues.contains(&key) {
                 result.set_index(offset + local_idx);
@@ -676,7 +676,7 @@ fn eval_bychain(ctx: &EvalContext, inner: &SelectionExpr) -> EvalResult<Selectio
 
         for (local_idx, atom) in mol.atoms().enumerate() {
             if inner_result.contains_index(offset + local_idx) {
-                let key = (atom.chain.clone(), atom.segi.clone());
+                let key = (atom.residue.chain.clone(), atom.residue.segi.clone());
                 if !selected_chains.contains(&key) {
                     selected_chains.push(key);
                 }
@@ -684,7 +684,7 @@ fn eval_bychain(ctx: &EvalContext, inner: &SelectionExpr) -> EvalResult<Selectio
         }
 
         for (local_idx, atom) in mol.atoms().enumerate() {
-            let key = (atom.chain.clone(), atom.segi.clone());
+            let key = (atom.residue.chain.clone(), atom.residue.segi.clone());
             if selected_chains.contains(&key) {
                 result.set_index(offset + local_idx);
             }
@@ -776,14 +776,14 @@ fn eval_bysegment(ctx: &EvalContext, inner: &SelectionExpr) -> EvalResult<Select
 
         for (local_idx, atom) in mol.atoms().enumerate() {
             if inner_result.contains_index(offset + local_idx) {
-                if !selected_segis.contains(&atom.segi) {
-                    selected_segis.push(atom.segi.clone());
+                if !selected_segis.contains(&atom.residue.segi) {
+                    selected_segis.push(atom.residue.segi.clone());
                 }
             }
         }
 
         for (local_idx, atom) in mol.atoms().enumerate() {
-            if selected_segis.contains(&atom.segi) {
+            if selected_segis.contains(&atom.residue.segi) {
                 result.set_index(offset + local_idx);
             }
         }
@@ -896,8 +896,8 @@ fn eval_like(
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
             if right_result.contains_index(offset + local_idx) {
-                if !target_resns.contains(&atom.resn) {
-                    target_resns.push(atom.resn.clone());
+                if !target_resns.contains(&atom.residue.resn) {
+                    target_resns.push(atom.residue.resn.clone());
                 }
             }
         }
@@ -907,7 +907,7 @@ fn eval_like(
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
             if left_result.contains_index(offset + local_idx) {
-                if target_resns.contains(&atom.resn) {
+                if target_resns.contains(&atom.residue.resn) {
                     result.set_index(offset + local_idx);
                 }
             }
@@ -940,22 +940,22 @@ fn eval_macro(ctx: &EvalContext, spec: &MacroSpec) -> EvalResult<SelectionResult
             }
         }
         if let Some(ref pattern) = spec.segi {
-            if !pattern.matches(&atom.segi, false) {
+            if !pattern.matches(&atom.residue.segi, false) {
                 return false;
             }
         }
         if let Some(ref pattern) = spec.chain {
-            if !pattern.matches(&atom.chain, false) {
+            if !pattern.matches(&atom.residue.chain, false) {
                 return false;
             }
         }
         if let Some(ref pattern) = spec.resn {
-            if !pattern.matches(&atom.resn, false) {
+            if !pattern.matches(&atom.residue.resn, false) {
                 return false;
             }
         }
         if let Some(ref resi_spec) = spec.resi {
-            if !resi_spec.matches(atom.resv, atom.inscode) {
+            if !resi_spec.matches(atom.residue.resv, atom.residue.inscode) {
                 return false;
             }
         }
@@ -976,31 +976,34 @@ fn eval_macro(ctx: &EvalContext, spec: &MacroSpec) -> EvalResult<SelectionResult
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pymol_mol::{Atom, BondOrder, CoordSet, Element, ObjectMolecule};
+    use pymol_mol::{Atom, AtomResidue, BondOrder, CoordSet, Element, ObjectMolecule};
     use crate::pattern::ResiSpec;
+    use std::sync::Arc;
 
     fn create_test_molecule() -> ObjectMolecule {
         let mut mol = ObjectMolecule::new("test");
 
+        // Create shared residues
+        let ala_res = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
+        let gly_res = Arc::new(AtomResidue::from_parts("A", "GLY", 2, ' ', ""));
+
         // Create a simple peptide-like structure
         let atoms = vec![
-            ("N", "ALA", 1, "A", Element::Nitrogen),
-            ("CA", "ALA", 1, "A", Element::Carbon),
-            ("C", "ALA", 1, "A", Element::Carbon),
-            ("O", "ALA", 1, "A", Element::Oxygen),
-            ("N", "GLY", 2, "A", Element::Nitrogen),
-            ("CA", "GLY", 2, "A", Element::Carbon),
-            ("C", "GLY", 2, "A", Element::Carbon),
-            ("O", "GLY", 2, "A", Element::Oxygen),
-            ("H", "GLY", 2, "A", Element::Hydrogen),
+            ("N", ala_res.clone(), Element::Nitrogen),
+            ("CA", ala_res.clone(), Element::Carbon),
+            ("C", ala_res.clone(), Element::Carbon),
+            ("O", ala_res.clone(), Element::Oxygen),
+            ("N", gly_res.clone(), Element::Nitrogen),
+            ("CA", gly_res.clone(), Element::Carbon),
+            ("C", gly_res.clone(), Element::Carbon),
+            ("O", gly_res.clone(), Element::Oxygen),
+            ("H", gly_res.clone(), Element::Hydrogen),
         ];
 
-        for (name, resn, resv, chain, elem) in atoms {
+        for (name, residue, elem) in atoms {
             let mut atom = Atom::new(name, elem);
-            atom.resn = resn.to_string();
-            atom.resv = resv;
-            atom.chain = chain.to_string();
-            atom.flags = AtomFlags::PROTEIN;
+            atom.residue = residue;
+            atom.state.flags = AtomFlags::PROTEIN;
             mol.add_atom(atom);
         }
 

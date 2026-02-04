@@ -270,7 +270,7 @@ impl PyObjectMolecule {
     fn count_atoms_by_resn(&self, resn: &str) -> usize {
         self.inner
             .atoms()
-            .filter(|a| a.resn == resn)
+            .filter(|a| a.residue.resn == resn)
             .count()
     }
 
@@ -278,7 +278,7 @@ impl PyObjectMolecule {
     fn count_atoms_by_chain(&self, chain: &str) -> usize {
         self.inner
             .atoms()
-            .filter(|a| a.chain == chain)
+            .filter(|a| a.residue.chain == chain)
             .count()
     }
 
@@ -287,7 +287,7 @@ impl PyObjectMolecule {
         let mut chains: Vec<String> = self
             .inner
             .atoms()
-            .map(|a| a.chain.clone())
+            .map(|a| a.residue.chain.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
@@ -300,7 +300,7 @@ impl PyObjectMolecule {
         let mut names: Vec<String> = self
             .inner
             .atoms()
-            .map(|a| a.resn.clone())
+            .map(|a| a.residue.resn.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();

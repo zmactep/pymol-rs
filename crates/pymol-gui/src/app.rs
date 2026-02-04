@@ -1142,7 +1142,7 @@ impl App {
                 if let Some(color_idx) = self.state.named_colors.get_by_name(&color).map(|(idx, _)| idx) {
                     if let Some(mol_obj) = self.state.registry.get_molecule_mut(&name) {
                         for atom in mol_obj.molecule_mut().atoms_mut() {
-                            atom.colors.base = color_idx as i32;
+                            atom.repr.colors.base = color_idx as i32;
                         }
                         self.needs_redraw = true;
                     }

@@ -81,23 +81,23 @@ impl<W: Write> PdbWriter<W> {
         y: f32,
         z: f32,
     ) -> IoResult<()> {
-        let record_type = if atom.hetatm { "HETATM" } else { "ATOM  " };
+        let record_type = if atom.state.hetatm { "HETATM" } else { "ATOM  " };
 
         // Format atom name with proper justification
         let name = format_atom_name(&atom.name, atom.element.symbol());
 
         // Format chain (single character)
-        let chain = if atom.chain.is_empty() {
+        let chain = if atom.residue.chain.is_empty() {
             " "
         } else {
-            &atom.chain[..1.min(atom.chain.len())]
+            &atom.residue.chain[..1.min(atom.residue.chain.len())]
         };
 
         // Format insertion code
-        let icode = if atom.inscode == ' ' {
+        let icode = if atom.residue.inscode == ' ' {
             ' '
         } else {
-            atom.inscode
+            atom.residue.inscode
         };
 
         // Format element symbol (right-justified in 2 characters)
@@ -113,13 +113,13 @@ impl<W: Write> PdbWriter<W> {
             serial % 100000,
             name,
             if atom.alt == ' ' { ' ' } else { atom.alt },
-            if atom.resn.len() > 3 {
-                &atom.resn[..3]
+            if atom.residue.resn.len() > 3 {
+                &atom.residue.resn[..3]
             } else {
-                &atom.resn
+                &atom.residue.resn
             },
             chain,
-            atom.resv,
+            atom.residue.resv,
             icode,
             x,
             y,
@@ -232,14 +232,14 @@ impl<W: Write> PdbWriter<W> {
                 let coord = mol.get_coord(atom_idx, *state_idx).unwrap_or_default();
 
                 // Write TER between chains
-                if !last_chain.is_empty() && atom.chain != last_chain {
+                if !last_chain.is_empty() && atom.residue.chain != last_chain {
                     // Get the previous atom's info for TER record
                     if let Some(prev_atom) = mol.get_atom(AtomIndex(atom_idx.0.saturating_sub(1))) {
-                        self.write_ter(serial, &prev_atom.resn, &prev_atom.chain, prev_atom.resv)?;
+                        self.write_ter(serial, &prev_atom.residue.resn, &prev_atom.residue.chain, prev_atom.residue.resv)?;
                         serial += 1;
                     }
                 }
-                last_chain = atom.chain.clone();
+                last_chain = atom.residue.chain.clone();
 
                 self.write_atom(serial, atom, coord.x, coord.y, coord.z)?;
                 serial += 1;
@@ -251,7 +251,7 @@ impl<W: Write> PdbWriter<W> {
                 .checked_sub(1)
                 .and_then(|i| mol.get_atom(AtomIndex(i as u32)))
             {
-                self.write_ter(serial, &last_atom.resn, &last_atom.chain, last_atom.resv)?;
+                self.write_ter(serial, &last_atom.residue.resn, &last_atom.residue.chain, last_atom.residue.resv)?;
             }
 
             if write_models {
@@ -316,16 +316,12 @@ mod tests {
         let mut mol = ObjectMolecule::new("test");
 
         let mut atom1 = Atom::new("N", Element::Nitrogen);
-        atom1.resn = "ALA".to_string();
-        atom1.resv = 1;
-        atom1.chain = "A".to_string();
+        atom1.set_residue("ALA", 1, "A");
         atom1.id = 1;
         mol.add_atom(atom1);
 
         let mut atom2 = Atom::new("CA", Element::Carbon);
-        atom2.resn = "ALA".to_string();
-        atom2.resv = 1;
-        atom2.chain = "A".to_string();
+        atom2.set_residue("ALA", 1, "A");
         atom2.id = 2;
         mol.add_atom(atom2);
 

@@ -52,7 +52,7 @@ mod residue;
 mod secondary;
 
 // Re-export main types
-pub use atom::{Atom, AtomBuilder, AtomColors, RepMask};
+pub use atom::{Atom, AtomBuilder, AtomColors, AtomRepresentation, AtomResidue, AtomState, RepMask};
 pub use bond::{Bond, BondOrder, BondStereo, SymOp};
 pub use coordset::{
     mat4_to_ttt, rotation_matrix, rotation_ttt, translation_matrix, ttt_to_mat4, CoordSet,
@@ -75,7 +75,7 @@ pub use dss::{assign_secondary_structure, DssSettings, PhiPsi};
 
 /// Re-export commonly used types for convenience
 pub mod prelude {
-    pub use crate::atom::{Atom, AtomBuilder, AtomColors};
+    pub use crate::atom::{Atom, AtomBuilder, AtomColors, AtomRepresentation, AtomResidue, AtomState};
     pub use crate::bond::{Bond, BondOrder};
     pub use crate::coordset::CoordSet;
     pub use crate::element::Element;
@@ -125,15 +125,16 @@ mod tests {
 
     #[test]
     fn test_residue_iteration() {
+        use std::sync::Arc;
+
         let mut mol = ObjectMolecule::new("peptide");
 
         // Create a simple dipeptide
         for (resn, resv) in &[("ALA", 1), ("GLY", 2)] {
+            let residue = Arc::new(AtomResidue::from_parts("A", *resn, *resv, ' ', ""));
             for name in &["N", "CA", "C", "O"] {
                 let mut atom = Atom::new(*name, Element::Carbon);
-                atom.resn = resn.to_string();
-                atom.resv = *resv;
-                atom.chain = "A".to_string();
+                atom.residue = residue.clone();
                 mol.add_atom(atom);
             }
         }

@@ -216,8 +216,8 @@ impl Representation for LineRep {
             };
 
             // Check if atoms have lines representation visible
-            if !atom1.visible_reps.is_visible(RepMask::LINES)
-                && !atom2.visible_reps.is_visible(RepMask::LINES)
+            if !atom1.repr.visible_reps.is_visible(RepMask::LINES)
+                && !atom2.repr.visible_reps.is_visible(RepMask::LINES)
             {
                 continue;
             }

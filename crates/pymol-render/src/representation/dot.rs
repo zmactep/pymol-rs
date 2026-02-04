@@ -145,7 +145,7 @@ impl Representation for DotRep {
             };
 
             // Check if dots representation is visible for this atom
-            if !atom.visible_reps.is_visible(RepMask::DOTS) {
+            if !atom.repr.visible_reps.is_visible(RepMask::DOTS) {
                 continue;
             }
 

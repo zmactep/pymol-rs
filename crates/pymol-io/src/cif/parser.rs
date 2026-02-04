@@ -4,9 +4,10 @@
 
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
+use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{Atom, AtomIndex, CoordSet, Element, ObjectMolecule, SecondaryStructure};
+use pymol_mol::{Atom, AtomIndex, AtomResidue, CoordSet, Element, ObjectMolecule, SecondaryStructure};
 
 use crate::error::{IoError, IoResult};
 use crate::traits::MoleculeReader;
@@ -336,25 +337,28 @@ fn parse_atom_site_loop(
         let mut atom = Atom::new(atom_name, element);
 
         // Residue info (prefer auth over label)
-        atom.resn = get_col("_atom_site.auth_comp_id")
+        let resn = get_col("_atom_site.auth_comp_id")
             .or_else(|| get_col("_atom_site.label_comp_id"))
             .unwrap_or("")
             .to_string();
 
-        atom.resv = get_col("_atom_site.auth_seq_id")
+        let resv = get_col("_atom_site.auth_seq_id")
             .or_else(|| get_col("_atom_site.label_seq_id"))
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
-        atom.chain = get_col("_atom_site.auth_asym_id")
+        let chain = get_col("_atom_site.auth_asym_id")
             .or_else(|| get_col("_atom_site.label_asym_id"))
             .unwrap_or("")
             .to_string();
 
         // Insertion code
-        atom.inscode = get_col("_atom_site.pdbx_PDB_ins_code")
+        let inscode = get_col("_atom_site.pdbx_PDB_ins_code")
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
+
+        // Create AtomResidue
+        atom.residue = Arc::new(AtomResidue::from_parts(chain, resn, resv, inscode, ""));
 
         // Alt loc
         atom.alt = get_col("_atom_site.label_alt_id")
@@ -372,7 +376,7 @@ fn parse_atom_site_loop(
             .unwrap_or(1.0);
 
         // HETATM flag
-        atom.hetatm = get_col("_atom_site.group_PDB")
+        atom.state.hetatm = get_col("_atom_site.group_PDB")
             .map(|s| s == "HETATM")
             .unwrap_or(false);
 
@@ -607,12 +611,12 @@ fn apply_secondary_structure(mol: &mut ObjectMolecule, ss_ranges: &[SecondaryStr
             // Match by chain and residue number
             // Try auth_chain first if available, otherwise use chain
             let chain_match = if let Some(ref auth_chain) = range.auth_chain {
-                atom.chain == *auth_chain
+                atom.residue.chain == *auth_chain
             } else {
-                atom.chain == range.chain
+                atom.residue.chain == range.chain
             };
 
-            if chain_match && atom.resv >= range.start_seq && atom.resv <= range.end_seq {
+            if chain_match && atom.residue.resv >= range.start_seq && atom.residue.resv <= range.end_seq {
                 updates.push((idx, range.ss_type));
             }
         }
@@ -726,7 +730,7 @@ _struct_conf.end_auth_seq_id 3
                 SecondaryStructure::Helix,
                 "Atom {} resv={} should be Helix",
                 atom.name,
-                atom.resv
+                atom.residue.resv
             );
         }
     }
@@ -772,7 +776,7 @@ HELX_P HELX_P1 A 1 A 2
                 SecondaryStructure::Helix,
                 "Atom {} resv={} should be Helix",
                 atom.name,
-                atom.resv
+                atom.residue.resv
             );
         }
     }

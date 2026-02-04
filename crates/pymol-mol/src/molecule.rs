@@ -287,10 +287,10 @@ impl ObjectMolecule {
 
         // Mark atoms as bonded
         if let Some(a1) = self.atoms.get_mut(atom1.as_usize()) {
-            a1.bonded = true;
+            a1.state.bonded = true;
         }
         if let Some(a2) = self.atoms.get_mut(atom2.as_usize()) {
-            a2.bonded = true;
+            a2.state.bonded = true;
         }
 
         Ok(bond_index)
@@ -471,7 +471,7 @@ impl ObjectMolecule {
             atom_bonds.clear();
         }
         for atom in &mut self.atoms {
-            atom.bonded = false;
+            atom.state.bonded = false;
         }
     }
 
@@ -507,13 +507,13 @@ impl ObjectMolecule {
             }
 
             // Only for amino acid residues
-            if !is_amino_acid(&atom1.resn) {
+            if !is_amino_acid(&atom1.residue.resn) {
                 continue;
             }
 
             let name1 = atom1.name.as_str();
             let name2 = atom2.name.as_str();
-            let resn = atom1.resn.as_str();
+            let resn = atom1.residue.resn.as_str();
 
             // Check for double bonds based on atom names
             let order = get_protein_bond_order(resn, name1, name2);
@@ -614,7 +614,7 @@ impl ObjectMolecule {
 
     /// Get unique chain IDs
     pub fn chain_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.atoms.iter().map(|a| a.chain.clone()).collect();
+        let mut ids: Vec<String> = self.atoms.iter().map(|a| a.residue.chain.clone()).collect();
         ids.sort();
         ids.dedup();
         ids
@@ -671,7 +671,7 @@ impl ObjectMolecule {
                 let is_hetatm = residue
                     .atoms
                     .first()
-                    .map(|a| a.hetatm)
+                    .map(|a| a.state.hetatm)
                     .unwrap_or(true);
 
                 // Determine classification flags
@@ -719,13 +719,13 @@ impl ObjectMolecule {
         for (range, mask, guide_idx) in residue_info {
             for idx in range {
                 if let Some(atom) = self.atoms.get_mut(idx) {
-                    atom.flags |= mask;
+                    atom.state.flags |= mask;
                 }
             }
             // Set guide flag on the guide atom
             if let Some(guide) = guide_idx {
                 if let Some(atom) = self.atoms.get_mut(guide) {
-                    atom.flags |= AtomFlags::GUIDE;
+                    atom.state.flags |= AtomFlags::GUIDE;
                 }
             }
         }
@@ -1103,34 +1103,31 @@ mod tests {
 
     #[test]
     fn test_classify_atoms_protein() {
+        use crate::atom::AtomResidue;
         use crate::flags::AtomFlags;
+        use std::sync::Arc;
 
         // Create a simple peptide with amino acid residues
         let mut mol = ObjectMolecule::new("peptide");
 
+        // Create shared residue
+        let ala_res = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
+
         // Add ALA residue atoms
         let mut n = Atom::new("N", Element::Nitrogen);
-        n.resn = "ALA".to_string();
-        n.resv = 1;
-        n.chain = "A".to_string();
+        n.residue = ala_res.clone();
         mol.add_atom(n);
 
         let mut ca = Atom::new("CA", Element::Carbon);
-        ca.resn = "ALA".to_string();
-        ca.resv = 1;
-        ca.chain = "A".to_string();
+        ca.residue = ala_res.clone();
         mol.add_atom(ca);
 
         let mut c = Atom::new("C", Element::Carbon);
-        c.resn = "ALA".to_string();
-        c.resv = 1;
-        c.chain = "A".to_string();
+        c.residue = ala_res.clone();
         mol.add_atom(c);
 
         let mut o = Atom::new("O", Element::Oxygen);
-        o.resn = "ALA".to_string();
-        o.resv = 1;
-        o.chain = "A".to_string();
+        o.residue = ala_res.clone();
         mol.add_atom(o);
 
         // Add coordinate set
@@ -1143,37 +1140,40 @@ mod tests {
         mol.add_coord_set(cs);
 
         // Before classification, atoms should NOT have PROTEIN flag
-        assert!(!mol.get_atom(AtomIndex(0)).unwrap().flags.contains(AtomFlags::PROTEIN));
+        assert!(!mol.get_atom(AtomIndex(0)).unwrap().state.flags.contains(AtomFlags::PROTEIN));
 
         // Classify atoms
         mol.classify_atoms();
 
         // After classification, all atoms should have PROTEIN and POLYMER flags
         for atom in mol.atoms() {
-            assert!(atom.flags.contains(AtomFlags::PROTEIN), "Atom {} should have PROTEIN flag", atom.name);
-            assert!(atom.flags.contains(AtomFlags::POLYMER), "Atom {} should have POLYMER flag", atom.name);
+            assert!(atom.state.flags.contains(AtomFlags::PROTEIN), "Atom {} should have PROTEIN flag", atom.name);
+            assert!(atom.state.flags.contains(AtomFlags::POLYMER), "Atom {} should have POLYMER flag", atom.name);
         }
 
         // CA atom should also have GUIDE flag
         let ca_atom = mol.get_atom(AtomIndex(1)).unwrap();
-        assert!(ca_atom.flags.contains(AtomFlags::GUIDE), "CA atom should have GUIDE flag");
+        assert!(ca_atom.state.flags.contains(AtomFlags::GUIDE), "CA atom should have GUIDE flag");
     }
 
     #[test]
     fn test_classify_atoms_water() {
+        use crate::atom::AtomResidue;
         use crate::flags::AtomFlags;
+        use std::sync::Arc;
 
         // Create water molecule
         let mut mol = ObjectMolecule::new("water");
 
+        // Create shared residue for water
+        let hoh_res = Arc::new(AtomResidue::from_parts("", "HOH", 1, ' ', ""));
+
         let mut o = Atom::new("O", Element::Oxygen);
-        o.resn = "HOH".to_string();
-        o.resv = 1;
+        o.residue = hoh_res.clone();
         mol.add_atom(o);
 
         let mut h1 = Atom::new("H1", Element::Hydrogen);
-        h1.resn = "HOH".to_string();
-        h1.resv = 1;
+        h1.residue = hoh_res.clone();
         mol.add_atom(h1);
 
         let cs = CoordSet::from_vec3(&[
@@ -1186,20 +1186,23 @@ mod tests {
 
         // Water should have SOLVENT flag, not PROTEIN
         for atom in mol.atoms() {
-            assert!(atom.flags.contains(AtomFlags::SOLVENT), "Atom {} should have SOLVENT flag", atom.name);
-            assert!(!atom.flags.contains(AtomFlags::PROTEIN), "Atom {} should NOT have PROTEIN flag", atom.name);
+            assert!(atom.state.flags.contains(AtomFlags::SOLVENT), "Atom {} should have SOLVENT flag", atom.name);
+            assert!(!atom.state.flags.contains(AtomFlags::PROTEIN), "Atom {} should NOT have PROTEIN flag", atom.name);
         }
     }
 
     #[test]
     fn test_residue_is_protein_after_classification() {
+        use crate::atom::AtomResidue;
+        use std::sync::Arc;
+
         // Create a peptide and verify that is_protein() returns true after classification
         let mut mol = ObjectMolecule::new("peptide");
 
+        let gly_res = Arc::new(AtomResidue::from_parts("A", "GLY", 1, ' ', ""));
+
         let mut ca = Atom::new("CA", Element::Carbon);
-        ca.resn = "GLY".to_string();
-        ca.resv = 1;
-        ca.chain = "A".to_string();
+        ca.residue = gly_res.clone();
         mol.add_atom(ca);
 
         let cs = CoordSet::from_vec3(&[Vec3::new(0.0, 0.0, 0.0)]);

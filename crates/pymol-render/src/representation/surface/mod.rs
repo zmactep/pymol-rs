@@ -427,7 +427,7 @@ impl Representation for SurfaceRep {
             };
 
             // Check if surface representation is visible for this atom
-            if !atom.visible_reps.is_visible(RepMask::SURFACE) {
+            if !atom.repr.visible_reps.is_visible(RepMask::SURFACE) {
                 continue;
             }
 

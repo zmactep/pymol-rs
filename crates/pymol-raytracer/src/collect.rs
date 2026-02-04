@@ -36,8 +36,8 @@ impl<'a> RayColorResolver<'a> {
         _molecule: &ObjectMolecule,
     ) -> [f32; 4] {
         // Check for explicit atom color first (positive index means custom color)
-        if atom.colors.base >= 0 {
-            if let Some(color) = self.named_colors.get_by_index(atom.colors.base as u32) {
+        if atom.repr.colors.base >= 0 {
+            if let Some(color) = self.named_colors.get_by_index(atom.repr.colors.base as u32) {
                 return [color.r, color.g, color.b, 1.0];
             }
         }
@@ -50,8 +50,8 @@ impl<'a> RayColorResolver<'a> {
         }
 
         // Try chain color
-        if !atom.chain.is_empty() {
-            let color = ChainColors::get(&atom.chain);
+        if !atom.residue.chain.is_empty() {
+            let color = ChainColors::get(&atom.residue.chain);
             return [color.r, color.g, color.b, 1.0];
         }
 
@@ -79,12 +79,12 @@ pub fn collect_spheres(
         };
 
         // Check if spheres representation is visible
-        if !atom.visible_reps.is_visible(RepMask::SPHERES) {
+        if !atom.repr.visible_reps.is_visible(RepMask::SPHERES) {
             continue;
         }
 
         // Use per-atom sphere_scale if set, otherwise global
-        let scale = atom.sphere_scale.unwrap_or(sphere_scale);
+        let scale = atom.repr.sphere_scale.unwrap_or(sphere_scale);
         let radius = atom.effective_vdw() * scale;
         let color = colors.resolve_atom(atom, molecule);
 
@@ -126,8 +126,8 @@ pub fn collect_cylinders(
         };
 
         // Check if sticks representation is visible
-        if !atom1.visible_reps.is_visible(RepMask::STICKS)
-            && !atom2.visible_reps.is_visible(RepMask::STICKS)
+        if !atom1.repr.visible_reps.is_visible(RepMask::STICKS)
+            && !atom2.repr.visible_reps.is_visible(RepMask::STICKS)
         {
             continue;
         }

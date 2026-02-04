@@ -44,12 +44,7 @@ impl ResidueKey {
 
     /// Create a residue key from an atom
     pub fn from_atom(atom: &Atom) -> Self {
-        ResidueKey {
-            chain: atom.chain.clone(),
-            resn: atom.resn.clone(),
-            resv: atom.resv,
-            inscode: atom.inscode,
-        }
+        atom.residue.key.clone()
     }
 
     /// Get a display string for the residue (e.g., "A/ALA`1")
@@ -159,7 +154,7 @@ impl<'a> ResidueView<'a> {
     pub fn is_protein(&self) -> bool {
         self.atoms
             .first()
-            .map(|a| a.flags.contains(crate::flags::AtomFlags::PROTEIN))
+            .map(|a| a.state.flags.contains(crate::flags::AtomFlags::PROTEIN))
             .unwrap_or(false)
     }
 
@@ -167,7 +162,7 @@ impl<'a> ResidueView<'a> {
     pub fn is_nucleic(&self) -> bool {
         self.atoms
             .first()
-            .map(|a| a.flags.contains(crate::flags::AtomFlags::NUCLEIC))
+            .map(|a| a.state.flags.contains(crate::flags::AtomFlags::NUCLEIC))
             .unwrap_or(false)
     }
 }
@@ -233,22 +228,24 @@ impl<'a> ChainView<'a> {
 /// Check if two atoms are in the same residue
 #[inline]
 pub fn atoms_same_residue(a: &Atom, b: &Atom) -> bool {
-    a.chain == b.chain
-        && a.resv == b.resv
-        && a.inscode == b.inscode
-        && a.resn == b.resn
+    // Can use Arc pointer equality for efficiency if atoms share the same residue
+    std::sync::Arc::ptr_eq(&a.residue, &b.residue)
+        || (a.residue.chain == b.residue.chain
+            && a.residue.resv == b.residue.resv
+            && a.residue.inscode == b.residue.inscode
+            && a.residue.resn == b.residue.resn)
 }
 
 /// Check if two atoms are in the same chain
 #[inline]
 pub fn atoms_same_chain(a: &Atom, b: &Atom) -> bool {
-    a.chain == b.chain
+    a.residue.chain == b.residue.chain
 }
 
 /// Check if two atoms are in the same segment
 #[inline]
 pub fn atoms_same_segment(a: &Atom, b: &Atom) -> bool {
-    a.segi == b.segi
+    a.residue.segi == b.residue.segi
 }
 
 /// Standard amino acid residue names (3-letter codes)
@@ -298,35 +295,34 @@ pub fn is_water(resn: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atom::AtomResidue;
     use crate::element::Element;
+    use std::sync::Arc;
 
     fn make_test_atoms() -> Vec<Atom> {
         let mut atoms = Vec::new();
 
         // Chain A, residue 1 (ALA)
+        let res_ala = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
         for name in &["N", "CA", "C", "O", "CB"] {
             let mut atom = Atom::new(*name, Element::Carbon);
-            atom.chain = "A".to_string();
-            atom.resn = "ALA".to_string();
-            atom.resv = 1;
+            atom.residue = res_ala.clone();
             atoms.push(atom);
         }
 
         // Chain A, residue 2 (GLY)
+        let res_gly = Arc::new(AtomResidue::from_parts("A", "GLY", 2, ' ', ""));
         for name in &["N", "CA", "C", "O"] {
             let mut atom = Atom::new(*name, Element::Carbon);
-            atom.chain = "A".to_string();
-            atom.resn = "GLY".to_string();
-            atom.resv = 2;
+            atom.residue = res_gly.clone();
             atoms.push(atom);
         }
 
         // Chain B, residue 1 (SER)
+        let res_ser = Arc::new(AtomResidue::from_parts("B", "SER", 1, ' ', ""));
         for name in &["N", "CA", "C", "O", "CB", "OG"] {
             let mut atom = Atom::new(*name, Element::Carbon);
-            atom.chain = "B".to_string();
-            atom.resn = "SER".to_string();
-            atom.resv = 1;
+            atom.residue = res_ser.clone();
             atoms.push(atom);
         }
 
@@ -382,6 +378,14 @@ mod tests {
         let atoms = make_test_atoms();
         assert!(atoms_same_residue(&atoms[0], &atoms[1]));
         assert!(!atoms_same_residue(&atoms[0], &atoms[5]));
+    }
+
+    #[test]
+    fn test_atoms_same_residue_shared() {
+        let atoms = make_test_atoms();
+        // Atoms 0 and 1 share the same Rc<AtomResidue>
+        assert!(Arc::ptr_eq(&atoms[0].residue, &atoms[1].residue));
+        assert!(atoms_same_residue(&atoms[0], &atoms[1]));
     }
 
     #[test]

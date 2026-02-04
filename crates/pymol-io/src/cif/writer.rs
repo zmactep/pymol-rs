@@ -118,21 +118,21 @@ impl<W: Write> CifWriter<W> {
             for (idx, atom) in mol.atoms_indexed() {
                 let coord = mol.get_coord(idx, *state).unwrap_or_default();
 
-                let group = if atom.hetatm { "HETATM" } else { "ATOM" };
-                let chain = if atom.chain.is_empty() {
+                let group = if atom.state.hetatm { "HETATM" } else { "ATOM" };
+                let chain = if atom.residue.chain.is_empty() {
                     "A"
                 } else {
-                    &atom.chain
+                    &atom.residue.chain
                 };
-                let resn = if atom.resn.is_empty() {
+                let resn = if atom.residue.resn.is_empty() {
                     "UNK"
                 } else {
-                    &atom.resn
+                    &atom.residue.resn
                 };
-                let inscode = if atom.inscode == ' ' {
+                let inscode = if atom.residue.inscode == ' ' {
                     "?"
                 } else {
-                    &atom.inscode.to_string()
+                    &atom.residue.inscode.to_string()
                 };
 
                 writeln!(
@@ -143,7 +143,7 @@ impl<W: Write> CifWriter<W> {
                     Self::escape_value(&atom.name),
                     Self::escape_value(resn),
                     chain,
-                    atom.resv,
+                    atom.residue.resv,
                     inscode,
                     coord.x,
                     coord.y,
@@ -158,7 +158,7 @@ impl<W: Write> CifWriter<W> {
                     Self::escape_value(&atom.name),
                     Self::escape_value(resn),
                     chain,
-                    atom.resv,
+                    atom.residue.resv,
                     model_num + 1,
                     group
                 )?;
@@ -194,15 +194,11 @@ mod tests {
         let mut mol = ObjectMolecule::new("alanine");
 
         let mut n = Atom::new("N", Element::Nitrogen);
-        n.resn = "ALA".to_string();
-        n.resv = 1;
-        n.chain = "A".to_string();
+        n.set_residue("ALA", 1, "A");
         mol.add_atom(n);
 
         let mut ca = Atom::new("CA", Element::Carbon);
-        ca.resn = "ALA".to_string();
-        ca.resv = 1;
-        ca.chain = "A".to_string();
+        ca.set_residue("ALA", 1, "A");
         mol.add_atom(ca);
 
         let coords = CoordSet::from_vec3(&[Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.5, 0.0, 0.0)]);

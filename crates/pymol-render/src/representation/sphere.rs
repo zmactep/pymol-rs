@@ -102,12 +102,12 @@ impl Representation for SphereRep {
             };
 
             // Check if spheres representation is visible for this atom
-            if !atom.visible_reps.is_visible(RepMask::SPHERES) {
+            if !atom.repr.visible_reps.is_visible(RepMask::SPHERES) {
                 continue;
             }
 
             // Get VdW radius - use per-atom sphere_scale if set, otherwise global
-            let scale = atom.sphere_scale.unwrap_or(sphere_scale);
+            let scale = atom.repr.sphere_scale.unwrap_or(sphere_scale);
             let radius = atom.effective_vdw() * scale;
 
             // Get color

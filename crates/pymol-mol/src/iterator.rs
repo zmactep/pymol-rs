@@ -178,7 +178,7 @@ impl<'a> Iterator for ChainIterator<'a> {
         let atoms = self.inner.atoms();
 
         Some(ChainView {
-            chain_id: first_atom.chain.clone(),
+            chain_id: first_atom.residue.chain.clone(),
             atoms: &atoms[start..end],
             atom_range: (base + start)..(base + end),
         })
@@ -188,35 +188,34 @@ impl<'a> Iterator for ChainIterator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atom::AtomResidue;
     use crate::element::Element;
+    use std::sync::Arc;
 
     fn make_test_atoms() -> Vec<Atom> {
         let mut atoms = Vec::new();
 
         // Chain A, residue 1 (ALA)
+        let res_ala = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
         for name in &["N", "CA", "C", "O", "CB"] {
             let mut atom = Atom::new(*name, Element::Carbon);
-            atom.chain = "A".to_string();
-            atom.resn = "ALA".to_string();
-            atom.resv = 1;
+            atom.residue = res_ala.clone();
             atoms.push(atom);
         }
 
         // Chain A, residue 2 (GLY)
+        let res_gly = Arc::new(AtomResidue::from_parts("A", "GLY", 2, ' ', ""));
         for name in &["N", "CA", "C", "O"] {
             let mut atom = Atom::new(*name, Element::Carbon);
-            atom.chain = "A".to_string();
-            atom.resn = "GLY".to_string();
-            atom.resv = 2;
+            atom.residue = res_gly.clone();
             atoms.push(atom);
         }
 
         // Chain B, residue 1 (SER)
+        let res_ser = Arc::new(AtomResidue::from_parts("B", "SER", 1, ' ', ""));
         for name in &["N", "CA", "C", "O", "CB", "OG"] {
             let mut atom = Atom::new(*name, Element::Carbon);
-            atom.chain = "B".to_string();
-            atom.resn = "SER".to_string();
-            atom.resv = 1;
+            atom.residue = res_ser.clone();
             atoms.push(atom);
         }
 

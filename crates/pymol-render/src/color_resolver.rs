@@ -80,7 +80,7 @@ impl<'a> ColorResolver<'a> {
 
     /// Resolve a color index to a Color
     fn resolve_color_index(&self, atom: &Atom) -> Color {
-        self.resolve_color_index_value(atom.colors.base, atom)
+        self.resolve_color_index_value(atom.repr.colors.base, atom)
     }
 
     /// Resolve a color index value to a Color
@@ -126,7 +126,7 @@ impl<'a> ColorResolver<'a> {
     /// Resolve color by chain
     fn resolve_by_chain(&self, atom: &Atom) -> Color {
         // Use chain name (ChainColors::get is a static method)
-        ChainColors::get(&atom.chain)
+        ChainColors::get(&atom.residue.chain)
     }
 
     /// Resolve color by secondary structure
@@ -166,7 +166,7 @@ impl<'a> ColorResolver<'a> {
     /// uses green as the default cartoon color.
     pub fn resolve_cartoon(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
         // Use cartoon color if set, otherwise fall back to base color
-        let color_idx = atom.colors.cartoon_or_base();
+        let color_idx = atom.repr.colors.cartoon_or_base();
         let color = match color_idx {
             -1 => {
                 // Default: green for cartoon (when explicitly "by element" or default)
@@ -181,7 +181,7 @@ impl<'a> ColorResolver<'a> {
     ///
     /// Uses colors.ribbon if set, otherwise falls back to colors.base.
     pub fn resolve_ribbon(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.colors.ribbon_or_base();
+        let color_idx = atom.repr.colors.ribbon_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
@@ -190,7 +190,7 @@ impl<'a> ColorResolver<'a> {
     ///
     /// Uses colors.stick if set, otherwise falls back to colors.base.
     pub fn resolve_stick(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.colors.stick_or_base();
+        let color_idx = atom.repr.colors.stick_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
@@ -199,7 +199,7 @@ impl<'a> ColorResolver<'a> {
     ///
     /// Uses colors.line if set, otherwise falls back to colors.base.
     pub fn resolve_line(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.colors.line_or_base();
+        let color_idx = atom.repr.colors.line_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
@@ -208,7 +208,7 @@ impl<'a> ColorResolver<'a> {
     ///
     /// Uses colors.sphere if set, otherwise falls back to colors.base.
     pub fn resolve_sphere(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.colors.sphere_or_base();
+        let color_idx = atom.repr.colors.sphere_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
@@ -217,7 +217,7 @@ impl<'a> ColorResolver<'a> {
     ///
     /// Uses colors.surface if set, otherwise falls back to colors.base.
     pub fn resolve_surface(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.colors.surface_or_base();
+        let color_idx = atom.repr.colors.surface_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
@@ -226,7 +226,7 @@ impl<'a> ColorResolver<'a> {
     ///
     /// Uses colors.mesh if set, otherwise falls back to colors.base.
     pub fn resolve_mesh(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.colors.mesh_or_base();
+        let color_idx = atom.repr.colors.mesh_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
@@ -297,7 +297,7 @@ mod tests {
         // Create a carbon atom
         let mut atom = Atom::default();
         atom.element = Element::Carbon;
-        atom.colors.base = -1; // By element
+        atom.repr.colors.base = -1; // By element
 
         let molecule = ObjectMolecule::new("test");
         let color = resolver.resolve_atom(&atom, &molecule);
@@ -316,13 +316,13 @@ mod tests {
         let resolver = ColorResolver::new(&named, &elements, &CHAIN_COLORS);
 
         let mut atom = Atom::default();
-        atom.chain = "A".to_string();
-        atom.colors.base = -2; // By chain
+        atom.set_residue("ALA", 1, "A");
+        atom.repr.colors.base = -2; // By chain
 
         let molecule = ObjectMolecule::new("test");
         let color_a = resolver.resolve_atom(&atom, &molecule);
 
-        atom.chain = "B".to_string();
+        atom.set_residue("ALA", 1, "B");
         let color_b = resolver.resolve_atom(&atom, &molecule);
 
         // Different chains should have different colors

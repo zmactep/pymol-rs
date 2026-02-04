@@ -3,9 +3,10 @@
 //! Parses TRIPOS MOL2 format files.
 
 use std::io::{BufRead, BufReader, Read};
+use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{Atom, AtomIndex, BondOrder, CoordSet, Element, ObjectMolecule};
+use pymol_mol::{Atom, AtomIndex, AtomResidue, BondOrder, CoordSet, Element, ObjectMolecule};
 
 use crate::error::{IoError, IoResult};
 use crate::traits::MoleculeReader;
@@ -232,24 +233,30 @@ fn parse_atom_line(line: &str, line_number: usize) -> IoResult<(Atom, Vec3)> {
     let mut atom = Atom::new(&atom_name, element);
 
     // Parse substructure info if present
+    let mut resv = 1;
+    let mut resn = String::new();
+
     if parts.len() > 6 {
         // subst_id
-        if let Ok(resv) = parts[6].parse::<i32>() {
-            atom.resv = resv;
+        if let Ok(parsed_resv) = parts[6].parse::<i32>() {
+            resv = parsed_resv;
         }
     }
 
     if parts.len() > 7 {
         // subst_name (residue name)
-        let resn = parts[7];
+        let resn_raw = parts[7];
         // Handle residue names like "ALA1" -> "ALA"
-        let resn_clean: String = resn.chars().take_while(|c| c.is_alphabetic()).collect();
-        atom.resn = if resn_clean.is_empty() {
-            resn.to_string()
+        let resn_clean: String = resn_raw.chars().take_while(|c| c.is_alphabetic()).collect();
+        resn = if resn_clean.is_empty() {
+            resn_raw.to_string()
         } else {
             resn_clean
         };
     }
+
+    // Create AtomResidue
+    atom.residue = Arc::new(AtomResidue::from_parts("", resn, resv, ' ', ""));
 
     if parts.len() > 8 {
         // partial charge
@@ -301,7 +308,7 @@ mod tests {
         assert!((coord.x - 1.0).abs() < 0.0001);
         assert!((coord.y - 2.0).abs() < 0.0001);
         assert!((coord.z - 3.0).abs() < 0.0001);
-        assert_eq!(atom.resn, "ALA");
+        assert_eq!(atom.residue.resn, "ALA");
         assert!((atom.partial_charge - (-0.3)).abs() < 0.0001);
     }
 

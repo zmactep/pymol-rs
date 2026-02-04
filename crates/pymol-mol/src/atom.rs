@@ -1,10 +1,19 @@
 //! Atom data structure
 //!
 //! Provides the `Atom` struct containing all atom properties from PyMOL's AtomInfoType.
+//!
+//! The atom data is organized into logical components:
+//! - [`AtomResidue`] - Shared residue information (chain, resn, resv, etc.)
+//! - [`AtomState`] - Per-atom chemical/bonding state flags
+//! - [`AtomRepresentation`] - Display/visualization settings
+//! - [`Atom`] - Core identity and physical/chemical properties
 
 use crate::element::Element;
 use crate::flags::{AtomFlags, AtomGeometry, Chirality, Stereo};
+use crate::residue::ResidueKey;
 use crate::secondary::SecondaryStructure;
+use std::ops::Deref;
+use std::sync::Arc;
 
 /// Representation visibility flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -191,12 +200,174 @@ impl AtomColors {
     }
 }
 
+// =============================================================================
+// AtomResidue - Shared residue information
+// =============================================================================
+
+/// Residue information shared by atoms in the same residue
+///
+/// This struct composes [`ResidueKey`] (identity fields) with the segment identifier.
+/// It implements [`Deref`] to [`ResidueKey`] for transparent field access.
+///
+/// Note: Secondary structure type (`ss_type`) is stored on the [`Atom`] directly,
+/// not in `AtomResidue`, because it can be assigned/modified per-atom by the DSSP algorithm.
+///
+/// # Example
+/// ```
+/// use pymol_mol::{AtomResidue, ResidueKey};
+///
+/// let residue = AtomResidue::new(
+///     ResidueKey::new("A", "ALA", 1, ' '),
+///     String::new(),
+/// );
+///
+/// // Access via Deref
+/// assert_eq!(residue.chain, "A");
+/// assert_eq!(residue.resn, "ALA");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AtomResidue {
+    /// Identity key (chain, resn, resv, inscode) - used for lookups
+    pub key: ResidueKey,
+    /// Segment identifier
+    pub segi: String,
+}
+
+impl Deref for AtomResidue {
+    type Target = ResidueKey;
+
+    fn deref(&self) -> &Self::Target {
+        &self.key
+    }
+}
+
+impl Default for AtomResidue {
+    fn default() -> Self {
+        AtomResidue {
+            key: ResidueKey::new("", "", 0, ' '),
+            segi: String::new(),
+        }
+    }
+}
+
+impl AtomResidue {
+    /// Create a new AtomResidue
+    pub fn new(key: ResidueKey, segi: String) -> Self {
+        AtomResidue { key, segi }
+    }
+
+    /// Create a new AtomResidue from individual fields
+    pub fn from_parts(
+        chain: impl Into<String>,
+        resn: impl Into<String>,
+        resv: i32,
+        inscode: char,
+        segi: impl Into<String>,
+    ) -> Self {
+        AtomResidue {
+            key: ResidueKey::new(chain, resn, resv, inscode),
+            segi: segi.into(),
+        }
+    }
+}
+
+// =============================================================================
+// AtomState - Per-atom chemical/bonding state flags
+// =============================================================================
+
+/// Per-atom state flags for chemical properties and bonding
+///
+/// Contains flags that describe the atom's chemical state and classification.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AtomState {
+    /// Atom flags (protein, solvent, organic, etc.)
+    pub flags: AtomFlags,
+    /// Whether this is a HETATM (heteroatom)
+    pub hetatm: bool,
+    /// Whether this atom is bonded to any other atom
+    pub bonded: bool,
+    /// Hydrogen bond donor
+    pub hb_donor: bool,
+    /// Hydrogen bond acceptor
+    pub hb_acceptor: bool,
+}
+
+// =============================================================================
+// AtomRepresentation - Display/visualization state
+// =============================================================================
+
+/// Display/visualization state for an atom
+///
+/// Contains all settings related to how the atom is displayed,
+/// including colors, visibility, labels, and per-atom settings.
+#[derive(Debug, Clone)]
+pub struct AtomRepresentation {
+    /// Color settings for different representations
+    pub colors: AtomColors,
+    /// Sphere-specific scale factor (None = use global setting)
+    pub sphere_scale: Option<f32>,
+    /// Visible representations bitmask
+    pub visible_reps: RepMask,
+    /// Cartoon override (0 = auto/default based on ss_type)
+    pub cartoon: i8,
+    /// Text type label
+    pub text_type: String,
+    /// Custom label
+    pub label: String,
+    /// Whether this atom is masked (hidden from selection)
+    pub masked: bool,
+    /// Unique ID for per-atom settings (None if no custom settings)
+    pub unique_id: Option<i32>,
+    /// Whether this atom has per-atom settings
+    pub has_setting: bool,
+}
+
+impl Default for AtomRepresentation {
+    fn default() -> Self {
+        AtomRepresentation {
+            colors: AtomColors::default(),
+            sphere_scale: None,
+            visible_reps: RepMask::LINES, // Default to lines visible like PyMOL
+            cartoon: 0,
+            text_type: String::new(),
+            label: String::new(),
+            masked: false,
+            unique_id: None,
+            has_setting: false,
+        }
+    }
+}
+
+// =============================================================================
+// Atom - Main atom data structure
+// =============================================================================
+
 /// Atom data structure
 ///
 /// Contains all properties of an atom including identity, residue information,
 /// physical and chemical properties, and display state.
 ///
 /// This is the Rust equivalent of PyMOL's `AtomInfoType` structure.
+///
+/// # Structure
+///
+/// The atom data is organized into logical components:
+/// - Core identity fields (name, element) are stored directly
+/// - Residue information is shared via [`Arc<AtomResidue>`] for memory efficiency
+/// - Chemical state flags are grouped in [`AtomState`]
+/// - Display settings are grouped in [`AtomRepresentation`]
+///
+/// # Example
+/// ```
+/// use pymol_mol::{Atom, Element};
+///
+/// let atom = Atom::new("CA", Element::Carbon);
+/// assert_eq!(atom.name, "CA");
+/// assert_eq!(atom.element, Element::Carbon);
+///
+/// // Access residue info via Deref
+/// assert_eq!(atom.residue.resn, "");
+/// ```
 #[derive(Debug, Clone)]
 pub struct Atom {
     // =========================================================================
@@ -209,23 +380,8 @@ pub struct Atom {
     pub element: Element,
 
     // =========================================================================
-    // Residue Information (stored inline, not as separate Residue struct)
+    // Per-atom residue field (varies within residue)
     // =========================================================================
-    /// Residue name (e.g., "ALA", "GLY")
-    pub resn: String,
-
-    /// Residue sequence number
-    pub resv: i32,
-
-    /// Insertion code (for residues with same resv)
-    pub inscode: char,
-
-    /// Chain identifier (e.g., "A", "B")
-    pub chain: String,
-
-    /// Segment identifier
-    pub segi: String,
-
     /// Alternate location indicator
     pub alt: char,
 
@@ -270,59 +426,15 @@ pub struct Atom {
     pub chirality: Chirality,
 
     // =========================================================================
-    // State Flags
+    // Secondary Structure
     // =========================================================================
-    /// Atom flags (protein, solvent, organic, etc.)
-    pub flags: AtomFlags,
-
-    /// Secondary structure type
+    /// Secondary structure type (assigned by DSSP or from file)
+    /// Note: Stored per-atom because DSSP algorithm can assign it independently
     pub ss_type: SecondaryStructure,
 
-    /// Whether this is a HETATM (heteroatom)
-    pub hetatm: bool,
-
-    /// Whether this atom is bonded to any other atom
-    pub bonded: bool,
-
-    /// Whether this atom is masked (hidden from selection)
-    pub masked: bool,
-
-    /// Hydrogen bond donor
-    pub hb_donor: bool,
-
-    /// Hydrogen bond acceptor
-    pub hb_acceptor: bool,
-
     // =========================================================================
-    // Display Properties
+    // Internal/Identity
     // =========================================================================
-    /// Color settings for different representations
-    pub colors: AtomColors,
-
-    /// Sphere-specific scale factor (None = use global sphere_scale setting)
-    pub sphere_scale: Option<f32>,
-
-    /// Visible representations bitmask
-    pub visible_reps: RepMask,
-
-    /// Cartoon override (0 = auto/default based on ss_type)
-    pub cartoon: i8,
-
-    /// Text type label
-    pub text_type: String,
-
-    /// Custom label
-    pub label: String,
-
-    // =========================================================================
-    // Settings and Internal
-    // =========================================================================
-    /// Unique ID for per-atom settings (None if no custom settings)
-    pub unique_id: Option<i32>,
-
-    /// Whether this atom has per-atom settings
-    pub has_setting: bool,
-
     /// PDB atom serial number
     pub id: i32,
 
@@ -332,6 +444,18 @@ pub struct Atom {
     /// Discrete state index (for discrete objects where each state has independent atoms)
     /// Value of 0 means not discrete, >0 means state index + 1
     pub discrete_state: i32,
+
+    // =========================================================================
+    // Composed Structs
+    // =========================================================================
+    /// Residue information (shared via Rc for memory efficiency)
+    pub residue: Arc<AtomResidue>,
+
+    /// Chemical/bonding state flags
+    pub state: AtomState,
+
+    /// Display/visualization settings
+    pub repr: AtomRepresentation,
 }
 
 impl Default for Atom {
@@ -339,11 +463,6 @@ impl Default for Atom {
         Atom {
             name: String::new(),
             element: Element::Unknown,
-            resn: String::new(),
-            resv: 0,
-            inscode: ' ',
-            chain: String::new(),
-            segi: String::new(),
             alt: ' ',
             b_factor: 0.0,
             occupancy: 1.0,
@@ -356,24 +475,13 @@ impl Default for Atom {
             geom: AtomGeometry::None,
             stereo: Stereo::None,
             chirality: Chirality::None,
-            flags: AtomFlags::empty(),
             ss_type: SecondaryStructure::Loop,
-            hetatm: false,
-            bonded: false,
-            masked: false,
-            hb_donor: false,
-            hb_acceptor: false,
-            colors: AtomColors::default(),
-            sphere_scale: None, // None = use global sphere_scale setting
-            visible_reps: RepMask::LINES, // Default to lines visible like PyMOL
-            cartoon: 0,
-            text_type: String::new(),
-            label: String::new(),
-            unique_id: None,
-            has_setting: false,
             id: 0,
             rank: 0,
             discrete_state: 0,
+            residue: Arc::new(AtomResidue::default()),
+            state: AtomState::default(),
+            repr: AtomRepresentation::default(),
         }
     }
 }
@@ -437,35 +545,44 @@ impl Atom {
     /// Check if this is a backbone atom (N, CA, C, O)
     pub fn is_backbone(&self) -> bool {
         matches!(self.name.as_str(), "N" | "CA" | "C" | "O")
-            && self.flags.contains(AtomFlags::PROTEIN)
+            && self.state.flags.contains(AtomFlags::PROTEIN)
     }
 
     /// Check if this is a side chain atom
     pub fn is_sidechain(&self) -> bool {
-        self.flags.contains(AtomFlags::PROTEIN) && !self.is_backbone()
+        self.state.flags.contains(AtomFlags::PROTEIN) && !self.is_backbone()
     }
 
-    /// Set the residue information
+    /// Set the residue information (creates a new AtomResidue)
     pub fn set_residue(
         &mut self,
         resn: impl Into<String>,
         resv: i32,
         chain: impl Into<String>,
     ) {
-        self.resn = resn.into();
-        self.resv = resv;
-        self.chain = chain.into();
+        self.residue = Arc::new(AtomResidue::from_parts(
+            chain,
+            resn,
+            resv,
+            ' ',
+            "",
+        ));
+    }
+
+    /// Set the residue from a shared AtomResidue
+    pub fn set_residue_shared(&mut self, residue: Arc<AtomResidue>) {
+        self.residue = residue;
     }
 
     /// Get a short description of the atom (for debugging)
     pub fn short_desc(&self) -> String {
         format!(
             "{}/{}{}{}/{}",
-            self.chain,
-            self.resn,
-            self.resv,
-            if self.inscode != ' ' {
-                self.inscode.to_string()
+            self.residue.chain,
+            self.residue.resn,
+            self.residue.resv,
+            if self.residue.inscode != ' ' {
+                self.residue.inscode.to_string()
             } else {
                 String::new()
             },
@@ -481,9 +598,9 @@ impl std::fmt::Display for Atom {
             "Atom({} {} {} {}{})",
             self.name,
             self.element.symbol(),
-            self.chain,
-            self.resn,
-            self.resv
+            self.residue.chain,
+            self.residue.resn,
+            self.residue.resv
         )
     }
 }
@@ -492,12 +609,25 @@ impl std::fmt::Display for Atom {
 #[derive(Debug, Default)]
 pub struct AtomBuilder {
     atom: Atom,
+    // Temporary residue fields for building
+    chain: String,
+    resn: String,
+    resv: i32,
+    inscode: char,
+    segi: String,
 }
 
 impl AtomBuilder {
     /// Create a new atom builder
     pub fn new() -> Self {
-        AtomBuilder::default()
+        AtomBuilder {
+            atom: Atom::default(),
+            chain: String::new(),
+            resn: String::new(),
+            resv: 0,
+            inscode: ' ',
+            segi: String::new(),
+        }
     }
 
     /// Set the atom name
@@ -528,19 +658,37 @@ impl AtomBuilder {
 
     /// Set residue name
     pub fn resn(mut self, resn: impl Into<String>) -> Self {
-        self.atom.resn = resn.into();
+        self.resn = resn.into();
         self
     }
 
     /// Set residue number
     pub fn resv(mut self, resv: i32) -> Self {
-        self.atom.resv = resv;
+        self.resv = resv;
         self
     }
 
     /// Set chain
     pub fn chain(mut self, chain: impl Into<String>) -> Self {
-        self.atom.chain = chain.into();
+        self.chain = chain.into();
+        self
+    }
+
+    /// Set insertion code
+    pub fn inscode(mut self, inscode: char) -> Self {
+        self.inscode = inscode;
+        self
+    }
+
+    /// Set segment identifier
+    pub fn segi(mut self, segi: impl Into<String>) -> Self {
+        self.segi = segi.into();
+        self
+    }
+
+    /// Set secondary structure type
+    pub fn ss_type(mut self, ss_type: SecondaryStructure) -> Self {
+        self.atom.ss_type = ss_type;
         self
     }
 
@@ -564,7 +712,7 @@ impl AtomBuilder {
 
     /// Set as HETATM
     pub fn hetatm(mut self, hetatm: bool) -> Self {
-        self.atom.hetatm = hetatm;
+        self.atom.state.hetatm = hetatm;
         self
     }
 
@@ -576,12 +724,37 @@ impl AtomBuilder {
 
     /// Set atom flags
     pub fn flags(mut self, flags: AtomFlags) -> Self {
-        self.atom.flags = flags;
+        self.atom.state.flags = flags;
+        self
+    }
+
+    /// Set a shared residue (for memory efficiency)
+    pub fn residue(mut self, residue: Arc<AtomResidue>) -> Self {
+        self.atom.residue = residue;
         self
     }
 
     /// Build the atom
-    pub fn build(self) -> Atom {
+    pub fn build(mut self) -> Atom {
+        // Only create a new residue if one wasn't explicitly set
+        // and if any residue fields were modified
+        if Arc::strong_count(&self.atom.residue) == 1 {
+            // Default residue, check if we need to update it
+            if !self.chain.is_empty()
+                || !self.resn.is_empty()
+                || self.resv != 0
+                || self.inscode != ' '
+                || !self.segi.is_empty()
+            {
+                self.atom.residue = Arc::new(AtomResidue::from_parts(
+                    self.chain,
+                    self.resn,
+                    self.resv,
+                    self.inscode,
+                    self.segi,
+                ));
+            }
+        }
         self.atom
     }
 }
@@ -616,16 +789,16 @@ mod tests {
             .build();
 
         assert_eq!(atom.name, "CA");
-        assert_eq!(atom.resn, "ALA");
-        assert_eq!(atom.resv, 1);
-        assert_eq!(atom.chain, "A");
+        assert_eq!(atom.residue.resn, "ALA");
+        assert_eq!(atom.residue.resv, 1);
+        assert_eq!(atom.residue.chain, "A");
         assert_eq!(atom.b_factor, 20.0);
     }
 
     #[test]
     fn test_atom_classification() {
         let mut atom = Atom::new("CA", Element::Carbon);
-        atom.flags = AtomFlags::PROTEIN;
+        atom.state.flags = AtomFlags::PROTEIN;
         assert!(atom.is_backbone());
 
         atom.name = "CB".to_string();
@@ -635,9 +808,7 @@ mod tests {
     #[test]
     fn test_atom_display() {
         let mut atom = Atom::new("CA", Element::Carbon);
-        atom.chain = "A".to_string();
-        atom.resn = "ALA".to_string();
-        atom.resv = 1;
+        atom.residue = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
         assert_eq!(format!("{}", atom), "Atom(CA C A ALA1)");
     }
 
@@ -651,5 +822,54 @@ mod tests {
 
         mask.set_hidden(RepMask::CARTOON);
         assert!(!mask.is_visible(RepMask::CARTOON));
+    }
+
+    #[test]
+    fn test_atom_residue_deref() {
+        let residue = AtomResidue::from_parts("A", "ALA", 1, ' ', "SEG1");
+        // Test Deref to ResidueKey fields
+        assert_eq!(residue.chain, "A");
+        assert_eq!(residue.resn, "ALA");
+        assert_eq!(residue.resv, 1);
+        assert_eq!(residue.inscode, ' ');
+        // Test direct fields
+        assert_eq!(residue.segi, "SEG1");
+    }
+
+    #[test]
+    fn test_atom_state_default() {
+        let state = AtomState::default();
+        assert_eq!(state.flags, AtomFlags::empty());
+        assert!(!state.hetatm);
+        assert!(!state.bonded);
+        assert!(!state.hb_donor);
+        assert!(!state.hb_acceptor);
+    }
+
+    #[test]
+    fn test_atom_representation_default() {
+        let repr = AtomRepresentation::default();
+        assert_eq!(repr.colors.base, -1);
+        assert!(repr.visible_reps.is_visible(RepMask::LINES));
+        assert!(!repr.masked);
+    }
+
+    #[test]
+    fn test_shared_residue() {
+        let residue = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
+        
+        let mut atom1 = Atom::new("N", Element::Nitrogen);
+        atom1.residue = residue.clone();
+        atom1.ss_type = SecondaryStructure::Helix;
+        
+        let mut atom2 = Atom::new("CA", Element::Carbon);
+        atom2.residue = residue.clone();
+        atom2.ss_type = SecondaryStructure::Helix;
+        
+        // Both atoms share the same residue
+        assert!(Arc::ptr_eq(&atom1.residue, &atom2.residue));
+        assert_eq!(Arc::strong_count(&residue), 3);
+        // But ss_type is per-atom
+        assert_eq!(atom1.ss_type, SecondaryStructure::Helix);
     }
 }

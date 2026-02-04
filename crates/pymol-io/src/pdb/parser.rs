@@ -4,11 +4,12 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
+use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
 use nom::IResult;
 use pymol_mol::{
-    Atom, AtomIndex, BondOrder, CoordSet, ObjectMolecule, SecondaryStructure,
+    Atom, AtomIndex, AtomResidue, BondOrder, CoordSet, ObjectMolecule, SecondaryStructure,
 };
 
 use crate::error::{IoError, IoResult};
@@ -170,15 +171,18 @@ impl<R: Read> PdbReader<R> {
             let element = record.get_element();
             let mut atom = Atom::new(&record.name, element);
 
-            atom.resn = record.resn.clone();
-            atom.resv = record.resv;
-            atom.chain = record.chain.clone();
-            atom.inscode = record.icode;
+            // Create AtomResidue
+            atom.residue = Arc::new(AtomResidue::from_parts(
+                record.chain.clone(),
+                record.resn.clone(),
+                record.resv,
+                record.icode,
+                record.segi.clone(),
+            ));
             atom.alt = record.alt_loc;
-            atom.segi = record.segi.clone();
             atom.b_factor = record.b_factor;
             atom.occupancy = record.occupancy;
-            atom.hetatm = record.hetatm;
+            atom.state.hetatm = record.hetatm;
             atom.formal_charge = record.get_formal_charge();
             atom.id = record.serial;
 
@@ -262,9 +266,9 @@ fn apply_secondary_structure(
         .flat_map(|helix| {
             mol.atoms_indexed()
                 .filter(|(_, atom)| {
-                    atom.chain == helix.init_chain
-                        && atom.resv >= helix.init_seq
-                        && atom.resv <= helix.end_seq
+                    atom.residue.chain == helix.init_chain
+                        && atom.residue.resv >= helix.init_seq
+                        && atom.residue.resv <= helix.end_seq
                 })
                 .map(|(idx, _)| idx)
                 .collect::<Vec<_>>()
@@ -284,9 +288,9 @@ fn apply_secondary_structure(
         .flat_map(|sheet| {
             mol.atoms_indexed()
                 .filter(|(_, atom)| {
-                    atom.chain == sheet.init_chain
-                        && atom.resv >= sheet.init_seq
-                        && atom.resv <= sheet.end_seq
+                    atom.residue.chain == sheet.init_chain
+                        && atom.residue.resv >= sheet.init_seq
+                        && atom.residue.resv <= sheet.end_seq
                 })
                 .map(|(idx, _)| idx)
                 .collect::<Vec<_>>()

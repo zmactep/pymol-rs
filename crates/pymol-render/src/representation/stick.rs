@@ -269,8 +269,8 @@ impl Representation for StickRep {
             };
 
             // Check if sticks representation is visible for either atom
-            if !atom1.visible_reps.is_visible(RepMask::STICKS)
-                && !atom2.visible_reps.is_visible(RepMask::STICKS)
+            if !atom1.repr.visible_reps.is_visible(RepMask::STICKS)
+                && !atom2.repr.visible_reps.is_visible(RepMask::STICKS)
             {
                 continue;
             }

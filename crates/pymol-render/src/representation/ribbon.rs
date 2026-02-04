@@ -323,10 +323,8 @@ mod tests {
         let mut coords = Vec::new();
         for (name, element, resn, resv, coord) in &atoms_data {
             let mut atom = Atom::new(*name, *element);
-            atom.resn = resn.to_string();
-            atom.resv = *resv;
-            atom.chain = "A".to_string();
-            atom.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
+            atom.set_residue(*resn, *resv, "A");
+            atom.repr.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
             mol.add_atom(atom);
             coords.push(Vec3::new(coord.0, coord.1, coord.2));
         }
@@ -384,41 +382,33 @@ mod tests {
 
             // N atom
             let mut n = Atom::new("N", Element::Nitrogen);
-            n.resn = resn.to_string();
-            n.resv = *resv;
-            n.chain = "A".to_string();
+            n.set_residue(*resn, *resv, "A");
             n.ss_type = *ss;
-            n.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
+            n.repr.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
             mol.add_atom(n);
             coords.push(Vec3::new(x - 1.0, 0.0, 0.0));
 
             // CA atom
             let mut ca = Atom::new("CA", Element::Carbon);
-            ca.resn = resn.to_string();
-            ca.resv = *resv;
-            ca.chain = "A".to_string();
+            ca.set_residue(*resn, *resv, "A");
             ca.ss_type = *ss;
-            ca.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
+            ca.repr.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
             mol.add_atom(ca);
             coords.push(Vec3::new(x, 0.0, 0.0));
 
             // C atom
             let mut c = Atom::new("C", Element::Carbon);
-            c.resn = resn.to_string();
-            c.resv = *resv;
-            c.chain = "A".to_string();
+            c.set_residue(*resn, *resv, "A");
             c.ss_type = *ss;
-            c.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
+            c.repr.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
             mol.add_atom(c);
             coords.push(Vec3::new(x + 0.5, 0.5, 0.0));
 
             // O atom
             let mut o = Atom::new("O", Element::Oxygen);
-            o.resn = resn.to_string();
-            o.resv = *resv;
-            o.chain = "A".to_string();
+            o.set_residue(*resn, *resv, "A");
             o.ss_type = *ss;
-            o.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
+            o.repr.visible_reps.set_visible(pymol_mol::RepMask::RIBBON);
             mol.add_atom(o);
             coords.push(Vec3::new(x + 0.5, 1.5, 0.0));
         }

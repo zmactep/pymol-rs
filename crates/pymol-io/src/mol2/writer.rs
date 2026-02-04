@@ -84,10 +84,10 @@ impl<W: Write> Mol2Writer<W> {
             let sybyl_type = Self::get_sybyl_type(atom);
 
             // subst_name: residue name + residue number
-            let subst_name = if atom.resn.is_empty() {
-                format!("UNK{}", atom.resv.max(1))
+            let subst_name = if atom.residue.resn.is_empty() {
+                format!("UNK{}", atom.residue.resv.max(1))
             } else {
-                format!("{}{}", atom.resn, atom.resv.max(1))
+                format!("{}{}", atom.residue.resn, atom.residue.resv.max(1))
             };
 
             writeln!(
@@ -99,7 +99,7 @@ impl<W: Write> Mol2Writer<W> {
                 coord.y,
                 coord.z,
                 sybyl_type,
-                atom.resv.max(1),
+                atom.residue.resv.max(1),
                 subst_name,
                 atom.partial_charge
             )?;

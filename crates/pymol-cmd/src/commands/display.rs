@@ -115,7 +115,7 @@ EXAMPLES
                     let mol_mut = mol_obj.molecule_mut();
                     for idx in selected.indices() {
                         if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            atom.visible_reps.set_visible(rep);
+                            atom.repr.visible_reps.set_visible(rep);
                         }
                     }
                     mol_obj.invalidate(DirtyFlags::REPS);
@@ -208,9 +208,9 @@ EXAMPLES
                     for idx in selected.indices() {
                         if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
                             if rep == RepMask::ALL {
-                                atom.visible_reps = RepMask::NONE;
+                                atom.repr.visible_reps = RepMask::NONE;
                             } else {
-                                atom.visible_reps.set_hidden(rep);
+                                atom.repr.visible_reps.set_hidden(rep);
                             }
                         }
                     }
@@ -305,8 +305,8 @@ EXAMPLES
                     let mol_mut = mol_obj.molecule_mut();
                     for idx in selected.indices() {
                         if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            atom.visible_reps = RepMask::NONE;
-                            atom.visible_reps.set_visible(rep);
+                            atom.repr.visible_reps = RepMask::NONE;
+                            atom.repr.visible_reps.set_visible(rep);
                         }
                     }
                     mol_obj.invalidate(DirtyFlags::REPS);
@@ -615,14 +615,14 @@ EXAMPLES
                             // If preserving cartoon/ribbon colors and the atom has these reps visible,
                             // save the current color to the rep-specific field before changing colors.base
                             if preserve_cartoon_color {
-                                if atom.colors.cartoon.is_none() && atom.visible_reps.is_visible(RepMask::CARTOON) {
-                                    atom.colors.cartoon = Some(atom.colors.base);
+                                if atom.repr.colors.cartoon.is_none() && atom.repr.visible_reps.is_visible(RepMask::CARTOON) {
+                                    atom.repr.colors.cartoon = Some(atom.repr.colors.base);
                                 }
-                                if atom.colors.ribbon.is_none() && atom.visible_reps.is_visible(RepMask::RIBBON) {
-                                    atom.colors.ribbon = Some(atom.colors.base);
+                                if atom.repr.colors.ribbon.is_none() && atom.repr.visible_reps.is_visible(RepMask::RIBBON) {
+                                    atom.repr.colors.ribbon = Some(atom.repr.colors.base);
                                 }
                             }
-                            atom.colors.base = color_index;
+                            atom.repr.colors.base = color_index;
                         }
                     }
                     total_colored += count;

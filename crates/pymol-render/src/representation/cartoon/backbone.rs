@@ -174,7 +174,7 @@ pub fn extract_backbone_segments(
             let (ca_idx, ca_atom) = ca;
 
             // Check if the specified representation is visible for this atom
-            if !ca_atom.visible_reps.is_visible(rep_mask) {
+            if !ca_atom.repr.visible_reps.is_visible(rep_mask) {
                 continue;
             }
 

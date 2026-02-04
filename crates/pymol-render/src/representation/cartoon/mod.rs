@@ -315,10 +315,8 @@ mod tests {
         let mut coords = Vec::new();
         for (name, element, resn, resv, coord) in &atoms_data {
             let mut atom = Atom::new(*name, *element);
-            atom.resn = resn.to_string();
-            atom.resv = *resv;
-            atom.chain = "A".to_string();
-            atom.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            atom.set_residue(*resn, *resv, "A");
+            atom.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(atom);
             coords.push(Vec3::new(coord.0, coord.1, coord.2));
         }
@@ -436,41 +434,33 @@ mod tests {
             
             // N atom
             let mut n = Atom::new("N", Element::Nitrogen);
-            n.resn = resn.to_string();
-            n.resv = *resv;
-            n.chain = "A".to_string();
+            n.set_residue(*resn, *resv, "A");
             n.ss_type = *ss;
-            n.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            n.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(n);
             coords.push(Vec3::new(x - 1.0, 0.0, 0.0));
             
             // CA atom
             let mut ca = Atom::new("CA", Element::Carbon);
-            ca.resn = resn.to_string();
-            ca.resv = *resv;
-            ca.chain = "A".to_string();
+            ca.set_residue(*resn, *resv, "A");
             ca.ss_type = *ss;
-            ca.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            ca.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(ca);
             coords.push(Vec3::new(x, 0.0, 0.0));
             
             // C atom
             let mut c = Atom::new("C", Element::Carbon);
-            c.resn = resn.to_string();
-            c.resv = *resv;
-            c.chain = "A".to_string();
+            c.set_residue(*resn, *resv, "A");
             c.ss_type = *ss;
-            c.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            c.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(c);
             coords.push(Vec3::new(x + 0.5, 0.5, 0.0));
             
             // O atom
             let mut o = Atom::new("O", Element::Oxygen);
-            o.resn = resn.to_string();
-            o.resv = *resv;
-            o.chain = "A".to_string();
+            o.set_residue(*resn, *resv, "A");
             o.ss_type = *ss;
-            o.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            o.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(o);
             coords.push(Vec3::new(x + 0.5, 1.5, 0.0));
         }
@@ -549,15 +539,15 @@ mod tests {
         eprintln!("Protein residues: {}", protein_count);
         
         // Check if atoms have CARTOON visibility - by default they don't
-        let cartoon_visible_before = mol.atoms().filter(|a| a.visible_reps.is_visible(pymol_mol::RepMask::CARTOON)).count();
+        let cartoon_visible_before = mol.atoms().filter(|a| a.repr.visible_reps.is_visible(pymol_mol::RepMask::CARTOON)).count();
         eprintln!("Atoms with CARTOON visible (before): {}", cartoon_visible_before);
         
         // Set CARTOON visibility on all atoms (simulating what toggle() does)
         for atom in mol.atoms_mut() {
-            atom.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            atom.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
         }
         
-        let cartoon_visible_after = mol.atoms().filter(|a| a.visible_reps.is_visible(pymol_mol::RepMask::CARTOON)).count();
+        let cartoon_visible_after = mol.atoms().filter(|a| a.repr.visible_reps.is_visible(pymol_mol::RepMask::CARTOON)).count();
         eprintln!("Atoms with CARTOON visible (after): {}", cartoon_visible_after);
         
         // Get coordinate set
