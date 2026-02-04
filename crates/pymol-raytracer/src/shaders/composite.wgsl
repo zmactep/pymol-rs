@@ -19,8 +19,15 @@ struct CompositeParams {
 @group(0) @binding(4) var<uniform> params: CompositeParams;
 
 // Quantize color for posterized look (mode 3)
+// PyMOL algorithm: 4 levels at 0, 0.333, 0.667, 1.0
+// From Ray.cpp: bit manipulation creates levels 0x00, 0x55, 0xAA, 0xFF
+// From anaglyph_header.fs: floor(color * 3.999) / 3.0
 fn quantize_color(color: vec3<f32>, levels: f32) -> vec3<f32> {
-    return floor(color * levels + 0.5) / levels;
+    // PyMOL: floor(color * 3.999) / 3.0 for 4 levels
+    // Generic: floor(color * (levels - 0.001)) / (levels - 1.0)
+    let n = levels - 0.001;  // Prevents 1.0 from going to next level
+    let d = levels - 1.0;    // Number of intervals
+    return floor(color * n) / d;
 }
 
 @compute @workgroup_size(8, 8, 1)

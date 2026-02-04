@@ -1,9 +1,14 @@
-// Cylinder impostor shader with PyMOL dual-light model for stick/bond rendering
+// Cylinder impostor shader with PyMOL multi-light model for stick/bond rendering
 // Renders cylinders as oriented quads with ray-cylinder intersection
 //
 // PyMOL Lighting Model:
+// - light_count = 1: Ambient only (no directional lights)
+// - light_count = 2: Ambient + 1 directional light
+// - light_count = 3-10: Ambient + (N-1) directional lights
 // - Headlight (direct): Always from camera direction, ensures front-facing surfaces are lit
-// - Positional light (reflect): World-space directional light for depth/shadow cues
+// - Positional lights (reflect): World-space directional lights for depth/shadow cues
+
+const MAX_LIGHTS: u32 = 9u;
 
 struct GlobalUniforms {
     view_proj: mat4x4<f32>,
@@ -11,7 +16,12 @@ struct GlobalUniforms {
     view_inv: mat4x4<f32>,
     proj: mat4x4<f32>,
     camera_pos: vec4<f32>,
-    light_dir: vec4<f32>,
+    // Multi-light support
+    light_dirs: array<vec4<f32>, 9>,
+    light_count: i32,
+    spec_count: i32,  // Number of lights contributing specular (-1 = all)
+    _pad_light_0: i32,
+    _pad_light_1: i32,
     // Headlight (camera light) parameters
     ambient: f32,
     direct: f32,
@@ -100,34 +110,56 @@ fn vs_main(billboard: BillboardVertex, instance: CylinderInstance) -> VertexOutp
     return output;
 }
 
-// Simplified camera-centric lighting model
-// Uses only headlight (from camera) for rotation-independent illumination
-fn pymol_lighting(normal: vec3<f32>, view_dir: vec3<f32>, light_dir_view: vec3<f32>, base_color: vec3<f32>) -> vec3<f32> {
+// PyMOL multi-light model
+// - Headlight (from camera direction) controlled by 'direct' setting
+// - Positional lights controlled by light_count and 'reflect'/'specular' settings
+// - spec_count controls how many positional lights contribute specular (-1 = all)
+fn pymol_lighting(normal: vec3<f32>, view_dir: vec3<f32>, base_color: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
     let v = normalize(view_dir);
     
-    // Higher ambient for better base illumination
-    let ambient_color = base_color * (uniforms.ambient + 0.15);
+    // Ambient contribution
+    var color = base_color * uniforms.ambient;
     
     // === HEADLIGHT (camera light) ===
-    // Light comes from camera direction - provides 3D depth while being rotation-independent
-    // Combine direct and reflect into a single camera light for consistency
-    let headlight_intensity = uniforms.direct + uniforms.reflect;
+    // Light comes from camera direction - always active
     let headlight_ndotl = max(dot(n, v), 0.0);
-    let headlight_diffuse = base_color * headlight_ndotl * headlight_intensity;
+    color += base_color * headlight_ndotl * uniforms.direct;
     
     // Headlight specular (Blinn-Phong)
-    // For headlight, half vector H = normalize(L + V) = normalize(V + V) = V
-    var headlight_specular = vec3<f32>(0.0);
-    let spec_intensity = uniforms.spec_direct + uniforms.specular;
-    if spec_intensity > 0.0 && headlight_ndotl > 0.0 {
-        let spec_power = max(uniforms.spec_direct_power, uniforms.shininess);
-        let spec = pow(headlight_ndotl, spec_power);
-        headlight_specular = vec3<f32>(1.0) * spec * spec_intensity;
+    if uniforms.spec_direct > 0.0 && headlight_ndotl > 0.0 {
+        let spec = pow(headlight_ndotl, uniforms.spec_direct_power);
+        color += vec3<f32>(1.0) * spec * uniforms.spec_direct;
     }
     
-    // Combine contributions
-    return ambient_color + headlight_diffuse + headlight_specular;
+    // === POSITIONAL LIGHTS ===
+    // light_count = 1: ambient only (no positional lights)
+    // light_count = 2: 1 positional light
+    // light_count = N: N-1 positional lights
+    let num_pos_lights = max(uniforms.light_count - 1, 0);
+    
+    // Resolve spec_count: -1 means all positional lights contribute specular
+    let effective_spec_count = select(uniforms.spec_count, num_pos_lights, uniforms.spec_count < 0);
+    
+    for (var i = 0; i < num_pos_lights; i++) {
+        // Light directions are already in view space (PyMOL convention)
+        // Negate because PyMOL defines direction FROM light TO scene
+        let l = normalize(-uniforms.light_dirs[i].xyz);
+        
+        // Diffuse contribution (always applied)
+        let ndotl = max(dot(n, l), 0.0);
+        color += base_color * ndotl * uniforms.reflect;
+        
+        // Specular contribution (Blinn-Phong) - only if i < effective_spec_count
+        if uniforms.specular > 0.0 && ndotl > 0.0 && i < effective_spec_count {
+            let h = normalize(l + v);
+            let ndoth = max(dot(n, h), 0.0);
+            let spec = pow(ndoth, uniforms.shininess);
+            color += vec3<f32>(1.0) * spec * uniforms.specular;
+        }
+    }
+    
+    return color;
 }
 
 // Apply fog
@@ -252,11 +284,8 @@ fn fs_main(input: VertexOutput) -> FragmentOutput {
     let base_color = mix(input.color1.rgb, input.color2.rgb, u);
     let alpha = mix(input.color1.a, input.color2.a, u);
     
-    // Transform light direction to view space
-    let light_dir_view = (uniforms.view * vec4<f32>(uniforms.light_dir.xyz, 0.0)).xyz;
-    
-    // Calculate lighting using PyMOL dual-light model
-    var color = pymol_lighting(normal, view_dir, light_dir_view, base_color);
+    // Calculate lighting using PyMOL multi-light model
+    var color = pymol_lighting(normal, view_dir, base_color);
     
     // Calculate depth
     let depth = -hit_point.z;

@@ -8,7 +8,12 @@ struct GlobalUniforms {
     view_inv: mat4x4<f32>,
     proj: mat4x4<f32>,
     camera_pos: vec4<f32>,
-    light_dir: vec4<f32>,
+    // Multi-light support (not used by dots, but must match layout)
+    light_dirs: array<vec4<f32>, 9>,
+    light_count: i32,
+    spec_count: i32,  // Number of lights contributing specular (-1 = all)
+    _pad_light_0: i32,
+    _pad_light_1: i32,
     // Headlight (camera light) parameters
     ambient: f32,
     direct: f32,

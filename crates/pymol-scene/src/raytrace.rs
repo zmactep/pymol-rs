@@ -12,6 +12,7 @@ use pymol_render::MeshVertex;
 use pymol_settings::GlobalSettings;
 
 use crate::object::{MoleculeObject, Object, ObjectRegistry};
+use crate::uniform::compute_reflect_scale;
 use crate::Camera;
 
 /// Error type for raytracing operations
@@ -272,12 +273,54 @@ pub fn raytrace_scene(
     let ray_trace_disco_factor = input.settings.get_float(pymol_settings::id::ray_trace_disco_factor);
     let ray_trace_gain = input.settings.get_float(pymol_settings::id::ray_trace_gain);
 
+    // Multi-light support (PyMOL light_count setting)
+    let light_count = input.settings.get_int(pymol_settings::id::light_count);
+
+    // spec_count controls how many positional lights contribute specular
+    // -1 (default) means all positional lights contribute specular
+    let spec_count = input.settings.get_int(pymol_settings::id::spec_count);
+
+    // Gather light directions from settings (light, light2, ..., light9)
+    let light_setting_ids = [
+        pymol_settings::id::light,
+        pymol_settings::id::light2,
+        pymol_settings::id::light3,
+        pymol_settings::id::light4,
+        pymol_settings::id::light5,
+        pymol_settings::id::light6,
+        pymol_settings::id::light7,
+        pymol_settings::id::light8,
+        pymol_settings::id::light9,
+    ];
+
+    let mut light_dirs = [[0.0f32; 4]; 9];
+    let mut light_dirs_3: Vec<[f32; 3]> = Vec::with_capacity(9);
+    for (i, &id) in light_setting_ids.iter().enumerate() {
+        let dir = input.settings.get_float3(id);
+        light_dirs[i] = [dir[0], dir[1], dir[2], 0.0];
+        light_dirs_3.push(dir);
+    }
+
+    // PyMOL brightness consistency adjustments:
+    // 1. Scale reflect based on light directions to maintain consistent brightness
+    // 2. When light_count < 2, redirect reflect energy to direct (headlight)
+    let reflect_scale = compute_reflect_scale(light_count, &light_dirs_3);
+    let reflect_scaled = reflect * reflect_scale;
+
+    let (direct_adjusted, reflect_final) = if light_count < 2 {
+        // No positional lights - add reflect to direct (PyMOL behavior)
+        ((direct + reflect_scaled).min(1.0), 0.0)
+    } else {
+        (direct, reflect_scaled)
+    };
+
     let settings = RaytraceSettings {
-        // PyMOL default light direction (from upper-left-front)
-        light_dir: [-0.4, -0.4, -1.0, 0.0],
+        light_dirs,
+        light_count,
+        spec_count,
         ambient,
-        direct,
-        reflect,
+        direct: direct_adjusted,
+        reflect: reflect_final,
         specular,
         shininess,
         bg_color: [input.clear_color[0], input.clear_color[1], input.clear_color[2], 1.0],

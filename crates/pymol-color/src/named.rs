@@ -74,6 +74,7 @@ impl NamedColors {
         self.register("lightblue", Color::new(0.75, 0.75, 1.0));
         self.register("lightgreen", Color::new(0.75, 1.0, 0.75));
         self.register("lightorange", Color::new(1.0, 0.8, 0.5));
+        self.register("lightpink", Color::new(1.0, 0.75, 0.87));
         self.register("palecyan", Color::new(0.8, 1.0, 1.0));
         self.register("paleyellow", Color::new(1.0, 1.0, 0.8));
         self.register("palegreen", Color::new(0.65, 0.9, 0.65));

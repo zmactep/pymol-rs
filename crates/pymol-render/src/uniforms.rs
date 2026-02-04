@@ -5,6 +5,9 @@
 use bytemuck::{Pod, Zeroable};
 use lin_alg::f32::{Mat4, Vec3};
 
+/// Maximum number of directional lights supported
+pub const MAX_LIGHTS: usize = 9;
+
 /// Global uniforms passed to all shaders
 ///
 /// This structure contains all the global rendering parameters including
@@ -13,11 +16,16 @@ use lin_alg::f32::{Mat4, Vec3};
 ///
 /// ## PyMOL Lighting Model
 ///
-/// PyMOL uses a dual-light system:
+/// PyMOL uses a multi-light system controlled by `light_count`:
+/// - **light_count = 1**: Ambient only (no directional lights)
+/// - **light_count = 2**: Ambient + 1 directional light
+/// - **light_count = 3-10**: Ambient + (N-1) directional lights
+///
+/// Light types:
 /// - **Headlight/Direct**: A light that always comes from the camera direction,
 ///   ensuring front-facing surfaces are always illuminated regardless of view angle.
 /// - **Positional/Reflect**: Directional lights in world space that provide depth
-///   and shadow cues.
+///   and shadow cues. Controlled by `light`, `light2`, ..., `light9` settings.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct GlobalUniforms {
@@ -31,8 +39,19 @@ pub struct GlobalUniforms {
     pub proj: [[f32; 4]; 4],
     /// Camera position in world space (w unused)
     pub camera_pos: [f32; 4],
-    /// Primary light direction (normalized, w unused)
-    pub light_dir: [f32; 4],
+
+    // === Multi-light support ===
+    /// Directional light directions (normalized, w unused)
+    /// Up to 9 lights: light, light2, light3, ..., light9
+    pub light_dirs: [[f32; 4]; MAX_LIGHTS],
+    /// Number of active lights (1-10, where 1 = ambient only)
+    pub light_count: i32,
+    /// Number of lights contributing specular (-1 = all positional lights)
+    /// Only the first `spec_count` positional lights contribute specular highlights;
+    /// remaining lights contribute only diffuse. PyMOL default: -1.
+    pub spec_count: i32,
+    /// Padding for 16-byte alignment
+    pub _pad_light: [i32; 2],
 
     // === Headlight (camera light) parameters ===
     /// Ambient light intensity (PyMOL default: 0.14)
@@ -79,6 +98,19 @@ fn mat4_to_array(m: Mat4) -> [[f32; 4]; 4] {
     <[[f32; 4]; 4]>::from(m)
 }
 
+/// Default light directions matching PyMOL settings
+const DEFAULT_LIGHT_DIRS: [[f32; 4]; MAX_LIGHTS] = [
+    [-0.4, -0.4, -1.0, 0.0],    // light
+    [-0.55, -0.7, 0.15, 0.0],   // light2
+    [0.3, -0.6, -0.2, 0.0],     // light3
+    [-1.2, 0.3, -0.2, 0.0],     // light4
+    [0.3, 0.6, -0.75, 0.0],     // light5
+    [-0.3, 0.5, 0.0, 0.0],      // light6
+    [0.9, -0.1, -0.15, 0.0],    // light7
+    [1.3, 2.0, 0.8, 0.0],       // light8
+    [-1.7, -0.5, 1.2, 0.0],     // light9
+];
+
 impl Default for GlobalUniforms {
     fn default() -> Self {
         let identity = mat4_to_array(Mat4::new_identity());
@@ -88,7 +120,11 @@ impl Default for GlobalUniforms {
             view_inv: identity,
             proj: identity,
             camera_pos: [0.0, 0.0, 10.0, 1.0],
-            light_dir: [-0.4, -0.4, -1.0, 0.0],
+            // Multi-light support - PyMOL default light_count is 2
+            light_dirs: DEFAULT_LIGHT_DIRS,
+            light_count: 2,
+            spec_count: -1, // -1 means all positional lights contribute specular
+            _pad_light: [0; 2],
             // Headlight (camera light) - PyMOL defaults
             ambient: 0.14,
             direct: 0.45,
@@ -135,9 +171,39 @@ impl GlobalUniforms {
     }
 
     /// Set the primary light direction (will be normalized)
+    ///
+    /// This sets only the first light direction. For multi-light support,
+    /// use `set_lights()` instead.
     pub fn set_light_direction(&mut self, dir: Vec3) {
         let normalized = dir.to_normalized();
-        self.light_dir = [normalized.x, normalized.y, normalized.z, 0.0];
+        self.light_dirs[0] = [normalized.x, normalized.y, normalized.z, 0.0];
+    }
+
+    /// Set multiple light directions, the light count, and specular count
+    ///
+    /// # Arguments
+    /// * `count` - Number of active lights (1-10, where 1 = ambient only)
+    /// * `spec_count` - Number of lights contributing specular (-1 = all positional lights)
+    /// * `directions` - Array of light direction vectors (up to 9)
+    ///
+    /// PyMOL behavior:
+    /// - `light_count = 1`: Ambient only (no directional lights)
+    /// - `light_count = 2`: Ambient + 1 directional light
+    /// - `light_count = 3-10`: Ambient + (N-1) directional lights
+    /// - `spec_count = -1`: All positional lights contribute specular
+    /// - `spec_count = N`: Only first N positional lights contribute specular
+    pub fn set_lights(&mut self, count: i32, spec_count: i32, directions: &[[f32; 3]]) {
+        self.light_count = count.clamp(1, 10);
+        self.spec_count = spec_count;
+
+        // Set light directions (up to MAX_LIGHTS)
+        for (i, dir) in directions.iter().take(MAX_LIGHTS).enumerate() {
+            // Normalize the direction
+            let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+            if len > 0.0 {
+                self.light_dirs[i] = [dir[0] / len, dir[1] / len, dir[2] / len, 0.0];
+            }
+        }
     }
 
     /// Set lighting parameters (PyMOL dual-light model)
@@ -221,9 +287,15 @@ impl UniformsBuilder {
         self
     }
 
-    /// Set light direction
+    /// Set light direction (first light only)
     pub fn light_direction(mut self, dir: Vec3) -> Self {
         self.uniforms.set_light_direction(dir);
+        self
+    }
+
+    /// Set multiple lights
+    pub fn lights(mut self, count: i32, spec_count: i32, directions: &[[f32; 3]]) -> Self {
+        self.uniforms.set_lights(count, spec_count, directions);
         self
     }
 

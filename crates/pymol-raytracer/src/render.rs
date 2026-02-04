@@ -89,11 +89,18 @@ impl RaytraceParams {
     }
 }
 
+/// Maximum number of directional lights supported
+pub const MAX_LIGHTS: usize = 9;
+
 /// Raytracing-specific settings
 #[derive(Clone, Debug)]
 pub struct RaytraceSettings {
-    /// Light direction (normalized)
-    pub light_dir: [f32; 4],
+    /// Light directions (normalized, up to 9 lights)
+    pub light_dirs: [[f32; 4]; MAX_LIGHTS],
+    /// Number of active lights (1-10, where 1 = ambient only)
+    pub light_count: i32,
+    /// Number of lights contributing specular (-1 = all positional lights)
+    pub spec_count: i32,
     /// Ambient light intensity
     pub ambient: f32,
     /// Direct light intensity
@@ -148,10 +155,25 @@ pub struct RaytraceSettings {
     pub ray_trace_gain: f32,
 }
 
+/// Default light directions matching PyMOL settings
+const DEFAULT_LIGHT_DIRS: [[f32; 4]; MAX_LIGHTS] = [
+    [-0.4, -0.4, -1.0, 0.0],    // light
+    [-0.55, -0.7, 0.15, 0.0],   // light2
+    [0.3, -0.6, -0.2, 0.0],     // light3
+    [-1.2, 0.3, -0.2, 0.0],     // light4
+    [0.3, 0.6, -0.75, 0.0],     // light5
+    [-0.3, 0.5, 0.0, 0.0],      // light6
+    [0.9, -0.1, -0.15, 0.0],    // light7
+    [1.3, 2.0, 0.8, 0.0],       // light8
+    [-1.7, -0.5, 1.2, 0.0],     // light9
+];
+
 impl Default for RaytraceSettings {
     fn default() -> Self {
         Self {
-            light_dir: [-0.4, -0.4, -1.0, 0.0],
+            light_dirs: DEFAULT_LIGHT_DIRS,
+            light_count: 2, // PyMOL default
+            spec_count: -1, // -1 = all positional lights contribute specular
             ambient: 0.14,
             direct: 0.45,
             reflect: 0.45,

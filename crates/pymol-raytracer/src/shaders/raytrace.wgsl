@@ -19,7 +19,13 @@ struct Uniforms {
     proj_inv_matrix: mat4x4<f32>,
     camera_pos: vec4<f32>,
     viewport: vec4<f32>,  // width, height, 1/width, 1/height
-    light_dir: vec4<f32>,
+    // Multi-light support
+    light_dirs: array<vec4<f32>, 9>, // Up to 9 directional lights
+    light_count: i32,   // Number of active lights (1 = ambient only, 2+ = with positional)
+    spec_count: i32,    // Number of lights contributing specular (-1 = all)
+    _pad_light_0: i32,
+    _pad_light_1: i32,
+    // Lighting parameters
     ambient: f32,
     direct: f32,
     reflect: f32,
@@ -471,7 +477,11 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
     return false;
 }
 
-// Shade a hit point - PyMOL-compatible lighting
+// Shade a hit point - PyMOL multi-light model
+// - Headlight (camera direction): Always active with 'direct' intensity, CASTS SHADOWS
+// - Positional lights (light, light2-light9): Use 'reflect' intensity, first casts shadows
+// - light_count controls number of positional lights (1 = none, 2+ = positional lights)
+// - spec_count controls how many lights contribute specular (-1 = all)
 fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
     let hit_point = ray.origin + hit.t * ray.direction;
     let normal = hit.normal;
@@ -483,56 +493,85 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
         n = -n;
     }
     
-    // PyMOL light directions are in VIEW SPACE (relative to camera)
-    // Transform from view space to world space so light rotates with camera
-    // light setting is direction FROM light TO scene, negate to get FROM surface TO light
-    let light_view = -uniforms.light_dir.xyz;
-    let light_dir = normalize((uniforms.view_inv_matrix * vec4<f32>(light_view, 0.0)).xyz);
+    // === FLAT LIGHTING for mode 3 with light_count = 1 ===
+    // PyMOL: light_count = 1 means "ambient only" - no directional lights
+    // For mode 3 (quantized), this produces clean single-color surfaces
+    if uniforms.ray_trace_mode == 3u && uniforms.light_count == 1 {
+        // Use boosted ambient (direct is already added to ambient on CPU when light_count < 2)
+        let flat_brightness = uniforms.ambient + uniforms.direct;
+        return hit.color.rgb * min(flat_brightness, 1.0);
+    }
     
-    // Secondary light (light2) for "reflect" component
-    // light2 default in view space: (-0.55, -0.7, 0.15), negate for surface-to-light
-    let light2_view = vec3<f32>(0.55, 0.7, -0.15);
-    let light2_dir = normalize((uniforms.view_inv_matrix * vec4<f32>(light2_view, 0.0)).xyz);
+    // Shadow bias for all shadow rays
+    let shadow_bias = max(hit.t * 0.0005, 0.05);
     
     // === AMBIENT ===
-    // PyMOL: ambient = 0.14
     var color = hit.color.rgb * uniforms.ambient;
     
-    // === DIRECT (primary light) ===
-    let ndotl = max(dot(n, light_dir), 0.0);
+    // === HEADLIGHT (camera direction, always active) ===
+    // Light comes from camera direction - ensures front-facing surfaces are always lit
+    let headlight_ndotl = max(dot(n, view_dir), 0.0);
     
-    // Shadow check for primary light (reduced bias for tighter shadows)
-    var shadow_factor = 1.0;
-    if uniforms.ray_shadow != 0u && ndotl > 0.001 {
-        let shadow_bias = max(hit.t * 0.0005, 0.05);
+    // Headlight shadow (trace toward viewer/camera)
+    var headlight_shadow = 1.0;
+    if uniforms.ray_shadow != 0u && headlight_ndotl > 0.001 {
         let shadow_origin = hit_point + n * shadow_bias;
-        let shadow_ray = Ray(shadow_origin, light_dir);
+        let shadow_ray = Ray(shadow_origin, view_dir);
         if trace_shadow(shadow_ray, MAX_T) {
-            shadow_factor = 0.0;  // PyMOL shadows are hard
+            headlight_shadow = 0.0;
         }
     }
     
-    // Direct diffuse: PyMOL direct = 0.45
-    color += hit.color.rgb * ndotl * uniforms.direct * shadow_factor;
+    // Headlight diffuse with shadow
+    color += hit.color.rgb * headlight_ndotl * uniforms.direct * headlight_shadow;
     
-    // === REFLECT (secondary fill light, no shadows) ===
-    // PyMOL reflect default = 0.45
-    let ndotl2 = max(dot(n, light2_dir), 0.0);
-    color += hit.color.rgb * ndotl2 * uniforms.reflect;
-    
-    // === SPECULAR ===
-    // PyMOL: specular = 1.0, specular_intensity = 0.5, shininess = 55
-    if uniforms.specular > 0.0 && shadow_factor > 0.5 {
-        // Primary light specular
-        let h1 = normalize(light_dir + view_dir);
-        let spec1 = pow(max(dot(n, h1), 0.0), uniforms.shininess);
-        
-        // Secondary light specular (weaker)
-        let h2 = normalize(light2_dir + view_dir);
-        let spec2 = pow(max(dot(n, h2), 0.0), uniforms.shininess);
-        
+    // Headlight specular (Blinn-Phong) - view and light are same direction
+    if uniforms.specular > 0.0 && headlight_shadow > 0.5 && headlight_ndotl > 0.0 {
+        // For headlight, H = normalize(L + V) where L = V, so H = V
+        let spec = pow(headlight_ndotl, uniforms.shininess);
         let spec_intensity = 0.5;  // specular_intensity default
-        color += vec3<f32>(1.0) * (spec1 + spec2 * 0.3) * uniforms.specular * spec_intensity;
+        color += vec3<f32>(1.0) * spec * uniforms.specular * spec_intensity;
+    }
+    
+    // === POSITIONAL LIGHTS (when light_count >= 2) ===
+    // light_count = 1: headlight only (no positional lights)
+    // light_count = 2: headlight + 1 positional light
+    // light_count = N: headlight + N-1 positional lights
+    let num_pos_lights = max(uniforms.light_count - 1, 0);
+    
+    // Resolve spec_count: -1 means all lights contribute specular
+    let effective_spec_count = select(uniforms.spec_count, num_pos_lights + 1, uniforms.spec_count < 0);
+    
+    for (var i = 0; i < num_pos_lights; i++) {
+        // PyMOL light directions are in VIEW SPACE (relative to camera)
+        // Transform from view space to world space (raytracing works in world space)
+        // light setting is direction FROM light TO scene, negate to get FROM surface TO light
+        let light_view = -uniforms.light_dirs[i].xyz;
+        let light_dir = normalize((uniforms.view_inv_matrix * vec4<f32>(light_view, 0.0)).xyz);
+        
+        let ndotl = max(dot(n, light_dir), 0.0);
+        
+        // First positional light casts shadows
+        var shadow = 1.0;
+        if i == 0 && uniforms.ray_shadow != 0u && ndotl > 0.001 {
+            let shadow_origin = hit_point + n * shadow_bias;
+            let shadow_ray = Ray(shadow_origin, light_dir);
+            if trace_shadow(shadow_ray, MAX_T) {
+                shadow = 0.0;
+            }
+        }
+        
+        // Positional lights use 'reflect' intensity
+        color += hit.color.rgb * ndotl * uniforms.reflect * shadow;
+        
+        // Specular contribution from positional lights - only if within spec_count
+        // (i + 1) because headlight is index 0
+        if uniforms.specular > 0.0 && ndotl > 0.0 && shadow > 0.5 && (i + 1) < effective_spec_count {
+            let h = normalize(light_dir + view_dir);
+            let spec = pow(max(dot(n, h), 0.0), uniforms.shininess);
+            let spec_intensity = 0.5 * 0.3;  // Weaker specular for positional lights
+            color += vec3<f32>(1.0) * spec * uniforms.specular * spec_intensity;
+        }
     }
     
     return color;

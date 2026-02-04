@@ -7,6 +7,38 @@ use crate::camera::Camera;
 use pymol_render::GlobalUniforms;
 use pymol_settings::GlobalSettings;
 
+/// Compute reflect scale factor to maintain consistent brightness (PyMOL algorithm)
+///
+/// This scales the `reflect` value inversely based on the light directions to ensure
+/// that the total light contribution stays constant regardless of light count.
+///
+/// From PyMOL's `SceneGetReflectScaleValue` in Scene.cpp:
+/// - For each light, adds (1 - z_normalized) where z is the light direction's z component
+/// - Multiplies sum by 0.5
+/// - Returns 1.0 / sum
+pub fn compute_reflect_scale(light_count: i32, light_dirs: &[[f32; 3]]) -> f32 {
+    let num_pos_lights = (light_count - 1).max(0) as usize;
+    if num_pos_lights > 0 {
+        let mut sum = 0.0f32;
+        for i in 0..num_pos_lights.min(light_dirs.len()) {
+            let dir = light_dirs[i];
+            let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+            if len > 0.0 {
+                let z_normalized = dir[2] / len;
+                sum += 1.0 - z_normalized;
+            }
+        }
+        sum *= 0.5;
+        if sum > 0.0 {
+            1.0 / sum
+        } else {
+            1.0
+        }
+    } else {
+        1.0
+    }
+}
+
 /// Setup global uniforms for rendering
 ///
 /// This is the single source of truth for uniform setup logic, used by both
@@ -39,6 +71,36 @@ pub fn setup_uniforms(
     let camera_pos = camera.world_position();
     uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
 
+    // Multi-light support (PyMOL light_count setting)
+    // light_count = 1: ambient only
+    // light_count = 2: ambient + 1 directional light
+    // light_count = 3-10: ambient + (N-1) directional lights
+    let light_count = settings.get_int(pymol_settings::id::light_count);
+
+    // spec_count controls how many positional lights contribute specular
+    // -1 (default) means all positional lights contribute specular
+    let spec_count = settings.get_int(pymol_settings::id::spec_count);
+
+    // Gather light directions from settings (light, light2, ..., light9)
+    let light_setting_ids = [
+        pymol_settings::id::light,
+        pymol_settings::id::light2,
+        pymol_settings::id::light3,
+        pymol_settings::id::light4,
+        pymol_settings::id::light5,
+        pymol_settings::id::light6,
+        pymol_settings::id::light7,
+        pymol_settings::id::light8,
+        pymol_settings::id::light9,
+    ];
+
+    let light_dirs: Vec<[f32; 3]> = light_setting_ids
+        .iter()
+        .map(|&id| settings.get_float3(id))
+        .collect();
+
+    uniforms.set_lights(light_count, spec_count, &light_dirs);
+
     // Lighting settings (PyMOL dual-light model)
     let ambient = settings.get_float(pymol_settings::id::ambient);
     let direct = settings.get_float(pymol_settings::id::direct);
@@ -47,7 +109,29 @@ pub fn setup_uniforms(
     let shininess = settings.get_float(pymol_settings::id::shininess);
     let spec_direct = settings.get_float(pymol_settings::id::spec_direct);
     let spec_direct_power = settings.get_float(pymol_settings::id::spec_direct_power);
-    uniforms.set_lighting(ambient, direct, reflect, specular, shininess, spec_direct, spec_direct_power);
+
+    // PyMOL brightness consistency adjustments:
+    // 1. Scale reflect based on light directions to maintain consistent brightness
+    // 2. When light_count < 2, redirect reflect energy to direct (headlight)
+    let reflect_scale = compute_reflect_scale(light_count, &light_dirs);
+    let reflect_scaled = reflect * reflect_scale;
+
+    let (direct_adjusted, reflect_final) = if light_count < 2 {
+        // No positional lights - add reflect to direct (PyMOL behavior)
+        ((direct + reflect_scaled).min(1.0), 0.0)
+    } else {
+        (direct, reflect_scaled)
+    };
+
+    uniforms.set_lighting(
+        ambient,
+        direct_adjusted,
+        reflect_final,
+        specular,
+        shininess,
+        spec_direct,
+        spec_direct_power,
+    );
 
     // Clip planes from camera
     let current_view = camera.current_view();

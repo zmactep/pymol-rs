@@ -580,8 +580,14 @@ pub struct RaytraceUniforms {
     // Viewport
     pub viewport: [f32; 4], // width, height, 1/width, 1/height
 
-    // Light
-    pub light_dir: [f32; 4],
+    // Multi-light support
+    pub light_dirs: [[f32; 4]; 9], // Up to 9 directional lights
+    pub light_count: i32,
+    pub spec_count: i32, // Number of lights contributing specular (-1 = all)
+    pub _pad_light_0: i32,
+    pub _pad_light_1: i32,
+
+    // Lighting parameters
     pub ambient: f32,
     pub direct: f32,
     pub reflect: f32,
@@ -636,7 +642,11 @@ impl RaytraceUniforms {
             proj_inv_matrix: params.proj_inv_matrix,
             camera_pos: params.camera_pos,
             viewport: [width, height, 1.0 / width, 1.0 / height],
-            light_dir: settings.light_dir,
+            light_dirs: settings.light_dirs,
+            light_count: settings.light_count,
+            spec_count: settings.spec_count,
+            _pad_light_0: 0,
+            _pad_light_1: 0,
             ambient: settings.ambient,
             direct: settings.direct,
             reflect: settings.reflect,

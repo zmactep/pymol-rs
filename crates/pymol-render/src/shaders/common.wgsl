@@ -2,9 +2,14 @@
 // This file is included in other shaders via copy-paste for now
 // (WGSL doesn't have a native include mechanism)
 //
-// PyMOL Lighting Model:
+// PyMOL Multi-Light Model:
+// - light_count = 1: Ambient only (no directional lights)
+// - light_count = 2: Ambient + 1 directional light
+// - light_count = 3-10: Ambient + (N-1) directional lights
 // - Headlight (direct): Always from camera direction, ensures front-facing surfaces are lit
-// - Positional light (reflect): World-space directional light for depth/shadow cues
+// - Positional lights (reflect): World-space directional lights for depth/shadow cues
+
+const MAX_LIGHTS: u32 = 9u;
 
 // Global uniforms shared by all shaders
 struct GlobalUniforms {
@@ -13,7 +18,12 @@ struct GlobalUniforms {
     view_inv: mat4x4<f32>,
     proj: mat4x4<f32>,
     camera_pos: vec4<f32>,
-    light_dir: vec4<f32>,
+    // Multi-light support
+    light_dirs: array<vec4<f32>, 9>,
+    light_count: i32,
+    spec_count: i32,  // Number of lights contributing specular (-1 = all)
+    _pad_light_0: i32,
+    _pad_light_1: i32,
     // Headlight (camera light) parameters
     ambient: f32,
     direct: f32,
@@ -35,20 +45,28 @@ struct GlobalUniforms {
     clip_planes: vec4<f32>,
 }
 
-// PyMOL dual-light model
-// Combines headlight (camera light) with positional directional light
+// PyMOL multi-light model (reference implementation)
+// - Headlight (from camera direction) controlled by 'direct' setting
+// - Positional lights controlled by light_count and 'reflect'/'specular' settings
+// - spec_count controls how many positional lights contribute specular (-1 = all)
 //
 // Arguments:
 // - normal: Surface normal in view space
 // - view_dir: Direction from fragment to camera in view space
-// - light_dir_view: Positional light direction transformed to view space
 // - base_color: Surface base color
-// - uniforms: Global uniform buffer reference (for lighting parameters)
-fn pymol_lighting(
+// - view_matrix: View matrix for transforming light directions
+// - light_dirs: Array of light directions in world space
+// - light_count: Number of active lights (1 = ambient only, 2+ = with positional)
+// - spec_count: Number of lights contributing specular (-1 = all positional lights)
+// - ambient, direct, reflect, specular, shininess, spec_direct, spec_direct_power: Lighting params
+fn pymol_lighting_multi(
     normal: vec3<f32>,
     view_dir: vec3<f32>,
-    light_dir_view: vec3<f32>,
     base_color: vec3<f32>,
+    view_matrix: mat4x4<f32>,
+    light_dirs: array<vec4<f32>, 9>,
+    light_count: i32,
+    spec_count: i32,
     ambient: f32,
     direct: f32,
     reflect: f32,
@@ -61,46 +79,48 @@ fn pymol_lighting(
     let v = normalize(view_dir);
     
     // Ambient contribution
-    let ambient_color = base_color * ambient;
+    var color = base_color * ambient;
     
-    // === CAMERA FILL LIGHT ===
-    // Constant illumination for all visible surfaces - doesn't depend on normal
-    // This provides consistent base lighting regardless of surface orientation
-    let fill_factor = 0.5; // 50% of headlight is constant fill
-    let camera_fill = base_color * direct * fill_factor;
-    
-    // === HEADLIGHT (camera light, normal-dependent) ===
-    // Use actual view direction as headlight - varies with surface angle for depth
-    let headlight_dir = v;
-    let headlight_ndotl = max(dot(n, headlight_dir), 0.0);
-    let headlight_diffuse = base_color * headlight_ndotl * direct * (1.0 - fill_factor);
+    // === HEADLIGHT (camera light) ===
+    // Light comes from camera direction - always active
+    let headlight_ndotl = max(dot(n, v), 0.0);
+    color += base_color * headlight_ndotl * direct;
     
     // Headlight specular (Blinn-Phong)
-    var headlight_specular = vec3<f32>(0.0);
     if spec_direct > 0.0 && headlight_ndotl > 0.0 {
-        let headlight_ndoth = max(dot(n, v), 0.0);
-        let headlight_spec = pow(headlight_ndoth, spec_direct_power);
-        headlight_specular = vec3<f32>(1.0) * headlight_spec * spec_direct;
+        let spec = pow(headlight_ndotl, spec_direct_power);
+        color += vec3<f32>(1.0) * spec * spec_direct;
     }
     
-    // === POSITIONAL LIGHT (world-space directional light) ===
-    let pos_light_dir = normalize(-light_dir_view);
+    // === POSITIONAL LIGHTS ===
+    // light_count = 1: ambient only (no positional lights)
+    // light_count = 2: 1 positional light
+    // light_count = N: N-1 positional lights
+    let num_pos_lights = max(light_count - 1, 0);
     
-    // Positional light diffuse
-    let pos_ndotl = max(dot(n, pos_light_dir), 0.0);
-    let pos_diffuse = base_color * pos_ndotl * reflect;
+    // Resolve spec_count: -1 means all positional lights contribute specular
+    let effective_spec_count = select(spec_count, num_pos_lights, spec_count < 0);
     
-    // Positional light specular (Blinn-Phong)
-    var pos_specular = vec3<f32>(0.0);
-    if specular > 0.0 && pos_ndotl > 0.0 {
-        let pos_h = normalize(pos_light_dir + v);
-        let pos_ndoth = max(dot(n, pos_h), 0.0);
-        let pos_spec = pow(pos_ndoth, shininess);
-        pos_specular = vec3<f32>(1.0) * pos_spec * specular;
+    for (var i = 0; i < num_pos_lights; i++) {
+        // Transform light direction to view space and negate (light points toward surface)
+        let light_dir_world = light_dirs[i].xyz;
+        let light_dir_view = normalize((view_matrix * vec4<f32>(light_dir_world, 0.0)).xyz);
+        let l = normalize(-light_dir_view);
+        
+        // Diffuse contribution (always applied)
+        let ndotl = max(dot(n, l), 0.0);
+        color += base_color * ndotl * reflect;
+        
+        // Specular contribution (Blinn-Phong) - only if i < effective_spec_count
+        if specular > 0.0 && ndotl > 0.0 && i < effective_spec_count {
+            let h = normalize(l + v);
+            let ndoth = max(dot(n, h), 0.0);
+            let spec = pow(ndoth, shininess);
+            color += vec3<f32>(1.0) * spec * specular;
+        }
     }
     
-    // Combine all contributions
-    return ambient_color + camera_fill + headlight_diffuse + headlight_specular + pos_diffuse + pos_specular;
+    return color;
 }
 
 // Apply fog based on depth
