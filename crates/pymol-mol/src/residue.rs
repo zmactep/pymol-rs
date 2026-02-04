@@ -138,7 +138,7 @@ impl<'a> ResidueView<'a> {
     /// Find an atom by name
     pub fn find_by_name(&self, name: &str) -> Option<(AtomIndex, &'a Atom)> {
         for (idx, atom) in self.iter_indexed() {
-            if atom.name == name {
+            if &*atom.name == name {
                 return Some((idx, atom));
             }
         }
@@ -369,7 +369,7 @@ mod tests {
         let residue = ResidueIterator::new(&atoms, 0).next().unwrap();
 
         let (idx, ca) = residue.ca().unwrap();
-        assert_eq!(ca.name, "CA");
+        assert_eq!(&*ca.name, "CA");
         assert_eq!(idx.as_usize(), 1);
     }
 

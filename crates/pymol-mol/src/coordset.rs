@@ -7,6 +7,71 @@ use crate::index::{AtomIndex, CoordIndex, INVALID_INDEX};
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_settings::GlobalSettings;
 
+/// Mapping between atom indices and coordinate indices
+///
+/// For memory efficiency, uses identity mapping when all atoms have coordinates
+/// (the common case), and sparse mapping only when some atoms are missing.
+#[derive(Debug, Clone)]
+enum CoordMapping {
+    /// Identity mapping: coord_idx == atom_idx for all indices
+    /// No arrays needed - just need to know the count
+    Dense,
+    /// Sparse mapping: only some atoms have coordinates
+    Sparse {
+        /// Mapping from coordinate index to atom index
+        idx_to_atm: Vec<AtomIndex>,
+        /// Mapping from atom index to coordinate index (INVALID_INDEX if missing)
+        atm_to_idx: Vec<u32>,
+    },
+}
+
+impl Default for CoordMapping {
+    fn default() -> Self {
+        CoordMapping::Dense
+    }
+}
+
+/// Iterator over (AtomIndex, Vec3) pairs from a CoordSet
+pub struct CoordAtomIter<'a> {
+    coords: &'a [f32],
+    mapping: &'a CoordMapping,
+    n_index: usize,
+    current: usize,
+}
+
+impl<'a> Iterator for CoordAtomIter<'a> {
+    type Item = (AtomIndex, Vec3);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.n_index {
+            return None;
+        }
+
+        let coord_idx = self.current;
+        let base = coord_idx * 3;
+        let coord = Vec3::new(
+            self.coords[base],
+            self.coords[base + 1],
+            self.coords[base + 2],
+        );
+
+        let atom_idx = match self.mapping {
+            CoordMapping::Dense => AtomIndex(coord_idx as u32),
+            CoordMapping::Sparse { idx_to_atm, .. } => idx_to_atm[coord_idx],
+        };
+
+        self.current += 1;
+        Some((atom_idx, coord))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.n_index - self.current;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for CoordAtomIter<'a> {}
+
 /// Symmetry information for a coordinate set
 #[derive(Debug, Clone)]
 pub struct Symmetry {
@@ -48,7 +113,8 @@ impl Symmetry {
 /// trajectories) have multiple coordinate sets.
 ///
 /// Not all atoms in the molecule necessarily have coordinates in every
-/// coordinate set. The `idx_to_atm` and `atm_to_idx` mappings handle this.
+/// coordinate set. The `mapping` field handles the atom-to-coordinate mapping,
+/// using an efficient identity mapping when all atoms have coordinates.
 #[derive(Debug, Clone)]
 pub struct CoordSet {
     /// Flat array of coordinates (3 floats per atom: x, y, z)
@@ -57,13 +123,10 @@ pub struct CoordSet {
     /// Number of atoms with coordinates in this set
     n_index: usize,
 
-    /// Mapping from coordinate index to atom index
-    /// idx_to_atm[coord_idx] = atom_idx
-    idx_to_atm: Vec<AtomIndex>,
-
-    /// Mapping from atom index to coordinate index
-    /// atm_to_idx[atom_idx] = coord_idx (INVALID_INDEX if not present)
-    atm_to_idx: Vec<u32>,
+    /// Mapping between atom indices and coordinate indices
+    /// Dense when all atoms have coordinates (identity mapping)
+    /// Sparse when some atoms are missing coordinates
+    mapping: CoordMapping,
 
     /// Name of this coordinate set (e.g., for trajectory frames)
     pub name: String,
@@ -80,8 +143,7 @@ impl Default for CoordSet {
         CoordSet {
             coords: Vec::new(),
             n_index: 0,
-            idx_to_atm: Vec::new(),
-            atm_to_idx: Vec::new(),
+            mapping: CoordMapping::Dense,
             name: String::new(),
             symmetry: None,
             settings: None,
@@ -96,12 +158,14 @@ impl CoordSet {
     }
 
     /// Create a coordinate set with pre-allocated capacity
+    ///
+    /// Initially uses dense mapping. Call `add_coord` to switch to sparse
+    /// mapping if atoms are added out of order.
     pub fn with_capacity(n_atoms: usize) -> Self {
         CoordSet {
             coords: Vec::with_capacity(n_atoms * 3),
             n_index: 0,
-            idx_to_atm: Vec::with_capacity(n_atoms),
-            atm_to_idx: Vec::new(),
+            mapping: CoordMapping::Dense,
             name: String::new(),
             symmetry: None,
             settings: None,
@@ -111,16 +175,14 @@ impl CoordSet {
     /// Create a coordinate set from a flat array of coordinates
     ///
     /// Assumes all atoms have coordinates (1:1 mapping).
+    /// Uses dense mapping for memory efficiency.
     pub fn from_coords(coords: Vec<f32>) -> Self {
         let n_atoms = coords.len() / 3;
-        let idx_to_atm: Vec<AtomIndex> = (0..n_atoms as u32).map(AtomIndex).collect();
-        let atm_to_idx: Vec<u32> = (0..n_atoms as u32).collect();
 
         CoordSet {
             coords,
             n_index: n_atoms,
-            idx_to_atm,
-            atm_to_idx,
+            mapping: CoordMapping::Dense,
             name: String::new(),
             symmetry: None,
             settings: None,
@@ -128,6 +190,8 @@ impl CoordSet {
     }
 
     /// Create a coordinate set from a vector of Vec3 positions
+    ///
+    /// Uses dense mapping for memory efficiency.
     pub fn from_vec3(positions: &[Vec3]) -> Self {
         let n_atoms = positions.len();
         let mut coords = Vec::with_capacity(n_atoms * 3);
@@ -137,14 +201,10 @@ impl CoordSet {
             coords.push(pos.z);
         }
 
-        let idx_to_atm: Vec<AtomIndex> = (0..n_atoms as u32).map(AtomIndex).collect();
-        let atm_to_idx: Vec<u32> = (0..n_atoms as u32).collect();
-
         CoordSet {
             coords,
             n_index: n_atoms,
-            idx_to_atm,
-            atm_to_idx,
+            mapping: CoordMapping::Dense,
             name: String::new(),
             symmetry: None,
             settings: None,
@@ -164,10 +224,13 @@ impl CoordSet {
     }
 
     /// Get the number of atoms in the parent molecule
-    /// (size of the atm_to_idx mapping)
+    /// (size of the atom-to-coordinate mapping)
     #[inline]
     pub fn atom_capacity(&self) -> usize {
-        self.atm_to_idx.len()
+        match &self.mapping {
+            CoordMapping::Dense => self.n_index,
+            CoordMapping::Sparse { atm_to_idx, .. } => atm_to_idx.len(),
+        }
     }
 
     /// Get coordinates by coordinate index
@@ -200,55 +263,99 @@ impl CoordSet {
     /// Get coordinates by atom index
     pub fn get_atom_coord(&self, atom: AtomIndex) -> Option<Vec3> {
         let atom_idx = atom.as_usize();
-        if atom_idx >= self.atm_to_idx.len() {
-            return None;
+        match &self.mapping {
+            CoordMapping::Dense => {
+                if atom_idx >= self.n_index {
+                    return None;
+                }
+                self.get_coord(CoordIndex(atom_idx as u32))
+            }
+            CoordMapping::Sparse { atm_to_idx, .. } => {
+                if atom_idx >= atm_to_idx.len() {
+                    return None;
+                }
+                let coord_idx = atm_to_idx[atom_idx];
+                if coord_idx == INVALID_INDEX {
+                    return None;
+                }
+                self.get_coord(CoordIndex(coord_idx))
+            }
         }
-        let coord_idx = self.atm_to_idx[atom_idx];
-        if coord_idx == INVALID_INDEX {
-            return None;
-        }
-        self.get_coord(CoordIndex(coord_idx))
     }
 
     /// Set coordinates by atom index
     pub fn set_atom_coord(&mut self, atom: AtomIndex, coord: Vec3) -> bool {
         let atom_idx = atom.as_usize();
-        if atom_idx >= self.atm_to_idx.len() {
-            return false;
+        match &self.mapping {
+            CoordMapping::Dense => {
+                if atom_idx >= self.n_index {
+                    return false;
+                }
+                self.set_coord(CoordIndex(atom_idx as u32), coord);
+                true
+            }
+            CoordMapping::Sparse { atm_to_idx, .. } => {
+                if atom_idx >= atm_to_idx.len() {
+                    return false;
+                }
+                let coord_idx = atm_to_idx[atom_idx];
+                if coord_idx == INVALID_INDEX {
+                    return false;
+                }
+                self.set_coord(CoordIndex(coord_idx), coord);
+                true
+            }
         }
-        let coord_idx = self.atm_to_idx[atom_idx];
-        if coord_idx == INVALID_INDEX {
-            return false;
-        }
-        self.set_coord(CoordIndex(coord_idx), coord);
-        true
     }
 
     /// Check if an atom has coordinates in this set
     #[inline]
     pub fn has_atom(&self, atom: AtomIndex) -> bool {
         let atom_idx = atom.as_usize();
-        atom_idx < self.atm_to_idx.len() && self.atm_to_idx[atom_idx] != INVALID_INDEX
+        match &self.mapping {
+            CoordMapping::Dense => atom_idx < self.n_index,
+            CoordMapping::Sparse { atm_to_idx, .. } => {
+                atom_idx < atm_to_idx.len() && atm_to_idx[atom_idx] != INVALID_INDEX
+            }
+        }
     }
 
     /// Get the atom index for a coordinate index
     #[inline]
     pub fn coord_to_atom(&self, coord: CoordIndex) -> Option<AtomIndex> {
-        self.idx_to_atm.get(coord.as_usize()).copied()
+        let coord_idx = coord.as_usize();
+        if coord_idx >= self.n_index {
+            return None;
+        }
+        match &self.mapping {
+            CoordMapping::Dense => Some(AtomIndex(coord_idx as u32)),
+            CoordMapping::Sparse { idx_to_atm, .. } => idx_to_atm.get(coord_idx).copied(),
+        }
     }
 
     /// Get the coordinate index for an atom index
     #[inline]
     pub fn atom_to_coord(&self, atom: AtomIndex) -> Option<CoordIndex> {
         let atom_idx = atom.as_usize();
-        if atom_idx >= self.atm_to_idx.len() {
-            return None;
-        }
-        let coord_idx = self.atm_to_idx[atom_idx];
-        if coord_idx == INVALID_INDEX {
-            None
-        } else {
-            Some(CoordIndex(coord_idx))
+        match &self.mapping {
+            CoordMapping::Dense => {
+                if atom_idx < self.n_index {
+                    Some(CoordIndex(atom_idx as u32))
+                } else {
+                    None
+                }
+            }
+            CoordMapping::Sparse { atm_to_idx, .. } => {
+                if atom_idx >= atm_to_idx.len() {
+                    return None;
+                }
+                let coord_idx = atm_to_idx[atom_idx];
+                if coord_idx == INVALID_INDEX {
+                    None
+                } else {
+                    Some(CoordIndex(coord_idx))
+                }
+            }
         }
     }
 
@@ -301,37 +408,64 @@ impl CoordSet {
     }
 
     /// Iterate over (atom_index, coord) pairs
-    pub fn iter_with_atoms(&self) -> impl Iterator<Item = (AtomIndex, Vec3)> + '_ {
-        self.idx_to_atm.iter().enumerate().map(move |(i, &atom)| {
-            let base = i * 3;
-            let coord = Vec3::new(
-                self.coords[base],
-                self.coords[base + 1],
-                self.coords[base + 2],
-            );
-            (atom, coord)
-        })
+    pub fn iter_with_atoms(&self) -> CoordAtomIter<'_> {
+        CoordAtomIter {
+            coords: &self.coords,
+            mapping: &self.mapping,
+            n_index: self.n_index,
+            current: 0,
+        }
     }
 
     /// Add coordinates for an atom
     ///
     /// This extends the coordinate set to include the given atom.
-    /// Call `rebuild_mappings` after adding all atoms.
+    /// If atoms are added out of order (not sequential), converts to sparse mapping.
     pub fn add_coord(&mut self, atom: AtomIndex, coord: Vec3) {
-        // Extend atm_to_idx if needed
         let atom_idx = atom.as_usize();
-        while self.atm_to_idx.len() <= atom_idx {
-            self.atm_to_idx.push(INVALID_INDEX);
+        let coord_idx = self.n_index;
+
+        // Check if we need to convert from dense to sparse
+        // Dense mapping requires: atom_idx == coord_idx (sequential 0, 1, 2, ...)
+        if matches!(self.mapping, CoordMapping::Dense) && atom_idx != coord_idx {
+            // Convert to sparse mapping
+            let idx_to_atm: Vec<AtomIndex> = (0..self.n_index as u32).map(AtomIndex).collect();
+            let mut atm_to_idx: Vec<u32> = (0..self.n_index as u32).collect();
+
+            // Extend atm_to_idx to accommodate the new atom
+            while atm_to_idx.len() <= atom_idx {
+                atm_to_idx.push(INVALID_INDEX);
+            }
+
+            self.mapping = CoordMapping::Sparse {
+                idx_to_atm,
+                atm_to_idx,
+            };
         }
 
         // Add the coordinate
-        let coord_idx = self.n_index;
         self.coords.push(coord.x);
         self.coords.push(coord.y);
         self.coords.push(coord.z);
-        self.idx_to_atm.push(atom);
-        self.atm_to_idx[atom_idx] = coord_idx as u32;
         self.n_index += 1;
+
+        // Update mapping
+        match &mut self.mapping {
+            CoordMapping::Dense => {
+                // Dense mapping: atom_idx == coord_idx, no explicit tracking needed
+            }
+            CoordMapping::Sparse {
+                idx_to_atm,
+                atm_to_idx,
+            } => {
+                // Extend atm_to_idx if needed
+                while atm_to_idx.len() <= atom_idx {
+                    atm_to_idx.push(INVALID_INDEX);
+                }
+                idx_to_atm.push(atom);
+                atm_to_idx[atom_idx] = coord_idx as u32;
+            }
+        }
     }
 
     /// Compute the center of mass (geometric center)

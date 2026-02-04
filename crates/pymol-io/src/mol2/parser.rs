@@ -2,6 +2,7 @@
 //!
 //! Parses TRIPOS MOL2 format files.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::sync::Arc;
 
@@ -153,8 +154,19 @@ impl<R: Read> Mol2Reader<R> {
         let atom_lines = self.read_section_lines()?;
         let mut coords = Vec::with_capacity(atom_lines.len());
 
+        // Cache for sharing AtomResidue instances among atoms of the same residue
+        let mut residue_cache: HashMap<AtomResidue, Arc<AtomResidue>> = HashMap::new();
+
         for line in &atom_lines {
-            let (atom, coord) = parse_atom_line(line, self.line_number)?;
+            let (mut atom, coord) = parse_atom_line(line, self.line_number)?;
+
+            // Use cache to share AtomResidue instances
+            let residue_data = (*atom.residue).clone();
+            atom.residue = residue_cache
+                .entry(residue_data.clone())
+                .or_insert_with(|| Arc::new(residue_data))
+                .clone();
+
             mol.add_atom(atom);
             coords.push(coord);
         }
@@ -303,7 +315,7 @@ mod tests {
         let line = "      1 N           1.0000    2.0000    3.0000 N.3       1 ALA1       -0.3000";
         let (atom, coord) = parse_atom_line(line, 1).unwrap();
 
-        assert_eq!(atom.name, "N");
+        assert_eq!(&*atom.name, "N");
         assert_eq!(atom.element, Element::Nitrogen);
         assert!((coord.x - 1.0).abs() < 0.0001);
         assert!((coord.y - 2.0).abs() < 0.0001);

@@ -286,6 +286,11 @@ impl Representation for RibbonRep {
     fn primitive_count(&self) -> usize {
         self.index_count as usize / 3 // triangles
     }
+
+    fn clear_cpu_data(&mut self) {
+        self.vertices = Vec::new();
+        self.indices = Vec::new();
+    }
 }
 
 #[cfg(test)]

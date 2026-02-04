@@ -12,56 +12,49 @@ use crate::setting::{SettingLevel, SettingValue};
 // =============================================================================
 
 /// Global settings store - holds session-wide settings
-/// Uses a Vec indexed by setting ID for O(1) access
+/// Uses sparse HashMap storage for memory efficiency when most settings use defaults
 #[derive(Debug)]
 pub struct GlobalSettings {
-    /// Current values (None = use default)
-    values: Vec<Option<SettingValue>>,
+    /// Current values (only stores non-default values)
+    values: AHashMap<u16, SettingValue>,
     /// Tracks which settings have been modified
-    changed: Vec<bool>,
+    changed: AHashMap<u16, bool>,
 }
 
 impl GlobalSettings {
     /// Create a new global settings store with defaults
     pub fn new() -> Self {
         GlobalSettings {
-            values: vec![None; SETTING_COUNT],
-            changed: vec![false; SETTING_COUNT],
+            values: AHashMap::new(),
+            changed: AHashMap::new(),
         }
     }
 
     /// Get a setting value, returning the default if not explicitly set
     pub fn get(&self, id: u16) -> Option<SettingValue> {
-        let idx = id as usize;
-        if idx >= SETTING_COUNT {
+        if id as usize >= SETTING_COUNT {
             return None;
         }
 
         self.values
-            .get(idx)
-            .and_then(|v| v.clone())
+            .get(&id)
+            .cloned()
             .or_else(|| get_setting(id).map(|s| s.default.clone()))
     }
 
     /// Check if a setting is explicitly defined (not using default)
     pub fn is_defined(&self, id: u16) -> bool {
-        let idx = id as usize;
-        idx < SETTING_COUNT && self.values.get(idx).map_or(false, |v| v.is_some())
+        self.values.contains_key(&id)
     }
 
     /// Get only if explicitly defined (not default)
     pub fn get_if_defined(&self, id: u16) -> Option<&SettingValue> {
-        let idx = id as usize;
-        if idx >= SETTING_COUNT {
-            return None;
-        }
-        self.values.get(idx).and_then(|v| v.as_ref())
+        self.values.get(&id)
     }
 
     /// Set a setting value
     pub fn set(&mut self, id: u16, value: SettingValue) -> Result<(), SettingError> {
-        let idx = id as usize;
-        if idx >= SETTING_COUNT {
+        if id as usize >= SETTING_COUNT {
             return Err(SettingError::NotFound(format!("id:{}", id)));
         }
 
@@ -89,21 +82,16 @@ impl GlobalSettings {
             }
         }
 
-        self.values[idx] = Some(value);
-        self.changed[idx] = true;
+        self.values.insert(id, value);
+        self.changed.insert(id, true);
         Ok(())
     }
 
     /// Unset a setting (revert to default)
     pub fn unset(&mut self, id: u16) -> bool {
-        let idx = id as usize;
-        if idx >= SETTING_COUNT {
-            return false;
-        }
-        let was_set = self.values[idx].is_some();
-        self.values[idx] = None;
+        let was_set = self.values.remove(&id).is_some();
         if was_set {
-            self.changed[idx] = true;
+            self.changed.insert(id, true);
         }
         was_set
     }
@@ -116,43 +104,27 @@ impl GlobalSettings {
 
     /// Reset all settings to defaults
     pub fn reset_all(&mut self) {
-        for i in 0..SETTING_COUNT {
-            if self.values[i].is_some() {
-                self.values[i] = None;
-                self.changed[i] = true;
-            }
+        for id in self.values.keys().copied().collect::<Vec<_>>() {
+            self.changed.insert(id, true);
         }
+        self.values.clear();
     }
 
     /// Check if a setting has changed since last check
     pub fn check_changed(&mut self, id: u16) -> bool {
-        let idx = id as usize;
-        if idx >= SETTING_COUNT {
-            return false;
-        }
-        let changed = self.changed[idx];
-        self.changed[idx] = false;
-        changed
+        self.changed.remove(&id).unwrap_or(false)
     }
 
     /// Get all changed setting IDs and clear changed flags
     pub fn get_changed_and_clear(&mut self) -> Vec<u16> {
-        let mut changed = Vec::new();
-        for (idx, c) in self.changed.iter_mut().enumerate() {
-            if *c {
-                changed.push(idx as u16);
-                *c = false;
-            }
-        }
+        let changed: Vec<u16> = self.changed.keys().copied().collect();
+        self.changed.clear();
         changed
     }
 
     /// Iterate over all defined (non-default) settings
     pub fn iter_defined(&self) -> impl Iterator<Item = (u16, &SettingValue)> {
-        self.values
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, v)| v.as_ref().map(|val| (idx as u16, val)))
+        self.values.iter().map(|(&id, val)| (id, val))
     }
 
     // =========================================================================
@@ -238,7 +210,7 @@ impl Clone for GlobalSettings {
     fn clone(&self) -> Self {
         GlobalSettings {
             values: self.values.clone(),
-            changed: vec![false; SETTING_COUNT], // Don't clone changed state
+            changed: AHashMap::new(), // Don't clone changed state
         }
     }
 }
@@ -271,13 +243,11 @@ impl GlobalSettings {
     pub fn to_session_list(&self) -> Vec<SerializedSetting> {
         self.values
             .iter()
-            .enumerate()
-            .filter_map(|(idx, v)| {
-                let id = idx as u16;
+            .filter_map(|(&id, value)| {
                 if is_session_blacklisted(id) {
                     return None;
                 }
-                v.as_ref().map(|value| SerializedSetting {
+                Some(SerializedSetting {
                     id,
                     value: value.clone(),
                 })
@@ -288,12 +258,9 @@ impl GlobalSettings {
     /// Restore settings from a session list
     pub fn from_session_list(&mut self, list: &[SerializedSetting]) {
         for entry in list {
-            if !is_session_blacklisted(entry.id) {
-                let idx = entry.id as usize;
-                if idx < SETTING_COUNT {
-                    self.values[idx] = Some(entry.value.clone());
-                    self.changed[idx] = true;
-                }
+            if !is_session_blacklisted(entry.id) && (entry.id as usize) < SETTING_COUNT {
+                self.values.insert(entry.id, entry.value.clone());
+                self.changed.insert(entry.id, true);
             }
         }
     }

@@ -1,6 +1,6 @@
 //! Display commands: show, hide, enable, disable, color, bg_color
 
-use pymol_mol::RepMask;
+use pymol_mol::{RepMask, COLOR_UNSET};
 use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
 
@@ -615,11 +615,11 @@ EXAMPLES
                             // If preserving cartoon/ribbon colors and the atom has these reps visible,
                             // save the current color to the rep-specific field before changing colors.base
                             if preserve_cartoon_color {
-                                if atom.repr.colors.cartoon.is_none() && atom.repr.visible_reps.is_visible(RepMask::CARTOON) {
-                                    atom.repr.colors.cartoon = Some(atom.repr.colors.base);
+                                if atom.repr.colors.cartoon == COLOR_UNSET && atom.repr.visible_reps.is_visible(RepMask::CARTOON) {
+                                    atom.repr.colors.cartoon = atom.repr.colors.base;
                                 }
-                                if atom.repr.colors.ribbon.is_none() && atom.repr.visible_reps.is_visible(RepMask::RIBBON) {
-                                    atom.repr.colors.ribbon = Some(atom.repr.colors.base);
+                                if atom.repr.colors.ribbon == COLOR_UNSET && atom.repr.visible_reps.is_visible(RepMask::RIBBON) {
+                                    atom.repr.colors.ribbon = atom.repr.colors.base;
                                 }
                             }
                             atom.repr.colors.base = color_index;

@@ -155,6 +155,10 @@ impl Representation for SphereRep {
     fn primitive_count(&self) -> usize {
         self.instance_count as usize
     }
+
+    fn clear_cpu_data(&mut self) {
+        self.instances = Vec::new();
+    }
 }
 
 #[cfg(test)]

@@ -96,49 +96,53 @@ impl RepMask {
     }
 }
 
+/// Sentinel value indicating "no color override" (use base color)
+pub const COLOR_UNSET: i32 = i32::MIN;
+
 /// Per-atom color settings for different representations
 ///
 /// Contains the base color index and optional per-representation color overrides.
-/// When a representation-specific color is `None`, the base color is used instead.
+/// When a representation-specific color is `COLOR_UNSET`, the base color is used instead.
+/// Uses sentinel values instead of `Option<i32>` for memory efficiency (4 bytes vs 8 bytes per field).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtomColors {
     /// Base color index (resolved via pymol-color crate)
     /// -1 = by element, -2 = by chain, -3 = by ss, -4 = by b-factor
     pub base: i32,
 
-    /// Cartoon-specific color (None = use base)
-    pub cartoon: Option<i32>,
+    /// Cartoon-specific color (COLOR_UNSET = use base)
+    pub cartoon: i32,
 
-    /// Ribbon-specific color (None = use base)
-    pub ribbon: Option<i32>,
+    /// Ribbon-specific color (COLOR_UNSET = use base)
+    pub ribbon: i32,
 
-    /// Stick-specific color (None = use base)
-    pub stick: Option<i32>,
+    /// Stick-specific color (COLOR_UNSET = use base)
+    pub stick: i32,
 
-    /// Line-specific color (None = use base)
-    pub line: Option<i32>,
+    /// Line-specific color (COLOR_UNSET = use base)
+    pub line: i32,
 
-    /// Surface-specific color (None = use base)
-    pub surface: Option<i32>,
+    /// Surface-specific color (COLOR_UNSET = use base)
+    pub surface: i32,
 
-    /// Mesh-specific color (None = use base)
-    pub mesh: Option<i32>,
+    /// Mesh-specific color (COLOR_UNSET = use base)
+    pub mesh: i32,
 
-    /// Sphere-specific color (None = use base)
-    pub sphere: Option<i32>,
+    /// Sphere-specific color (COLOR_UNSET = use base)
+    pub sphere: i32,
 }
 
 impl Default for AtomColors {
     fn default() -> Self {
         AtomColors {
             base: -1, // -1 = by element
-            cartoon: None,
-            ribbon: None,
-            stick: None,
-            line: None,
-            surface: None,
-            mesh: None,
-            sphere: None,
+            cartoon: COLOR_UNSET,
+            ribbon: COLOR_UNSET,
+            stick: COLOR_UNSET,
+            line: COLOR_UNSET,
+            surface: COLOR_UNSET,
+            mesh: COLOR_UNSET,
+            sphere: COLOR_UNSET,
         }
     }
 }
@@ -157,46 +161,52 @@ impl AtomColors {
         }
     }
 
+    /// Check if a color value is set (not the sentinel value)
+    #[inline]
+    pub fn is_color_set(color: i32) -> bool {
+        color != COLOR_UNSET
+    }
+
     /// Get the effective color for cartoon representation
     #[inline]
     pub fn cartoon_or_base(&self) -> i32 {
-        self.cartoon.unwrap_or(self.base)
+        if self.cartoon != COLOR_UNSET { self.cartoon } else { self.base }
     }
 
     /// Get the effective color for ribbon representation
     #[inline]
     pub fn ribbon_or_base(&self) -> i32 {
-        self.ribbon.unwrap_or(self.base)
+        if self.ribbon != COLOR_UNSET { self.ribbon } else { self.base }
     }
 
     /// Get the effective color for stick representation
     #[inline]
     pub fn stick_or_base(&self) -> i32 {
-        self.stick.unwrap_or(self.base)
+        if self.stick != COLOR_UNSET { self.stick } else { self.base }
     }
 
     /// Get the effective color for line representation
     #[inline]
     pub fn line_or_base(&self) -> i32 {
-        self.line.unwrap_or(self.base)
+        if self.line != COLOR_UNSET { self.line } else { self.base }
     }
 
     /// Get the effective color for surface representation
     #[inline]
     pub fn surface_or_base(&self) -> i32 {
-        self.surface.unwrap_or(self.base)
+        if self.surface != COLOR_UNSET { self.surface } else { self.base }
     }
 
     /// Get the effective color for mesh representation
     #[inline]
     pub fn mesh_or_base(&self) -> i32 {
-        self.mesh.unwrap_or(self.base)
+        if self.mesh != COLOR_UNSET { self.mesh } else { self.base }
     }
 
     /// Get the effective color for sphere representation
     #[inline]
     pub fn sphere_or_base(&self) -> i32 {
-        self.sphere.unwrap_or(self.base)
+        if self.sphere != COLOR_UNSET { self.sphere } else { self.base }
     }
 }
 
@@ -225,7 +235,7 @@ impl AtomColors {
 /// assert_eq!(residue.chain, "A");
 /// assert_eq!(residue.resn, "ALA");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AtomResidue {
     /// Identity key (chain, resn, resv, inscode) - used for lookups
     pub key: ResidueKey,
@@ -362,7 +372,7 @@ impl Default for AtomRepresentation {
 /// use pymol_mol::{Atom, Element};
 ///
 /// let atom = Atom::new("CA", Element::Carbon);
-/// assert_eq!(atom.name, "CA");
+/// assert_eq!(&*atom.name, "CA");
 /// assert_eq!(atom.element, Element::Carbon);
 ///
 /// // Access residue info via Deref
@@ -374,7 +384,8 @@ pub struct Atom {
     // Identity
     // =========================================================================
     /// Atom name (e.g., "CA", "N", "O")
-    pub name: String,
+    /// Uses Arc<str> for memory efficiency - atom names repeat frequently
+    pub name: Arc<str>,
 
     /// Chemical element
     pub element: Element,
@@ -461,7 +472,7 @@ pub struct Atom {
 impl Default for Atom {
     fn default() -> Self {
         Atom {
-            name: String::new(),
+            name: Arc::from(""),
             element: Element::Unknown,
             alt: ' ',
             b_factor: 0.0,
@@ -490,7 +501,7 @@ impl Atom {
     /// Create a new atom with the given name and element
     pub fn new(name: impl Into<String>, element: Element) -> Self {
         let mut atom = Atom::default();
-        atom.name = name.into();
+        atom.name = Arc::from(name.into());
         atom.element = element;
         atom.vdw = element.vdw_radius();
         atom
@@ -539,12 +550,12 @@ impl Atom {
     /// Check if this is a C-alpha (backbone) atom
     #[inline]
     pub fn is_ca(&self) -> bool {
-        self.name == "CA" && self.element.is_carbon()
+        &*self.name == "CA" && self.element.is_carbon()
     }
 
     /// Check if this is a backbone atom (N, CA, C, O)
     pub fn is_backbone(&self) -> bool {
-        matches!(self.name.as_str(), "N" | "CA" | "C" | "O")
+        matches!(&*self.name, "N" | "CA" | "C" | "O")
             && self.state.flags.contains(AtomFlags::PROTEIN)
     }
 
@@ -632,7 +643,7 @@ impl AtomBuilder {
 
     /// Set the atom name
     pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.atom.name = name.into();
+        self.atom.name = Arc::from(name.into());
         self
     }
 
@@ -766,7 +777,7 @@ mod tests {
     #[test]
     fn test_atom_new() {
         let atom = Atom::new("CA", Element::Carbon);
-        assert_eq!(atom.name, "CA");
+        assert_eq!(&*atom.name, "CA");
         assert_eq!(atom.element, Element::Carbon);
         assert!((atom.vdw - 1.70).abs() < 0.01);
     }
@@ -788,7 +799,7 @@ mod tests {
             .b_factor(20.0)
             .build();
 
-        assert_eq!(atom.name, "CA");
+        assert_eq!(&*atom.name, "CA");
         assert_eq!(atom.residue.resn, "ALA");
         assert_eq!(atom.residue.resv, 1);
         assert_eq!(atom.residue.chain, "A");
@@ -801,7 +812,7 @@ mod tests {
         atom.state.flags = AtomFlags::PROTEIN;
         assert!(atom.is_backbone());
 
-        atom.name = "CB".to_string();
+        atom.name = Arc::from("CB");
         assert!(atom.is_sidechain());
     }
 

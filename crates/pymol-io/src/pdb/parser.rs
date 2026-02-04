@@ -166,19 +166,27 @@ impl<R: Read> PdbReader<R> {
         // Map from PDB serial number to atom index
         let mut serial_to_index: HashMap<i32, AtomIndex> = HashMap::new();
 
+        // Cache for sharing AtomResidue instances among atoms of the same residue
+        let mut residue_cache: HashMap<AtomResidue, Arc<AtomResidue>> = HashMap::new();
+
         // Add atoms
         for record in &atom_records {
             let element = record.get_element();
             let mut atom = Atom::new(&record.name, element);
 
-            // Create AtomResidue
-            atom.residue = Arc::new(AtomResidue::from_parts(
+            // Create or reuse shared AtomResidue
+            let residue_data = AtomResidue::from_parts(
                 record.chain.clone(),
                 record.resn.clone(),
                 record.resv,
                 record.icode,
                 record.segi.clone(),
-            ));
+            );
+            atom.residue = residue_cache
+                .entry(residue_data.clone())
+                .or_insert_with(|| Arc::new(residue_data))
+                .clone();
+
             atom.alt = record.alt_loc;
             atom.b_factor = record.b_factor;
             atom.occupancy = record.occupancy;

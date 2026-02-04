@@ -52,7 +52,7 @@ mod residue;
 mod secondary;
 
 // Re-export main types
-pub use atom::{Atom, AtomBuilder, AtomColors, AtomRepresentation, AtomResidue, AtomState, RepMask};
+pub use atom::{Atom, AtomBuilder, AtomColors, AtomRepresentation, AtomResidue, AtomState, RepMask, COLOR_UNSET};
 pub use bond::{Bond, BondOrder, BondStereo, SymOp};
 pub use coordset::{
     mat4_to_ttt, rotation_matrix, rotation_ttt, translation_matrix, ttt_to_mat4, CoordSet,

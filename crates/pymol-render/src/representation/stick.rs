@@ -397,6 +397,11 @@ impl Representation for StickRep {
     fn primitive_count(&self) -> usize {
         (self.cylinder_count + self.sphere_count) as usize
     }
+
+    fn clear_cpu_data(&mut self) {
+        self.cylinder_instances = Vec::new();
+        self.sphere_instances = Vec::new();
+    }
 }
 
 #[cfg(test)]

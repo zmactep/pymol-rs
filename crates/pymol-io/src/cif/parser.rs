@@ -282,6 +282,9 @@ fn parse_atom_site_loop(
     let mut coords: Vec<Vec3> = Vec::new();
     let mut models: HashMap<i32, Vec<Vec3>> = HashMap::new();
 
+    // Cache for sharing AtomResidue instances among atoms of the same residue
+    let mut residue_cache: HashMap<AtomResidue, Arc<AtomResidue>> = HashMap::new();
+
     // Parse rows
     loop {
         // Check if we've reached end of loop data
@@ -357,8 +360,12 @@ fn parse_atom_site_loop(
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
-        // Create AtomResidue
-        atom.residue = Arc::new(AtomResidue::from_parts(chain, resn, resv, inscode, ""));
+        // Create or reuse shared AtomResidue
+        let residue_data = AtomResidue::from_parts(chain, resn, resv, inscode, "");
+        atom.residue = residue_cache
+            .entry(residue_data.clone())
+            .or_insert_with(|| Arc::new(residue_data))
+            .clone();
 
         // Alt loc
         atom.alt = get_col("_atom_site.label_alt_id")

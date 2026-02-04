@@ -5,6 +5,7 @@
 
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_settings::{GlobalSettings, UniqueSettings};
+use smallvec::SmallVec;
 
 use crate::atom::Atom;
 use crate::bond::{Bond, BondOrder};
@@ -102,7 +103,8 @@ pub struct ObjectMolecule {
     // Bond Lookup
     // =========================================================================
     /// Map from atom index to list of bond indices involving that atom
-    atom_bonds: Vec<Vec<BondIndex>>,
+    /// Uses SmallVec to avoid heap allocation for atoms with 4 or fewer bonds (common case)
+    atom_bonds: Vec<SmallVec<[BondIndex; 4]>>,
 
     // =========================================================================
     // Metadata
@@ -193,7 +195,7 @@ impl ObjectMolecule {
     pub fn add_atom(&mut self, atom: Atom) -> AtomIndex {
         let index = AtomIndex(self.atoms.len() as u32);
         self.atoms.push(atom);
-        self.atom_bonds.push(Vec::new());
+        self.atom_bonds.push(SmallVec::new());
         index
     }
 
@@ -511,8 +513,8 @@ impl ObjectMolecule {
                 continue;
             }
 
-            let name1 = atom1.name.as_str();
-            let name2 = atom2.name.as_str();
+            let name1 = &*atom1.name;
+            let name2 = &*atom2.name;
             let resn = atom1.residue.resn.as_str();
 
             // Check for double bonds based on atom names
@@ -696,13 +698,13 @@ impl ObjectMolecule {
                 // Find guide atom (CA for proteins, C4' for nucleic acids)
                 let guide_atom_local_idx = if mask.contains(AtomFlags::PROTEIN) {
                     // Find CA atom
-                    residue.atoms.iter().position(|a| a.name == "CA")
+                    residue.atoms.iter().position(|a| &*a.name == "CA")
                 } else if mask.contains(AtomFlags::NUCLEIC) {
                     // Find C4' or C4* atom
                     residue
                         .atoms
                         .iter()
-                        .position(|a| a.name == "C4'" || a.name == "C4*")
+                        .position(|a| &*a.name == "C4'" || &*a.name == "C4*")
                 } else {
                     None
                 };
@@ -1026,7 +1028,7 @@ mod tests {
     fn test_atom_access() {
         let mol = create_water();
         let atom = mol.get_atom(AtomIndex(0)).unwrap();
-        assert_eq!(atom.name, "O");
+        assert_eq!(&*atom.name, "O");
         assert_eq!(atom.element, Element::Oxygen);
     }
 

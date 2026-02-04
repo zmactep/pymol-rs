@@ -67,7 +67,8 @@ impl RepType {
 /// The typical lifecycle is:
 /// 1. `build()` - Generate vertex data from molecular data
 /// 2. `upload()` - Upload vertex data to GPU buffers
-/// 3. `render()` - Record draw commands into a render pass
+/// 3. `clear_cpu_data()` - Free CPU-side data after upload (optional memory optimization)
+/// 4. `render()` - Record draw commands into a render pass
 pub trait Representation {
     /// Generate vertex data from molecular data
     ///
@@ -105,4 +106,14 @@ pub trait Representation {
     fn is_empty(&self) -> bool {
         self.primitive_count() == 0
     }
+
+    /// Clear CPU-side vertex/instance data after GPU upload
+    ///
+    /// This releases memory used by CPU-side buffers after data has been
+    /// uploaded to the GPU. Call this after `upload()` to reduce memory usage.
+    ///
+    /// Note: After calling this, the representation cannot be re-uploaded
+    /// without first calling `build()` again. Raytracing may also need
+    /// CPU data, so only call this when GPU-only rendering is sufficient.
+    fn clear_cpu_data(&mut self);
 }

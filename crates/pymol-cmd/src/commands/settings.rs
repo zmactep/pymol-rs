@@ -246,13 +246,13 @@ EXAMPLES
                         for idx in selected.indices() {
                             if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
                                 match id {
-                                    setting_id::stick_color => atom.repr.colors.stick = Some(color_index),
-                                    setting_id::line_color => atom.repr.colors.line = Some(color_index),
-                                    setting_id::cartoon_color => atom.repr.colors.cartoon = Some(color_index),
-                                    setting_id::surface_color => atom.repr.colors.surface = Some(color_index),
-                                    setting_id::mesh_color => atom.repr.colors.mesh = Some(color_index),
-                                    setting_id::sphere_color => atom.repr.colors.sphere = Some(color_index),
-                                    setting_id::ribbon_color => atom.repr.colors.ribbon = Some(color_index),
+                                    setting_id::stick_color => atom.repr.colors.stick = color_index,
+                                    setting_id::line_color => atom.repr.colors.line = color_index,
+                                    setting_id::cartoon_color => atom.repr.colors.cartoon = color_index,
+                                    setting_id::surface_color => atom.repr.colors.surface = color_index,
+                                    setting_id::mesh_color => atom.repr.colors.mesh = color_index,
+                                    setting_id::sphere_color => atom.repr.colors.sphere = color_index,
+                                    setting_id::ribbon_color => atom.repr.colors.ribbon = color_index,
                                     _ => {}
                                 }
                             }

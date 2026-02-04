@@ -49,7 +49,7 @@ impl PyAtom {
     /// Create a PyAtom from a Rust Atom and optional coordinates
     pub fn from_atom(atom: &Atom, coord: Option<(f32, f32, f32)>, index: usize) -> Self {
         PyAtom {
-            name: atom.name.clone(),
+            name: atom.name.to_string(),
             element: atom.element,
             resn: atom.residue.resn.clone(),
             resv: atom.residue.resv,

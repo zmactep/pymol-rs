@@ -313,7 +313,7 @@ fn collect_residue_data(molecule: &ObjectMolecule) -> Vec<ResidueData> {
 /// Find an atom by name within a residue
 fn find_atom_by_name(residue: &ResidueView, name: &str) -> Option<AtomIndex> {
     for (idx, atom) in residue.iter_indexed() {
-        if atom.name == name {
+        if &*atom.name == name {
             return Some(idx);
         }
     }

@@ -493,6 +493,11 @@ impl Representation for SurfaceRep {
     fn primitive_count(&self) -> usize {
         self.index_count as usize / 3 // Triangles
     }
+
+    fn clear_cpu_data(&mut self) {
+        self.vertices = Vec::new();
+        self.indices = Vec::new();
+    }
 }
 
 #[cfg(test)]

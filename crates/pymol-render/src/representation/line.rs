@@ -336,6 +336,10 @@ impl Representation for LineRep {
     fn primitive_count(&self) -> usize {
         self.vertex_count as usize / 2 // Lines have 2 vertices each
     }
+
+    fn clear_cpu_data(&mut self) {
+        self.vertices = Vec::new();
+    }
 }
 
 #[cfg(test)]
