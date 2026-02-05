@@ -5,11 +5,13 @@ use bytemuck::{Pod, Zeroable};
 
 /// Uniform parameters for edge detection shader
 /// 
-/// Uses PyMOL's gradient-of-gradient algorithm parameters:
-/// - slope_factor: Max gradient magnitude difference threshold (default 0.6)
-/// - depth_factor: Max gradient direction difference threshold (default 0.1)  
-/// - disco_factor: Gradient discontinuity threshold (default 0.05)
-/// - gain: Pixel radius adjustment factor
+/// Uses normal-based edge detection algorithm:
+/// - slope_factor: Normal dot product threshold - edges detected when dot(N1, N2) < threshold
+///   Higher values = more sensitive (more edges), range [0, 1], PyMOL default 0.6
+/// - depth_factor: Depth discontinuity threshold - edges detected when |d1 - d2| > threshold
+///   Lower values = more sensitive (more edges), PyMOL default 0.1
+/// - disco_factor: Reserved for future use
+/// - gain: Controls edge line thickness - lower values = thicker lines, PyMOL default 0.12
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct EdgeParams {
@@ -25,11 +27,11 @@ impl Default for EdgeParams {
     fn default() -> Self {
         Self {
             viewport: [0.0, 0.0],
-            // Thresholds balanced for both surface (smooth) and cartoon (sharp) geometry
-            slope_factor: 0.004,     // Gradient magnitude difference threshold
-            depth_factor: 0.000005,  // Gradient direction difference threshold
-            disco_factor: 0.25,      // Gradient discontinuity dot product threshold
-            gain: 100.0,             // Gradient amplification
+            // Normal-based edge detection thresholds
+            slope_factor: 0.7,    // Normal dot product threshold (edges when dot < this)
+            depth_factor: 0.01,   // Depth difference threshold (normalized depth)
+            disco_factor: 0.05,   // Reserved
+            gain: 0.12,           // Line thickness control (PyMOL default)
             _pad: [0.0; 2],
         }
     }

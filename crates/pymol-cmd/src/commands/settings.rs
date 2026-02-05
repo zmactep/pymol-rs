@@ -349,6 +349,31 @@ EXAMPLES
             }
         }
 
+        // Special handling for cartoon geometry settings - invalidate all molecule
+        // representations so cartoons get rebuilt with the new settings
+        if matches!(id, 
+            setting_id::cartoon_fancy_helices |
+            setting_id::cartoon_fancy_sheets |
+            setting_id::cartoon_oval_width |
+            setting_id::cartoon_oval_length |
+            setting_id::cartoon_rect_width |
+            setting_id::cartoon_rect_length |
+            setting_id::cartoon_loop_radius |
+            setting_id::cartoon_dumbbell_width |
+            setting_id::cartoon_dumbbell_length |
+            setting_id::cartoon_dumbbell_radius |
+            setting_id::cartoon_round_helices |
+            setting_id::cartoon_sampling |
+            setting_id::cartoon_smooth_loops
+        ) {
+            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+            for obj_name in names {
+                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    mol.invalidate_representations();
+                }
+            }
+        }
+
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {

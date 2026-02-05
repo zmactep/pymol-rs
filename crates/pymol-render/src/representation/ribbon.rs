@@ -194,6 +194,10 @@ impl Representation for RibbonRep {
             flat_sheets: false,
             // Disable all arrow-related features
             fancy_sheets: false,
+            fancy_helices: false,
+            dumbbell_length: 1.6,
+            dumbbell_width: 0.17,
+            dumbbell_radius: 0.16,
             arrow_tip_scale: 1.0,
             arrow_length: 0,
             arrow_residues: 0,
