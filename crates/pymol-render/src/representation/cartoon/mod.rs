@@ -138,7 +138,7 @@ impl Representation for CartoonRep {
         // PyMOL-style smoothing settings (defaults match PyMOL exactly)
         let power_b = settings.get_float_if_defined(CARTOON_POWER_B).unwrap_or(0.52);
         let throw = settings.get_float_if_defined(CARTOON_THROW).unwrap_or(1.35);
-        
+
         let smooth_settings = CartoonSmoothSettings {
             smooth_cycles: settings
                 .get_int_if_defined(CARTOON_SMOOTH_CYCLES)
@@ -214,12 +214,9 @@ impl Representation for CartoonRep {
                 continue;
             }
 
-            // Find sheet termini for arrow heads (only if fancy_sheets is enabled)
-            let sheet_termini = if geom_settings.fancy_sheets {
-                find_sheet_termini(&frames)
-            } else {
-                Vec::new()
-            };
+            // Find sheet termini — always needed for explicit sheet geometry.
+            // The fancy_sheets flag only controls whether arrows are drawn.
+            let sheet_termini = find_sheet_termini(&frames);
 
             // Generate mesh geometry
             let (mut seg_vertices, seg_indices) =
@@ -334,10 +331,10 @@ mod tests {
     #[test]
     fn test_backbone_extraction() {
         use pymol_color::{ChainColors, ElementColors, NamedColors};
-        
+
         let mol = create_test_peptide();
         let coord_set = mol.get_coord_set(0).unwrap();
-        
+
         // Create color tables
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
@@ -345,7 +342,7 @@ mod tests {
         let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
 
         let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON);
-        
+
         assert!(!segments.is_empty(), "Should have at least one segment");
         assert_eq!(segments[0].len(), 3, "Should have 3 guide points (3 residues)");
     }
@@ -381,10 +378,10 @@ mod tests {
                 20.0,
             ),
         ];
-        
+
         let settings = InterpolationSettings::default();
         let frames = generate_frames(&guide_points, &settings, 7, 2);
-        
+
         assert!(!frames.is_empty(), "Should have frames");
         // With displacement interpolation, we get (n_segments * sampling) + 1 points
         // 2 segments * 7 sampling + 1 = 15 points
@@ -394,12 +391,12 @@ mod tests {
     #[test]
     fn test_cartoon_build_simple_peptide() {
         use pymol_color::{ChainColors, ElementColors, NamedColors};
-        
+
         let mol = create_test_peptide();
         let coord_set = mol.get_coord_set(0).unwrap();
         let settings = GlobalSettings::new();
         let settings_resolver = pymol_settings::SettingResolver::global(&settings);
-        
+
         // Create color tables
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
@@ -417,7 +414,7 @@ mod tests {
     #[test]
     fn test_cartoon_with_secondary_structure() {
         use pymol_color::{ChainColors, ElementColors, NamedColors};
-        
+
         // Create a peptide with secondary structure assigned
         let mut mol = ObjectMolecule::new("ss_peptide");
 
@@ -433,10 +430,10 @@ mod tests {
 
         let mut coords = Vec::new();
         let base_x = 0.0f32;
-        
+
         for (i, (ss, resn, resv)) in ss_sequence.iter().enumerate() {
             let x = base_x + (i as f32) * 3.8; // ~CA-CA distance
-            
+
             // N atom
             let mut n = Atom::new("N", Element::Nitrogen);
             n.set_residue(*resn, *resv, "A");
@@ -444,7 +441,7 @@ mod tests {
             n.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(n);
             coords.push(Vec3::new(x - 1.0, 0.0, 0.0));
-            
+
             // CA atom
             let mut ca = Atom::new("CA", Element::Carbon);
             ca.set_residue(*resn, *resv, "A");
@@ -452,7 +449,7 @@ mod tests {
             ca.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(ca);
             coords.push(Vec3::new(x, 0.0, 0.0));
-            
+
             // C atom
             let mut c = Atom::new("C", Element::Carbon);
             c.set_residue(*resn, *resv, "A");
@@ -460,7 +457,7 @@ mod tests {
             c.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
             mol.add_atom(c);
             coords.push(Vec3::new(x + 0.5, 0.5, 0.0));
-            
+
             // O atom
             let mut o = Atom::new("O", Element::Oxygen);
             o.set_residue(*resn, *resv, "A");
@@ -480,7 +477,7 @@ mod tests {
         let coord_set = mol.get_coord_set(0).unwrap();
         let settings = GlobalSettings::new();
         let settings_resolver = pymol_settings::SettingResolver::global(&settings);
-        
+
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
         let chain_colors = ChainColors;
@@ -497,7 +494,7 @@ mod tests {
 
         assert!(!cartoon.vertices.is_empty(), "Cartoon should have vertices");
         assert!(!cartoon.indices.is_empty(), "Cartoon should have indices");
-        
+
         // Print some diagnostic info
         eprintln!("Cartoon vertices: {}, indices: {}", cartoon.vertices.len(), cartoon.indices.len());
     }
@@ -506,14 +503,14 @@ mod tests {
     fn test_cartoon_from_pdb_file() {
         use pymol_color::{ChainColors, ElementColors, NamedColors};
         use std::path::Path;
-        
+
         // Try to load a real PDB file
         let path = Path::new("../../pymol-open-source/test/dat/1tii.pdb");
         if !path.exists() {
             eprintln!("Skipping test - PDB file not found at {:?}", path);
             return;
         }
-        
+
         let mut mol = match pymol_io::read_file(path) {
             Ok(m) => m,
             Err(e) => {
@@ -521,9 +518,9 @@ mod tests {
                 return;
             }
         };
-        
+
         eprintln!("Loaded {} atoms from {:?}", mol.atom_count(), path);
-        
+
         // Count atoms by secondary structure
         let mut helix_count = 0;
         let mut sheet_count = 0;
@@ -538,23 +535,23 @@ mod tests {
             }
         }
         eprintln!("Secondary structure: Helix={}, Sheet={}, Loop={}", helix_count, sheet_count, loop_count);
-        
+
         // Count protein residues
         let protein_count = mol.residues().filter(|r| r.is_protein()).count();
         eprintln!("Protein residues: {}", protein_count);
-        
+
         // Check if atoms have CARTOON visibility - by default they don't
         let cartoon_visible_before = mol.atoms().filter(|a| a.repr.visible_reps.is_visible(pymol_mol::RepMask::CARTOON)).count();
         eprintln!("Atoms with CARTOON visible (before): {}", cartoon_visible_before);
-        
+
         // Set CARTOON visibility on all atoms (simulating what toggle() does)
         for atom in mol.atoms_mut() {
             atom.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
         }
-        
+
         let cartoon_visible_after = mol.atoms().filter(|a| a.repr.visible_reps.is_visible(pymol_mol::RepMask::CARTOON)).count();
         eprintln!("Atoms with CARTOON visible (after): {}", cartoon_visible_after);
-        
+
         // Get coordinate set
         let coord_set = match mol.get_coord_set(0) {
             Some(cs) => cs,
@@ -563,10 +560,10 @@ mod tests {
                 return;
             }
         };
-        
+
         let settings = GlobalSettings::new();
         let settings_resolver = pymol_settings::SettingResolver::global(&settings);
-        
+
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
         let chain_colors = ChainColors;
@@ -578,13 +575,13 @@ mod tests {
         for (i, seg) in segments.iter().enumerate() {
             eprintln!("  Segment {}: {} guide points, chain={}", i, seg.len(), seg.chain_id);
         }
-        
+
         // Build cartoon
         let mut cartoon = CartoonRep::new();
         cartoon.build(&mol, coord_set, &color_resolver, &settings_resolver);
-        
+
         eprintln!("Cartoon vertices: {}, indices: {}", cartoon.vertices.len(), cartoon.indices.len());
-        
+
         // The cartoon should have vertices for a protein file
         assert!(!cartoon.vertices.is_empty(), "Cartoon should have vertices for a protein PDB file");
     }

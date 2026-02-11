@@ -2,5 +2,8 @@ __pycache__
 _tests
 *.so
 pymol-open-source
+ngl
 target
 .venv
+CLAUDE.md
+.claude

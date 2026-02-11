@@ -35,11 +35,11 @@ impl ReferenceFrame {
     /// - binormal: perpendicular to both (ribbon thickness direction)
     pub fn new(position: Vec3, tangent: Vec3, orientation: Vec3) -> Self {
         let t = normalize_safe(tangent);
-        
+
         // Binormal = tangent × orientation (perpendicular to both)
         let b = t.cross(orientation);
         let b = normalize_safe(b);
-        
+
         // Normal = binormal × tangent (ensures orthogonality)
         let n = b.cross(t);
 
@@ -140,10 +140,10 @@ pub fn generate_frames(
     // Extract data from guide points
     let positions: Vec<Vec3> = guide_points.iter().map(|gp| gp.position).collect();
     let orientations: Vec<Vec3> = guide_points.iter().map(|gp| gp.orientation).collect();
-    
+
     // Ensure orientation consistency (no sudden flips)
     let consistent_orientations = ensure_orientation_consistency(&orientations);
-    
+
     // Compute tangent vectors at each guide point
     let tangents = compute_tangents(&positions);
 
@@ -189,7 +189,60 @@ pub fn generate_frames(
         })
         .collect();
 
-    // Apply smoothing to prevent normal flips
+    // Override orientations for sheet frames to keep sheets flat.
+    // Compute a single averaged orientation per contiguous sheet run,
+    // then apply it to all frames in that run. This prevents twist caused
+    // by per-residue orientation variation.
+    {
+        // Find contiguous sheet runs in guide points
+        let mut sheet_runs: Vec<(usize, usize)> = Vec::new();
+        let mut in_sheet = false;
+        let mut run_start = 0;
+        for (i, gp) in guide_points.iter().enumerate() {
+            if gp.ss_type == pymol_mol::SecondaryStructure::Sheet {
+                if !in_sheet {
+                    run_start = i;
+                    in_sheet = true;
+                }
+            } else if in_sheet {
+                sheet_runs.push((run_start, i - 1));
+                in_sheet = false;
+            }
+        }
+        if in_sheet {
+            sheet_runs.push((run_start, guide_points.len() - 1));
+        }
+
+        // Compute averaged orientation for each sheet run
+        let mut avg_orientations: Vec<(usize, usize, Vec3)> = Vec::new();
+        for &(start, end) in &sheet_runs {
+            let mut sum = Vec3::new(0.0, 0.0, 0.0);
+            for i in start..=end {
+                sum = sum + consistent_orientations[i];
+            }
+            let avg = normalize_safe(sum);
+            avg_orientations.push((start, end, avg));
+        }
+
+        // Apply averaged orientation to all sheet frames
+        for frame in &mut frames {
+            if frame.ss_type == pymol_mol::SecondaryStructure::Sheet {
+                let seg = frame.segment_idx.min(guide_points.len() - 2);
+                // Find which sheet run this frame belongs to
+                if let Some(&(_, _, avg_orient)) = avg_orientations.iter().find(|&&(s, e, _)| {
+                    seg >= s && seg <= e
+                }) {
+                    frame.frame = ReferenceFrame::new(
+                        frame.frame.position,
+                        frame.frame.tangent,
+                        avg_orient,
+                    );
+                }
+            }
+        }
+    }
+
+    // Apply smoothing to prevent normal flips (sheets are already skipped)
     smooth_frames(&mut frames, smooth_cycles);
 
     frames
@@ -203,11 +256,11 @@ fn ensure_orientation_consistency(orientations: &[Vec3]) -> Vec<Vec3> {
 
     let mut consistent = Vec::with_capacity(orientations.len());
     consistent.push(orientations[0]);
-    
+
     for i in 1..orientations.len() {
         let prev = consistent[i - 1];
         let curr = orientations[i];
-        
+
         // If current orientation points opposite to previous, flip it
         if prev.dot(curr) < 0.0 {
             consistent.push(curr * -1.0);
@@ -215,14 +268,18 @@ fn ensure_orientation_consistency(orientations: &[Vec3]) -> Vec<Vec3> {
             consistent.push(curr);
         }
     }
-    
+
     consistent
 }
 
 /// Smooth reference frames while preserving consistent ribbon orientation
 ///
 /// Uses parallel transport with blending to ensure smooth, continuous frames.
+/// IMPORTANT: Sheets are excluded from smoothing - PyMOL computes sheet frames
+/// independently at each point from the orientation vector to prevent twist.
 fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
+    use pymol_mol::SecondaryStructure;
+
     if frames.len() < 2 {
         return;
     }
@@ -231,21 +288,27 @@ fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
     let original_binormals: Vec<Vec3> = frames.iter().map(|f| f.frame.binormal).collect();
 
     // First pass: use parallel transport to establish continuous binormals
+    // SKIP sheets - they should keep their orientation-based frames (PyMOL behavior)
     for i in 1..frames.len() {
+        // Skip sheets - they need independent frame computation to stay flat
+        if frames[i].ss_type == SecondaryStructure::Sheet {
+            continue;
+        }
+
         let tangent = frames[i].frame.tangent;
         let prev_binormal = frames[i - 1].frame.binormal;
         let orig_binormal = original_binormals[i];
-        
+
         // Parallel transport: project previous binormal to current tangent's perpendicular plane
         let transported = prev_binormal - tangent * prev_binormal.dot(tangent);
         let transport_len = transported.magnitude();
-        
+
         if transport_len > 1e-6 {
             let transported_norm = transported / transport_len;
-            
+
             // Blend between transported and original based on agreement
             let agreement = transported_norm.dot(orig_binormal);
-            
+
             let new_binormal = if agreement > 0.5 {
                 // Good agreement - blend towards original
                 let blend = agreement;
@@ -257,22 +320,29 @@ fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
                 // Poor agreement - use transported
                 transported_norm
             };
-            
+
             // Compute normal from binormal: N = B × T
             let new_normal = new_binormal.cross(tangent);
-            
+
             frames[i].frame.binormal = new_binormal;
             frames[i].frame.normal = new_normal;
         }
     }
 
     // Apply smoothing cycles
+    // SKIP sheets - they should not be smoothed (PyMOL behavior)
     for _ in 0..cycles {
         let len = frames.len();
         let mut new_binormals = Vec::with_capacity(len);
 
         // Smooth binormals by averaging with neighbors
         for i in 0..len {
+            // Skip sheets - preserve their orientation-based binormals
+            if frames[i].ss_type == SecondaryStructure::Sheet {
+                new_binormals.push(frames[i].frame.binormal);
+                continue;
+            }
+
             let prev = if i > 0 { i - 1 } else { 0 };
             let next = if i < len - 1 { i + 1 } else { len - 1 };
 
@@ -287,12 +357,17 @@ fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
 
         // Apply smoothed binormals and recompute frames
         for (i, new_binormal) in new_binormals.into_iter().enumerate() {
+            // Skip sheets
+            if frames[i].ss_type == SecondaryStructure::Sheet {
+                continue;
+            }
+
             let tangent = frames[i].frame.tangent;
-            
+
             // Make binormal perpendicular to tangent
             let projected = new_binormal - tangent * new_binormal.dot(tangent);
             let binormal = normalize_safe(projected);
-            
+
             // Compute normal: N = B × T
             let normal = binormal.cross(tangent);
 

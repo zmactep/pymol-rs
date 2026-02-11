@@ -11,7 +11,7 @@ use super::frame::FrameWithMetadata;
 use crate::vertex::MeshVertex;
 
 /// Profile rendering type - determines how mesh is generated
-/// 
+///
 /// Round profiles use `connect_rings()` which wraps around all vertices.
 /// Flat profiles use `generate_face_strips()` which renders each face pair separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,10 +149,10 @@ impl Profile {
             // Parametric form with consistent vertex distribution
             let sign_x = cos_a.signum();
             let sign_y = sin_a.signum();
-            
+
             let abs_cos = cos_a.abs();
             let abs_sin = sin_a.abs();
-            
+
             // Superellipse parametric coordinates
             let x = width * sign_x * abs_cos.powf(2.0 / exponent);
             let y = height * sign_y * abs_sin.powf(2.0 / exponent);
@@ -171,7 +171,7 @@ impl Profile {
             } else {
                 0.0
             };
-            
+
             let len = (nx * nx + ny * ny).sqrt();
             if len > 1e-6 {
                 normals.push((nx / len, ny / len));
@@ -191,57 +191,53 @@ impl Profile {
 
     /// Create a flat-faced rectangular profile (for sheets) matching PyMOL's ExtrudeRectangle
     ///
-    /// This creates a flat ribbon with 4 faces (top, right, bottom, left) organized
-    /// as face pairs for PyMOL-style rendering. Each face has 2 vertices with the same normal.
+    /// This creates a flat ribbon with 4 faces organized as face pairs for PyMOL-style
+    /// rendering. Each face has 2 vertices with the same normal.
     ///
-    /// - `thickness`: Half-extent in the normal direction (perpendicular to surface, small ~0.2)
-    /// - `width`: Half-extent in the binormal direction (lateral ribbon width, large ~1.4)
+    /// Called as `flat_rectangle(sheet_height, sheet_width)`:
+    /// - `thickness`: Half-extent in the normal direction (ribbon width, LARGE ~1.4)
+    /// - `width`: Half-extent in the binormal direction (ribbon thickness, SMALL ~0.4)
     ///
-    /// PyMOL coordinate mapping:
-    /// - Normal direction (first coord): perpendicular to ribbon surface (+X = top, -X = bottom)
-    /// - Binormal direction (second coord): lateral ribbon extent (+Y = right, -Y = left)
+    /// This matches PyMOL's ExtrudeRectangle(width, length) where:
+    /// - length (cartoon_rect_length=1.4) → Z/normal direction → our first coord (thickness)
+    /// - width (cartoon_rect_width=0.4) → Y/binormal direction → our second coord (width)
     ///
-    /// 8 vertices organized as 4 face pairs (like PyMOL's ExtrudeRectangle):
-    /// - Face 0-1: Top face (normal +X)
-    /// - Face 2-3: Right side (normal +Y)  
-    /// - Face 4-5: Bottom face (normal -X)
-    /// - Face 6-7: Left side (normal -Y)
-    ///
-    /// IMPORTANT: All horizontal faces (top, bottom) must have vertices in the same
-    /// order (left-to-right) for consistent triangle winding in generate_face_strips.
-    /// Vertical faces (left, right) must go in the same direction (top-to-bottom).
+    /// 8 vertices organized as 4 face pairs:
+    /// - Face 0-1: Side edge at +t normal (narrow edge of ribbon)
+    /// - Face 2-3: Flat top surface at +w binormal (wide visible face)
+    /// - Face 4-5: Side edge at -t normal (narrow edge of ribbon)
+    /// - Face 6-7: Flat bottom surface at -w binormal (wide visible face)
     pub fn flat_rectangle(thickness: f32, width: f32) -> Self {
         // PyMOL uses cos(π/4) scaling for the rectangular shape
         let cos45 = std::f32::consts::FRAC_1_SQRT_2;
-        let t = cos45 * thickness;  // half-thickness scaled
-        let w = cos45 * width;      // half-width scaled
-        
+        let t = cos45 * thickness;  // half-extent in normal dir (LARGE = ribbon width)
+        let w = cos45 * width;      // half-extent in binormal dir (SMALL = ribbon thickness)
+
         // 8 vertices: 2 per face, organized as face pairs
-        // CRITICAL: All faces must have consistent vertex ordering for correct winding
-        // Horizontal faces go left-to-right, vertical faces go top-to-bottom
+        // t = normal direction (first coord, ribbon width), w = binormal direction (second coord, ribbon thickness)
         let points = vec![
-            // Top face (vertices 0-1): at +t, going left to right (-w to +w)
+            // Face 0-1: Side edge at +t normal, spanning ±w binormal
             (t, -w), (t, w),
-            // Right side (vertices 2-3): at +w, going top to bottom (+t to -t)
+            // Face 2-3: Flat top surface at +w binormal, spanning +t to -t normal
             (t, w), (-t, w),
-            // Bottom face (vertices 4-5): at -t, going left to right (-w to +w) - SAME as top
+            // Face 4-5: Side edge at -t normal, spanning ±w binormal
             (-t, -w), (-t, w),
-            // Left side (vertices 6-7): at -w, going top to bottom (+t to -t) - SAME as right
+            // Face 6-7: Flat bottom surface at -w binormal, spanning +t to -t normal
             (t, -w), (-t, -w),
         ];
-        
+
         // Flat normals for each face - all vertices in a face pair have same normal
         let normals = vec![
-            // Top face normals (+X direction = perpendicular up from ribbon)
+            // Face 0-1: +normal direction (side edge outward)
             (1.0, 0.0), (1.0, 0.0),
-            // Right side normals (+Y direction = along ribbon width)
+            // Face 2-3: +binormal direction (flat top surface outward)
             (0.0, 1.0), (0.0, 1.0),
-            // Bottom face normals (-X direction = perpendicular down from ribbon)
+            // Face 4-5: -normal direction (side edge outward)
             (-1.0, 0.0), (-1.0, 0.0),
-            // Left side normals (-Y direction = along ribbon width)
+            // Face 6-7: -binormal direction (flat bottom surface outward)
             (0.0, -1.0), (0.0, -1.0),
         ];
-        
+
         Profile { points, normals, profile_type: ProfileType::Flat4Face }
     }
 
@@ -273,7 +269,7 @@ impl Profile {
         // PyMOL's dumbbell uses cos(π/4) and sin(π/4) for positioning
         let w = std::f32::consts::FRAC_1_SQRT_2 * width;
         let l = std::f32::consts::FRAC_1_SQRT_2 * length;
-        
+
         // 4 vertices: 2 per face, organized as face pairs
         // To match ellipse orientation (wide in normal direction):
         // - First coord (normal): ribbon width, spanning ±l
@@ -284,7 +280,7 @@ impl Profile {
             // Bottom face (vertices 2-3): at -w in binormal, spanning -l to +l in normal
             (-l, -w), (l, -w),
         ];
-        
+
         // Face normals point perpendicular to the flat surfaces (in ±binormal direction)
         let normals = vec![
             // Top face normals point up (+binormal, +Y direction)
@@ -292,7 +288,7 @@ impl Profile {
             // Bottom face normals point down (-binormal, -Y direction)
             (0.0, -1.0), (0.0, -1.0),
         ];
-        
+
         Profile { points, normals, profile_type: ProfileType::Flat2Face }
     }
 
@@ -316,7 +312,7 @@ impl Profile {
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
-    
+
     /// Blend two profiles together
     ///
     /// Creates a new profile by linearly interpolating between `self` and `other`.
@@ -325,17 +321,17 @@ impl Profile {
     /// - `t`: Blend factor (0.0 = self, 1.0 = other)
     pub fn blend(&self, other: &Profile, t: f32) -> Self {
         debug_assert_eq!(self.points.len(), other.points.len(), "Profiles must have same vertex count");
-        
+
         let t = t.clamp(0.0, 1.0);
         let one_minus_t = 1.0 - t;
-        
+
         let points: Vec<(f32, f32)> = self.points.iter()
             .zip(other.points.iter())
             .map(|((x1, y1), (x2, y2))| {
                 (x1 * one_minus_t + x2 * t, y1 * one_minus_t + y2 * t)
             })
             .collect();
-        
+
         let normals: Vec<(f32, f32)> = self.normals.iter()
             .zip(other.normals.iter())
             .map(|((nx1, ny1), (nx2, ny2))| {
@@ -349,7 +345,7 @@ impl Profile {
                 }
             })
             .collect();
-        
+
         // Preserve the profile type from the source profile
         Profile { points, normals, profile_type: self.profile_type }
     }
@@ -434,15 +430,15 @@ impl CartoonGeometrySettings {
             dumbbell_radius: settings.get_float_if_defined(CARTOON_DUMBBELL_RADIUS).unwrap_or(0.16),
             arrow_tip_scale: 1.5,
             arrow_length: 0, // Will be calculated from subdivisions
-            arrow_residues: 2, // Arrow spans ~2 residues (like PyMOL's sampling parameter)
+            arrow_residues: 1, // Match PyMOL's sampling (~7-8 frames)
             uniform_tube: false, // Default: different profiles for different SS types
         }
     }
-    
+
     /// Set the arrow length based on spline subdivisions
     ///
-    /// The arrow should span approximately `arrow_residues` residues.
-    /// Each residue has `subdivisions + 1` frames, so:
+    /// The arrow head length matches PyMOL's sampling parameter.
+    /// PyMOL uses sampling (~subdivisions) as arrow head length.
     /// arrow_length = arrow_residues * (subdivisions + 1)
     pub fn with_subdivisions(mut self, subdivisions: u32) -> Self {
         self.arrow_length = self.arrow_residues * (subdivisions as usize + 1);
@@ -467,8 +463,8 @@ impl Default for CartoonGeometrySettings {
             dumbbell_width: 0.17,
             dumbbell_radius: 0.16,
             arrow_tip_scale: 1.5,
-            arrow_length: 16, // Default for subdivisions=7: 2 * (7+1) = 16
-            arrow_residues: 2,
+            arrow_length: 8, // Default for subdivisions=7: 1 * (7+1) = 8
+            arrow_residues: 1,
             uniform_tube: false,
         }
     }
@@ -492,12 +488,12 @@ pub fn generate_cartoon_mesh(
     let mut segment_frame_indices: Vec<usize> = Vec::new(); // Track frame indices for capping
     let mut current_profile_type: Option<ProfileType> = None;
     let mut current_profile_len: usize = 0;
-    
+
     // Detect SS transition boundaries for blending
     let transition_frames = detect_ss_transitions(frames);
     // Number of frames to blend across at each transition
     let blend_range = 8usize;
-    
+
     // Find helix regions for dumbbell tapering
     let helix_regions = if settings.fancy_helices {
         find_helix_regions(frames)
@@ -508,9 +504,30 @@ pub fn generate_cartoon_mesh(
     let helix_taper_frames = 8usize;
 
     for (i, frame_meta) in frames.iter().enumerate() {
+        // Skip ALL sheet frames — they are rendered by generate_explicit_sheet().
+        // No overlap: loop ends exactly at boundary, sheet starts exactly at boundary.
+        if frame_meta.ss_type == SecondaryStructure::Sheet && !settings.uniform_tube {
+            // Flush any pending segment before skipping
+            if let Some(profile_type) = current_profile_type {
+                if !segment_ring_starts.is_empty() {
+                    flush_segment(
+                        &mut indices,
+                        &segment_ring_starts,
+                        profile_type,
+                        current_profile_len,
+                    );
+                    segment_ring_starts.clear();
+                    segment_frame_indices.clear();
+                }
+            }
+            current_profile_type = None;
+            current_profile_len = 0;
+            continue;
+        }
+
         // Get the base profile for this frame's SS type
         let base_profile = select_profile(frame_meta, settings, i, frames.len(), sheet_termini, &helix_regions, helix_taper_frames);
-        
+
         // Check if we need to blend with a different profile
         let profile = apply_transition_blending(
             i,
@@ -523,11 +540,11 @@ pub fn generate_cartoon_mesh(
             &helix_regions,
             helix_taper_frames,
         );
-        
+
         // Check if profile type or vertex count changed - need to flush previous segment
         let type_changed = current_profile_type.map_or(false, |t| t != profile.profile_type);
         let len_changed = current_profile_len != 0 && current_profile_len != profile.len();
-        
+
         if type_changed || len_changed {
             // Check for helix-to-loop transition (fancy helices)
             // Extend loop tube backward to helix boundary position
@@ -663,35 +680,27 @@ pub fn generate_cartoon_mesh(
                 // in the normal loop iteration below when processing frame i
             }
         }
-        
+
         // Calculate dumbbell taper factor for fancy helices
-        // PyMOL tapers the lateral extent (Z component) at helix ends using smooth(f, 2)
-        // This creates a smooth visual transition where the ribbon narrows to a line
         let dumbbell_taper = if profile.profile_type == ProfileType::Flat2Face && settings.fancy_helices {
             calculate_dumbbell_taper(i, &helix_regions, helix_taper_frames)
         } else {
             1.0
         };
-        
+
         // Record this ring's start and frame index
         let ring_start = vertices.len();
         segment_ring_starts.push(ring_start);
         segment_frame_indices.push(i);
         current_profile_type = Some(profile.profile_type);
         current_profile_len = profile.len();
-        
-        // Check if this frame is in an arrow taper region (for normal adjustment)
-        let is_arrow = settings.fancy_sheets 
-            && frame_meta.ss_type == SecondaryStructure::Sheet
-            && is_in_arrow_region(i, sheet_termini, settings.arrow_length);
 
         // Generate vertices for this profile ring
         for j in 0..profile.len() {
             let local_pos = profile.points[j];
             let local_normal = profile.normals[j];
-            
-            // Apply dumbbell taper to the X (normal) component
-            // This matches PyMOL's ExtrudeCGOSurfacePolygonTaper which scales sv[2] (Z/normal)
+
+            // Apply dumbbell taper for fancy helices at helix ends
             let tapered_pos = if dumbbell_taper < 1.0 {
                 (local_pos.0 * dumbbell_taper, local_pos.1)
             } else {
@@ -699,18 +708,7 @@ pub fn generate_cartoon_mesh(
             };
 
             let world_pos = frame_meta.frame.transform_local(tapered_pos);
-            
-            // Transform the 2D profile normal to world space using the frame
-            let world_normal = if is_arrow {
-                // Get adjusted normal with tangent tilt for arrow shading
-                let (nx, ny, tilt) = adjust_arrow_normal(local_normal, true, 0.4);
-                let base_normal = frame_meta.frame.local_normal((nx, ny));
-                let tangent_contrib = frame_meta.frame.tangent * tilt;
-                let adjusted = base_normal + tangent_contrib;
-                normalize_safe(adjusted)
-            } else {
-                frame_meta.frame.local_normal(local_normal)
-            };
+            let world_normal = frame_meta.frame.local_normal(local_normal);
 
             vertices.push(MeshVertex {
                 position: [world_pos.x, world_pos.y, world_pos.z],
@@ -730,44 +728,44 @@ pub fn generate_cartoon_mesh(
         );
     }
 
-    // Cap the ends
-    if frames.len() >= 2 {
-        // Compute taper for start cap
-        let start_taper = if settings.fancy_helices {
-            calculate_dumbbell_taper(0, &helix_regions, helix_taper_frames)
-        } else {
-            1.0
-        };
-        // Cap the start (never an arrow tip)
-        cap_tube_end(&mut vertices, &mut indices, &frames[0], settings, true, false, start_taper);
-        
-        // Compute taper for end cap
-        let last_idx = frames.len() - 1;
-        let end_taper = if settings.fancy_helices {
-            calculate_dumbbell_taper(last_idx, &helix_regions, helix_taper_frames)
-        } else {
-            1.0
-        };
-        let is_arrow_tip = is_at_arrow_tip(last_idx, sheet_termini);
-        cap_tube_end(
-            &mut vertices,
-            &mut indices,
-            &frames[last_idx],
-            settings,
-            false,
-            is_arrow_tip,
-            end_taper,
-        );
+    // Generate explicit sheet geometry for each sheet run
+    if !settings.uniform_tube {
+        for &(start, end) in sheet_termini {
+            generate_explicit_sheet(&mut vertices, &mut indices, frames, start, end, settings);
+        }
     }
 
-    // Generate arrow back faces at body/head transition points
-    if settings.fancy_sheets && settings.arrow_length > 0 {
-        for (i, frame_meta) in frames.iter().enumerate() {
-            if frame_meta.ss_type == SecondaryStructure::Sheet {
-                if is_at_arrow_transition(i, sheet_termini, settings.arrow_length).is_some() {
-                    generate_arrow_back_face(&mut vertices, &mut indices, frame_meta, settings);
-                }
-            }
+    // Cap the ends (skip if the end frame is a sheet — explicit sheets have their own caps)
+    if frames.len() >= 2 {
+        let first_is_sheet = frames[0].ss_type == SecondaryStructure::Sheet && !settings.uniform_tube;
+        let last_idx = frames.len() - 1;
+        let last_is_sheet = frames[last_idx].ss_type == SecondaryStructure::Sheet && !settings.uniform_tube;
+
+        if !first_is_sheet {
+            let start_taper = if settings.fancy_helices {
+                calculate_dumbbell_taper(0, &helix_regions, helix_taper_frames)
+            } else {
+                1.0
+            };
+            cap_tube_end(&mut vertices, &mut indices, &frames[0], settings, true, false, start_taper);
+        }
+
+        if !last_is_sheet {
+            let end_taper = if settings.fancy_helices {
+                calculate_dumbbell_taper(last_idx, &helix_regions, helix_taper_frames)
+            } else {
+                1.0
+            };
+            let is_arrow_tip = is_at_arrow_tip(last_idx, sheet_termini);
+            cap_tube_end(
+                &mut vertices,
+                &mut indices,
+                &frames[last_idx],
+                settings,
+                false,
+                is_arrow_tip,
+                end_taper,
+            );
         }
     }
 
@@ -795,9 +793,9 @@ pub fn generate_cartoon_mesh(
 fn select_profile(
     frame_meta: &FrameWithMetadata,
     settings: &CartoonGeometrySettings,
-    frame_idx: usize,
+    _frame_idx: usize,
     _total_frames: usize,
-    sheet_termini: &[(usize, usize)],
+    _sheet_termini: &[(usize, usize)],
     _helix_regions: &[(usize, usize)],
     _helix_taper_frames: usize,
 ) -> Profile {
@@ -805,7 +803,7 @@ fn select_profile(
     if settings.uniform_tube {
         return Profile::circle(settings.loop_radius, settings.quality);
     }
-    
+
     match frame_meta.ss_type {
         SecondaryStructure::Helix
         | SecondaryStructure::Helix310
@@ -828,33 +826,17 @@ fn select_profile(
             }
         }
         SecondaryStructure::Sheet => {
-            // Check if this is near a sheet terminus for arrow tapering
-            let scale = if settings.fancy_sheets {
-                calculate_arrow_scale(
-                    frame_idx,
-                    sheet_termini,
-                    settings.arrow_length,
-                    settings.arrow_tip_scale,
-                )
-            } else {
-                1.0 // No arrow tapering when fancy_sheets is disabled
-            };
-            
+            // Flat ribbon at uniform width - arrow is generated separately
             // Use flat_rectangle for PyMOL-style flat sheet appearance
-            // This creates distinct flat top/bottom faces with sharp edges
-            // 
-            // PyMOL coordinate mapping:
-            // - First param (thickness): perpendicular to surface (small ~0.2)
-            // - Second param (width): lateral ribbon extent (large ~1.4)
-            let ribbon_thickness = settings.sheet_width * 0.5;  // ~0.2, perpendicular to surface
-            let ribbon_width = settings.sheet_height * scale;   // ~1.4 * scale, lateral extent
-            
-            if ribbon_width < 0.01 {
-                // At or near the arrow tip - create minimal profile
-                Profile::flat_rectangle(ribbon_thickness, 0.01)
-            } else {
-                Profile::flat_rectangle(ribbon_thickness, ribbon_width)
-            }
+            //
+            // PyMOL's ExtrudeRectangle(width, length) maps:
+            // - width (cartoon_rect_width=0.4) → binormal direction (ribbon thickness)
+            // - length (cartoon_rect_length=1.4) → normal direction (ribbon width, lateral extent)
+            //
+            // Our flat_rectangle(thickness, width):
+            // - thickness → first coord (normal direction) → should be WIDE (1.4)
+            // - width → second coord (binormal direction) → should be THIN (0.4)
+            Profile::flat_rectangle(settings.sheet_height, settings.sheet_width)
         }
         _ => {
             // Loop/coil/turn/bend - use tube
@@ -863,78 +845,9 @@ fn select_profile(
     }
 }
 
-/// Calculate arrow width scale factor for sheet termini (PyMOL-style)
-///
-/// Returns:
-/// - 1.0 for normal sheet regions (no arrow)
-/// - 1.5 at the start of the arrow (widest point)
-/// - 0.0 at the arrow tip (point)
-/// - Values between 1.5 and 0.0 for the taper region
-fn calculate_arrow_scale(
-    frame_idx: usize,
-    sheet_termini: &[(usize, usize)],
-    arrow_length: usize,
-    tip_scale: f32,
-) -> f32 {
-    if arrow_length == 0 {
-        return 1.0;
-    }
-    
-    for &(_start, end) in sheet_termini {
-        // Check if near the end of a sheet (C-terminus gets arrow)
-        if frame_idx >= end.saturating_sub(arrow_length) && frame_idx <= end {
-            let distance_from_end = end - frame_idx;
-            // PyMOL formula: tip_scale * distance_from_end / arrow_length
-            // At distance_from_end = arrow_length: scale = tip_scale (widest)
-            // At distance_from_end = 0 (tip): scale = 0 (point)
-            let scale = tip_scale * (distance_from_end as f32) / (arrow_length as f32);
-            return scale;
-        }
-    }
-    1.0 // Not in an arrow region, use normal width
-}
-
 /// Check if a frame index is at an arrow tip (end of a sheet segment)
 fn is_at_arrow_tip(frame_idx: usize, sheet_termini: &[(usize, usize)]) -> bool {
     sheet_termini.iter().any(|&(_start, end)| frame_idx == end)
-}
-
-/// Check if a frame index is at the arrow body/head transition point
-/// Returns the sheet end index if this frame is at a transition, None otherwise
-fn is_at_arrow_transition(
-    frame_idx: usize,
-    sheet_termini: &[(usize, usize)],
-    arrow_length: usize,
-) -> Option<usize> {
-    if arrow_length == 0 {
-        return None;
-    }
-    
-    for &(_start, end) in sheet_termini {
-        let transition = end.saturating_sub(arrow_length);
-        if frame_idx == transition && transition < end {
-            return Some(end);
-        }
-    }
-    None
-}
-
-/// Check if a frame index is in the arrow taper region of a sheet
-fn is_in_arrow_region(
-    frame_idx: usize,
-    sheet_termini: &[(usize, usize)],
-    arrow_length: usize,
-) -> bool {
-    if arrow_length == 0 {
-        return false;
-    }
-    
-    for &(_start, end) in sheet_termini {
-        if frame_idx >= end.saturating_sub(arrow_length) && frame_idx <= end {
-            return true;
-        }
-    }
-    false
 }
 
 /// Calculate the taper factor for dumbbell profiles at helix ends
@@ -944,7 +857,7 @@ fn is_in_arrow_region(
 ///
 /// # Arguments
 /// * `frame_idx` - Current frame index
-/// * `helix_regions` - (start, end) indices for helix regions  
+/// * `helix_regions` - (start, end) indices for helix regions
 /// * `taper_frames` - Number of frames to taper at each helix end
 ///
 /// # Returns
@@ -957,18 +870,18 @@ fn calculate_dumbbell_taper(
     if taper_frames == 0 {
         return 1.0;
     }
-    
+
     for &(start, end) in helix_regions {
         if frame_idx >= start && frame_idx <= end {
             let region_len = end - start + 1;
             let sub_n = region_len.saturating_sub(taper_frames);
-            
+
             if frame_idx < start + taper_frames {
                 // Near start of helix - taper in
                 let f = (frame_idx - start) as f32 / taper_frames as f32;
                 return smooth(f, 2.0);
             } else if frame_idx > start + sub_n {
-                // Near end of helix - taper out  
+                // Near end of helix - taper out
                 let f = (end - frame_idx) as f32 / taper_frames as f32;
                 return smooth(f, 2.0);
             }
@@ -979,45 +892,16 @@ fn calculate_dumbbell_taper(
     1.0 // Not in a helix region
 }
 
-/// Adjust normals on arrow taper edges for proper shading (PyMOL-style)
-///
-/// PyMOL tilts normals outward on the slanted arrow edges by adding 0.4 to the
-/// tangent component. This makes the tapered faces catch light properly.
-///
-/// - `local_normal`: The 2D profile normal in local coordinates (x=normal dir, y=binormal dir)
-/// - `is_arrow_region`: Whether this vertex is in the arrow taper region
-/// - `tilt_factor`: How much to tilt (PyMOL uses 0.4)
-///
-/// Returns the adjusted normal (still in local 2D coordinates, but will be transformed
-/// to include tangent tilt when converted to 3D)
-fn adjust_arrow_normal(
-    local_normal: (f32, f32),
-    is_arrow_region: bool,
-    tilt_factor: f32,
-) -> (f32, f32, f32) {
-    // The third component represents the tangent direction tilt
-    // PyMOL checks if the normal has a significant z component (binormal direction)
-    // and tilts the x component (tangent direction) outward
-    if is_arrow_region && local_normal.1.abs() > 0.001 {
-        // Tilt outward along tangent direction
-        // The sign of the tilt should match the sign of the binormal component
-        let tilt = tilt_factor * local_normal.1.signum();
-        (local_normal.0, local_normal.1, tilt)
-    } else {
-        (local_normal.0, local_normal.1, 0.0)
-    }
-}
-
 /// Detect frame indices where SS type transitions occur
 fn detect_ss_transitions(frames: &[FrameWithMetadata]) -> Vec<usize> {
     let mut transitions = Vec::new();
-    
+
     for i in 1..frames.len() {
         if frames[i].ss_type != frames[i - 1].ss_type {
             transitions.push(i);
         }
     }
-    
+
     transitions
 }
 
@@ -1039,36 +923,36 @@ fn apply_transition_blending(
     if blend_range == 0 || transitions.is_empty() {
         return base_profile.clone();
     }
-    
+
     // Find the nearest transition
     let mut nearest_transition: Option<usize> = None;
     let mut nearest_distance = usize::MAX;
-    
+
     for &trans_idx in transitions {
         let distance = if frame_idx >= trans_idx {
             frame_idx - trans_idx
         } else {
             trans_idx - frame_idx
         };
-        
+
         if distance < nearest_distance && distance <= blend_range {
             nearest_distance = distance;
             nearest_transition = Some(trans_idx);
         }
     }
-    
+
     let trans_idx = match nearest_transition {
         Some(t) => t,
         None => return base_profile.clone(),
     };
-    
+
     // Determine which SS types are involved in the transition
     let (before_ss, after_ss) = if trans_idx > 0 && trans_idx < frames.len() {
         (frames[trans_idx - 1].ss_type, frames[trans_idx].ss_type)
     } else {
         return base_profile.clone();
     };
-    
+
     // Skip blending for helix transitions (creates arrow-like flaring)
     // PyMOL uses sharp transitions at helix boundaries
     let involves_helix = matches!(
@@ -1078,26 +962,26 @@ fn apply_transition_blending(
         after_ss,
         SecondaryStructure::Helix | SecondaryStructure::Helix310 | SecondaryStructure::HelixPi
     );
-    
+
     if involves_helix {
         return base_profile.clone();
     }
-    
+
     // Skip blending for sheet transitions (flat_rectangle has different vertex count)
     // This matches PyMOL's sharp-edge behavior for sheets
-    let involves_sheet = before_ss == SecondaryStructure::Sheet 
+    let involves_sheet = before_ss == SecondaryStructure::Sheet
         || after_ss == SecondaryStructure::Sheet;
-    
+
     if involves_sheet {
         return base_profile.clone();
     }
-    
+
     // Get the "other" profile (the one we're transitioning to/from)
     let other_ss = if frame_idx < trans_idx { after_ss } else { before_ss };
-    
+
     // Create profile for the other SS type
     let other_profile = create_profile_for_ss(other_ss, settings, frame_idx, frames.len(), sheet_termini, helix_regions, helix_taper_frames);
-    
+
     // Calculate blend factor based on distance from transition
     // At transition: blend = 0.5
     // At blend_range distance: blend = 0.0 (before) or 1.0 (after)
@@ -1110,10 +994,10 @@ fn apply_transition_blending(
         let dist = frame_idx - trans_idx;
         dist as f32 / (blend_range as f32 + 1.0)
     };
-    
+
     // Clamp blend factor
     let blend_factor = blend_factor.clamp(0.0, 1.0);
-    
+
     // If blend factor is very close to 0 or 1, skip blending
     if blend_factor < 0.01 {
         return base_profile.clone();
@@ -1121,7 +1005,7 @@ fn apply_transition_blending(
     if blend_factor > 0.99 {
         return base_profile.clone();
     }
-    
+
     // Blend the profiles
     if frame_idx < trans_idx {
         // Before transition: base -> other
@@ -1136,9 +1020,9 @@ fn apply_transition_blending(
 fn create_profile_for_ss(
     ss_type: SecondaryStructure,
     settings: &CartoonGeometrySettings,
-    frame_idx: usize,
+    _frame_idx: usize,
     _total_frames: usize,
-    sheet_termini: &[(usize, usize)],
+    _sheet_termini: &[(usize, usize)],
     _helix_regions: &[(usize, usize)],
     _helix_taper_frames: usize,
 ) -> Profile {
@@ -1146,7 +1030,7 @@ fn create_profile_for_ss(
     if settings.uniform_tube {
         return Profile::circle(settings.loop_radius, settings.quality);
     }
-    
+
     match ss_type {
         SecondaryStructure::Helix
         | SecondaryStructure::Helix310
@@ -1166,24 +1050,9 @@ fn create_profile_for_ss(
             }
         }
         SecondaryStructure::Sheet => {
-            let scale = if settings.fancy_sheets {
-                calculate_arrow_scale(
-                    frame_idx,
-                    sheet_termini,
-                    settings.arrow_length,
-                    settings.arrow_tip_scale,
-                )
-            } else {
-                1.0
-            };
-            // First param = thickness (normal dir), second param = width (binormal dir)
-            let ribbon_thickness = settings.sheet_width * 0.5;
-            let ribbon_width = settings.sheet_height * scale;
-            if ribbon_width < 0.01 {
-                Profile::flat_rectangle(ribbon_thickness, 0.01)
-            } else {
-                Profile::flat_rectangle(ribbon_thickness, ribbon_width)
-            }
+            // Flat ribbon at uniform width - arrow is generated separately
+            // Match PyMOL: thickness (normal, wide=1.4), width (binormal, thin=0.4)
+            Profile::flat_rectangle(settings.sheet_height, settings.sheet_width)
         }
         _ => Profile::circle(settings.loop_radius, settings.quality),
     }
@@ -1202,7 +1071,7 @@ fn flush_segment(
     if ring_starts.len() < 2 || vertices_per_ring == 0 {
         return;
     }
-    
+
     match profile_type {
         ProfileType::Round => {
             // Use connect_rings() which wraps around all vertices
@@ -1268,7 +1137,7 @@ fn generate_face_strips(
     if num_rings < 2 {
         return;
     }
-    
+
     // Each face pair consists of 2 consecutive profile vertices
     // Face 0: vertices 0,1
     // Face 1: vertices 2,3
@@ -1277,18 +1146,18 @@ fn generate_face_strips(
     for face in 0..num_faces {
         let v0_offset = (face * 2) % vertices_per_ring;      // First vertex of face pair
         let v1_offset = (face * 2 + 1) % vertices_per_ring;  // Second vertex of face pair
-        
+
         // Generate triangles along the path for this face
         for ring_idx in 0..(num_rings - 1) {
             let ring1 = ring_starts[ring_idx] as u32;
             let ring2 = ring_starts[ring_idx + 1] as u32;
-            
+
             // Quad vertices: (ring1,v0), (ring1,v1), (ring2,v0), (ring2,v1)
             let r1v0 = ring1 + v0_offset as u32;
             let r1v1 = ring1 + v1_offset as u32;
             let r2v0 = ring2 + v0_offset as u32;
             let r2v1 = ring2 + v1_offset as u32;
-            
+
             // Two triangles per quad - CCW winding when viewed from outside
             // For flat profiles: face normal points in +/- normal direction
             // Vertices are at (normal_coord, binormal_coord) where:
@@ -1303,7 +1172,7 @@ fn generate_face_strips(
             indices.push(r1v0);
             indices.push(r2v0);
             indices.push(r1v1);
-            
+
             indices.push(r1v1);
             indices.push(r2v0);
             indices.push(r2v1);
@@ -1311,60 +1180,350 @@ fn generate_face_strips(
     }
 }
 
-/// Generate the back face of an arrow head (flat quad closing the arrow body)
+/// Generate explicit sheet geometry for a contiguous sheet run.
 ///
-/// For 8-vertex Flat4Face profiles with consistent vertex ordering, corners are:
-/// - Index 0 (top-left), 1 (top-right)
-/// - Index 4 (bottom-left), 5 (bottom-right)
-///
-/// The back face closes the gap between the body and the wider arrow head.
-fn generate_arrow_back_face(
+/// Builds 4 quad strips (top, bottom, left side, right side) plus caps.
+/// In fancy mode, the C-terminal end has an arrow head instead of a flat cap.
+fn generate_explicit_sheet(
     vertices: &mut Vec<MeshVertex>,
     indices: &mut Vec<u32>,
-    frame_meta: &FrameWithMetadata,
+    frames: &[FrameWithMetadata],
+    sheet_start: usize,
+    sheet_end: usize,
     settings: &CartoonGeometrySettings,
 ) {
-    // The back face normal points backward (negative tangent direction)
-    let back_normal = frame_meta.frame.tangent * -1.0;
-    
-    // Get the arrow profile at the transition point (at 1.5x scale)
-    let ribbon_thickness = settings.sheet_width * 0.5;
-    // Arrow head starts at 1.5x width
-    let ribbon_width = settings.sheet_height * settings.arrow_tip_scale;
-    let profile = Profile::flat_rectangle(ribbon_thickness, ribbon_width);
-    
-    // For Flat4Face profiles (8 vertices), the rectangle corners are:
-    // Top-left: vertex 0, Top-right: vertex 1
-    // Bottom-left: vertex 4, Bottom-right: vertex 5
-    // (vertices 2-3 and 6-7 are the right and left side edges)
-    
-    // We'll create new vertices for the back face with the back-pointing normal
-    let start_idx = vertices.len() as u32;
-    
-    // Get the four corners - order: top-left, top-right, bottom-right, bottom-left
-    let corner_indices = [0, 1, 5, 4];
-    for &idx in &corner_indices {
-        let local_pos = profile.points[idx];
-        let world_pos = frame_meta.frame.transform_local(local_pos);
-        
-        vertices.push(MeshVertex {
-            position: [world_pos.x, world_pos.y, world_pos.z],
-            normal: [back_normal.x, back_normal.y, back_normal.z],
-            color: frame_meta.color,
-        });
+    if sheet_start >= sheet_end || sheet_end >= frames.len() {
+        return;
     }
-    
-    // Create two triangles for the quad (CCW winding when looking at the back)
-    // Vertices in our array: 0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left
-    // Triangle 1: top-left -> bottom-left -> top-right
-    indices.push(start_idx + 0);
-    indices.push(start_idx + 3);
-    indices.push(start_idx + 1);
-    
-    // Triangle 2: bottom-left -> bottom-right -> top-right
-    indices.push(start_idx + 3);
-    indices.push(start_idx + 2);
-    indices.push(start_idx + 1);
+
+    let half_width = settings.sheet_height; // Wide dimension (~1.4), in normal direction
+    let half_thick = settings.sheet_width * 0.5; // Thin dimension (~0.2), in binormal direction
+
+    // Determine arrow region
+    let sheet_len = sheet_end - sheet_start + 1;
+    let (body_end, has_arrow) = if settings.fancy_sheets && settings.arrow_length > 0 {
+        let max_arrow = sheet_len / 2;
+        let effective_len = settings.arrow_length.min(max_arrow);
+        if effective_len >= 2 {
+            (sheet_end + 1 - effective_len, true)
+        } else {
+            (sheet_end, false)
+        }
+    } else {
+        (sheet_end, false)
+    };
+
+    // Helper: compute 4 corners for a frame at a given width
+    let corners = |frame: &FrameWithMetadata, hw: f32| -> (Vec3, Vec3, Vec3, Vec3) {
+        let n = frame.frame.normal;
+        let b = frame.frame.binormal;
+        let p = frame.frame.position;
+        // TL = +normal, +binormal; TR = -normal, +binormal
+        // BL = +normal, -binormal; BR = -normal, -binormal
+        (
+            p + n * hw + b * half_thick, // TL
+            p - n * hw + b * half_thick, // TR
+            p + n * hw - b * half_thick, // BL
+            p - n * hw - b * half_thick, // BR
+        )
+    };
+
+    // Helper: push a vertex
+    let push_vert = |verts: &mut Vec<MeshVertex>, pos: Vec3, normal: Vec3, color: [f32; 4]| -> u32 {
+        let idx = verts.len() as u32;
+        verts.push(MeshVertex {
+            position: [pos.x, pos.y, pos.z],
+            normal: [normal.x, normal.y, normal.z],
+            color,
+        });
+        idx
+    };
+
+    // Helper: push a quad (two CCW triangles) given 4 vertex indices
+    // Vertices should be in order: v0-v1-v2-v3 going around the quad
+    let push_quad = |inds: &mut Vec<u32>, v0: u32, v1: u32, v2: u32, v3: u32| {
+        inds.extend([v0, v1, v2, v0, v2, v3]);
+    };
+
+    // ========== BODY (rectangular tube) ==========
+    // Render frames from sheet_start to body_end as quad strips
+
+    // Collect corner positions for body frames
+    let body_frame_count = body_end - sheet_start + 1;
+    if body_frame_count < 2 {
+        return;
+    }
+
+    // Generate 4 quad strips for the body
+    for fi in sheet_start..body_end {
+        let f0 = &frames[fi];
+        let f1 = &frames[fi + 1];
+        let (tl0, tr0, bl0, br0) = corners(f0, half_width);
+        let (tl1, tr1, bl1, br1) = corners(f1, half_width);
+        let color0 = f0.color;
+        let color1 = f1.color;
+
+        // TOP surface (facing +binormal)
+        let top_n0 = f0.frame.binormal;
+        let top_n1 = f1.frame.binormal;
+        let v0 = push_vert(vertices, tl0, top_n0, color0);
+        let v1 = push_vert(vertices, tr0, top_n0, color0);
+        let v2 = push_vert(vertices, tr1, top_n1, color1);
+        let v3 = push_vert(vertices, tl1, top_n1, color1);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // BOTTOM surface (facing -binormal)
+        let bot_n0 = f0.frame.binormal * -1.0;
+        let bot_n1 = f1.frame.binormal * -1.0;
+        let v0 = push_vert(vertices, br0, bot_n0, color0);
+        let v1 = push_vert(vertices, bl0, bot_n0, color0);
+        let v2 = push_vert(vertices, bl1, bot_n1, color1);
+        let v3 = push_vert(vertices, br1, bot_n1, color1);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // LEFT surface (facing +normal)
+        let left_n0 = f0.frame.normal;
+        let left_n1 = f1.frame.normal;
+        let v0 = push_vert(vertices, tl0, left_n0, color0);
+        let v1 = push_vert(vertices, tl1, left_n1, color1);
+        let v2 = push_vert(vertices, bl1, left_n1, color1);
+        let v3 = push_vert(vertices, bl0, left_n0, color0);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // RIGHT surface (facing -normal)
+        let right_n0 = f0.frame.normal * -1.0;
+        let right_n1 = f1.frame.normal * -1.0;
+        let v0 = push_vert(vertices, tr1, right_n1, color1);
+        let v1 = push_vert(vertices, tr0, right_n0, color0);
+        let v2 = push_vert(vertices, br0, right_n0, color0);
+        let v3 = push_vert(vertices, br1, right_n1, color1);
+        push_quad(indices, v0, v1, v2, v3);
+    }
+
+    // ========== N-TERMINAL CONNECTOR ==========
+    // Bridge from pre-sheet loop to sheet start position.
+    // Tube starts at full loop radius and shrinks to sheet thickness at sheet_start.
+    if sheet_start > 0 {
+        let loop_profile = Profile::circle(settings.loop_radius, settings.quality);
+        let profile_len = loop_profile.len();
+        let sheet_frame = &frames[sheet_start];
+        let sn = sheet_frame.frame.normal;
+
+        let connector_start = sheet_start.saturating_sub(2);
+        let connector_count = sheet_start - connector_start + 1;
+        let mut ring_starts: Vec<usize> = Vec::new();
+
+        for fi in connector_start..=sheet_start {
+            let f = &frames[fi];
+            let ring_start = vertices.len();
+
+            // Gradually shrink from full loop radius to arrow tip size at sheet start.
+            // At connector_start (idx 0): scale = 1.0 (full loop radius)
+            // At sheet_start (last): scale = half_thick / loop_radius (tiny)
+            let idx = fi - connector_start;
+            let t_frac = idx as f32 / (connector_count - 1).max(1) as f32;
+            let min_scale = (half_thick / settings.loop_radius).min(1.0);
+            let scale = 1.0 - (1.0 - min_scale) * t_frac;
+
+            let ring_binormal = normalize_safe(f.frame.tangent.cross(sn));
+            let ring_normal = normalize_safe(ring_binormal.cross(f.frame.tangent));
+            for j in 0..profile_len {
+                let (lx, ly) = loop_profile.points[j];
+                let (nx_l, ny_l) = loop_profile.normals[j];
+                let world_pos = f.frame.position + ring_normal * (lx * scale) + ring_binormal * (ly * scale);
+                let world_normal = normalize_safe(ring_normal * nx_l + ring_binormal * ny_l);
+                vertices.push(MeshVertex {
+                    position: [world_pos.x, world_pos.y, world_pos.z],
+                    normal: [world_normal.x, world_normal.y, world_normal.z],
+                    color: f.color,
+                });
+            }
+            ring_starts.push(ring_start);
+        }
+
+        for r in 0..ring_starts.len() - 1 {
+            let r0 = ring_starts[r] as u32;
+            let r1 = ring_starts[r + 1] as u32;
+            let n_verts = profile_len as u32;
+            for j in 0..n_verts {
+                let j_next = (j + 1) % n_verts;
+                indices.extend([
+                    r0 + j, r0 + j_next, r1 + j_next,
+                    r0 + j, r1 + j_next, r1 + j,
+                ]);
+            }
+        }
+    }
+
+    // N-terminal cap (back face)
+    {
+        let f = &frames[sheet_start];
+        let (tl, tr, bl, br) = corners(f, half_width);
+        let cap_n = f.frame.tangent * -1.0;
+        let color = f.color;
+        let v0 = push_vert(vertices, tl, cap_n, color);
+        let v1 = push_vert(vertices, bl, cap_n, color);
+        let v2 = push_vert(vertices, br, cap_n, color);
+        let v3 = push_vert(vertices, tr, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+    }
+
+    if !has_arrow {
+        // C-terminal cap (front face) — no arrow
+        let f = &frames[sheet_end];
+        let (tl, tr, bl, br) = corners(f, half_width);
+        let cap_n = f.frame.tangent;
+        let color = f.color;
+        let v0 = push_vert(vertices, tl, cap_n, color);
+        let v1 = push_vert(vertices, tr, cap_n, color);
+        let v2 = push_vert(vertices, br, cap_n, color);
+        let v3 = push_vert(vertices, bl, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+
+        return;
+    }
+
+    // ========== ARROW HEAD ==========
+    // Arrow REPLACES the last few frames of the sheet — tip at frames[sheet_end].
+    // Uses the base frame's orientation projected along tangent direction.
+
+    let base = &frames[body_end];
+    let arrow_width = half_width * settings.arrow_tip_scale;
+    let arrow_len = sheet_end - body_end;
+
+    // Use the base frame's orientation for the entire arrow
+    let n = base.frame.normal;
+    let b = base.frame.binormal;
+
+    // Helper: compute arrow corners at a position with given width
+    let arrow_corners = |pos: Vec3, hw: f32| -> (Vec3, Vec3, Vec3, Vec3) {
+        (
+            pos + n * hw + b * half_thick, // TL
+            pos - n * hw + b * half_thick, // TR
+            pos + n * hw - b * half_thick, // BL
+            pos - n * hw - b * half_thick, // BR
+        )
+    };
+
+    for ai in 0..arrow_len {
+        let fi0 = body_end + ai;
+        let fi1 = body_end + ai + 1;
+        let f0 = &frames[fi0];
+        let f1 = &frames[fi1];
+
+        // Linear taper: arrow_width at base -> 0 at tip
+        let w0 = arrow_width * (1.0 - ai as f32 / arrow_len as f32);
+        let w1 = arrow_width * (1.0 - (ai + 1) as f32 / arrow_len as f32);
+
+        let (tl0, tr0, bl0, br0) = arrow_corners(f0.frame.position, w0);
+        let (tl1, tr1, bl1, br1) = arrow_corners(f1.frame.position, w1);
+        let color0 = f0.color;
+        let color1 = f1.color;
+
+        // TOP surface (facing +binormal)
+        let v0 = push_vert(vertices, tl0, b, color0);
+        let v1 = push_vert(vertices, tr0, b, color0);
+        let v2 = push_vert(vertices, tr1, b, color1);
+        let v3 = push_vert(vertices, tl1, b, color1);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // BOTTOM surface (facing -binormal)
+        let bot_n = b * -1.0;
+        let v0 = push_vert(vertices, br0, bot_n, color0);
+        let v1 = push_vert(vertices, bl0, bot_n, color0);
+        let v2 = push_vert(vertices, bl1, bot_n, color1);
+        let v3 = push_vert(vertices, br1, bot_n, color1);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // LEFT taper edge (facing +normal)
+        let v0 = push_vert(vertices, tl0, n, color0);
+        let v1 = push_vert(vertices, tl1, n, color1);
+        let v2 = push_vert(vertices, bl1, n, color1);
+        let v3 = push_vert(vertices, bl0, n, color0);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // RIGHT taper edge (facing -normal)
+        let neg_n = n * -1.0;
+        let v0 = push_vert(vertices, tr1, neg_n, color1);
+        let v1 = push_vert(vertices, tr0, neg_n, color0);
+        let v2 = push_vert(vertices, br0, neg_n, color0);
+        let v3 = push_vert(vertices, br1, neg_n, color1);
+        push_quad(indices, v0, v1, v2, v3);
+    }
+
+    // Arrow shoulder caps (back-face where arrow widens beyond body)
+    {
+        let cap_n = base.frame.tangent * -1.0;
+        let color = base.color;
+        let (body_tl, body_tr, body_bl, body_br) = corners(base, half_width);
+        let (arrow_tl, arrow_tr, arrow_bl, arrow_br) = arrow_corners(base.frame.position, arrow_width);
+
+        // Left shoulder
+        let v0 = push_vert(vertices, body_tl, cap_n, color);
+        let v1 = push_vert(vertices, arrow_tl, cap_n, color);
+        let v2 = push_vert(vertices, arrow_bl, cap_n, color);
+        let v3 = push_vert(vertices, body_bl, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // Right shoulder
+        let v0 = push_vert(vertices, arrow_tr, cap_n, color);
+        let v1 = push_vert(vertices, body_tr, cap_n, color);
+        let v2 = push_vert(vertices, body_br, cap_n, color);
+        let v3 = push_vert(vertices, arrow_br, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+    }
+
+    // ========== C-TERMINAL CONNECTOR ==========
+    // Bridge from arrow tip (at sheet_end) to the post-sheet loop.
+    // Tube starts small at tip and expands to full loop radius.
+    if sheet_end + 1 < frames.len() {
+        let loop_profile = Profile::circle(settings.loop_radius, settings.quality);
+        let profile_len = loop_profile.len();
+        let sn = frames[sheet_end].frame.normal;
+
+        let connector_end = (sheet_end + 3).min(frames.len());
+        let connector_count = connector_end - sheet_end;
+        let mut ring_starts: Vec<usize> = Vec::new();
+
+        for fi in sheet_end..connector_end {
+            let f = &frames[fi];
+            let ring_start = vertices.len();
+
+            // Gradually expand from arrow tip size to full loop radius
+            let idx = fi - sheet_end;
+            let t_frac = idx as f32 / (connector_count - 1).max(1) as f32;
+            let min_scale = (half_thick / settings.loop_radius).min(1.0);
+            let scale = min_scale + (1.0 - min_scale) * t_frac;
+
+            let ring_binormal = normalize_safe(f.frame.tangent.cross(sn));
+            let ring_normal = normalize_safe(ring_binormal.cross(f.frame.tangent));
+            for j in 0..profile_len {
+                let (lx, ly) = loop_profile.points[j];
+                let (nx_l, ny_l) = loop_profile.normals[j];
+                let world_pos = f.frame.position + ring_normal * (lx * scale) + ring_binormal * (ly * scale);
+                let world_normal = normalize_safe(ring_normal * nx_l + ring_binormal * ny_l);
+                vertices.push(MeshVertex {
+                    position: [world_pos.x, world_pos.y, world_pos.z],
+                    normal: [world_normal.x, world_normal.y, world_normal.z],
+                    color: f.color,
+                });
+            }
+            ring_starts.push(ring_start);
+        }
+
+        for r in 0..ring_starts.len() - 1 {
+            let r0 = ring_starts[r] as u32;
+            let r1 = ring_starts[r + 1] as u32;
+            let n_verts = profile_len as u32;
+            for j in 0..n_verts {
+                let j_next = (j + 1) % n_verts;
+                indices.extend([
+                    r0 + j, r0 + j_next, r1 + j_next,
+                    r0 + j, r1 + j_next, r1 + j,
+                ]);
+            }
+        }
+    }
 }
 
 /// Add end cap to the tube
@@ -1405,8 +1564,8 @@ fn cap_tube_end(
             }
             SecondaryStructure::Sheet => {
                 // Use flat_rectangle for sheets (consistent with select_profile)
-                // First param = thickness, second param = width (lateral)
-                Profile::flat_rectangle(settings.sheet_width * 0.5, settings.sheet_height)
+                // Match PyMOL: thickness (normal, wide=1.4), width (binormal, thin=0.4)
+                Profile::flat_rectangle(settings.sheet_height, settings.sheet_width)
             }
             _ => Profile::circle(settings.loop_radius, settings.quality),
         }
@@ -1462,7 +1621,7 @@ fn cap_tube_end(
             // 4: (-t, -w) bottom-left, 5: (-t, w) bottom-right
             let start_idx = vertices.len() as u32;
             let corner_indices = [0, 1, 5, 4]; // top-left, top-right, bottom-right, bottom-left
-            
+
             for &idx in &corner_indices {
                 let world_pos = frame_meta.frame.transform_local(profile.points[idx]);
                 vertices.push(MeshVertex {
@@ -1471,14 +1630,14 @@ fn cap_tube_end(
                     color: frame_meta.color,
                 });
             }
-            
+
             // Two triangles for the quad
             if is_start {
                 // Reverse winding for start cap
                 indices.push(start_idx + 0);
                 indices.push(start_idx + 3);
                 indices.push(start_idx + 1);
-                
+
                 indices.push(start_idx + 3);
                 indices.push(start_idx + 2);
                 indices.push(start_idx + 1);
@@ -1486,7 +1645,7 @@ fn cap_tube_end(
                 indices.push(start_idx + 0);
                 indices.push(start_idx + 1);
                 indices.push(start_idx + 3);
-                
+
                 indices.push(start_idx + 1);
                 indices.push(start_idx + 2);
                 indices.push(start_idx + 3);
@@ -1589,19 +1748,19 @@ fn generate_dumbbell_edge_tubes(
 
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    
+
     // PyMOL edge tube offset: sin(π/4) * dumbbell_length
     // This positions the tubes at the lateral edges of the dumbbell ribbon
     let sin45 = std::f32::consts::FRAC_1_SQRT_2;
     let base_offset = sin45 * settings.dumbbell_length;
-    
+
     // Tube radius from settings
     let tube_radius = settings.dumbbell_radius;
-    
+
     // Circular profile for edge tubes
     let tube_quality = 16u32;
     let tube_profile = Profile::circle(tube_radius, tube_quality);
-    
+
     // Number of frames to taper at helix ends (PyMOL's "sampling")
     let taper_frames = 8usize;
 
@@ -1650,31 +1809,31 @@ fn generate_dumbbell_edge_tubes(
                         true, // is_start
                     );
                 }
-                
+
                 // Generate vertices for circular cross-section
                 for j in 0..tube_profile.len() {
                     let local_pos = tube_profile.points[j];
                     let local_normal = tube_profile.normals[j];
-                    
+
                     // Transform local position to world space
                     // The tube is centered at offset_pos, oriented along the tangent
-                    let world_pos = offset_pos 
-                        + frame_meta.frame.normal * local_pos.0 
+                    let world_pos = offset_pos
+                        + frame_meta.frame.normal * local_pos.0
                         + frame_meta.frame.binormal * local_pos.1;
-                    
+
                     // Transform normal to world space
                     let world_normal = normalize_safe(
-                        frame_meta.frame.normal * local_normal.0 
+                        frame_meta.frame.normal * local_normal.0
                         + frame_meta.frame.binormal * local_normal.1
                     );
-                    
+
                     vertices.push(MeshVertex {
                         position: [world_pos.x, world_pos.y, world_pos.z],
                         normal: [world_normal.x, world_normal.y, world_normal.z],
                         color: frame_meta.color,
                     });
                 }
-                
+
                 // Connect to previous ring
                 if let Some(prev_start) = prev_ring_start {
                     connect_rings(
@@ -1684,7 +1843,7 @@ fn generate_dumbbell_edge_tubes(
                         tube_profile.len() as u32,
                     );
                 }
-                
+
                 prev_ring_start = Some(ring_start);
 
                 // Add flat cap at the center where edge tube ends (last frame of helix)
@@ -1721,11 +1880,11 @@ fn cap_edge_tube_end(
 ) {
     // Offset position along normal direction (tube center at this frame)
     let center_pos = frame_meta.frame.position + frame_meta.frame.normal * normal_offset;
-    
+
     // Cap normal direction (pointing away from helix body)
     let cap_dir = if is_start { -1.0 } else { 1.0 };
     let cap_normal = frame_meta.frame.tangent * cap_dir;
-    
+
     // Add center vertex for the flat disc
     let center_idx = vertices.len() as u32;
     vertices.push(MeshVertex {
@@ -1733,31 +1892,31 @@ fn cap_edge_tube_end(
         normal: [cap_normal.x, cap_normal.y, cap_normal.z],
         color: frame_meta.color,
     });
-    
+
     // Add edge vertices around the disc circumference
     let edge_start = vertices.len() as u32;
     let n = quality as usize;
-    
+
     for i in 0..n {
         let theta = 2.0 * std::f32::consts::PI * (i as f32 / n as f32);
         let cos_theta = theta.cos();
         let sin_theta = theta.sin();
-        
+
         // Position on disc edge
         let local_x = radius * cos_theta; // normal direction
         let local_y = radius * sin_theta; // binormal direction
-        
+
         let world_pos = center_pos
             + frame_meta.frame.normal * local_x
             + frame_meta.frame.binormal * local_y;
-        
+
         vertices.push(MeshVertex {
             position: [world_pos.x, world_pos.y, world_pos.z],
             normal: [cap_normal.x, cap_normal.y, cap_normal.z],
             color: frame_meta.color,
         });
     }
-    
+
     // Generate triangle fan indices
     for i in 0..n as u32 {
         let i_next = (i + 1) % n as u32;
@@ -1815,7 +1974,7 @@ mod tests {
             let len = (nx * nx + ny * ny).sqrt();
             assert!((len - 1.0).abs() < 0.01);
         }
-        
+
         // Verify rectangle and ellipse have same vertex count for smooth transitions
         let ellipse = Profile::ellipse(1.0, 0.5, 32);
         assert_eq!(profile.len(), ellipse.len());
@@ -1867,35 +2026,6 @@ mod tests {
     }
 
     #[test]
-    fn test_arrow_scale_calculation() {
-        // Sheet termini: frames 5-10 (end at 10)
-        // With arrow_length=3, arrow region is frames 7-10
-        let sheet_termini = vec![(5, 10)];
-        let arrow_length = 3;
-        let tip_scale = 1.5;
-
-        // Outside arrow region - should return 1.0
-        assert!((calculate_arrow_scale(0, &sheet_termini, arrow_length, tip_scale) - 1.0).abs() < 0.01);
-        assert!((calculate_arrow_scale(5, &sheet_termini, arrow_length, tip_scale) - 1.0).abs() < 0.01);
-        assert!((calculate_arrow_scale(6, &sheet_termini, arrow_length, tip_scale) - 1.0).abs() < 0.01);
-        assert!((calculate_arrow_scale(11, &sheet_termini, arrow_length, tip_scale) - 1.0).abs() < 0.01);
-
-        // At the arrow tip (frame_idx == end) - should return 0.0
-        // distance_from_end = 10 - 10 = 0, scale = 1.5 * 0/3 = 0.0
-        assert!((calculate_arrow_scale(10, &sheet_termini, arrow_length, tip_scale) - 0.0).abs() < 0.01);
-
-        // At the start of arrow region (distance_from_end == arrow_length)
-        // Frame 7: distance_from_end = 10 - 7 = 3, scale = 1.5 * 3/3 = 1.5
-        assert!((calculate_arrow_scale(7, &sheet_termini, arrow_length, tip_scale) - 1.5).abs() < 0.01);
-        
-        // Frame 8: distance_from_end = 10 - 8 = 2, scale = 1.5 * 2/3 = 1.0
-        assert!((calculate_arrow_scale(8, &sheet_termini, arrow_length, tip_scale) - 1.0).abs() < 0.01);
-        
-        // Frame 9: distance_from_end = 10 - 9 = 1, scale = 1.5 * 1/3 = 0.5
-        assert!((calculate_arrow_scale(9, &sheet_termini, arrow_length, tip_scale) - 0.5).abs() < 0.01);
-    }
-
-    #[test]
     fn test_is_at_arrow_tip() {
         let sheet_termini = vec![(1, 3), (5, 6)];
 
@@ -1911,15 +2041,15 @@ mod tests {
         assert!(!is_at_arrow_tip(5, &sheet_termini));
         assert!(!is_at_arrow_tip(7, &sheet_termini));
     }
-    
+
     #[test]
     fn test_profile_blend() {
         // Create two profiles with the same vertex count
         let circle = Profile::circle(1.0, 12);
         let rect = Profile::rectangle(1.0, 0.5, 12);
-        
+
         assert_eq!(circle.len(), rect.len());
-        
+
         // Blend at t=0 should give circle
         let blend_0 = circle.blend(&rect, 0.0);
         assert_eq!(blend_0.len(), circle.len());
@@ -1927,14 +2057,14 @@ mod tests {
             assert!((blend_0.points[i].0 - circle.points[i].0).abs() < 1e-5);
             assert!((blend_0.points[i].1 - circle.points[i].1).abs() < 1e-5);
         }
-        
+
         // Blend at t=1 should give rect
         let blend_1 = circle.blend(&rect, 1.0);
         for i in 0..rect.len() {
             assert!((blend_1.points[i].0 - rect.points[i].0).abs() < 1e-5);
             assert!((blend_1.points[i].1 - rect.points[i].1).abs() < 1e-5);
         }
-        
+
         // Blend at t=0.5 should be midway
         let blend_05 = circle.blend(&rect, 0.5);
         for i in 0..circle.len() {
@@ -1944,7 +2074,7 @@ mod tests {
             assert!((blend_05.points[i].1 - expected_y).abs() < 1e-5);
         }
     }
-    
+
     #[test]
     fn test_detect_ss_transitions() {
         let make_frame = |ss| FrameWithMetadata {
@@ -1976,70 +2106,70 @@ mod tests {
         assert_eq!(transitions[1], 4);
         assert_eq!(transitions[2], 6);
     }
-    
+
     #[test]
     fn test_flat_rectangle_profile() {
         // flat_rectangle(thickness, width) - 8-vertex face-pair layout
         let profile = Profile::flat_rectangle(0.2, 1.4);
-        
+
         // Should have 8 vertices (2 per face, 4 faces)
         assert_eq!(profile.len(), 8);
         assert_eq!(profile.profile_type, ProfileType::Flat4Face);
-        
+
         // Check normals are unit vectors
         for (nx, ny) in &profile.normals {
             let len = (nx * nx + ny * ny).sqrt();
             assert!((len - 1.0).abs() < 0.01, "Normal should be unit length, got {}", len);
         }
-        
+
         // Expected scaled values (cos45 ≈ 0.707)
         let cos45 = std::f32::consts::FRAC_1_SQRT_2;
         let t = cos45 * 0.2;   // ~0.14
         let w = cos45 * 1.4;   // ~0.99
-        
+
         // Face 0-1: Top face at (t, -w), (t, w) with normal (1, 0)
         assert!((profile.points[0].0 - t).abs() < 0.01 && (profile.points[0].1 - (-w)).abs() < 0.01);
         assert!((profile.points[1].0 - t).abs() < 0.01 && (profile.points[1].1 - w).abs() < 0.01);
         assert!((profile.normals[0].0 - 1.0).abs() < 0.01);
         assert!((profile.normals[1].0 - 1.0).abs() < 0.01);
-        
+
         // Face 2-3: Right side at (t, w), (-t, w) with normal (0, 1)
         assert!((profile.points[2].0 - t).abs() < 0.01 && (profile.points[2].1 - w).abs() < 0.01);
         assert!((profile.points[3].0 - (-t)).abs() < 0.01 && (profile.points[3].1 - w).abs() < 0.01);
         assert!((profile.normals[2].1 - 1.0).abs() < 0.01);
         assert!((profile.normals[3].1 - 1.0).abs() < 0.01);
-        
+
         // Face 4-5: Bottom face at (-t, -w), (-t, w) with normal (-1, 0) - left to right
         assert!((profile.points[4].0 - (-t)).abs() < 0.01 && (profile.points[4].1 - (-w)).abs() < 0.01);
         assert!((profile.points[5].0 - (-t)).abs() < 0.01 && (profile.points[5].1 - w).abs() < 0.01);
         assert!((profile.normals[4].0 - (-1.0)).abs() < 0.01);
         assert!((profile.normals[5].0 - (-1.0)).abs() < 0.01);
-        
+
         // Face 6-7: Left side at (t, -w), (-t, -w) with normal (0, -1) - top to bottom
         assert!((profile.points[6].0 - t).abs() < 0.01 && (profile.points[6].1 - (-w)).abs() < 0.01);
         assert!((profile.points[7].0 - (-t)).abs() < 0.01 && (profile.points[7].1 - (-w)).abs() < 0.01);
         assert!((profile.normals[6].1 - (-1.0)).abs() < 0.01);
         assert!((profile.normals[7].1 - (-1.0)).abs() < 0.01);
     }
-    
+
     #[test]
     fn test_dumbbell_profile() {
         let profile = Profile::dumbbell(0.17, 1.6);
-        
+
         // Should have 4 vertices (2 face pairs: top and bottom)
         assert_eq!(profile.len(), 4);
         assert_eq!(profile.profile_type, ProfileType::Flat2Face);
-        
+
         // Check normals are unit vectors
         for (nx, ny) in &profile.normals {
             let len = (nx * nx + ny * ny).sqrt();
             assert!((len - 1.0).abs() < 0.01, "Normal should be unit length, got {}", len);
         }
-        
+
         // Expected vertex positions with cos(π/4) ≈ 0.707 scaling
         let w = std::f32::consts::FRAC_1_SQRT_2 * 0.17;  // ~0.12
         let l = std::f32::consts::FRAC_1_SQRT_2 * 1.6;   // ~1.13
-        
+
         // Coordinate mapping to match ellipse orientation (wide in normal direction):
         // - First coord (normal direction): ribbon width, spanning ±l
         // - Second coord (binormal direction): face position at ±w
@@ -2049,53 +2179,14 @@ mod tests {
         assert!((profile.points[1].0 - l).abs() < 0.01 && (profile.points[1].1 - w).abs() < 0.01);
         assert!((profile.points[2].0 - (-l)).abs() < 0.01 && (profile.points[2].1 - (-w)).abs() < 0.01);
         assert!((profile.points[3].0 - l).abs() < 0.01 && (profile.points[3].1 - (-w)).abs() < 0.01);
-        
+
         // Check that top face (v0, v1) has +Y normals, bottom face (v2, v3) has -Y normals
         assert!((profile.normals[0].0 - 0.0).abs() < 0.01 && (profile.normals[0].1 - 1.0).abs() < 0.01);
         assert!((profile.normals[1].0 - 0.0).abs() < 0.01 && (profile.normals[1].1 - 1.0).abs() < 0.01);
         assert!((profile.normals[2].0 - 0.0).abs() < 0.01 && (profile.normals[2].1 - (-1.0)).abs() < 0.01);
         assert!((profile.normals[3].0 - 0.0).abs() < 0.01 && (profile.normals[3].1 - (-1.0)).abs() < 0.01);
     }
-    
-    #[test]
-    fn test_is_in_arrow_region() {
-        let sheet_termini = vec![(1, 10)];
-        let arrow_length = 3;
-        
-        // Before arrow region
-        assert!(!is_in_arrow_region(0, &sheet_termini, arrow_length));
-        assert!(!is_in_arrow_region(5, &sheet_termini, arrow_length));
-        assert!(!is_in_arrow_region(6, &sheet_termini, arrow_length));
-        
-        // In arrow region (frames 7-10 when arrow_length=3, end=10)
-        assert!(is_in_arrow_region(7, &sheet_termini, arrow_length));
-        assert!(is_in_arrow_region(8, &sheet_termini, arrow_length));
-        assert!(is_in_arrow_region(9, &sheet_termini, arrow_length));
-        assert!(is_in_arrow_region(10, &sheet_termini, arrow_length));
-        
-        // After arrow region
-        assert!(!is_in_arrow_region(11, &sheet_termini, arrow_length));
-    }
-    
-    #[test]
-    fn test_adjust_arrow_normal() {
-        // Non-arrow region should not modify
-        let (_nx, _ny, tilt) = adjust_arrow_normal((0.0, 1.0), false, 0.4);
-        assert!((tilt - 0.0).abs() < 0.01);
-        
-        // Arrow region with binormal component should add tilt
-        let (_nx, _ny, tilt) = adjust_arrow_normal((0.0, 1.0), true, 0.4);
-        assert!((tilt - 0.4).abs() < 0.01);
-        
-        // Arrow region with negative binormal component should add negative tilt
-        let (_nx, _ny, tilt) = adjust_arrow_normal((0.0, -1.0), true, 0.4);
-        assert!((tilt - (-0.4)).abs() < 0.01);
-        
-        // Arrow region with zero binormal component should not add tilt
-        let (_nx, _ny, tilt) = adjust_arrow_normal((1.0, 0.0), true, 0.4);
-        assert!((tilt - 0.0).abs() < 0.01);
-    }
-    
+
     #[test]
     fn test_find_helix_regions() {
         let make_frame = |ss| FrameWithMetadata {
@@ -2130,7 +2221,7 @@ mod tests {
         assert_eq!(regions[1], (5, 6)); // Helix310
         assert_eq!(regions[2], (8, 8)); // HelixPi (single frame)
     }
-    
+
     #[test]
     fn test_dumbbell_edge_tubes_disabled() {
         let make_frame = |ss, pos: f32| FrameWithMetadata {
@@ -2151,21 +2242,21 @@ mod tests {
             make_frame(SecondaryStructure::Helix, 1.0),
             make_frame(SecondaryStructure::Helix, 2.0),
         ];
-        
+
         let helix_regions = find_helix_regions(&frames);
         assert_eq!(helix_regions.len(), 1);
-        
+
         // With fancy_helices disabled, should return empty
         let settings = CartoonGeometrySettings {
             fancy_helices: false,
             ..Default::default()
         };
-        
+
         let (vertices, indices) = generate_dumbbell_edge_tubes(&frames, &helix_regions, &settings);
         assert!(vertices.is_empty());
         assert!(indices.is_empty());
     }
-    
+
     #[test]
     fn test_dumbbell_edge_tubes_enabled() {
         let make_frame = |ss, pos: f32| FrameWithMetadata {
@@ -2187,10 +2278,10 @@ mod tests {
             make_frame(SecondaryStructure::Helix, 2.0),
             make_frame(SecondaryStructure::Helix, 3.0),
         ];
-        
+
         let helix_regions = find_helix_regions(&frames);
         assert_eq!(helix_regions.len(), 1);
-        
+
         // With fancy_helices enabled, should generate edge tubes
         let settings = CartoonGeometrySettings {
             fancy_helices: true,
@@ -2198,13 +2289,13 @@ mod tests {
             dumbbell_radius: 0.16,
             ..Default::default()
         };
-        
+
         let (vertices, indices) = generate_dumbbell_edge_tubes(&frames, &helix_regions, &settings);
-        
+
         // Should have generated geometry for 2 edge tubes
         assert!(!vertices.is_empty());
         assert!(!indices.is_empty());
-        
+
         // Check that indices are valid
         let max_vertex_idx = vertices.len() as u32;
         for &idx in &indices {
