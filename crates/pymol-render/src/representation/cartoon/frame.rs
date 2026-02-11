@@ -7,6 +7,7 @@ use lin_alg::f32::Vec3;
 
 use super::backbone::GuidePoint;
 use super::spline::{compute_tangents, interpolate_backbone, InterpolationSettings};
+use super::utils::normalize_safe;
 
 /// A reference frame at a point along the cartoon backbone
 ///
@@ -51,17 +52,6 @@ impl ReferenceFrame {
         }
     }
 
-    /// Create a frame with explicit binormal (for pre-computed frames)
-    #[allow(dead_code)]
-    pub fn from_tnb(position: Vec3, tangent: Vec3, normal: Vec3, binormal: Vec3) -> Self {
-        Self {
-            position,
-            tangent: normalize_safe(tangent),
-            normal: normalize_safe(normal),
-            binormal: normalize_safe(binormal),
-        }
-    }
-
     /// Transform a local 2D point to world space
     ///
     /// The local point is in the normal-binormal plane, centered at position.
@@ -80,17 +70,6 @@ impl ReferenceFrame {
     }
 }
 
-/// Normalize a vector, returning a default if zero-length
-#[inline]
-fn normalize_safe(v: Vec3) -> Vec3 {
-    let len_sq = v.magnitude_squared();
-    if len_sq > 1e-10 {
-        v / len_sq.sqrt()
-    } else {
-        Vec3::new(0.0, 1.0, 0.0)
-    }
-}
-
 /// Reference frame with associated metadata
 #[derive(Debug, Clone)]
 pub struct FrameWithMetadata {
@@ -100,15 +79,8 @@ pub struct FrameWithMetadata {
     pub color: [f32; 4],
     /// Secondary structure type
     pub ss_type: pymol_mol::SecondaryStructure,
-    /// Interpolated B-factor (for putty representation)
-    #[allow(dead_code)]
-    pub b_factor: f32,
-    /// Source segment index
-    #[allow(dead_code)]
+    /// Source segment index (which guide point pair this frame was interpolated from)
     pub segment_idx: usize,
-    /// Local parameter within segment
-    #[allow(dead_code)]
-    pub local_t: f32,
 }
 
 /// Generate reference frames along a backbone segment
@@ -131,9 +103,7 @@ pub fn generate_frames(
             frame: ReferenceFrame::new(gp.position, Vec3::new(0.0, 0.0, 1.0), gp.orientation),
             color: gp.color,
             ss_type: gp.ss_type,
-            b_factor: gp.b_factor,
             segment_idx: 0,
-            local_t: 0.0,
         }];
     }
 
@@ -168,9 +138,6 @@ pub fn generate_frames(
             // Interpolate color
             let color = interpolate_color_linear(&gp1.color, &gp2.color, ip.local_t);
 
-            // Interpolate B-factor
-            let b_factor = gp1.b_factor + (gp2.b_factor - gp1.b_factor) * ip.local_t;
-
             // Use SS type from the nearest guide point (discrete assignment)
             let ss_type = if ip.local_t < 0.5 { gp1.ss_type } else { gp2.ss_type };
 
@@ -182,9 +149,7 @@ pub fn generate_frames(
                 frame,
                 color,
                 ss_type,
-                b_factor,
                 segment_idx: ip.segment,
-                local_t: ip.local_t,
             }
         })
         .collect();
@@ -429,8 +394,7 @@ mod tests {
                 [1.0, 0.0, 0.0, 1.0],
                 SecondaryStructure::Helix,
                 AtomIndex(0),
-                1,
-                20.0,
+                1
             ),
             GuidePoint::new(
                 Vec3::new(3.8, 0.0, 0.0),
@@ -438,8 +402,7 @@ mod tests {
                 [0.0, 1.0, 0.0, 1.0],
                 SecondaryStructure::Helix,
                 AtomIndex(1),
-                2,
-                25.0,
+                2
             ),
             GuidePoint::new(
                 Vec3::new(7.6, 0.0, 0.0),
@@ -447,8 +410,7 @@ mod tests {
                 [0.0, 0.0, 1.0, 1.0],
                 SecondaryStructure::Helix,
                 AtomIndex(2),
-                3,
-                30.0,
+                3
             ),
         ];
 

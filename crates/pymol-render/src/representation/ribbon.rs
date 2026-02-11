@@ -32,12 +32,9 @@ use crate::vertex::MeshVertex;
 use pymol_mol::{CoordSet, ObjectMolecule};
 use pymol_settings::SettingResolver;
 
-// Reuse cartoon's backbone, frame, geometry, and spline modules
-use super::cartoon::backbone::{
-    apply_pymol_smoothing, extract_backbone_segments, smooth_orientations, CartoonSmoothSettings,
-};
-use super::cartoon::frame::generate_frames;
-use super::cartoon::geometry::{generate_cartoon_mesh, CartoonGeometrySettings};
+use super::cartoon::backbone::CartoonSmoothSettings;
+use super::cartoon::build_cartoon_geometry;
+use super::cartoon::geometry::CartoonGeometrySettings;
 use super::cartoon::spline::InterpolationSettings;
 
 /// Ribbon representation for protein secondary structure
@@ -109,23 +106,19 @@ impl Representation for RibbonRep {
         colors: &ColorResolver,
         settings: &SettingResolver,
     ) {
-        self.vertices.clear();
-        self.indices.clear();
-
-        // Ribbon-specific setting IDs (from pymol-settings/src/definitions.rs)
+        // Ribbon-specific setting IDs
         const RIBBON_SAMPLING: u16 = 19;
         const RIBBON_POWER: u16 = 17;
         const RIBBON_POWER_B: u16 = 18;
         const RIBBON_THROW: u16 = 121;
         const RIBBON_RADIUS: u16 = 20;
 
-        // Use cartoon settings for smoothing that don't have ribbon equivalents
+        // Smoothing settings shared with cartoon
         const CARTOON_GAP_CUTOFF: u16 = 750;
         const CARTOON_SMOOTH_CYCLES: u16 = 259;
         const CARTOON_FLAT_CYCLES: u16 = 260;
         const CARTOON_SMOOTH_FIRST: u16 = 257;
         const CARTOON_SMOOTH_LAST: u16 = 258;
-        const CARTOON_REFINE: u16 = 123;
         const CARTOON_REFINE_NORMALS: u16 = 112;
 
         let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
@@ -135,64 +128,32 @@ impl Representation for RibbonRep {
         let throw = settings.get_float_if_defined(RIBBON_THROW).unwrap_or(1.35);
         let ribbon_radius = settings.get_float_if_defined(RIBBON_RADIUS).unwrap_or(0.2);
 
-        // PyMOL-style smoothing settings
         let smooth_settings = CartoonSmoothSettings {
-            smooth_cycles: settings
-                .get_int_if_defined(CARTOON_SMOOTH_CYCLES)
-                .unwrap_or(2) as u32,
-            flat_cycles: settings
-                .get_int_if_defined(CARTOON_FLAT_CYCLES)
-                .unwrap_or(4) as u32,
-            smooth_first: settings
-                .get_int_if_defined(CARTOON_SMOOTH_FIRST)
-                .unwrap_or(1) as u32,
-            smooth_last: settings
-                .get_int_if_defined(CARTOON_SMOOTH_LAST)
-                .unwrap_or(1) as u32,
-            refine_cycles: settings
-                .get_int_if_defined(CARTOON_REFINE)
-                .unwrap_or(5) as u32,
-            refine_normals: settings
-                .get_bool_if_defined(CARTOON_REFINE_NORMALS)
-                .unwrap_or(true),
-            power_a: power,
-            power_b,
-            throw_factor: throw,
+            smooth_cycles: settings.get_int_if_defined(CARTOON_SMOOTH_CYCLES).unwrap_or(2) as u32,
+            flat_cycles: settings.get_int_if_defined(CARTOON_FLAT_CYCLES).unwrap_or(4) as u32,
+            smooth_first: settings.get_int_if_defined(CARTOON_SMOOTH_FIRST).unwrap_or(1) as u32,
+            smooth_last: settings.get_int_if_defined(CARTOON_SMOOTH_LAST).unwrap_or(1) as u32,
+            refine_normals: settings.get_bool_if_defined(CARTOON_REFINE_NORMALS).unwrap_or(true),
         };
 
-        // Calculate subdivisions from sampling
-        // Ribbon typically uses lower sampling than cartoon
-        let subdivisions = if sampling < 0 {
-            10u32
-        } else {
-            (sampling as u32).max(7)
-        };
+        let subdivisions = if sampling < 0 { 10u32 } else { (sampling as u32).max(7) };
 
-        // Create interpolation settings
         let interp_settings = InterpolationSettings {
             power_a: power,
             power_b,
             throw_factor: throw,
         };
 
-        // Ribbon uses a UNIFORM tube profile for ALL secondary structures
-        // This is different from cartoon which uses different profiles for helix/sheet/loop
+        // Ribbon uses a uniform tube for all secondary structures
         let tube_radius = if ribbon_radius > 0.0 { ribbon_radius } else { 0.3 };
-        
-        // Create geometry settings with uniform_tube=true for smooth tube representation
         let geom_settings = CartoonGeometrySettings {
-            // These dimensions are not used when uniform_tube=true, but set them anyway
             helix_width: tube_radius,
             helix_height: tube_radius,
             sheet_width: tube_radius,
             sheet_height: tube_radius,
-            // This is the actual radius used for the uniform tube
             loop_radius: tube_radius,
-            // Quality settings
             quality: 32,
             round_helices: true,
-            flat_sheets: false,
-            // Disable all arrow-related features
             fancy_sheets: false,
             fancy_helices: false,
             dumbbell_length: 1.6,
@@ -201,54 +162,23 @@ impl Representation for RibbonRep {
             arrow_tip_scale: 1.0,
             arrow_length: 0,
             arrow_residues: 0,
-            // KEY: Enable uniform tube mode for ribbon representation
             uniform_tube: true,
         };
 
-        // Extract backbone segments (using RIBBON visibility mask)
-        let mut segments = extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::RIBBON);
+        let (vertices, indices) = build_cartoon_geometry(
+            molecule,
+            coord_set,
+            colors,
+            &smooth_settings,
+            &interp_settings,
+            &geom_settings,
+            subdivisions,
+            gap_cutoff,
+            pymol_mol::RepMask::RIBBON,
+        );
 
-        // Process each segment
-        for segment in &mut segments {
-            if segment.len() < 2 {
-                continue;
-            }
-
-            // Apply PyMOL-style smoothing operations
-            apply_pymol_smoothing(segment, &smooth_settings);
-
-            // Additional orientation smoothing
-            smooth_orientations(segment, smooth_settings.smooth_cycles);
-
-            // Generate reference frames using displacement-based interpolation
-            let frame_smooth_cycles = smooth_settings.smooth_cycles.max(4);
-            let frames = generate_frames(
-                &segment.guide_points,
-                &interp_settings,
-                subdivisions,
-                frame_smooth_cycles,
-            );
-
-            if frames.is_empty() {
-                continue;
-            }
-
-            // No sheet termini needed since fancy_sheets is disabled
-            let sheet_termini = Vec::new();
-
-            // Generate mesh geometry
-            let (mut seg_vertices, seg_indices) =
-                generate_cartoon_mesh(&frames, &geom_settings, &sheet_termini);
-
-            // Offset indices for this segment
-            let base_index = self.vertices.len() as u32;
-            let offset_indices: Vec<u32> = seg_indices.iter().map(|i| i + base_index).collect();
-
-            // Append to global buffers
-            self.vertices.append(&mut seg_vertices);
-            self.indices.extend(offset_indices);
-        }
-
+        self.vertices = vertices;
+        self.indices = indices;
         self.index_count = self.indices.len() as u32;
         self.dirty = false;
     }

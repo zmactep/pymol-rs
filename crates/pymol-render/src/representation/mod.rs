@@ -2,6 +2,7 @@
 //!
 //! This module provides the trait and types for molecular representations.
 
+mod bond_utils;
 pub mod cartoon;
 pub mod dot;
 pub mod line;

@@ -30,6 +30,7 @@ pub mod backbone;
 pub mod frame;
 pub mod geometry;
 pub mod spline;
+pub mod utils;
 
 use crate::buffer::GrowableBuffer;
 use crate::color_resolver::ColorResolver;
@@ -45,6 +46,69 @@ use self::backbone::{
 use self::frame::generate_frames;
 use self::geometry::{find_sheet_termini, generate_cartoon_mesh, CartoonGeometrySettings};
 use self::spline::InterpolationSettings;
+
+/// Build cartoon/ribbon mesh geometry from molecular data.
+///
+/// This is the shared pipeline used by both CartoonRep and RibbonRep:
+/// extract backbone → smooth → generate frames → extrude geometry.
+///
+/// The caller provides representation-specific settings (setting IDs, geometry config,
+/// rep mask) and this function handles the common processing loop.
+pub fn build_cartoon_geometry(
+    molecule: &ObjectMolecule,
+    coord_set: &CoordSet,
+    colors: &ColorResolver,
+    smooth_settings: &CartoonSmoothSettings,
+    interp_settings: &InterpolationSettings,
+    geom_settings: &CartoonGeometrySettings,
+    subdivisions: u32,
+    gap_cutoff: i32,
+    rep_mask: pymol_mol::RepMask,
+) -> (Vec<MeshVertex>, Vec<u32>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    let mut segments =
+        extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, rep_mask);
+
+    for segment in &mut segments {
+        if segment.len() < 2 {
+            continue;
+        }
+
+        apply_pymol_smoothing(segment, smooth_settings);
+        smooth_orientations(segment, smooth_settings.smooth_cycles);
+
+        let frame_smooth_cycles = smooth_settings.smooth_cycles.max(4);
+        let frames = generate_frames(
+            &segment.guide_points,
+            interp_settings,
+            subdivisions,
+            frame_smooth_cycles,
+        );
+
+        if frames.is_empty() {
+            continue;
+        }
+
+        let sheet_termini = if geom_settings.uniform_tube {
+            Vec::new()
+        } else {
+            find_sheet_termini(&frames)
+        };
+
+        let (mut seg_vertices, seg_indices) =
+            generate_cartoon_mesh(&frames, geom_settings, &sheet_termini);
+
+        let base_index = vertices.len() as u32;
+        let offset_indices: Vec<u32> = seg_indices.iter().map(|i| i + base_index).collect();
+
+        vertices.append(&mut seg_vertices);
+        indices.extend(offset_indices);
+    }
+
+    (vertices, indices)
+}
 
 /// Cartoon representation for protein secondary structure
 ///
@@ -128,109 +192,57 @@ impl Representation for CartoonRep {
         const CARTOON_FLAT_CYCLES: u16 = 260;
         const CARTOON_SMOOTH_FIRST: u16 = 257;
         const CARTOON_SMOOTH_LAST: u16 = 258;
-        const CARTOON_REFINE: u16 = 123;
         const CARTOON_REFINE_NORMALS: u16 = 112;
 
         let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
         let sampling = settings.get_int_if_defined(CARTOON_SAMPLING).unwrap_or(7);
         let power = settings.get_float_if_defined(CARTOON_POWER).unwrap_or(2.0);
-
-        // PyMOL-style smoothing settings (defaults match PyMOL exactly)
         let power_b = settings.get_float_if_defined(CARTOON_POWER_B).unwrap_or(0.52);
         let throw = settings.get_float_if_defined(CARTOON_THROW).unwrap_or(1.35);
 
         let smooth_settings = CartoonSmoothSettings {
             smooth_cycles: settings
                 .get_int_if_defined(CARTOON_SMOOTH_CYCLES)
-                .unwrap_or(2) as u32, // PyMOL default: 2
+                .unwrap_or(2) as u32,
             flat_cycles: settings
                 .get_int_if_defined(CARTOON_FLAT_CYCLES)
-                .unwrap_or(4) as u32, // PyMOL default: 4
+                .unwrap_or(4) as u32,
             smooth_first: settings
                 .get_int_if_defined(CARTOON_SMOOTH_FIRST)
-                .unwrap_or(1) as u32, // PyMOL default: 1
+                .unwrap_or(1) as u32,
             smooth_last: settings
                 .get_int_if_defined(CARTOON_SMOOTH_LAST)
-                .unwrap_or(1) as u32, // PyMOL default: 1
-            refine_cycles: settings
-                .get_int_if_defined(CARTOON_REFINE)
-                .unwrap_or(5) as u32, // PyMOL default: 5
+                .unwrap_or(1) as u32,
             refine_normals: settings
                 .get_bool_if_defined(CARTOON_REFINE_NORMALS)
                 .unwrap_or(true),
-            power_a: power,
-            power_b,
-            throw_factor: throw,
         };
 
-        // Calculate subdivisions from sampling
-        // Higher subdivisions = smoother curves
-        let subdivisions = if sampling < 0 {
-            7u32 // Default sampling
-        } else {
-            (sampling as u32).max(7)
-        };
+        let subdivisions = if sampling < 0 { 7u32 } else { (sampling as u32).max(7) };
 
-        // Create interpolation settings from cartoon settings
         let interp_settings = InterpolationSettings {
             power_a: power,
             power_b,
             throw_factor: throw,
         };
 
-        // Get geometry settings with arrow length scaled by subdivisions
         let geom_settings =
             CartoonGeometrySettings::from_resolver(settings).with_subdivisions(subdivisions);
 
-        // Extract backbone segments (using CARTOON visibility mask)
-        let mut segments = extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON);
+        let (vertices, indices) = build_cartoon_geometry(
+            molecule,
+            coord_set,
+            colors,
+            &smooth_settings,
+            &interp_settings,
+            &geom_settings,
+            subdivisions,
+            gap_cutoff,
+            pymol_mol::RepMask::CARTOON,
+        );
 
-        // Process each segment
-        for segment in &mut segments {
-            if segment.len() < 2 {
-                continue;
-            }
-
-            // Apply PyMOL-style smoothing operations:
-            // 1. Helix axis centering
-            // 2. Sheet flattening
-            // 3. Loop smoothing
-            // 4. Normal refinement
-            apply_pymol_smoothing(segment, &smooth_settings);
-
-            // Additional orientation smoothing
-            smooth_orientations(segment, smooth_settings.smooth_cycles);
-
-            // Generate reference frames using displacement-based interpolation
-            let frame_smooth_cycles = smooth_settings.smooth_cycles.max(4);
-            let frames = generate_frames(
-                &segment.guide_points,
-                &interp_settings,
-                subdivisions,
-                frame_smooth_cycles,
-            );
-
-            if frames.is_empty() {
-                continue;
-            }
-
-            // Find sheet termini — always needed for explicit sheet geometry.
-            // The fancy_sheets flag only controls whether arrows are drawn.
-            let sheet_termini = find_sheet_termini(&frames);
-
-            // Generate mesh geometry
-            let (mut seg_vertices, seg_indices) =
-                generate_cartoon_mesh(&frames, &geom_settings, &sheet_termini);
-
-            // Offset indices for this segment
-            let base_index = self.vertices.len() as u32;
-            let offset_indices: Vec<u32> = seg_indices.iter().map(|i| i + base_index).collect();
-
-            // Append to global buffers
-            self.vertices.append(&mut seg_vertices);
-            self.indices.extend(offset_indices);
-        }
-
+        self.vertices = vertices;
+        self.indices = indices;
         self.index_count = self.indices.len() as u32;
         self.dirty = false;
     }
@@ -356,8 +368,7 @@ mod tests {
                 [1.0, 0.0, 0.0, 1.0],
                 pymol_mol::SecondaryStructure::Loop,
                 pymol_mol::AtomIndex(0),
-                1,
-                20.0,
+                1
             ),
             GuidePoint::new(
                 Vec3::new(3.8, 0.0, 0.0),
@@ -365,8 +376,7 @@ mod tests {
                 [0.0, 1.0, 0.0, 1.0],
                 pymol_mol::SecondaryStructure::Loop,
                 pymol_mol::AtomIndex(1),
-                2,
-                20.0,
+                2
             ),
             GuidePoint::new(
                 Vec3::new(7.6, 0.0, 0.0),
@@ -374,8 +384,7 @@ mod tests {
                 [0.0, 0.0, 1.0, 1.0],
                 pymol_mol::SecondaryStructure::Loop,
                 pymol_mol::AtomIndex(2),
-                3,
-                20.0,
+                3
             ),
         ];
 
