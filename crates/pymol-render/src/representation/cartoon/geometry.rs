@@ -1368,114 +1368,10 @@ fn generate_explicit_sheet(
         push_quad(indices, v0, v1, v2, v3);
     }
 
-    if !has_arrow {
-        // C-terminal cap (front face) — no arrow
-        let f = &frames[sheet_end];
-        let (tl, tr, bl, br) = corners(f, half_width);
-        let cap_n = f.frame.tangent;
-        let color = f.color;
-        let v0 = push_vert(vertices, tl, cap_n, color);
-        let v1 = push_vert(vertices, tr, cap_n, color);
-        let v2 = push_vert(vertices, br, cap_n, color);
-        let v3 = push_vert(vertices, bl, cap_n, color);
-        push_quad(indices, v0, v1, v2, v3);
-
-        return;
-    }
-
-    // ========== ARROW HEAD ==========
-    // Arrow REPLACES the last few frames of the sheet — tip at frames[sheet_end].
-    // Uses the base frame's orientation projected along tangent direction.
-
-    let base = &frames[body_end];
-    let arrow_width = half_width * settings.arrow_tip_scale;
-    let arrow_len = sheet_end - body_end;
-
-    // Use the base frame's orientation for the entire arrow
-    let n = base.frame.normal;
-    let b = base.frame.binormal;
-
-    // Helper: compute arrow corners at a position with given width
-    let arrow_corners = |pos: Vec3, hw: f32| -> (Vec3, Vec3, Vec3, Vec3) {
-        (
-            pos + n * hw + b * half_thick, // TL
-            pos - n * hw + b * half_thick, // TR
-            pos + n * hw - b * half_thick, // BL
-            pos - n * hw - b * half_thick, // BR
-        )
-    };
-
-    for ai in 0..arrow_len {
-        let fi0 = body_end + ai;
-        let fi1 = body_end + ai + 1;
-        let f0 = &frames[fi0];
-        let f1 = &frames[fi1];
-
-        // Linear taper: arrow_width at base -> 0 at tip
-        let w0 = arrow_width * (1.0 - ai as f32 / arrow_len as f32);
-        let w1 = arrow_width * (1.0 - (ai + 1) as f32 / arrow_len as f32);
-
-        let (tl0, tr0, bl0, br0) = arrow_corners(f0.frame.position, w0);
-        let (tl1, tr1, bl1, br1) = arrow_corners(f1.frame.position, w1);
-        let color0 = f0.color;
-        let color1 = f1.color;
-
-        // TOP surface (facing +binormal)
-        let v0 = push_vert(vertices, tl0, b, color0);
-        let v1 = push_vert(vertices, tr0, b, color0);
-        let v2 = push_vert(vertices, tr1, b, color1);
-        let v3 = push_vert(vertices, tl1, b, color1);
-        push_quad(indices, v0, v1, v2, v3);
-
-        // BOTTOM surface (facing -binormal)
-        let bot_n = b * -1.0;
-        let v0 = push_vert(vertices, br0, bot_n, color0);
-        let v1 = push_vert(vertices, bl0, bot_n, color0);
-        let v2 = push_vert(vertices, bl1, bot_n, color1);
-        let v3 = push_vert(vertices, br1, bot_n, color1);
-        push_quad(indices, v0, v1, v2, v3);
-
-        // LEFT taper edge (facing +normal)
-        let v0 = push_vert(vertices, tl0, n, color0);
-        let v1 = push_vert(vertices, tl1, n, color1);
-        let v2 = push_vert(vertices, bl1, n, color1);
-        let v3 = push_vert(vertices, bl0, n, color0);
-        push_quad(indices, v0, v1, v2, v3);
-
-        // RIGHT taper edge (facing -normal)
-        let neg_n = n * -1.0;
-        let v0 = push_vert(vertices, tr1, neg_n, color1);
-        let v1 = push_vert(vertices, tr0, neg_n, color0);
-        let v2 = push_vert(vertices, br0, neg_n, color0);
-        let v3 = push_vert(vertices, br1, neg_n, color1);
-        push_quad(indices, v0, v1, v2, v3);
-    }
-
-    // Arrow shoulder caps (back-face where arrow widens beyond body)
-    {
-        let cap_n = base.frame.tangent * -1.0;
-        let color = base.color;
-        let (body_tl, body_tr, body_bl, body_br) = corners(base, half_width);
-        let (arrow_tl, arrow_tr, arrow_bl, arrow_br) = arrow_corners(base.frame.position, arrow_width);
-
-        // Left shoulder
-        let v0 = push_vert(vertices, body_tl, cap_n, color);
-        let v1 = push_vert(vertices, arrow_tl, cap_n, color);
-        let v2 = push_vert(vertices, arrow_bl, cap_n, color);
-        let v3 = push_vert(vertices, body_bl, cap_n, color);
-        push_quad(indices, v0, v1, v2, v3);
-
-        // Right shoulder
-        let v0 = push_vert(vertices, arrow_tr, cap_n, color);
-        let v1 = push_vert(vertices, body_tr, cap_n, color);
-        let v2 = push_vert(vertices, body_br, cap_n, color);
-        let v3 = push_vert(vertices, arrow_br, cap_n, color);
-        push_quad(indices, v0, v1, v2, v3);
-    }
-
     // ========== C-TERMINAL CONNECTOR ==========
-    // Bridge from arrow tip (at sheet_end) to the post-sheet loop.
+    // Bridge from sheet end (arrow tip or flat cap) to the post-sheet loop.
     // Tube starts small at tip and expands to full loop radius.
+    // Must be generated BEFORE the early return for non-arrow sheets.
     if sheet_end + 1 < frames.len() {
         let loop_profile = Profile::circle(settings.loop_radius, settings.quality);
         let profile_len = loop_profile.len();
@@ -1524,6 +1420,124 @@ fn generate_explicit_sheet(
             }
         }
     }
+
+    if !has_arrow {
+        // C-terminal cap (front face) — no arrow
+        let f = &frames[sheet_end];
+        let (tl, tr, bl, br) = corners(f, half_width);
+        let cap_n = f.frame.tangent;
+        let color = f.color;
+        let v0 = push_vert(vertices, tl, cap_n, color);
+        let v1 = push_vert(vertices, tr, cap_n, color);
+        let v2 = push_vert(vertices, br, cap_n, color);
+        let v3 = push_vert(vertices, bl, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+
+        return;
+    }
+
+    // ========== ARROW HEAD ==========
+    // Arrow REPLACES the last few frames of the sheet — tip at frames[sheet_end].
+    // Uses the base frame's normal/binormal (same as body) for orientation, ensuring
+    // C0 continuity at the body-arrow junction. Positions are linearly interpolated
+    // from base to tip so the straight spine matches the fixed orientation.
+
+    let base = &frames[body_end];
+    let arrow_width = half_width * settings.arrow_tip_scale;
+    let arrow_len = sheet_end - body_end;
+
+    // Use the base frame's orientation directly — same vectors the body uses via corners().
+    // This guarantees the arrow starts with exactly the same orientation as the body end.
+    let n = base.frame.normal;
+    let b = base.frame.binormal;
+
+    // Linearly interpolated spine from base to tip
+    let start_pos = base.frame.position;
+    let end_pos = frames[sheet_end].frame.position;
+
+    for ai in 0..arrow_len {
+        // Interpolation parameters along the arrow
+        let t0 = ai as f32 / arrow_len as f32;
+        let t1 = (ai + 1) as f32 / arrow_len as f32;
+
+        // Linear taper: arrow_width at base -> 0 at tip
+        let w0 = arrow_width * (1.0 - t0);
+        let w1 = arrow_width * (1.0 - t1);
+
+        // Linearly interpolated positions (straight spine)
+        let pos0 = start_pos + (end_pos - start_pos) * t0;
+        let pos1 = start_pos + (end_pos - start_pos) * t1;
+
+        // Colors from actual frames
+        let color0 = frames[body_end + ai].color;
+        let color1 = frames[body_end + ai + 1].color;
+
+        let tl0 = pos0 + n * w0 + b * half_thick;
+        let tr0 = pos0 - n * w0 + b * half_thick;
+        let bl0 = pos0 + n * w0 - b * half_thick;
+        let br0 = pos0 - n * w0 - b * half_thick;
+        let tl1 = pos1 + n * w1 + b * half_thick;
+        let tr1 = pos1 - n * w1 + b * half_thick;
+        let bl1 = pos1 + n * w1 - b * half_thick;
+        let br1 = pos1 - n * w1 - b * half_thick;
+
+        // TOP surface (facing +binormal)
+        let v0 = push_vert(vertices, tl0, b, color0);
+        let v1 = push_vert(vertices, tr0, b, color0);
+        let v2 = push_vert(vertices, tr1, b, color1);
+        let v3 = push_vert(vertices, tl1, b, color1);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // BOTTOM surface (facing -binormal)
+        let neg_b = b * -1.0;
+        let v0 = push_vert(vertices, br0, neg_b, color0);
+        let v1 = push_vert(vertices, bl0, neg_b, color0);
+        let v2 = push_vert(vertices, bl1, neg_b, color1);
+        let v3 = push_vert(vertices, br1, neg_b, color1);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // LEFT taper edge (facing +normal)
+        let v0 = push_vert(vertices, tl0, n, color0);
+        let v1 = push_vert(vertices, tl1, n, color1);
+        let v2 = push_vert(vertices, bl1, n, color1);
+        let v3 = push_vert(vertices, bl0, n, color0);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // RIGHT taper edge (facing -normal)
+        let neg_n = n * -1.0;
+        let v0 = push_vert(vertices, tr1, neg_n, color1);
+        let v1 = push_vert(vertices, tr0, neg_n, color0);
+        let v2 = push_vert(vertices, br0, neg_n, color0);
+        let v3 = push_vert(vertices, br1, neg_n, color1);
+        push_quad(indices, v0, v1, v2, v3);
+    }
+
+    // Arrow shoulder caps (back-face where arrow widens beyond body)
+    {
+        let cap_n = base.frame.tangent * -1.0;
+        let color = base.color;
+        let (body_tl, body_tr, body_bl, body_br) = corners(base, half_width);
+        let base_pos = base.frame.position;
+        let arrow_tl = base_pos + n * arrow_width + b * half_thick;
+        let arrow_tr = base_pos - n * arrow_width + b * half_thick;
+        let arrow_bl = base_pos + n * arrow_width - b * half_thick;
+        let arrow_br = base_pos - n * arrow_width - b * half_thick;
+
+        // Left shoulder
+        let v0 = push_vert(vertices, body_tl, cap_n, color);
+        let v1 = push_vert(vertices, arrow_tl, cap_n, color);
+        let v2 = push_vert(vertices, arrow_bl, cap_n, color);
+        let v3 = push_vert(vertices, body_bl, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+
+        // Right shoulder
+        let v0 = push_vert(vertices, arrow_tr, cap_n, color);
+        let v1 = push_vert(vertices, body_tr, cap_n, color);
+        let v2 = push_vert(vertices, body_br, cap_n, color);
+        let v3 = push_vert(vertices, arrow_br, cap_n, color);
+        push_quad(indices, v0, v1, v2, v3);
+    }
+
 }
 
 /// Add end cap to the tube
