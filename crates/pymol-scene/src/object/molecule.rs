@@ -6,8 +6,8 @@ use bitflags::bitflags;
 use lin_alg::f32::Vec3;
 use pymol_mol::{ObjectMolecule, RepMask};
 use pymol_render::{
-    CartoonRep, ColorResolver, DotRep, LineRep, MeshRep, RenderContext, Representation, RibbonRep,
-    SelectionIndicatorRep, SphereRep, StickRep, SurfaceRep,
+    CartoonRep, ColorResolver, DotRep, LineRep, RenderContext, Representation, RibbonRep,
+    SelectionIndicatorRep, SphereRep, StickRep, SurfaceRep, WireSurfaceRep,
 };
 use pymol_select::SelectionResult;
 use pymol_settings::{GlobalSettings, SettingResolver};
@@ -42,7 +42,7 @@ struct RepresentationCache {
     cartoon: Option<CartoonRep>,
     ribbon: Option<RibbonRep>,
     surface: Option<SurfaceRep>,
-    mesh: Option<MeshRep>,
+    mesh: Option<WireSurfaceRep>,
     /// Selection indicator representation (rendered last, on top of everything)
     selection_indicator: Option<SelectionIndicatorRep>,
 }
@@ -300,13 +300,13 @@ impl MoleculeObject {
 
         // Build and upload the indicator
         indicator.build_for_selection(&self.molecule, coord_set, selection);
-        
+
         log::debug!(
             "Built selection indicator with {} instances, size={}",
             indicator.instance_count(),
             indicator.size()
         );
-        
+
         indicator.upload(context.device(), context.queue());
     }
 
@@ -431,10 +431,16 @@ impl MoleculeObject {
             }
         }
 
-        // Build mesh if visible
+        // Build mesh (wireframe surface) if visible
         if vis.is_visible(RepMask::MESH) {
-            let mesh = self.representations.mesh.get_or_insert_with(MeshRep::new);
+            let quality = self.surface_quality;
+            let mesh = self.representations.mesh.get_or_insert_with(|| {
+                let mut m = WireSurfaceRep::new();
+                m.set_quality(quality);
+                m
+            });
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
+                mesh.set_quality(quality);
                 mesh.build(&self.molecule, coord_set, color_resolver, &settings);
                 mesh.upload(context.device(), context.queue());
             }
@@ -576,11 +582,11 @@ impl MoleculeObject {
             }
         }
 
-        // Mesh
+        // Mesh (wireframe surface)
         if vis.is_visible(RepMask::MESH) {
             if let Some(ref mesh) = self.representations.mesh {
                 if !mesh.is_empty() {
-                    let pipeline = context.mesh_pipeline(pymol_render::pipeline::BlendMode::Opaque);
+                    let pipeline = context.line_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
                     mesh.render(render_pass);
@@ -635,14 +641,20 @@ impl MoleculeObject {
         self.representations.surface.as_ref().map(|s| (s.vertices(), s.indices()))
     }
 
-    /// Get mesh data for raytracing
+    /// Get mesh wireframe edge data for raytracing
     ///
-    /// Returns (vertices, indices) if mesh representation is visible and built.
-    pub fn get_mesh_data(&self) -> Option<(&[pymol_render::MeshVertex], &[u32])> {
+    /// Returns line vertex pairs (each consecutive pair is an edge) if mesh
+    /// representation is visible and built. These are rendered as thin cylinders
+    /// (sausage primitives) by the raytracer.
+    pub fn get_mesh_edges(&self) -> Option<&[pymol_render::LineVertex]> {
         if !self.state.visible_reps.is_visible(RepMask::MESH) {
             return None;
         }
-        self.representations.mesh.as_ref().map(|m| (m.vertices(), m.indices()))
+        self.representations
+            .mesh
+            .as_ref()
+            .filter(|m| !m.is_empty())
+            .map(|m| m.vertices())
     }
 
     /// Get ribbon mesh data for raytracing

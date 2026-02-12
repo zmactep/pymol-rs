@@ -5,8 +5,8 @@
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_raytracer::{
-    collect_from_molecule, matrix_to_array, raytrace, Bvh, CollectOptions, GpuTriangle,
-    PrimitiveCollector, RayColorResolver, RaytraceParams, RaytraceSettings,
+    collect_from_molecule, matrix_to_array, raytrace, Bvh, CollectOptions, GpuCylinder,
+    GpuTriangle, PrimitiveCollector, RayColorResolver, RaytraceParams, RaytraceSettings,
 };
 use pymol_render::MeshVertex;
 use pymol_settings::GlobalSettings;
@@ -127,10 +127,7 @@ pub fn collect_triangles_from_mesh_reps(mol_obj: &MoleculeObject) -> Vec<GpuTria
         triangles.extend(convert_mesh(vertices, indices));
     }
 
-    // Collect from mesh representation
-    if let Some((vertices, indices)) = mol_obj.get_mesh_data() {
-        triangles.extend(convert_mesh(vertices, indices));
-    }
+    // Note: Mesh representation is wireframe (edges), collected separately as cylinders
 
     // Collect from ribbon representation
     if let Some((vertices, indices)) = mol_obj.get_ribbon_mesh() {
@@ -194,9 +191,29 @@ pub fn raytrace_scene(
                 all_primitives.add_triangles(prims.triangles);
             }
 
-            // Collect triangles from mesh-based representations (cartoon, surface, mesh)
+            // Collect triangles from mesh-based representations (cartoon, surface, ribbon)
             let triangles = collect_triangles_from_mesh_reps(mol_obj);
             all_primitives.add_triangles(triangles);
+
+            // Collect mesh wireframe edges as thin cylinders (sausage primitives)
+            if let Some(edges) = mol_obj.get_mesh_edges() {
+                let mesh_radius = 0.01;
+                let cylinders: Vec<GpuCylinder> = edges
+                    .chunks(2)
+                    .filter(|pair| pair.len() == 2)
+                    .map(|pair| {
+                        GpuCylinder::new(
+                            pair[0].position,
+                            pair[1].position,
+                            mesh_radius,
+                            pair[0].color,
+                            pair[1].color,
+                            0.0,
+                        )
+                    })
+                    .collect();
+                all_primitives.add_cylinders(cylinders);
+            }
         }
     }
 

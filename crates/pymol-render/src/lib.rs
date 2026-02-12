@@ -74,3 +74,4 @@ pub use representation::selection_indicator::{
 pub use representation::sphere::SphereRep;
 pub use representation::stick::StickRep;
 pub use representation::surface::{Grid3D, SurfaceRep, SurfaceType};
+pub use representation::wire_surface::WireSurfaceRep;

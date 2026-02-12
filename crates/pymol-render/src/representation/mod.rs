@@ -12,6 +12,7 @@ pub mod selection_indicator;
 pub mod sphere;
 pub mod stick;
 pub mod surface;
+pub mod wire_surface;
 
 use pymol_mol::{CoordSet, ObjectMolecule};
 use pymol_settings::SettingResolver;
