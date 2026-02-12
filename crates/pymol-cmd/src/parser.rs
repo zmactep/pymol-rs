@@ -318,7 +318,7 @@ fn parse_arg_name(input: &str) -> IResult<&str, &str> {
 /// Parse an argument value
 fn parse_arg_value(input: &str) -> IResult<&str, ArgValue> {
     alt((
-        // Try parenthesized expression (selection)
+        // Try parenthesized expression (selection or value list like set_view)
         map(parse_paren_expr, |s| ArgValue::String(s.to_string())),
         // Try bracketed list
         parse_list,
@@ -334,12 +334,62 @@ fn parse_arg_value(input: &str) -> IResult<&str, ArgValue> {
 }
 
 /// Parse a parenthesized expression (typically a selection)
+///
+/// Handles both simple parenthesized expressions like `(1.0, 2.0)` and
+/// selection algebra like `(chain A and resi 29) or (chain A and resi 31)`.
+/// After matching the initial `(...)`, continues to consume selection operators
+/// (`and`, `or`, `not`, `&`, `|`, `+`, `-`, `!`) and any subsequent terms.
 fn parse_paren_expr(input: &str) -> IResult<&str, &str> {
-    recognize(delimited(
+    let (rest, _) = recognize(delimited(
         char('('),
         take_balanced_parens,
         char(')'),
-    ))(input)
+    ))(input)?;
+
+    // After the first (...), check if there are selection operators followed by more content.
+    // This handles expressions like: (chain A and resi 29) or (chain A and resi 31)
+    let mut end = input.len() - rest.len();
+    let mut remaining = rest;
+
+    loop {
+        // Skip whitespace
+        let trimmed = remaining.trim_start();
+        if trimmed.is_empty() {
+            break;
+        }
+
+        // Check for selection operators: and, or, not, in, like, &, |, +, -, !
+        let has_operator = trimmed.starts_with("and ")
+            || trimmed.starts_with("or ")
+            || trimmed.starts_with("not ")
+            || trimmed.starts_with("in ")
+            || trimmed.starts_with("like ")
+            || trimmed.starts_with("& ")
+            || trimmed.starts_with("| ")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with("- ")
+            || trimmed.starts_with("! ");
+
+        if !has_operator {
+            break;
+        }
+
+        // Consume the rest of the selection expression after the operator
+        let consumed_ws = remaining.len() - trimmed.len();
+        let taken: usize = trimmed
+            .chars()
+            .take_while(|c| !matches!(c, ',' | ';' | '\n' | '\r' | '[' | ']'))
+            .map(|c| c.len_utf8())
+            .sum();
+        if taken == 0 {
+            break;
+        }
+        let taken_trimmed = trimmed[..taken].trim_end().len();
+        end += consumed_ws + taken_trimmed;
+        remaining = &input[end..];
+    }
+
+    Ok((&input[end..], &input[..end]))
 }
 
 /// Take content with balanced parentheses
@@ -626,6 +676,14 @@ mod tests {
     }
 
     #[test]
+    fn test_selection_with_parens_and_or() {
+        let cmd = parse_command("select sele, (chain A and resi 29) or (chain A and resi 31)").unwrap();
+        assert_eq!(cmd.name, "select");
+        assert_eq!(cmd.get_str(0), Some("sele"));
+        assert_eq!(cmd.get_str(1), Some("(chain A and resi 29) or (chain A and resi 31)"));
+    }
+
+    #[test]
     fn test_bool_word_boundary() {
         // "no" as standalone boolean should still work
         let cmd = parse_command("set valence, no").unwrap();
@@ -710,11 +768,11 @@ mod tests {
             0.000000,     0.000000,   639.042053,\
            -1.574999,   -16.596998,     9.544001,\
             561.162231,   794.801453,   14.000000 )"#;
-        
+
         let cmd = parse_command(input).unwrap();
         assert_eq!(cmd.name, "set_view");
         let arg = cmd.get_str(0).unwrap();
-        
+
         // Should have all 18 values parseable
         let s = arg.trim_matches(|c| c == '(' || c == ')');
         let values: Vec<f32> = s
@@ -736,7 +794,7 @@ set_view (\ 0.381124,    -0.381788,    -0.842011,\
            -1.574999,   -16.596998,     9.544001,\
             561.162231,   794.801453,   14.000000 )
 ray 1920, 1080, filename=test.png"#;
-        
+
         let cmds = parse_commands(input).unwrap();
         assert_eq!(cmds.len(), 4, "Expected 4 commands");
         assert_eq!(cmds[0].name, "load");
@@ -798,17 +856,17 @@ set_view (\ 0.381124,    -0.381788,    -0.842011,\
            -1.574999,   -16.596998,     9.544001,\
             561.162231,   794.801453,   14.000000 )
 ray 1920, 1080, filename=test.png"#;
-        
+
         let result = join_continued_lines(input);
         let lines: Vec<&str> = result.lines().collect();
-        
+
         // Should have 4 lines: load, as, set_view (joined), ray
         assert_eq!(lines.len(), 4, "Expected 4 lines, got {}", lines.len());
         assert!(lines[0].starts_with("load"));
         assert!(lines[1].starts_with("as"));
         assert!(lines[2].starts_with("set_view"));
         assert!(lines[3].starts_with("ray"));
-        
+
         // The set_view line should contain all values
         assert!(lines[2].contains("0.381124"));
         assert!(lines[2].contains("14.000000"));

@@ -1015,6 +1015,12 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_parens_with_or() {
+        let expr = parse_selection("(chain A and resi 29) or (chain A and resi 31)").unwrap();
+        assert!(matches!(expr, SelectionExpr::Or(_, _)));
+    }
+
+    #[test]
     fn test_parse_resi_single() {
         let expr = parse_selection("resi 100").unwrap();
         if let SelectionExpr::Resi(spec) = expr {

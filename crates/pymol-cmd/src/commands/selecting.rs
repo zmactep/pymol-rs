@@ -7,6 +7,44 @@ use crate::error::{CmdError, CmdResult};
 use pymol_mol::ObjectMolecule;
 use pymol_select::{EvalContext, SelectionResult};
 
+/// Expand self-references in a selection expression.
+///
+/// When a selection expression references its own name (e.g., `select sele, sele or resi 24`
+/// where `sele` was previously `chain A`), replace occurrences of the name with the old
+/// expression wrapped in parentheses: `(chain A) or resi 24`.
+///
+/// Only replaces whole-word matches to avoid replacing partial identifiers
+/// (e.g., `sele` should not match inside `selected`).
+fn expand_self_reference(expression: &str, name: &str, old_expression: &str) -> String {
+    let mut result = String::with_capacity(expression.len() + old_expression.len());
+    let replacement = format!("({})", old_expression);
+    let mut remaining = expression;
+
+    while let Some(pos) = remaining.find(name) {
+        // Check word boundary before the match
+        let before_ok = pos == 0
+            || !remaining.as_bytes()[pos - 1].is_ascii_alphanumeric()
+                && remaining.as_bytes()[pos - 1] != b'_';
+
+        // Check word boundary after the match
+        let end = pos + name.len();
+        let after_ok = end >= remaining.len()
+            || !remaining.as_bytes()[end].is_ascii_alphanumeric()
+                && remaining.as_bytes()[end] != b'_';
+
+        if before_ok && after_ok {
+            result.push_str(&remaining[..pos]);
+            result.push_str(&replacement);
+        } else {
+            result.push_str(&remaining[..end]);
+        }
+        remaining = &remaining[end..];
+    }
+    result.push_str(remaining);
+
+    result
+}
+
 /// Register selection commands
 pub fn register(registry: &mut CommandRegistry) {
     registry.register(SelectCommand);
@@ -40,7 +78,7 @@ pub fn select_with_context(
 ) -> CmdResult<(usize, Vec<(String, SelectionResult)>)> {
     // Gather all molecules from the registry
     let object_names: Vec<String> = viewer.objects().names().map(|s| s.to_string()).collect();
-    
+
     // Collect molecule references
     let mut molecules: Vec<(&str, &ObjectMolecule)> = Vec::new();
     for name in &object_names {
@@ -48,23 +86,23 @@ pub fn select_with_context(
             molecules.push((name.as_str(), mol_obj.molecule()));
         }
     }
-    
+
     if molecules.is_empty() {
         // No molecules, return empty result
         return Ok((0, Vec::new()));
     }
-    
+
     // Get the stored named selections
     let selection_names = viewer.selection_names();
-    
+
     let mut total_count = 0;
     let mut results: Vec<(String, SelectionResult)> = Vec::new();
-    
+
     // For each molecule, evaluate the selection in a context that includes named selections
     for (obj_name, mol) in &molecules {
         // Build context for this single molecule
         let mut ctx = EvalContext::single(mol);
-        
+
         // Pre-evaluate and add named selections to the context
         // We evaluate each named selection against this molecule and add it to the context
         for sel_name in &selection_names {
@@ -77,7 +115,7 @@ pub fn select_with_context(
                 }
             }
         }
-        
+
         // Now evaluate the target selection with named selections available
         match pymol_select::parse(selection) {
             Ok(expr) => {
@@ -98,7 +136,7 @@ pub fn select_with_context(
             }
         }
     }
-    
+
     Ok((total_count, results))
 }
 
@@ -170,12 +208,22 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
 
-        // Evaluate the selection to count atoms and validate it
-        let (total_count, _results) = select_with_context(ctx.viewer, selection)?;
+        // If the expression references its own name (e.g., `select sele, sele or resi 24`),
+        // expand the self-reference by substituting the old expression. This prevents
+        // circular references in the stored expression, matching PyMOL's behavior where
+        // selections are evaluated immediately and stored as results.
+        let expanded = if let Some(old_expr) = ctx.viewer.get_selection(name) {
+            expand_self_reference(selection, name, old_expr)
+        } else {
+            selection.to_string()
+        };
 
-        // Store the selection expression in the viewer (creates with visible=true by default)
-        ctx.viewer.define_selection(name, selection);
-        
+        // Evaluate the selection to count atoms and validate it
+        let (total_count, _results) = select_with_context(ctx.viewer, &expanded)?;
+
+        // Store the expanded expression (no self-references)
+        ctx.viewer.define_selection(name, &expanded);
+
         // Ensure the selection is visible (show indicators)
         ctx.viewer.set_selection_visible(name, true);
 
@@ -184,6 +232,42 @@ EXAMPLES
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_self_reference_basic() {
+        let result = expand_self_reference("sele or resi 24", "sele", "chain A");
+        assert_eq!(result, "(chain A) or resi 24");
+    }
+
+    #[test]
+    fn test_expand_self_reference_multiple() {
+        let result = expand_self_reference("sele and not sele", "sele", "chain A");
+        assert_eq!(result, "(chain A) and not (chain A)");
+    }
+
+    #[test]
+    fn test_expand_self_reference_no_match() {
+        let result = expand_self_reference("chain A or resi 24", "sele", "chain B");
+        assert_eq!(result, "chain A or resi 24");
+    }
+
+    #[test]
+    fn test_expand_self_reference_word_boundary() {
+        // "sele" should not match inside "selected"
+        let result = expand_self_reference("selected or resi 24", "sele", "chain A");
+        assert_eq!(result, "selected or resi 24");
+    }
+
+    #[test]
+    fn test_expand_self_reference_at_end() {
+        let result = expand_self_reference("resi 24 or sele", "sele", "chain A");
+        assert_eq!(result, "resi 24 or (chain A)");
     }
 }
 
@@ -271,7 +355,7 @@ impl Command for IndicateCommand {
 DESCRIPTION
 
     "indicate" shows a visual indicator (pink/magenta dots) for the specified
-    selection in the 3D viewport. This helps visualize which atoms are 
+    selection in the 3D viewport. This helps visualize which atoms are
     currently selected.
 
 USAGE
@@ -308,7 +392,7 @@ EXAMPLES
             None => {
                 // No arguments - default to "sele"
                 let sel = "sele";
-                
+
                 // Check if "sele" is a named selection that exists
                 if ctx.viewer.get_selection(sel).is_some() {
                     // Make the existing selection visible
