@@ -16,18 +16,18 @@ const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(22.0);
 /// All color constants used in the object list panel
 mod colors {
     use egui::Color32;
-    
+
     // Button colors (A, S, H, L, C)
     pub const ACTION: Color32 = Color32::from_rgb(150, 150, 255);   // A - blue
     pub const SHOW: Color32 = Color32::from_rgb(100, 200, 100);     // S - green
     pub const HIDE: Color32 = Color32::from_rgb(200, 100, 100);     // H - red
     pub const LABEL: Color32 = Color32::from_rgb(200, 200, 255);    // L - light blue
     pub const COLOR: Color32 = Color32::from_rgb(255, 200, 100);    // C - orange/yellow
-    
+
     // Object state colors
     pub const ENABLED: Color32 = Color32::from_rgb(100, 255, 100);  // Green for enabled
     pub const DISABLED: Color32 = Color32::GRAY;                     // Gray for disabled
-    
+
     // Selection colors
     pub const SELECTION: Color32 = Color32::from_rgb(255, 85, 255);      // Bright pink
     pub const SELECTION_HIDDEN: Color32 = Color32::from_rgb(128, 43, 128); // Dimmed pink
@@ -95,10 +95,10 @@ fn menu_button(
     let button = egui::Button::new(RichText::new(text).color(color))
         .min_size(BUTTON_MIN_SIZE);
     let response = ui.add(button);
-    
+
     // Check if this button's menu is currently active
     let is_this_menu_active = menu_state.active == target_menu;
-    
+
     if response.clicked() {
         if is_this_menu_active {
             // Clicking the same button closes the menu
@@ -116,12 +116,12 @@ fn menu_button(
         // This prevents "jumping" when scroll position or layout changes
         menu_state.anchor_pos = response.rect.right_bottom();
     }
-    
+
     // Show tooltip only when no menu is open
     if menu_state.active == ActiveMenu::None {
         response.clone().on_hover_text(hover_text);
     }
-    
+
     response
 }
 
@@ -141,7 +141,7 @@ pub enum ObjectAction {
     HideAll(String),
     /// Show specific representation
     ShowRep(String, RepMask),
-    /// Hide specific representation  
+    /// Hide specific representation
     HideRep(String, RepMask),
     /// Set color
     SetColor(String, String),
@@ -187,7 +187,7 @@ impl ObjectListPanel {
     ) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Buttons are added in reverse order (right-to-left): C, L, H, S, A
-            
+
             // C - Color
             let color_tooltip = if is_selection { "Color selection" } else { "Color" };
             if menu_button(
@@ -241,14 +241,8 @@ impl ObjectListPanel {
         });
     }
 
-    /// Render the panel header ("Objects" title)
-    fn render_header(ui: &mut Ui) {
-        ui.label(
-            RichText::new("Objects")
-                .strong()
-                .color(Color32::WHITE),
-        );
-        ui.separator();
+    /// Render the panel header
+    fn render_header(_ui: &mut Ui) {
     }
 
     /// Render the "all" row with aggregate actions for all objects
@@ -261,7 +255,7 @@ impl ObjectListPanel {
             registry.get(name).map(|o| o.is_enabled()).unwrap_or(false)
         });
         let has_objects = registry.names().next().is_some();
-        
+
         ui.horizontal(|ui| {
             let all_color = if !has_objects {
                 colors::DISABLED
@@ -270,7 +264,7 @@ impl ObjectListPanel {
             } else {
                 Color32::WHITE
             };
-            
+
             let all_response = ui.add(
                 egui::Label::new(
                     RichText::new("all")
@@ -279,7 +273,7 @@ impl ObjectListPanel {
                 )
                 .sense(egui::Sense::click()),
             );
-            
+
             if all_response.clicked() && has_objects {
                 if all_enabled {
                     actions.push(ObjectAction::DisableAll);
@@ -287,7 +281,7 @@ impl ObjectListPanel {
                     actions.push(ObjectAction::EnableAll);
                 }
             }
-            
+
             all_response.on_hover_text(if all_enabled { "Click to disable all" } else { "Click to enable all" });
 
             // Right-align the buttons (simple action buttons, no menus)
@@ -338,8 +332,6 @@ impl ObjectListPanel {
                 }
             });
         });
-        
-        ui.separator();
     }
 
     /// Render a single object row
@@ -392,13 +384,13 @@ impl ObjectListPanel {
         ui.push_id(format!("sel_{}", name), |ui| {
             ui.horizontal(|ui| {
                 let display_name = format!("({})", name);
-                
+
                 let color = if entry.visible {
                     colors::SELECTION
                 } else {
                     colors::SELECTION_HIDDEN
                 };
-                
+
                 let name_response = ui.add(
                     egui::Label::new(
                         RichText::new(&display_name)
@@ -437,7 +429,7 @@ impl ObjectListPanel {
         }
 
         let menu_clicked = self.render_active_menu(ui, actions);
-        
+
         // Close menu on click outside (but not if we clicked a menu button or menu item)
         if !menu_button_clicked && !menu_clicked {
             if ui.input(|i| i.pointer.any_click()) {
@@ -447,7 +439,7 @@ impl ObjectListPanel {
     }
 
     /// Draw the object list panel
-    /// 
+    ///
     /// # Arguments
     /// * `ui` - The egui UI context
     /// * `registry` - Object registry containing molecules and other objects
@@ -479,7 +471,7 @@ impl ObjectListPanel {
                 ui.separator();
                 let mut sel_entries: Vec<_> = selections.iter().collect();
                 sel_entries.sort_by(|a, b| a.0.cmp(b.0));
-                
+
                 for (sel_name, entry) in sel_entries {
                     self.render_selection_row(ui, sel_name, entry, &mut actions, &mut menu_button_clicked);
                 }
@@ -494,11 +486,11 @@ impl ObjectListPanel {
     /// Returns true if a menu item was clicked
     fn render_active_menu(&mut self, ui: &mut Ui, actions: &mut Vec<ObjectAction>) -> bool {
         let mut item_clicked = false;
-        
+
         // Request repaint to ensure the popup is fully rendered
         // This is critical for the first frame after opening
         ui.ctx().request_repaint();
-        
+
         // Use a stable Area configuration:
         // - fixed_pos: anchor to button's right-bottom corner
         // - pivot RIGHT_TOP: popup's right-top aligns with anchor, so it expands LEFT
@@ -516,10 +508,10 @@ impl ObjectListPanel {
                 let popup_frame = egui::Frame::popup(ui.style())
                     .fill(Color32::from_rgb(40, 40, 45))  // Solid dark background
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(80, 80, 85)));
-                
+
                 popup_frame.show(ui, |ui| {
                         ui.set_min_width(100.0);
-                        
+
                         match &self.menu_state.active.clone() {
                             ActiveMenu::None => {}
                             ActiveMenu::Actions { object } => {
@@ -540,12 +532,12 @@ impl ObjectListPanel {
                         }
                     });
             });
-        
+
         // Close menu if an item was clicked
         if item_clicked {
             self.menu_state.active = ActiveMenu::None;
         }
-        
+
         item_clicked
     }
 
@@ -559,7 +551,7 @@ impl ObjectListPanel {
     }
 
     /// Render representation menu (show or hide) - returns true if item clicked
-    /// 
+    ///
     /// # Arguments
     /// * `is_show` - true for show menu, false for hide menu
     fn render_representation_menu(
@@ -580,7 +572,7 @@ impl ObjectListPanel {
                 return true;
             }
         }
-        
+
         // Separator and "all/everything" option
         ui.separator();
         let all_label = if is_show { "all" } else { "everything" };
@@ -593,7 +585,7 @@ impl ObjectListPanel {
             actions.push(action);
             return true;
         }
-        
+
         false
     }
 
@@ -660,7 +652,7 @@ impl ObjectListPanel {
                 return true;
             }
         }
-        
+
         false
     }
 }

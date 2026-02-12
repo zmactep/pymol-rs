@@ -29,7 +29,7 @@ impl UiConfig {
         Self {
             show_output_panel: true,
             show_control_panel: true,
-            show_sequence_panel: true,
+            show_sequence_panel: false,
             output_panel_height: 150.0,
             right_panel_width: 200.0,
         }

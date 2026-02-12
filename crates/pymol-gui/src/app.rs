@@ -541,7 +541,7 @@ impl App {
         let full_output = {
             let output = &mut self.output;
             let command_line = &mut self.command_line;
-            let ui_config = &self.view.ui_config;
+            let ui_config = &mut self.view.ui_config;
             let registry = &self.state.registry;
             let selections = &self.state.selections;
             let named_colors = &self.state.named_colors;
@@ -580,8 +580,31 @@ impl App {
                     egui::SidePanel::right("right_panel")
                         .default_width(ui_config.right_panel_width)
                         .show(ctx, |ui| {
+                            let panel_x_range = ui.max_rect().x_range();
+
+                            // Bottom toolbar (pinned below the scrollable list)
+                            egui::TopBottomPanel::bottom("right_panel_toolbar")
+                                .show_separator_line(false)
+                                .show_inside(ui, |ui| {
+                                    // Full-width separator using the outer panel's x range
+                                    let y = ui.max_rect().top();
+                                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+                                    ui.painter().hline(panel_x_range, y, stroke);
+                                    ui.add_space(4.0);
+
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let size = ui.spacing().interact_size.y;
+                                        let btn = egui::Button::new("S")
+                                            .min_size(egui::vec2(size, size))
+                                            .selected(ui_config.show_sequence_panel);
+                                        if ui.add(btn).on_hover_text("Sequence viewer").clicked() {
+                                            ui_config.show_sequence_panel = !ui_config.show_sequence_panel;
+                                        }
+                                    });
+                                });
+
+                            // Scrollable object list fills remaining space
                             egui::ScrollArea::vertical().show(ui, |ui| {
-                                // Object list with selections (stateful panel)
                                 object_actions = object_list_panel.show(ui, registry, selections);
                             });
                         });
@@ -639,6 +662,8 @@ impl App {
                 if !pending_messages.is_empty() {
                     NotificationOverlay::show(ctx, &pending_messages);
                 }
+
+
             })
         };
 
