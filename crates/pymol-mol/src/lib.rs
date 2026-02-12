@@ -65,8 +65,8 @@ pub use index::{AtomIndex, BondIndex, CoordIndex, StateIndex, INVALID_INDEX};
 pub use molecule::{MoleculeBuilder, ObjectMolecule};
 pub use residue::{
     atoms_same_chain, atoms_same_residue, atoms_same_segment, is_amino_acid, is_nucleotide,
-    is_water, ChainIterator, ChainView, ResidueIterator, ResidueKey, ResidueView,
-    AMINO_ACIDS, NUCLEOTIDES, WATER_NAMES,
+    is_water, nucleotide_to_char, residue_to_char, three_to_one, ChainIterator, ChainView,
+    ResidueIterator, ResidueKey, ResidueView, AMINO_ACIDS, NUCLEOTIDES, WATER_NAMES,
 };
 pub use secondary::SecondaryStructure;
 

@@ -248,6 +248,45 @@ pub fn atoms_same_segment(a: &Atom, b: &Atom) -> bool {
     a.residue.segi == b.residue.segi
 }
 
+/// Convert 3-letter amino acid code to 1-letter code
+pub fn three_to_one(resn: &str) -> Option<char> {
+    match resn {
+        "ALA" => Some('A'), "ARG" => Some('R'), "ASN" => Some('N'),
+        "ASP" => Some('D'), "CYS" => Some('C'), "GLN" => Some('Q'),
+        "GLU" => Some('E'), "GLY" => Some('G'), "HIS" => Some('H'),
+        "ILE" => Some('I'), "LEU" => Some('L'), "LYS" => Some('K'),
+        "MET" => Some('M'), "PHE" => Some('F'), "PRO" => Some('P'),
+        "SER" => Some('S'), "THR" => Some('T'), "TRP" => Some('W'),
+        "TYR" => Some('Y'), "VAL" => Some('V'),
+        // Histidine protonation variants
+        "HID" | "HIE" | "HIP" => Some('H'),
+        // Cysteine variants
+        "CYX" => Some('C'),
+        // Non-standard but common
+        "MSE" => Some('M'), "SEC" => Some('U'), "PYL" => Some('O'),
+        _ => None,
+    }
+}
+
+/// Convert nucleotide residue name to single character
+pub fn nucleotide_to_char(resn: &str) -> Option<char> {
+    match resn {
+        "DA" | "A" | "ADE" => Some('A'),
+        "DT" | "T" | "THY" => Some('T'),
+        "DG" | "G" | "GUA" => Some('G'),
+        "DC" | "C" | "CYT" => Some('C'),
+        "U" | "URA" => Some('U'),
+        _ => None,
+    }
+}
+
+/// Get display character for any residue (amino acid, nucleotide, or '?' for unknown)
+pub fn residue_to_char(resn: &str) -> char {
+    three_to_one(resn)
+        .or_else(|| nucleotide_to_char(resn))
+        .unwrap_or('?')
+}
+
 /// Standard amino acid residue names (3-letter codes)
 pub const AMINO_ACIDS: &[&str] = &[
     "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
@@ -400,5 +439,80 @@ mod tests {
         assert!(is_water("HOH"));
         assert!(is_water("WAT"));
         assert!(!is_water("ALA"));
+    }
+
+    #[test]
+    fn test_three_to_one_standard() {
+        assert_eq!(three_to_one("ALA"), Some('A'));
+        assert_eq!(three_to_one("ARG"), Some('R'));
+        assert_eq!(three_to_one("ASN"), Some('N'));
+        assert_eq!(three_to_one("ASP"), Some('D'));
+        assert_eq!(three_to_one("CYS"), Some('C'));
+        assert_eq!(three_to_one("GLN"), Some('Q'));
+        assert_eq!(three_to_one("GLU"), Some('E'));
+        assert_eq!(three_to_one("GLY"), Some('G'));
+        assert_eq!(three_to_one("HIS"), Some('H'));
+        assert_eq!(three_to_one("ILE"), Some('I'));
+        assert_eq!(three_to_one("LEU"), Some('L'));
+        assert_eq!(three_to_one("LYS"), Some('K'));
+        assert_eq!(three_to_one("MET"), Some('M'));
+        assert_eq!(three_to_one("PHE"), Some('F'));
+        assert_eq!(three_to_one("PRO"), Some('P'));
+        assert_eq!(three_to_one("SER"), Some('S'));
+        assert_eq!(three_to_one("THR"), Some('T'));
+        assert_eq!(three_to_one("TRP"), Some('W'));
+        assert_eq!(three_to_one("TYR"), Some('Y'));
+        assert_eq!(three_to_one("VAL"), Some('V'));
+    }
+
+    #[test]
+    fn test_three_to_one_variants() {
+        // Histidine protonation variants
+        assert_eq!(three_to_one("HID"), Some('H'));
+        assert_eq!(three_to_one("HIE"), Some('H'));
+        assert_eq!(three_to_one("HIP"), Some('H'));
+        // Cysteine variant
+        assert_eq!(three_to_one("CYX"), Some('C'));
+        // Non-standard
+        assert_eq!(three_to_one("MSE"), Some('M'));
+        assert_eq!(three_to_one("SEC"), Some('U'));
+        assert_eq!(three_to_one("PYL"), Some('O'));
+    }
+
+    #[test]
+    fn test_three_to_one_unknown() {
+        assert_eq!(three_to_one("HOH"), None);
+        assert_eq!(three_to_one("ZZZ"), None);
+        assert_eq!(three_to_one(""), None);
+    }
+
+    #[test]
+    fn test_nucleotide_to_char() {
+        // DNA
+        assert_eq!(nucleotide_to_char("DA"), Some('A'));
+        assert_eq!(nucleotide_to_char("DT"), Some('T'));
+        assert_eq!(nucleotide_to_char("DG"), Some('G'));
+        assert_eq!(nucleotide_to_char("DC"), Some('C'));
+        // RNA
+        assert_eq!(nucleotide_to_char("A"), Some('A'));
+        assert_eq!(nucleotide_to_char("U"), Some('U'));
+        assert_eq!(nucleotide_to_char("G"), Some('G'));
+        assert_eq!(nucleotide_to_char("C"), Some('C'));
+        // Alternative names
+        assert_eq!(nucleotide_to_char("ADE"), Some('A'));
+        assert_eq!(nucleotide_to_char("THY"), Some('T'));
+        assert_eq!(nucleotide_to_char("GUA"), Some('G'));
+        assert_eq!(nucleotide_to_char("CYT"), Some('C'));
+        assert_eq!(nucleotide_to_char("URA"), Some('U'));
+        // Unknown
+        assert_eq!(nucleotide_to_char("HOH"), None);
+    }
+
+    #[test]
+    fn test_residue_to_char() {
+        assert_eq!(residue_to_char("ALA"), 'A');
+        assert_eq!(residue_to_char("DA"), 'A');
+        assert_eq!(residue_to_char("HOH"), '?');
+        assert_eq!(residue_to_char("UNK"), '?');
     }
 }

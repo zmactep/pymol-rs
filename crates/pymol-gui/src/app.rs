@@ -30,7 +30,8 @@ use crate::state::{AppState, CommandLineState, OutputBufferState};
 use crate::view::AppView;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
-use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel};
+use crate::ui::sequence::SequenceAction;
+use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel, SequencePanel};
 use crate::viewer_adapter::ViewerAdapter;
 
 /// Type alias for key action callbacks
@@ -59,6 +60,8 @@ pub struct App {
     // =========================================================================
     /// Object list panel (stateful for menu handling)
     object_list_panel: ObjectListPanel,
+    /// Sequence viewer panel (bottom panel)
+    sequence_panel: SequencePanel,
 
     // =========================================================================
     // Input State
@@ -128,7 +131,7 @@ impl TaskContext for App {
             let settings = DssSettings::default();
             assign_secondary_structure(&mut mol, 0, &settings);
         }
-        
+
         self.state.registry.add(MoleculeObject::with_name(mol, name));
     }
 
@@ -168,6 +171,7 @@ impl App {
             output: OutputBufferState::new(),
             command_line: CommandLineState::new(),
             object_list_panel: ObjectListPanel::new(),
+            sequence_panel: SequencePanel::new(),
             input: InputState::new(),
             last_frame: Instant::now(),
             needs_redraw: true,
@@ -194,13 +198,13 @@ impl App {
     /// * `headless` - If true, the window will not be displayed initially
     pub fn with_ipc(socket_path: &std::path::Path, headless: bool) -> Result<Self, String> {
         let mut app = Self::new(headless);
-        
+
         let server = IpcServer::bind(socket_path)
             .map_err(|e| format!("Failed to create IPC server: {}", e))?;
-        
+
         app.ipc_server = Some(server);
         app.output.print_info("IPC server enabled".to_string());
-        
+
         Ok(app)
     }
 
@@ -277,21 +281,21 @@ impl App {
             })
             .await
             .map_err(|e| format!("No suitable GPU adapter found: {}", e))?;
-        
+
         let info = adapter.get_info();
         let device_name = info.name.clone();
         let backend = format!("{:?}", info.backend);
-        
+
         // Drop adapter so init_gpu can create its own
         drop(adapter);
-        
+
         // Initialize the view's GPU resources
         self.view.init_gpu(window.clone()).await?;
-        
+
         // Set camera aspect ratio
         let size = window.inner_size();
         self.state.camera.set_aspect(size.width as f32 / size.height as f32);
-        
+
         Ok((device_name, backend))
     }
 
@@ -302,7 +306,7 @@ impl App {
         }
 
         self.view.resize(new_size);
-        
+
         // Update camera aspect ratio
         self.state.camera.set_aspect(new_size.width as f32 / new_size.height as f32);
         self.needs_redraw = true;
@@ -351,19 +355,19 @@ impl App {
 
         // Prepare molecules
         let names: Vec<String> = self.state.registry.names().map(|s: &str| s.to_string()).collect();
-        
+
         // Evaluate all visible selections
         let selection_results = self.evaluate_visible_selections(&names);
-        
+
         // Get selection indicator size from settings (selection_width, ID 80)
         // Use a minimum size to ensure visibility
         let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
-        
+
         for name in &names {
             let color_resolver = ColorResolver::new(&self.state.named_colors, &self.state.element_colors, &self.state.chain_colors);
             if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
                 mol_obj.prepare_render(context, &color_resolver, &self.state.settings);
-                
+
                 // Update selection indicator if we have results for this molecule
                 if let Some((_, selection_result)) = selection_results.iter().find(|(n, _)| n == name) {
                     log::debug!("Setting selection indicator for '{}' with {} atoms", name, selection_result.count());
@@ -419,7 +423,7 @@ impl App {
                 let vp_y = viewport.min.y.max(0.0);
                 let vp_w = viewport.width().max(1.0);
                 let vp_h = viewport.height().max(1.0);
-                
+
                 render_pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
                 render_pass.set_scissor_rect(
                     vp_x as u32,
@@ -504,6 +508,7 @@ impl App {
         // Collect data needed for UI without borrowing self in the closure
         let mut commands_to_execute = Vec::new();
         let mut object_actions = Vec::new();
+        let mut sequence_actions = Vec::new();
         let mut viewport_rect_logical = egui::Rect::NOTHING;
 
         // Check for pending async tasks and get their messages before entering the closure
@@ -539,8 +544,10 @@ impl App {
             let ui_config = &self.view.ui_config;
             let registry = &self.state.registry;
             let selections = &self.state.selections;
+            let named_colors = &self.state.named_colors;
             let object_list_panel = &mut self.object_list_panel;
-            
+            let sequence_panel = &mut self.sequence_panel;
+
             self.view.egui_ctx.run(raw_input, |ctx| {
                 // Top panel - output and command line
                 egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -556,6 +563,17 @@ impl App {
                         CommandAction::None => {}
                     }
                 });
+
+                // Bottom panel - sequence viewer
+                if ui_config.show_sequence_panel {
+                    egui::TopBottomPanel::bottom("sequence_panel")
+                        .resizable(true)
+                        .default_height(80.0)
+                        .height_range(40.0..=200.0)
+                        .show(ctx, |ui| {
+                            sequence_actions = sequence_panel.show(ui, registry, named_colors);
+                        });
+                }
 
                 // Right panel - object list only
                 if ui_config.show_control_panel {
@@ -574,13 +592,13 @@ impl App {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         let available = ui.available_size();
-                        
+
                         // If we have a raytraced overlay, render it scaled to fit the viewport
                         if let Some((texture_id, img_width, img_height)) = ray_overlay_info {
                             // Calculate scaling to fit the image in the viewport while maintaining aspect ratio
                             let img_aspect = img_width as f32 / img_height as f32;
                             let vp_aspect = available.x / available.y;
-                            
+
                             let (display_width, display_height) = if img_aspect > vp_aspect {
                                 // Image is wider than viewport - fit to width
                                 (available.x, available.x / img_aspect)
@@ -588,19 +606,19 @@ impl App {
                                 // Image is taller than viewport - fit to height
                                 (available.y * img_aspect, available.y)
                             };
-                            
+
                             // Center the image in the viewport
                             let offset_x = (available.x - display_width) / 2.0;
                             let offset_y = (available.y - display_height) / 2.0;
-                            
+
                             // Allocate space for interaction
                             let (rect, response) = ui.allocate_exact_size(available, egui::Sense::hover());
-                            
+
                             let image_rect = egui::Rect::from_min_size(
                                 egui::pos2(rect.min.x + offset_x, rect.min.y + offset_y),
                                 egui::vec2(display_width, display_height),
                             );
-                            
+
                             // Render the raytraced image
                             ui.painter().image(
                                 texture_id,
@@ -608,7 +626,7 @@ impl App {
                                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                                 egui::Color32::WHITE,
                             );
-                            
+
                             response
                         } else {
                             // No overlay - just allocate the space for 3D rendering
@@ -643,13 +661,27 @@ impl App {
         }
 
         // Process commands and actions
-        let has_actions = !commands_to_execute.is_empty() || !object_actions.is_empty();
+        let has_actions = !commands_to_execute.is_empty()
+            || !object_actions.is_empty()
+            || !sequence_actions.is_empty();
         for cmd in commands_to_execute {
             // Errors are displayed in the GUI output, no need to propagate
             let _ = self.execute_command(&cmd);
         }
         for action in object_actions {
             self.handle_object_action(action);
+        }
+        for action in sequence_actions {
+            match action {
+                SequenceAction::Execute(cmd) => {
+                    let _ = self.execute_command(&cmd);
+                }
+            }
+        }
+
+        // Sync 3D selection highlights to sequence panel
+        if has_actions {
+            self.sync_selection_to_sequence();
         }
 
         // Check if egui needs a repaint (e.g., for popup menus, animations, etc.)
@@ -667,7 +699,7 @@ impl App {
         }
 
         let clipped_primitives = self.view.egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
-        
+
         Some((clipped_primitives, full_output.textures_delta))
     }
 
@@ -785,7 +817,7 @@ impl App {
         // Use a fresh executor to avoid borrowing issues with self
         // The executor is stateless for single command execution
         let mut executor = CommandExecutor::new();
-        
+
         // Execute the command using the proper CommandExecutor
         // Use do_with_options to capture output messages
         match executor.do_with_options(&mut adapter, cmd, true, false) {
@@ -892,7 +924,7 @@ impl App {
                 log::debug!("IPC CallbackResponse: id={}, success={}", id, success);
                 // This is handled by the async task system via the server's pending callbacks
                 let _ = server.handle_callback_response(request);
-                
+
                 // Also display output immediately
                 for msg in output {
                     match msg.kind {
@@ -901,22 +933,22 @@ impl App {
                         IpcOutputKind::Error => self.output.print_error(msg.text.clone()),
                     }
                 }
-                
+
                 if !success {
                     if let Some(err) = error {
                         self.output.print_error(err.clone());
                     }
                 }
-                
+
                 self.needs_redraw = true;
                 None // No response needed
             }
 
             IpcRequest::GetState { id } => {
                 // TODO: Implement state serialization
-                Some(IpcResponse::Value { 
-                    id: *id, 
-                    value: serde_json::json!({}) 
+                Some(IpcResponse::Value {
+                    id: *id,
+                    value: serde_json::json!({})
                 })
             }
 
@@ -924,9 +956,9 @@ impl App {
                 let names: Vec<String> = self.state.registry.names()
                     .map(|s| s.to_string())
                     .collect();
-                Some(IpcResponse::Value { 
-                    id: *id, 
-                    value: serde_json::json!(names) 
+                Some(IpcResponse::Value {
+                    id: *id,
+                    value: serde_json::json!(names)
                 })
             }
 
@@ -939,9 +971,9 @@ impl App {
                         }
                     }
                 }
-                Some(IpcResponse::Value { 
-                    id: *id, 
-                    value: serde_json::json!(count) 
+                Some(IpcResponse::Value {
+                    id: *id,
+                    value: serde_json::json!(count)
                 })
             }
 
@@ -1081,6 +1113,49 @@ impl App {
         results
     }
 
+    /// Sync the current "sele" selection to the sequence panel highlights
+    fn sync_selection_to_sequence(&mut self) {
+        use std::collections::HashSet;
+
+        let mut highlighted = HashSet::new();
+
+        // Look for the "sele" selection (the default selection name)
+        if let Some(entry) = self.state.selections.get("sele") {
+            let expression = entry.expression.clone();
+
+            for name in self.state.registry.names() {
+                if let Some(mol_obj) = self.state.registry.get_molecule(name) {
+                    let mol = mol_obj.molecule();
+
+                    let result = match pymol_select::select(mol, &expression) {
+                        Ok(r) => r,
+                        Err(_) => continue,
+                    };
+
+                    if !result.any() {
+                        continue;
+                    }
+
+                    // Map selected atoms to residues
+                    for residue in mol.residues() {
+                        let any_selected = residue.atom_range.clone().any(|idx| {
+                            result.contains_index(idx)
+                        });
+                        if any_selected {
+                            highlighted.insert((
+                                name.to_string(),
+                                residue.chain().to_string(),
+                                residue.resv(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        self.sequence_panel.update_highlights(highlighted);
+    }
+
     /// Handle object list actions
     fn handle_object_action(&mut self, action: ObjectAction) {
         match action {
@@ -1175,7 +1250,7 @@ impl App {
     }
 
     /// Process accumulated input and update camera
-    /// 
+    ///
     /// This processes mouse deltas accumulated in InputState and applies them
     /// to the camera. Called once per frame in update().
     fn process_input(&mut self) {
@@ -1457,7 +1532,7 @@ impl ApplicationHandler for App {
         // not just when a client is already connected.
         if self.ipc_server.is_some() {
             self.process_ipc();
-            
+
             // When IPC is enabled, use a timeout-based wake-up to periodically
             // check for connections and requests. This is needed for:
             // - Headless mode: no user interaction generates events
@@ -1465,17 +1540,17 @@ impl ApplicationHandler for App {
             // This avoids 100% CPU usage while still being responsive.
             use std::time::{Duration, Instant};
             use winit::event_loop::ControlFlow;
-            
+
             // Wake up every 50ms to check for IPC requests
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(50)
             ));
-            
+
             // Check for quit request
             if self.quit_requested {
                 event_loop.exit();
             }
-            
+
             // In GUI mode, request a redraw if IPC commands modified state
             if !self.headless && self.needs_redraw {
                 self.request_redraw();

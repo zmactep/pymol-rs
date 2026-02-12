@@ -8,6 +8,7 @@ pub mod movie;
 pub mod notification;
 pub mod objects;
 pub mod output;
+pub mod sequence;
 
 pub use command::CommandLinePanel;
 pub use completion::{generate_completions, CompletionResult};
@@ -15,3 +16,4 @@ pub use movie::{MovieAction, MoviePanel};
 pub use notification::NotificationOverlay;
 pub use objects::ObjectListPanel;
 pub use output::OutputPanel;
+pub use sequence::SequencePanel;
