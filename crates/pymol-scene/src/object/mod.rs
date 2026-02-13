@@ -211,6 +211,9 @@ pub trait Object: Send + Sync {
             (min.z + max.z) * 0.5,
         ))
     }
+
+    /// Set the object name
+    fn set_name(&mut self, name: String);
 }
 
 /// Object registry for managing named objects
@@ -223,6 +226,8 @@ pub struct ObjectRegistry {
     render_order: Vec<String>,
     /// Counter for generating unique names
     next_id: u32,
+    /// Generation counter, incremented on structural changes (add/remove/rename)
+    generation: u64,
 }
 
 impl Default for ObjectRegistry {
@@ -238,6 +243,7 @@ impl ObjectRegistry {
             objects: AHashMap::new(),
             render_order: Vec::new(),
             next_id: 1,
+            generation: 0,
         }
     }
 
@@ -251,6 +257,11 @@ impl ObjectRegistry {
         self.objects.is_empty()
     }
 
+    /// Get the generation counter (incremented on structural changes)
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Add an object to the registry
     ///
     /// Returns the name used for the object. If an object with the same name
@@ -260,14 +271,12 @@ impl ObjectRegistry {
         self.render_order.retain(|n| n != &name);
         self.render_order.push(name.clone());
         self.objects.insert(name, Box::new(obj));
+        self.generation += 1;
         self.render_order.last().map(|s| s.as_str()).unwrap()
     }
 
     /// Add an object with an auto-generated name
-    pub fn add_with_name<O: Object + 'static>(&mut self, mut obj: O, base_name: &str) -> String
-    where
-        O: ObjectWithName,
-    {
+    pub fn add_with_name<O: Object + 'static>(&mut self, mut obj: O, base_name: &str) -> String {
         let name = self.generate_unique_name(base_name);
         obj.set_name(name.clone());
         self.add(obj);
@@ -292,7 +301,11 @@ impl ObjectRegistry {
     /// Remove an object by name
     pub fn remove(&mut self, name: &str) -> Option<Box<dyn Object>> {
         self.render_order.retain(|n| n != name);
-        self.objects.remove(name)
+        let removed = self.objects.remove(name);
+        if removed.is_some() {
+            self.generation += 1;
+        }
+        removed
     }
 
     /// Get an object by name
@@ -685,7 +698,9 @@ impl ObjectRegistry {
             return Err(SceneError::ObjectExists(new_name.to_string()));
         }
 
-        if let Some(obj) = self.objects.remove(old_name) {
+        if let Some(mut obj) = self.objects.remove(old_name) {
+            // Update the internal name field
+            obj.set_name(new_name.to_string());
             self.objects.insert(new_name.to_string(), obj);
 
             // Update render order
@@ -696,20 +711,33 @@ impl ObjectRegistry {
             }
         }
 
+        // Update group children references
+        let old = old_name.to_string();
+        let new = new_name.to_string();
+        for obj in self.objects.values_mut() {
+            if obj.object_type() == ObjectType::Group {
+                let ptr = obj.as_mut() as *mut dyn Object;
+                let group = unsafe { &mut *(ptr as *mut GroupObject) };
+                for child in group.children_mut() {
+                    if *child == old {
+                        *child = new.clone();
+                    }
+                }
+            }
+        }
+
+        self.generation += 1;
         Ok(())
     }
 
     /// Clear all objects
     pub fn clear(&mut self) {
+        if !self.objects.is_empty() {
+            self.generation += 1;
+        }
         self.objects.clear();
         self.render_order.clear();
     }
-}
-
-/// Trait for objects that can have their name set
-pub trait ObjectWithName {
-    /// Set the object name
-    fn set_name(&mut self, name: String);
 }
 
 #[cfg(test)]
@@ -750,6 +778,10 @@ mod tests {
 
         fn extent(&self) -> Option<(Vec3, Vec3)> {
             None
+        }
+
+        fn set_name(&mut self, name: String) {
+            self.name = name;
         }
     }
 

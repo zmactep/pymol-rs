@@ -618,20 +618,20 @@ impl Viewer {
         // Prepare molecules for rendering
         // Create color resolver with borrowed data - need to avoid borrowing self during registry iteration
         let names: Vec<_> = self.registry.names().map(|s| s.to_string()).collect();
-        
+
         // Evaluate all visible selections using the SelectionManager
         let selection_results = self.selections.evaluate_visible(&self.registry);
-        
+
         // Get selection indicator size from settings (selection_width, ID 80)
         // Use a minimum size to ensure visibility
         let selection_width = self.settings.get_float(pymol_settings::id::selection_width).max(6.0);
-        
+
         for name in &names {
             // Create color resolver fresh each iteration to avoid borrow conflicts
             let color_resolver = ColorResolver::new(&self.named_colors, &self.element_colors, &self.chain_colors);
             if let Some(mol_obj) = self.registry.get_molecule_mut(name) {
                 mol_obj.prepare_render(context, &color_resolver, &self.settings);
-                
+
                 // Update selection indicator if we have results for this molecule
                 if let Some((_, selection_result)) = selection_results.iter().find(|(n, _)| n == name) {
                     mol_obj.set_selection_indicator_with_size(selection_result, context, Some(selection_width));
@@ -1080,6 +1080,14 @@ impl ViewerLike for Viewer {
             self.needs_redraw = true;
         }
         removed
+    }
+
+    fn rename_selection(&mut self, old_name: &str, new_name: &str) -> bool {
+        let renamed = self.selections.rename(old_name, new_name);
+        if renamed {
+            self.needs_redraw = true;
+        }
+        renamed
     }
 
     fn selection_names(&self) -> Vec<String> {

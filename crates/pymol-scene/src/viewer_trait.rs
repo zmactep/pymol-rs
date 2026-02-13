@@ -88,6 +88,9 @@ pub trait ViewerLike {
     /// Remove a named selection, returns true if it existed
     fn remove_selection(&mut self, name: &str) -> bool;
 
+    /// Rename a named selection, returns true if it existed and was renamed
+    fn rename_selection(&mut self, old_name: &str, new_name: &str) -> bool;
+
     /// Get all named selection names
     fn selection_names(&self) -> Vec<String>;
 

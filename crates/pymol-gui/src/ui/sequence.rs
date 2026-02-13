@@ -9,7 +9,37 @@ use std::ops::Range;
 use egui::{Color32, RichText, Ui};
 use pymol_color::NamedColors;
 use pymol_mol::{residue_to_char, ObjectMolecule};
-use pymol_scene::ObjectRegistry;
+use pymol_scene::{Object, ObjectRegistry};
+
+/// Compress a sorted list of residue numbers into range notation.
+/// E.g., `[74, 75, 76, 77, 80, 85, 86, 87]` → `"74-77+80+85-87"`
+fn compress_resi_list(values: &[i32]) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    let mut start = values[0];
+    let mut end = values[0];
+    for &v in &values[1..] {
+        if v == end + 1 {
+            end = v;
+        } else {
+            if start == end {
+                parts.push(start.to_string());
+            } else {
+                parts.push(format!("{}-{}", start, end));
+            }
+            start = v;
+            end = v;
+        }
+    }
+    if start == end {
+        parts.push(start.to_string());
+    } else {
+        parts.push(format!("{}-{}", start, end));
+    }
+    parts.join("+")
+}
 
 /// Single residue entry in the sequence viewer
 #[derive(Debug, Clone)]
@@ -49,6 +79,10 @@ pub struct SequencePanel {
     sequences: Vec<SeqObject>,
     /// Number of objects when cache was last built
     cached_object_count: usize,
+    /// Number of enabled objects when cache was last built
+    cached_enabled_count: usize,
+    /// Registry generation when cache was last built
+    cached_generation: u64,
     /// Currently highlighted residues from 3D selection: (object_name, chain_id, resv)
     highlighted: HashSet<(String, String, i32)>,
     /// Active drag start: (object_index, chain_index, start_residue_index)
@@ -68,6 +102,8 @@ impl SequencePanel {
         Self {
             sequences: Vec::new(),
             cached_object_count: 0,
+            cached_enabled_count: 0,
+            cached_generation: 0,
             highlighted: HashSet::new(),
             drag_start: None,
             drag_end: None,
@@ -85,6 +121,9 @@ impl SequencePanel {
 
         for name in registry.names() {
             if let Some(mol_obj) = registry.get_molecule(name) {
+                if !mol_obj.is_enabled() {
+                    continue;
+                }
                 let mol = mol_obj.molecule();
                 let seq_obj = build_seq_object(name, mol);
                 if !seq_obj.chains.is_empty() {
@@ -94,12 +133,15 @@ impl SequencePanel {
         }
 
         self.cached_object_count = registry.names().count();
+        self.cached_enabled_count = registry.enabled_objects().count();
+        self.cached_generation = registry.generation();
     }
 
-    /// Check if cache needs rebuilding (simple heuristic: object count changed)
+    /// Check if cache needs rebuilding (object count, enabled count, or generation changed)
     fn needs_rebuild(&self, registry: &ObjectRegistry) -> bool {
-        let count = registry.names().count();
-        count != self.cached_object_count
+        registry.names().count() != self.cached_object_count
+            || registry.enabled_objects().count() != self.cached_enabled_count
+            || registry.generation() != self.cached_generation
     }
 
     /// Compute the desired panel height based on the number of objects and chains.
@@ -112,12 +154,9 @@ impl SequencePanel {
         }
         let row_height = 14.0;
         let ruler_height = 10.0;
-        let obj_name_char_h = 11.0;
         let mut h = 0.0;
         for seq_obj in &self.sequences {
-            let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
-            let name_h = seq_obj.object_name.len() as f32 * obj_name_char_h;
-            h += chains_h.max(name_h);
+            h += seq_obj.chains.len() as f32 * (ruler_height + row_height);
             h += 2.0; // spacing after object
         }
         h + 8.0 // panel padding
@@ -159,50 +198,47 @@ impl SequencePanel {
         let label_font = egui::FontId::new(12.0, egui::FontFamily::Monospace);
         let label_color = Color32::from_rgb(180, 180, 180);
         let separator_color = Color32::from_rgb(60, 60, 60);
-        let obj_name_width = 14.0;
-        let obj_name_char_h = 11.0;
+        let obj_name_width = 40.0;
         let label_width = cw * 2.5; // enough for "D:" etc.
         let spacing = 2.0;
         let n_objects = self.sequences.len();
 
-        // Pre-compute per-object heights (must fit both chains and vertical name)
+        // Pre-compute per-object heights
         let obj_heights: Vec<f32> = self
             .sequences
             .iter()
-            .map(|seq_obj| {
-                let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
-                let name_h = seq_obj.object_name.len() as f32 * obj_name_char_h;
-                chains_h.max(name_h)
-            })
+            .map(|seq_obj| seq_obj.chains.len() as f32 * (ruler_height + row_height))
             .collect();
 
         // Three-column layout: vertical object names | chain labels | scrollable sequences
         ui.horizontal(|ui| {
-            // Column 1: vertical object names (fixed)
+            // Column 1: horizontal object names (fixed, truncated)
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (i, seq_obj) in self.sequences.iter().enumerate() {
                     let obj_height = obj_heights[i];
-                    let (rect, _) = ui.allocate_exact_size(
+                    let (rect, response) = ui.allocate_exact_size(
                         egui::vec2(obj_name_width, obj_height),
                         egui::Sense::hover(),
                     );
                     let painter = ui.painter_at(rect);
-                    // Paint characters stacked vertically, centered
                     let name = &seq_obj.object_name;
-                    let total_text_h = name.len() as f32 * obj_name_char_h;
-                    let start_y = rect.center().y - total_text_h / 2.0;
-                    for (ci, ch) in name.chars().enumerate() {
-                        painter.text(
-                            egui::pos2(rect.center().x, start_y + ci as f32 * obj_name_char_h),
-                            egui::Align2::CENTER_TOP,
-                            ch.to_string(),
-                            obj_name_font.clone(),
-                            obj_name_color,
-                        );
+                    let display_name = if name.len() > 4 {
+                        format!("{}...", &name[..3])
+                    } else {
+                        name.clone()
+                    };
+                    painter.text(
+                        egui::pos2(rect.min.x, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        &display_name,
+                        obj_name_font.clone(),
+                        obj_name_color,
+                    );
+                    if name.len() > 4 {
+                        response.on_hover_text(name);
                     }
                     if i + 1 < n_objects {
-                        // Separator line between objects
                         let y = rect.max.y + spacing / 2.0;
                         painter.line_segment(
                             [egui::pos2(rect.min.x, y), egui::pos2(rect.max.x + 1000.0, y)],
@@ -216,15 +252,7 @@ impl SequencePanel {
             // Column 2: chain labels (fixed)
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                for (i, seq_obj) in self.sequences.iter().enumerate() {
-                    let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
-                    let extra = obj_heights[i] - chains_h;
-                    if extra > 0.0 {
-                        ui.allocate_exact_size(
-                            egui::vec2(label_width, extra / 2.0),
-                            egui::Sense::hover(),
-                        );
-                    }
+                for seq_obj in self.sequences.iter() {
                     for chain in seq_obj.chains.iter() {
                         // Ruler spacer
                         ui.allocate_exact_size(
@@ -245,12 +273,6 @@ impl SequencePanel {
                             label_color,
                         );
                     }
-                    if extra > 0.0 {
-                        ui.allocate_exact_size(
-                            egui::vec2(label_width, extra - extra / 2.0),
-                            egui::Sense::hover(),
-                        );
-                    }
                     ui.add_space(spacing);
                 }
             });
@@ -263,14 +285,6 @@ impl SequencePanel {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (obj_idx, seq_obj) in self.sequences.iter().enumerate() {
-                            let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
-                            let extra = obj_heights[obj_idx] - chains_h;
-                            if extra > 0.0 {
-                                ui.allocate_exact_size(
-                                    egui::vec2(0.0, extra / 2.0),
-                                    egui::Sense::hover(),
-                                );
-                            }
                             for (chain_idx, chain) in seq_obj.chains.iter().enumerate() {
                                 render_chain_sequence(
                                     ui,
@@ -284,12 +298,6 @@ impl SequencePanel {
                                     drag_start,
                                     drag_end,
                                     &mut actions,
-                                );
-                            }
-                            if extra > 0.0 {
-                                ui.allocate_exact_size(
-                                    egui::vec2(0.0, extra - extra / 2.0),
-                                    egui::Sense::hover(),
                                 );
                             }
                             ui.add_space(spacing);
@@ -454,15 +462,13 @@ fn render_chain_sequence(
                 if let Some(d_end_idx) = *drag_end {
                     let lo = d_start_idx.min(d_end_idx);
                     let hi = d_start_idx.max(d_end_idx);
-                    let resi_list: Vec<String> = chain.residues[lo..=hi]
-                        .iter()
-                        .map(|r| r.resv.to_string())
-                        .collect();
+                    let resv_values: Vec<i32> =
+                        chain.residues[lo..=hi].iter().map(|r| r.resv).collect();
                     let expr = format!(
                         "model {} and chain {} and resi {}",
                         object_name,
                         chain.chain_id,
-                        resi_list.join("+")
+                        compress_resi_list(&resv_values)
                     );
                     let modifiers = ui.input(|i| i.modifiers);
                     if modifiers.command || modifiers.ctrl {

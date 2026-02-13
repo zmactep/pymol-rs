@@ -5,7 +5,7 @@
 
 use lin_alg::f32::Vec3;
 
-use super::{Object, ObjectState, ObjectType, ObjectWithName};
+use super::{Object, ObjectState, ObjectType};
 
 /// A group object for hierarchical organization
 ///
@@ -144,9 +144,7 @@ impl Object for GroupObject {
     fn set_current_state(&mut self, _state: usize) -> bool {
         false
     }
-}
 
-impl ObjectWithName for GroupObject {
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -179,19 +177,19 @@ mod tests {
     #[test]
     fn test_add_remove_children() {
         let mut group = GroupObject::new("my_group");
-        
+
         group.add_child("obj1".to_string());
         group.add_child("obj2".to_string());
         assert_eq!(group.len(), 2);
-        
+
         // Adding duplicate should be ignored
         group.add_child("obj1".to_string());
         assert_eq!(group.len(), 2);
-        
+
         assert!(group.remove_child("obj1"));
         assert_eq!(group.len(), 1);
         assert!(!group.contains_child("obj1"));
-        
+
         // Removing non-existent child
         assert!(!group.remove_child("nonexistent"));
     }
@@ -200,10 +198,10 @@ mod tests {
     fn test_group_open_state() {
         let mut group = GroupObject::new("my_group");
         assert!(group.is_open());
-        
+
         group.set_open(false);
         assert!(!group.is_open());
-        
+
         group.toggle_open();
         assert!(group.is_open());
     }

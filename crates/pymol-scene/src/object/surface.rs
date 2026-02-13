@@ -6,7 +6,7 @@
 use lin_alg::f32::Vec3;
 use pymol_render::{MeshRep, MeshVertex, RenderContext, Representation, SurfaceType};
 
-use super::{Object, ObjectState, ObjectType, ObjectWithName};
+use super::{Object, ObjectState, ObjectType};
 
 /// A standalone surface object
 ///
@@ -176,7 +176,7 @@ impl SurfaceObject {
         }
 
         let rep = self.cached_rep.get_or_insert_with(MeshRep::new);
-        
+
         // Clone vertices and indices for set_mesh
         let vertices = self.vertices.clone();
         let indices = self.indices.clone();
@@ -256,9 +256,7 @@ impl Object for SurfaceObject {
     fn set_current_state(&mut self, _state: usize) -> bool {
         false
     }
-}
 
-impl ObjectWithName for SurfaceObject {
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -303,7 +301,7 @@ mod tests {
     fn test_surface_from_mesh() {
         let (vertices, indices) = create_test_triangle();
         let surface = SurfaceObject::from_mesh("test", vertices, indices);
-        
+
         assert_eq!(surface.vertex_count(), 3);
         assert_eq!(surface.triangle_count(), 1);
         assert!(!surface.is_empty());
@@ -319,7 +317,7 @@ mod tests {
             "my_protein",
             SurfaceType::SolventAccessible,
         );
-        
+
         assert_eq!(surface.source_molecule(), Some("my_protein"));
         assert_eq!(surface.surface_type(), SurfaceType::SolventAccessible);
     }
@@ -328,7 +326,7 @@ mod tests {
     fn test_surface_extent() {
         let (vertices, indices) = create_test_triangle();
         let surface = SurfaceObject::from_mesh("test", vertices, indices);
-        
+
         let (min, max) = surface.extent().expect("Should have extent");
         assert_eq!(min.x, 0.0);
         assert_eq!(min.y, 0.0);
@@ -340,7 +338,7 @@ mod tests {
     fn test_surface_clear() {
         let (vertices, indices) = create_test_triangle();
         let mut surface = SurfaceObject::from_mesh("test", vertices, indices);
-        
+
         assert!(!surface.is_empty());
         surface.clear();
         assert!(surface.is_empty());
@@ -350,7 +348,7 @@ mod tests {
     fn test_surface_dirty_flag() {
         let mut surface = SurfaceObject::new("test");
         assert!(surface.is_dirty());
-        
+
         // Setting mesh marks dirty
         let (vertices, indices) = create_test_triangle();
         surface.set_mesh(vertices, indices);

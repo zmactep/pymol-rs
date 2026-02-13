@@ -12,7 +12,7 @@ use pymol_render::{
 use pymol_select::SelectionResult;
 use pymol_settings::{GlobalSettings, SettingResolver};
 
-use super::{Object, ObjectState, ObjectType, ObjectWithName};
+use super::{Object, ObjectState, ObjectType};
 
 bitflags! {
     /// Flags indicating which aspects of a molecule need rebuilding
@@ -723,9 +723,7 @@ impl Object for MoleculeObject {
     fn settings_mut(&mut self) -> Option<&mut GlobalSettings> {
         self.settings.as_mut()
     }
-}
 
-impl ObjectWithName for MoleculeObject {
     fn set_name(&mut self, name: String) {
         self.molecule.name = name;
     }

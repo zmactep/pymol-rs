@@ -104,7 +104,7 @@ impl Command for RenameCommand {
         r#"
 DESCRIPTION
 
-    "set_name" renames an object.
+    "set_name" renames an object or selection.
 
 USAGE
 
@@ -112,8 +112,8 @@ USAGE
 
 ARGUMENTS
 
-    old_name = string: current object name
-    new_name = string: new object name
+    old_name = string: current object or selection name
+    new_name = string: new name
 
 EXAMPLES
 
@@ -133,10 +133,15 @@ EXAMPLES
             .or_else(|| args.get_named_str("new_name"))
             .ok_or_else(|| CmdError::MissingArgument("new_name".to_string()))?;
 
-        ctx.viewer
-            .objects_mut()
-            .rename(old_name, new_name)
-            .map_err(|e| CmdError::Scene(e.to_string()))?;
+        // Try renaming as an object first, then as a selection
+        let renamed = match ctx.viewer.objects_mut().rename(old_name, new_name) {
+            Ok(()) => true,
+            Err(_) => ctx.viewer.rename_selection(old_name, new_name),
+        };
+
+        if !renamed {
+            return Err(CmdError::ObjectNotFound(old_name.to_string()));
+        }
 
         if !ctx.quiet {
             ctx.print(&format!(" Renamed \"{}\" to \"{}\"", old_name, new_name));

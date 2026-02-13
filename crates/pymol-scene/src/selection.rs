@@ -84,6 +84,18 @@ impl SelectionManager {
         self.selections.keys().cloned().collect()
     }
 
+    /// Rename a named selection
+    ///
+    /// Returns true if the selection existed and was renamed.
+    pub fn rename(&mut self, old_name: &str, new_name: &str) -> bool {
+        if let Some(entry) = self.selections.remove(old_name) {
+            self.selections.insert(new_name.to_string(), entry);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Check if a selection exists
     pub fn contains(&self, name: &str) -> bool {
         self.selections.contains_key(name)
@@ -258,14 +270,14 @@ mod tests {
     #[test]
     fn test_selection_manager_basic() {
         let mut manager = SelectionManager::new();
-        
+
         manager.define("sel1", "chain A");
         assert!(manager.contains("sel1"));
         assert_eq!(manager.get_expression("sel1"), Some("chain A"));
-        
+
         manager.define("sel2", "resn ALA");
         assert_eq!(manager.len(), 2);
-        
+
         assert!(manager.remove("sel1"));
         assert!(!manager.contains("sel1"));
         assert_eq!(manager.len(), 1);
@@ -274,13 +286,13 @@ mod tests {
     #[test]
     fn test_selection_visibility() {
         let mut manager = SelectionManager::new();
-        
+
         manager.define("sel1", "chain A");
         assert!(manager.is_visible("sel1"));
-        
+
         manager.set_visible("sel1", false);
         assert!(!manager.is_visible("sel1"));
-        
+
         manager.set_visible("sel1", true);
         assert!(manager.is_visible("sel1"));
     }
@@ -288,7 +300,7 @@ mod tests {
     #[test]
     fn test_indicate_selection() {
         let mut manager = SelectionManager::new();
-        
+
         manager.indicate("chain B");
         assert!(manager.contains("indicate"));
         assert_eq!(manager.get_expression("indicate"), Some("chain B"));
@@ -298,12 +310,12 @@ mod tests {
     #[test]
     fn test_clear_indication() {
         let mut manager = SelectionManager::new();
-        
+
         manager.define("sel1", "chain A");
         manager.define("sel2", "chain B");
-        
+
         manager.clear_indication();
-        
+
         assert!(!manager.is_visible("sel1"));
         assert!(!manager.is_visible("sel2"));
         assert!(manager.indicated_selection().is_none());

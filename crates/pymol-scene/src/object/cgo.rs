@@ -9,7 +9,7 @@ use pymol_render::{
     SphereRep, SphereVertex, StickRep,
 };
 
-use super::{Object, ObjectState, ObjectType, ObjectWithName};
+use super::{Object, ObjectState, ObjectType};
 
 /// Primitive mode for Begin/End blocks
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -710,9 +710,7 @@ impl Object for CgoObject {
     fn set_current_state(&mut self, _state: usize) -> bool {
         false
     }
-}
 
-impl ObjectWithName for CgoObject {
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -735,10 +733,10 @@ mod tests {
     fn test_cgo_add_sphere() {
         let mut cgo = CgoObject::new("test");
         cgo.add_sphere(Vec3::new(0.0, 0.0, 0.0), 1.0);
-        
+
         assert_eq!(cgo.instructions().len(), 1);
         assert!(!cgo.is_empty());
-        
+
         let extent = cgo.extent().expect("Should have extent");
         assert_eq!(extent.0.x, -1.0);
         assert_eq!(extent.1.x, 1.0);
@@ -754,7 +752,7 @@ mod tests {
             [1.0, 0.0, 0.0, 1.0],
             [0.0, 0.0, 1.0, 1.0],
         );
-        
+
         assert_eq!(cgo.instructions().len(), 1);
         let extent = cgo.extent().expect("Should have extent");
         assert_eq!(extent.0.x, -0.5);
@@ -769,7 +767,7 @@ mod tests {
             Vec3::new(1.0, 0.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
         );
-        
+
         assert_eq!(cgo.instructions().len(), 1);
         let extent = cgo.extent().expect("Should have extent");
         assert_eq!(extent.0.x, 0.0);
@@ -783,7 +781,7 @@ mod tests {
         let mut cgo = CgoObject::new("test");
         cgo.add_sphere(Vec3::new(0.0, 0.0, 0.0), 1.0);
         assert!(!cgo.is_empty());
-        
+
         cgo.clear();
         assert!(cgo.is_empty());
     }
@@ -797,7 +795,7 @@ mod tests {
                 radius: 1.0,
             },
         ];
-        
+
         let cgo = CgoObject::with_instructions("test", instructions);
         assert_eq!(cgo.instructions().len(), 2);
     }
@@ -806,7 +804,7 @@ mod tests {
     fn test_cgo_empty_extent() {
         let cgo = CgoObject::new("test");
         assert!(cgo.extent().is_none());
-        
+
         let mut cgo_with_color = CgoObject::new("test2");
         cgo_with_color.set_color([1.0, 0.0, 0.0, 1.0]);
         assert!(cgo_with_color.extent().is_none());

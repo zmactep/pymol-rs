@@ -6,7 +6,7 @@
 use lin_alg::f32::Vec3;
 use pymol_render::{LineRep, LineVertex, RenderContext, Representation};
 
-use super::{Object, ObjectState, ObjectType, ObjectWithName};
+use super::{Object, ObjectState, ObjectType};
 
 /// A single label entry
 #[derive(Debug, Clone)]
@@ -234,10 +234,10 @@ impl LabelObject {
     /// Build connector lines for labels that have them enabled
     fn build_connectors(&mut self) {
         let _lines = self.connector_lines.get_or_insert_with(LineRep::new);
-        
+
         // Build line vertices for connectors
         let mut vertices: Vec<LineVertex> = Vec::new();
-        
+
         for label in &self.labels {
             if label.connector {
                 // Draw a small cross at the label position to indicate connector
@@ -245,7 +245,7 @@ impl LabelObject {
                 let p = label.position;
                 let size = label.size * 0.1;
                 let color = label.color;
-                
+
                 // Horizontal line
                 vertices.push(LineVertex {
                     position: [p.x - size, p.y, p.z],
@@ -255,7 +255,7 @@ impl LabelObject {
                     position: [p.x + size, p.y, p.z],
                     color,
                 });
-                
+
                 // Vertical line
                 vertices.push(LineVertex {
                     position: [p.x, p.y - size, p.z],
@@ -369,9 +369,7 @@ impl Object for LabelObject {
     fn set_current_state(&mut self, _state: usize) -> bool {
         false
     }
-}
 
-impl ObjectWithName for LabelObject {
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -421,11 +419,11 @@ mod tests {
     #[test]
     fn test_label_object_add_remove() {
         let mut obj = LabelObject::new("labels");
-        
+
         obj.add_text("Label 1", Vec3::new(0.0, 0.0, 0.0));
         obj.add_text("Label 2", Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(obj.len(), 2);
-        
+
         obj.remove_label(0);
         assert_eq!(obj.len(), 1);
         assert_eq!(obj.labels()[0].text, "Label 2");
@@ -436,7 +434,7 @@ mod tests {
         let mut obj = LabelObject::new("labels");
         obj.add_text("A", Vec3::new(0.0, 0.0, 0.0));
         obj.add_text("B", Vec3::new(10.0, 5.0, 2.0));
-        
+
         let (min, max) = obj.extent().expect("Should have extent");
         assert_eq!(min, Vec3::new(0.0, 0.0, 0.0));
         assert_eq!(max, Vec3::new(10.0, 5.0, 2.0));
@@ -447,7 +445,7 @@ mod tests {
         let mut obj = LabelObject::new("labels");
         obj.add_text("A", Vec3::new(0.0, 0.0, 0.0));
         obj.add_text("B", Vec3::new(1.0, 0.0, 0.0));
-        
+
         obj.clear();
         assert!(obj.is_empty());
     }

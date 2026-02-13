@@ -232,6 +232,16 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         removed
     }
 
+    fn rename_selection(&mut self, old_name: &str, new_name: &str) -> bool {
+        if let Some(entry) = self.state.selections.remove(old_name) {
+            self.state.selections.insert(new_name.to_string(), entry);
+            *self.needs_redraw = true;
+            true
+        } else {
+            false
+        }
+    }
+
     fn selection_names(&self) -> Vec<String> {
         self.state.selections.keys().cloned().collect()
     }

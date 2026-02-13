@@ -8,7 +8,7 @@ use pymol_mol::Symmetry;
 use pymol_render::{Grid3D, MeshRep, MeshVertex, RenderContext, Representation};
 use pymol_settings::GlobalSettings;
 
-use super::{Object, ObjectState, ObjectType, ObjectWithName};
+use super::{Object, ObjectState, ObjectType};
 
 /// Data for a single map state
 #[derive(Debug, Clone)]
@@ -259,7 +259,7 @@ impl MapObject {
         let mut indices = Vec::new();
 
         let dims = grid.dims;
-        
+
         // Process each cell
         for z in 0..dims[2] {
             for y in 0..dims[1] {
@@ -358,7 +358,7 @@ impl MapObject {
     /// Compute gradient (normal) at a point using central differences
     fn compute_gradient(grid: &Grid3D, pos: [f32; 3], spacing: f32) -> [f32; 3] {
         let h = spacing * 0.5;
-        
+
         // Sample the grid (simplified - would use trilinear interpolation)
         let sample = |p: [f32; 3]| -> f32 {
             let ix = ((p[0] - grid.origin[0]) / grid.spacing) as usize;
@@ -473,9 +473,7 @@ impl Object for MapObject {
     fn settings_mut(&mut self) -> Option<&mut GlobalSettings> {
         self.settings.as_mut()
     }
-}
 
-impl ObjectWithName for MapObject {
     fn set_name(&mut self, name: String) {
         self.name = name;
     }
@@ -794,7 +792,7 @@ mod tests {
     fn test_map_creation() {
         let grid = Grid3D::from_bounds([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], 1.0, 0.0);
         let map = MapObject::new("test_map", grid);
-        
+
         assert_eq!(map.name(), "test_map");
         assert_eq!(map.object_type(), ObjectType::Map);
         assert!(map.is_enabled());
@@ -805,7 +803,7 @@ mod tests {
     fn test_map_level() {
         let grid = Grid3D::from_bounds([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], 1.0, 0.0);
         let mut map = MapObject::new("test", grid);
-        
+
         assert_eq!(map.level(), 1.0);
         map.set_level(2.5);
         assert_eq!(map.level(), 2.5);
@@ -816,7 +814,7 @@ mod tests {
     fn test_map_display_mode() {
         let grid = Grid3D::from_bounds([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], 1.0, 0.0);
         let mut map = MapObject::new("test", grid);
-        
+
         assert_eq!(map.display_mode(), MapDisplayMode::Isomesh);
         map.set_display_mode(MapDisplayMode::Isosurface);
         assert_eq!(map.display_mode(), MapDisplayMode::Isosurface);
@@ -826,7 +824,7 @@ mod tests {
     fn test_map_extent() {
         let grid = Grid3D::from_bounds([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], 1.0, 0.0);
         let map = MapObject::new("test", grid);
-        
+
         let extent = map.extent().expect("Should have extent");
         assert!(extent.0.x <= 0.0);
         assert!(extent.1.x >= 10.0);
