@@ -51,8 +51,10 @@ pub struct SequencePanel {
     cached_object_count: usize,
     /// Currently highlighted residues from 3D selection: (object_name, chain_id, resv)
     highlighted: HashSet<(String, String, i32)>,
-    /// Last clicked residue for shift-click range selection: (object_index, chain_index, residue_index)
-    last_clicked: Option<(usize, usize, usize)>,
+    /// Active drag start: (object_index, chain_index, start_residue_index)
+    drag_start: Option<(usize, usize, usize)>,
+    /// Current drag end residue index (updated each frame while dragging)
+    drag_end: Option<usize>,
 }
 
 impl Default for SequencePanel {
@@ -67,7 +69,8 @@ impl SequencePanel {
             sequences: Vec::new(),
             cached_object_count: 0,
             highlighted: HashSet::new(),
-            last_clicked: None,
+            drag_start: None,
+            drag_end: None,
         }
     }
 
@@ -99,6 +102,27 @@ impl SequencePanel {
         count != self.cached_object_count
     }
 
+    /// Compute the desired panel height based on the number of objects and chains.
+    pub fn desired_height(&mut self, registry: &ObjectRegistry) -> f32 {
+        if self.needs_rebuild(registry) {
+            self.rebuild_cache(registry);
+        }
+        if self.sequences.is_empty() {
+            return 30.0;
+        }
+        let row_height = 14.0;
+        let ruler_height = 10.0;
+        let obj_name_char_h = 11.0;
+        let mut h = 0.0;
+        for seq_obj in &self.sequences {
+            let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
+            let name_h = seq_obj.object_name.len() as f32 * obj_name_char_h;
+            h += chains_h.max(name_h);
+            h += 2.0; // spacing after object
+        }
+        h + 8.0 // panel padding
+    }
+
     /// Show the sequence panel and return any actions
     pub fn show(
         &mut self,
@@ -124,49 +148,114 @@ impl SequencePanel {
         }
 
         let highlighted = &self.highlighted;
-        let last_clicked = &mut self.last_clicked;
-
-        // Find the longest chain to size the scrollable content
-        let max_residues = self
-            .sequences
-            .iter()
-            .flat_map(|s| s.chains.iter())
-            .map(|c| c.residues.len())
-            .max()
-            .unwrap_or(0);
+        let drag_start = &mut self.drag_start;
+        let drag_end = &mut self.drag_end;
 
         let cw = char_width(ui);
+        let ruler_height = 10.0;
+        let row_height = ui.text_style_height(&egui::TextStyle::Body);
+        let obj_name_font = egui::FontId::new(11.0, egui::FontFamily::Proportional);
+        let obj_name_color = Color32::from_rgb(100, 255, 100);
+        let label_font = egui::FontId::new(12.0, egui::FontFamily::Monospace);
+        let label_color = Color32::from_rgb(180, 180, 180);
+        let separator_color = Color32::from_rgb(60, 60, 60);
+        let obj_name_width = 14.0;
+        let obj_name_char_h = 11.0;
+        let label_width = cw * 2.5; // enough for "D:" etc.
+        let spacing = 2.0;
+        let n_objects = self.sequences.len();
 
-        // Two-column layout: fixed labels on the left, single shared horizontal
-        // scroll area on the right containing all chains' sequences.
+        // Pre-compute per-object heights (must fit both chains and vertical name)
+        let obj_heights: Vec<f32> = self
+            .sequences
+            .iter()
+            .map(|seq_obj| {
+                let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
+                let name_h = seq_obj.object_name.len() as f32 * obj_name_char_h;
+                chains_h.max(name_h)
+            })
+            .collect();
+
+        // Three-column layout: vertical object names | chain labels | scrollable sequences
         ui.horizontal(|ui| {
-            // Left column: object/chain labels (fixed, not scrolled)
+            // Column 1: vertical object names (fixed)
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                for seq_obj in self.sequences.iter() {
-                    // Object name row
-                    ui.label(
-                        RichText::new(&seq_obj.object_name)
-                            .strong()
-                            .color(Color32::from_rgb(100, 255, 100))
-                            .size(11.0),
+                for (i, seq_obj) in self.sequences.iter().enumerate() {
+                    let obj_height = obj_heights[i];
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(obj_name_width, obj_height),
+                        egui::Sense::hover(),
                     );
-                    for chain in seq_obj.chains.iter() {
-                        // Ruler placeholder row (same height as the ruler)
-                        ui.allocate_exact_size(egui::vec2(0.0, 10.0), egui::Sense::hover());
-                        // Sequence row label
-                        ui.label(
-                            RichText::new(format!("{}:", chain.chain_id))
-                                .color(Color32::from_rgb(180, 180, 180))
-                                .family(egui::FontFamily::Monospace)
-                                .size(12.0),
+                    let painter = ui.painter_at(rect);
+                    // Paint characters stacked vertically, centered
+                    let name = &seq_obj.object_name;
+                    let total_text_h = name.len() as f32 * obj_name_char_h;
+                    let start_y = rect.center().y - total_text_h / 2.0;
+                    for (ci, ch) in name.chars().enumerate() {
+                        painter.text(
+                            egui::pos2(rect.center().x, start_y + ci as f32 * obj_name_char_h),
+                            egui::Align2::CENTER_TOP,
+                            ch.to_string(),
+                            obj_name_font.clone(),
+                            obj_name_color,
                         );
                     }
-                    ui.add_space(2.0);
+                    if i + 1 < n_objects {
+                        // Separator line between objects
+                        let y = rect.max.y + spacing / 2.0;
+                        painter.line_segment(
+                            [egui::pos2(rect.min.x, y), egui::pos2(rect.max.x + 1000.0, y)],
+                            egui::Stroke::new(1.0, separator_color),
+                        );
+                    }
+                    ui.add_space(spacing);
                 }
             });
 
-            // Right column: single horizontal scroll for all sequences
+            // Column 2: chain labels (fixed)
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (i, seq_obj) in self.sequences.iter().enumerate() {
+                    let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
+                    let extra = obj_heights[i] - chains_h;
+                    if extra > 0.0 {
+                        ui.allocate_exact_size(
+                            egui::vec2(label_width, extra / 2.0),
+                            egui::Sense::hover(),
+                        );
+                    }
+                    for chain in seq_obj.chains.iter() {
+                        // Ruler spacer
+                        ui.allocate_exact_size(
+                            egui::vec2(label_width, ruler_height),
+                            egui::Sense::hover(),
+                        );
+                        // Chain label aligned with sequence row
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(label_width, row_height),
+                            egui::Sense::hover(),
+                        );
+                        let painter = ui.painter_at(rect);
+                        painter.text(
+                            rect.right_center(),
+                            egui::Align2::RIGHT_CENTER,
+                            format!("{}:", chain.chain_id),
+                            label_font.clone(),
+                            label_color,
+                        );
+                    }
+                    if extra > 0.0 {
+                        ui.allocate_exact_size(
+                            egui::vec2(label_width, extra - extra / 2.0),
+                            egui::Sense::hover(),
+                        );
+                    }
+                    ui.add_space(spacing);
+                }
+            });
+
+            // Column 3: scrollable sequences
             egui::ScrollArea::horizontal()
                 .id_salt("sequence_hscroll")
                 .auto_shrink([false, false])
@@ -174,12 +263,14 @@ impl SequencePanel {
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (obj_idx, seq_obj) in self.sequences.iter().enumerate() {
-                            // Object header spacer (match left column)
-                            ui.allocate_exact_size(
-                                egui::vec2(cw * max_residues as f32, ui.text_style_height(&egui::TextStyle::Body)),
-                                egui::Sense::hover(),
-                            );
-
+                            let chains_h = seq_obj.chains.len() as f32 * (ruler_height + row_height);
+                            let extra = obj_heights[obj_idx] - chains_h;
+                            if extra > 0.0 {
+                                ui.allocate_exact_size(
+                                    egui::vec2(0.0, extra / 2.0),
+                                    egui::Sense::hover(),
+                                );
+                            }
                             for (chain_idx, chain) in seq_obj.chains.iter().enumerate() {
                                 render_chain_sequence(
                                     ui,
@@ -190,11 +281,18 @@ impl SequencePanel {
                                     cw,
                                     named_colors,
                                     highlighted,
-                                    last_clicked,
+                                    drag_start,
+                                    drag_end,
                                     &mut actions,
                                 );
                             }
-                            ui.add_space(2.0);
+                            if extra > 0.0 {
+                                ui.allocate_exact_size(
+                                    egui::vec2(0.0, extra - extra / 2.0),
+                                    egui::Sense::hover(),
+                                );
+                            }
+                            ui.add_space(spacing);
                         }
                     });
                 });
@@ -223,22 +321,26 @@ fn render_chain_sequence(
     cw: f32,
     named_colors: &NamedColors,
     highlighted: &HashSet<(String, String, i32)>,
-    last_clicked: &mut Option<(usize, usize, usize)>,
+    drag_start: &mut Option<(usize, usize, usize)>,
+    drag_end: &mut Option<usize>,
     actions: &mut Vec<SequenceAction>,
 ) {
     let n = chain.residues.len();
+    if n == 0 {
+        return;
+    }
 
     // --- Ruler row: residue numbers above the sequence ---
     let (ruler_rect, _) =
         ui.allocate_exact_size(egui::vec2(cw * n as f32, 10.0), egui::Sense::hover());
-    let painter = ui.painter_at(ruler_rect);
+    let ruler_painter = ui.painter_at(ruler_rect);
     let ruler_font = egui::FontId::new(8.0, egui::FontFamily::Monospace);
     let ruler_color = Color32::from_rgb(120, 120, 120);
 
     for (res_idx, residue) in chain.residues.iter().enumerate() {
         if res_idx == 0 || res_idx % 10 == 0 {
             let x = ruler_rect.min.x + cw * res_idx as f32;
-            painter.text(
+            ruler_painter.text(
                 egui::pos2(x, ruler_rect.min.y),
                 egui::Align2::LEFT_TOP,
                 format!("{}", residue.resv),
@@ -248,99 +350,186 @@ fn render_chain_sequence(
         }
     }
 
-    // --- Sequence row: clickable residue letters ---
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+    // --- Sequence row: single interactive rect with painted characters ---
+    let row_height = ui.text_style_height(&egui::TextStyle::Body);
+    let (seq_rect, response) = ui.allocate_exact_size(
+        egui::vec2(cw * n as f32, row_height),
+        egui::Sense::click_and_drag(),
+    );
 
-        for (res_idx, residue) in chain.residues.iter().enumerate() {
-            let is_highlighted = highlighted.contains(&(
-                object_name.to_string(),
-                chain.chain_id.clone(),
-                residue.resv,
-            ));
+    let painter = ui.painter_at(seq_rect);
+    let seq_font = egui::FontId::new(12.0, egui::FontFamily::Monospace);
+    let seq_font_bold = egui::FontId::new(12.0, egui::FontFamily::Monospace);
 
-            let text_color = resolve_residue_color(residue, named_colors);
+    // Helper: convert pointer x position to residue index
+    let pointer_to_res_idx = |pos: egui::Pos2| -> usize {
+        let rel_x = pos.x - seq_rect.min.x;
+        (rel_x / cw).floor().max(0.0).min((n - 1) as f32) as usize
+    };
 
-            let mut text = RichText::new(residue.display_char.to_string())
-                .family(egui::FontFamily::Monospace)
-                .size(12.0);
+    // Determine the active drag range for this chain (if any)
+    let drag_range = if let Some((d_obj, d_chain, d_start)) = *drag_start {
+        if d_obj == obj_idx && d_chain == chain_idx {
+            drag_end.map(|d_end| {
+                let lo = d_start.min(d_end);
+                let hi = d_start.max(d_end);
+                lo..=hi
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
-            if is_highlighted {
-                text = text.color(Color32::from_rgb(255, 80, 80)).strong();
-            } else {
-                text = text.color(text_color);
+    // Draw drag highlight background
+    if let Some(ref range) = drag_range {
+        let x_start = seq_rect.min.x + cw * (*range.start() as f32);
+        let x_end = seq_rect.min.x + cw * (*range.end() as f32 + 1.0);
+        let highlight_rect = egui::Rect::from_min_max(
+            egui::pos2(x_start, seq_rect.min.y),
+            egui::pos2(x_end, seq_rect.max.y),
+        );
+        painter.rect_filled(
+            highlight_rect,
+            0.0,
+            Color32::from_rgba_premultiplied(255, 180, 200, 80),
+        );
+    }
+
+    // Paint residue characters
+    for (res_idx, residue) in chain.residues.iter().enumerate() {
+        let is_highlighted = highlighted.contains(&(
+            object_name.to_string(),
+            chain.chain_id.clone(),
+            residue.resv,
+        ));
+
+        let is_in_drag = drag_range
+            .as_ref()
+            .is_some_and(|range| range.contains(&res_idx));
+
+        let (text_color, font) = if is_highlighted || is_in_drag {
+            (Color32::from_rgb(255, 80, 80), seq_font_bold.clone())
+        } else {
+            (resolve_residue_color(residue, named_colors), seq_font.clone())
+        };
+
+        let x = seq_rect.min.x + cw * res_idx as f32;
+        painter.text(
+            egui::pos2(x, seq_rect.min.y),
+            egui::Align2::LEFT_TOP,
+            residue.display_char.to_string(),
+            font,
+            text_color,
+        );
+    }
+
+    // --- Interaction logic ---
+
+    // Drag started: record start position
+    if response.drag_started() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let res_idx = pointer_to_res_idx(pos);
+            *drag_start = Some((obj_idx, chain_idx, res_idx));
+            *drag_end = Some(res_idx);
+        }
+    }
+
+    // Dragging: update end position (only if drag originated in this chain)
+    if response.dragged() {
+        if let Some((d_obj, d_chain, _)) = *drag_start {
+            if d_obj == obj_idx && d_chain == chain_idx {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    *drag_end = Some(pointer_to_res_idx(pos));
+                }
             }
+        }
+    }
 
-            let fill = Color32::TRANSPARENT;
-
-            let button = egui::Button::new(text)
-                .fill(fill)
-                .frame(false)
-                .min_size(egui::vec2(cw, 0.0));
-
-            let response = ui.add(button);
-
-            response.clone().on_hover_text(format!(
-                "{}.{} {}",
-                chain.chain_id, residue.resn, residue.resv
-            ));
-
-            if response.clicked() {
-                let modifiers = ui.input(|i| i.modifiers);
-
-                if modifiers.shift {
-                    if let Some((prev_obj, prev_chain, prev_res)) = *last_clicked {
-                        if prev_obj == obj_idx && prev_chain == chain_idx {
-                            let start = prev_res.min(res_idx);
-                            let end = prev_res.max(res_idx);
-                            let resi_list: Vec<String> = chain.residues[start..=end]
-                                .iter()
-                                .map(|r| r.resv.to_string())
-                                .collect();
-                            let expr = format!(
-                                "model {} and chain {} and resi {}",
-                                object_name,
-                                chain.chain_id,
-                                resi_list.join("+")
-                            );
-                            actions.push(SequenceAction::Execute(format!(
-                                "select sele, {}",
-                                expr
-                            )));
-                        }
-                    }
-                } else if modifiers.command || modifiers.ctrl {
+    // Drag stopped: emit selection command and clear drag state
+    if response.drag_stopped() {
+        if let Some((d_obj, d_chain, d_start_idx)) = *drag_start {
+            if d_obj == obj_idx && d_chain == chain_idx {
+                if let Some(d_end_idx) = *drag_end {
+                    let lo = d_start_idx.min(d_end_idx);
+                    let hi = d_start_idx.max(d_end_idx);
+                    let resi_list: Vec<String> = chain.residues[lo..=hi]
+                        .iter()
+                        .map(|r| r.resv.to_string())
+                        .collect();
                     let expr = format!(
                         "model {} and chain {} and resi {}",
-                        object_name, chain.chain_id, residue.resv
+                        object_name,
+                        chain.chain_id,
+                        resi_list.join("+")
                     );
-                    if is_highlighted {
-                        actions.push(SequenceAction::Execute(format!(
-                            "select sele, sele and not ({})",
-                            expr
-                        )));
-                    } else {
+                    let modifiers = ui.input(|i| i.modifiers);
+                    if modifiers.command || modifiers.ctrl {
                         actions.push(SequenceAction::Execute(format!(
                             "select sele, sele or ({})",
                             expr
                         )));
+                    } else {
+                        actions.push(SequenceAction::Execute(format!(
+                            "select sele, {}",
+                            expr
+                        )));
                     }
-                } else {
-                    let expr = format!(
-                        "model {} and chain {} and resi {}",
-                        object_name, chain.chain_id, residue.resv
-                    );
+                }
+                *drag_start = None;
+                *drag_end = None;
+            }
+        }
+    }
+
+    // Click (no drag): select single residue
+    if response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let res_idx = pointer_to_res_idx(pos);
+            let residue = &chain.residues[res_idx];
+            let expr = format!(
+                "model {} and chain {} and resi {}",
+                object_name, chain.chain_id, residue.resv
+            );
+            let modifiers = ui.input(|i| i.modifiers);
+            if modifiers.command || modifiers.ctrl {
+                let is_highlighted = highlighted.contains(&(
+                    object_name.to_string(),
+                    chain.chain_id.clone(),
+                    residue.resv,
+                ));
+                if is_highlighted {
                     actions.push(SequenceAction::Execute(format!(
-                        "select sele, {}",
+                        "select sele, sele and not ({})",
+                        expr
+                    )));
+                } else {
+                    actions.push(SequenceAction::Execute(format!(
+                        "select sele, sele or ({})",
                         expr
                     )));
                 }
-
-                *last_clicked = Some((obj_idx, chain_idx, res_idx));
+            } else {
+                actions.push(SequenceAction::Execute(format!(
+                    "select sele, {}",
+                    expr
+                )));
             }
         }
-    });
+    }
+
+    // Tooltip on hover (when not dragging)
+    if drag_start.is_none() {
+        if let Some(pos) = response.hover_pos() {
+            let res_idx = pointer_to_res_idx(pos);
+            let residue = &chain.residues[res_idx];
+            response.on_hover_text(format!(
+                "{}.{} {}",
+                chain.chain_id, residue.resn, residue.resv
+            ));
+        }
+    }
 }
 
 /// Build sequence data for one molecule object

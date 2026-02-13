@@ -566,10 +566,11 @@ impl App {
 
                 // Bottom panel - sequence viewer
                 if ui_config.show_sequence_panel {
+                    let panel_height = sequence_panel.desired_height(registry);
                     egui::TopBottomPanel::bottom("sequence_panel")
                         .resizable(true)
-                        .default_height(80.0)
-                        .height_range(40.0..=200.0)
+                        .default_height(panel_height)
+                        .height_range(30.0..=200.0)
                         .show(ctx, |ui| {
                             sequence_actions = sequence_panel.show(ui, registry, named_colors);
                         });
