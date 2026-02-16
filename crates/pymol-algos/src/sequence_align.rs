@@ -3,26 +3,25 @@
 //! Standard dynamic programming alignment for matching residues between
 //! structures prior to structural superposition.
 
+use crate::substitution_matrix::{SubstitutionMatrix, BLOSUM62};
+
 /// Scoring parameters for sequence alignment
 #[derive(Debug, Clone)]
 pub struct AlignmentScoring {
-    /// Score for matching residues (default: 2.0)
-    pub match_score: f32,
-    /// Score for mismatching residues (default: -1.0)
-    pub mismatch_score: f32,
-    /// Gap opening penalty (default: -5.0)
+    /// Substitution matrix for residue pair scores
+    pub matrix: &'static SubstitutionMatrix,
+    /// Gap opening penalty (default: -10.0 for BLOSUM62)
     pub gap_open: f32,
-    /// Gap extension penalty (default: -0.5)
+    /// Gap extension penalty (default: -1.0)
     pub gap_extend: f32,
 }
 
 impl Default for AlignmentScoring {
     fn default() -> Self {
         Self {
-            match_score: 2.0,
-            mismatch_score: -1.0,
-            gap_open: -5.0,
-            gap_extend: -0.5,
+            matrix: &BLOSUM62,
+            gap_open: -10.0,
+            gap_extend: -1.0,
         }
     }
 }
@@ -111,11 +110,7 @@ pub fn global_align(
     // Fill
     for i in 1..=m {
         for j in 1..=n {
-            let sub = if source[i - 1] == target[j - 1] {
-                scoring.match_score
-            } else {
-                scoring.mismatch_score
-            };
+            let sub = scoring.matrix.score(source[i - 1], target[j - 1]);
 
             // M[i][j]: match/mismatch — come from any matrix at (i-1, j-1)
             let from_m = dp_m[idx(i - 1, j - 1)] + sub;
@@ -272,11 +267,21 @@ pub fn global_align(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::substitution_matrix::IDENTITY;
+
+    /// Scoring that mimics the old match=2/mismatch=-1 behavior
+    fn identity_scoring() -> AlignmentScoring {
+        AlignmentScoring {
+            matrix: &IDENTITY,
+            gap_open: -5.0,
+            gap_extend: -0.5,
+        }
+    }
 
     #[test]
     fn test_identical_sequences() {
         let seq: Vec<char> = "ACDEFG".chars().collect();
-        let result = global_align(&seq, &seq, &AlignmentScoring::default());
+        let result = global_align(&seq, &seq, &identity_scoring());
         assert_eq!(result.n_matched, 6);
         assert!((result.identity - 1.0).abs() < 1e-5);
     }
@@ -284,8 +289,8 @@ mod tests {
     #[test]
     fn test_single_insertion() {
         let source: Vec<char> = "ACDEFG".chars().collect();
-        let target: Vec<char> = "ACDXEFG".chars().collect();
-        let result = global_align(&source, &target, &AlignmentScoring::default());
+        let target: Vec<char> = "ACDMEFG".chars().collect();
+        let result = global_align(&source, &target, &identity_scoring());
 
         // Should have 6 matches and 1 gap
         assert_eq!(result.n_matched, 6);
@@ -301,41 +306,41 @@ mod tests {
 
     #[test]
     fn test_single_deletion() {
-        let source: Vec<char> = "ACDXEFG".chars().collect();
+        let source: Vec<char> = "ACDMEFG".chars().collect();
         let target: Vec<char> = "ACDEFG".chars().collect();
-        let result = global_align(&source, &target, &AlignmentScoring::default());
+        let result = global_align(&source, &target, &identity_scoring());
         assert_eq!(result.n_matched, 6);
     }
 
     #[test]
     fn test_completely_different() {
         let source: Vec<char> = "AAAA".chars().collect();
-        let target: Vec<char> = "BBBB".chars().collect();
-        let result = global_align(&source, &target, &AlignmentScoring::default());
+        let target: Vec<char> = "LLLL".chars().collect();
+        let result = global_align(&source, &target, &identity_scoring());
         assert_eq!(result.n_matched, 4); // All are mismatches, but still aligned
         assert!((result.identity - 0.0).abs() < 1e-5); // No identical residues
     }
 
     #[test]
     fn test_empty_sequences() {
-        let result = global_align(&[], &[], &AlignmentScoring::default());
+        let result = global_align(&[], &[], &identity_scoring());
         assert_eq!(result.n_matched, 0);
         assert_eq!(result.pairs.len(), 0);
     }
 
     #[test]
     fn test_one_empty() {
-        let source: Vec<char> = "ABC".chars().collect();
-        let result = global_align(&source, &[], &AlignmentScoring::default());
+        let source: Vec<char> = "ACE".chars().collect();
+        let result = global_align(&source, &[], &identity_scoring());
         assert_eq!(result.n_matched, 0);
         assert_eq!(result.pairs.len(), 3); // All gap-in-target
     }
 
     #[test]
     fn test_alignment_preserves_order() {
-        let source: Vec<char> = "ABCDEF".chars().collect();
-        let target: Vec<char> = "ABCDEF".chars().collect();
-        let result = global_align(&source, &target, &AlignmentScoring::default());
+        let source: Vec<char> = "ACDEFK".chars().collect();
+        let target: Vec<char> = "ACDEFK".chars().collect();
+        let result = global_align(&source, &target, &identity_scoring());
 
         for pair in &result.pairs {
             if let AlignedPair::Match { source: s, target: t } = pair {
@@ -347,11 +352,31 @@ mod tests {
     #[test]
     fn test_affine_gap_preference() {
         // Affine gaps: one long gap should be preferred over multiple short gaps
-        let source: Vec<char> = "ABCDEFGH".chars().collect();
-        let target: Vec<char> = "ABFGH".chars().collect(); // CDE deleted
-        let result = global_align(&source, &target, &AlignmentScoring::default());
+        let source: Vec<char> = "ACDEFGH".chars().collect();
+        let target: Vec<char> = "ACFGH".chars().collect(); // DE deleted
+        let result = global_align(&source, &target, &identity_scoring());
 
-        // Should have 5 matches (A,B,F,G,H) and 3 gaps (C,D,E)
+        // Should have 5 matches (A,C,F,G,H) and 2 gaps (D,E)
         assert_eq!(result.n_matched, 5);
+    }
+
+    #[test]
+    fn test_blosum62_default() {
+        // With BLOSUM62, similar amino acids should score better
+        let source: Vec<char> = "ACDEFGHIKLMNPQRSTVWY".chars().collect();
+        let result = global_align(&source, &source, &AlignmentScoring::default());
+        assert_eq!(result.n_matched, 20);
+        assert!((result.identity - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_blosum62_similar_residues() {
+        // D and E are similar (score 2 in BLOSUM62), should prefer aligning them
+        // over opening a gap
+        let source: Vec<char> = "AADE".chars().collect();
+        let target: Vec<char> = "AAED".chars().collect();
+        let result = global_align(&source, &target, &AlignmentScoring::default());
+        // All 4 should be matched (no gaps), since D-E scores 2 (positive)
+        assert_eq!(result.n_matched, 4);
     }
 }

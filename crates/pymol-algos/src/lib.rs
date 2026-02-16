@@ -10,6 +10,7 @@ mod svd3;
 mod kabsch;
 mod sequence_align;
 mod superpose;
+pub mod substitution_matrix;
 
 pub use svd3::Svd3;
 pub use kabsch::{kabsch, rmsd, apply_transform, KabschResult};

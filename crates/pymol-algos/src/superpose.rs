@@ -11,7 +11,9 @@ use crate::AlignError;
 pub struct SuperposeParams {
     /// Number of outlier rejection cycles (0 = no rejection)
     pub cycles: u32,
-    /// Distance cutoff for outlier rejection (Å)
+    /// Outlier rejection cutoff — an atom pair is rejected when
+    /// `distance / current_RMSD > cutoff` (PyMOL convention).
+    /// Default: 2.0
     pub cutoff: f32,
 }
 
@@ -85,21 +87,29 @@ pub fn superpose(
         let mut transformed_src = src.clone();
         kabsch::apply_transform(&mut transformed_src, &current_result);
 
-        // Compute per-pair distances
+        // Reject pairs where distance/RMSD > cutoff (PyMOL convention).
+        // This is a relative threshold: as RMSD decreases across cycles,
+        // the effective distance threshold tightens automatically.
+        let rms = current_result.rmsd;
         let mut keep = Vec::new();
-        for (i, ((ts, t), _pair)) in transformed_src
-            .iter()
-            .zip(tgt.iter())
-            .zip(active_pairs.iter())
-            .enumerate()
-        {
-            let dx = ts[0] - t[0];
-            let dy = ts[1] - t[1];
-            let dz = ts[2] - t[2];
-            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-            if dist <= params.cutoff {
-                keep.push(i);
+        if rms > 1e-6 {
+            for (i, ((ts, t), _pair)) in transformed_src
+                .iter()
+                .zip(tgt.iter())
+                .zip(active_pairs.iter())
+                .enumerate()
+            {
+                let dx = ts[0] - t[0];
+                let dy = ts[1] - t[1];
+                let dz = ts[2] - t[2];
+                let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+                if (dist / rms) <= params.cutoff {
+                    keep.push(i);
+                }
             }
+        } else {
+            // RMSD ≈ 0 → perfect fit, keep everything
+            keep.extend(0..active_pairs.len());
         }
 
         // If no pairs were rejected, we've converged
@@ -165,8 +175,7 @@ mod tests {
     #[test]
     fn test_with_outliers() {
         // 8 good pairs (identical), plus 2 pairs where the target is
-        // shifted by 5Å — enough to exceed cutoff=2.0 but not so extreme
-        // as to completely distort the initial fit.
+        // shifted by 20Å — well beyond the relative cutoff (dist/RMSD > 2.0).
         let source: Vec<[f32; 3]> = vec![
             [0.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
@@ -176,8 +185,8 @@ mod tests {
             [1.0, 0.0, 1.0],
             [0.0, 1.0, 1.0],
             [1.0, 1.0, 1.0],
-            [0.5, 0.5, 0.5], // outlier source
-            [0.5, 0.5, 0.0], // outlier source
+            [0.5, 0.5, 0.5],  // outlier source
+            [0.5, 0.5, 0.0],  // outlier source
         ];
         let target: Vec<[f32; 3]> = vec![
             [0.0, 0.0, 0.0],
@@ -188,8 +197,8 @@ mod tests {
             [1.0, 0.0, 1.0],
             [0.0, 1.0, 1.0],
             [1.0, 1.0, 1.0],
-            [5.5, 5.5, 5.5], // outlier target — 5Å away
-            [5.5, 5.5, 5.0], // outlier target — 5Å away
+            [20.5, 20.5, 20.5], // outlier target — 20Å away
+            [20.5, 20.5, 20.0], // outlier target — 20Å away
         ];
 
         let pairs: Vec<(usize, usize)> = (0..10).map(|i| (i, i)).collect();

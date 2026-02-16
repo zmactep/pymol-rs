@@ -7,6 +7,7 @@
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_algos::{
     global_align, superpose, AlignedPair, AlignmentScoring, SuperposeParams,
+    substitution_matrix,
 };
 use pymol_mol::{residue_to_char, AtomIndex};
 
@@ -44,17 +45,26 @@ ARGUMENTS
 
     cycles = int: number of outlier rejection cycles {default: 5}
 
-    cutoff = float: distance cutoff for outlier rejection in Å {default: 2.0}
+    cutoff = float: outlier rejection cutoff (distance/RMSD ratio) {default: 2.0}
 
     method = kabsch or sequence: alignment method {default: kabsch}
         kabsch   — direct fit on matching atoms (selections must have same size)
         sequence — sequence alignment to find Cα correspondences
+
+    matrix = string: substitution matrix for sequence alignment {default: blosum62}
+        Available: blosum62, blosum50, blosum80, pam250, identity
+
+    gap_open = float: gap opening penalty {default: -10.0}
+
+    gap_extend = float: gap extension penalty {default: -1.0}
 
 EXAMPLES
 
     align chain A, chain B
     align mobile, target, cycles=0
     align 1hpx, 1t46, method=sequence
+    align 1hpx, 1t46, method=sequence, matrix=blosum50
+    align 1hpx, 1t46, method=sequence, gap_open=-12.0, gap_extend=-2.0
 "#
     }
 
@@ -89,7 +99,28 @@ EXAMPLES
         let params = SuperposeParams { cycles, cutoff };
 
         match method {
-            "sequence" | "seq" => align_by_sequence(ctx, source_sel, target_sel, &params),
+            "sequence" | "seq" => {
+                let matrix_name = args
+                    .get_named_str("matrix")
+                    .unwrap_or("blosum62");
+
+                let matrix = substitution_matrix::get_matrix(matrix_name)
+                    .ok_or_else(|| CmdError::InvalidArgument {
+                        name: "matrix".to_string(),
+                        reason: format!(
+                            "Unknown substitution matrix '{}'. Available: blosum62, blosum50, blosum80, pam250, identity",
+                            matrix_name
+                        ),
+                    })?;
+
+                let scoring = AlignmentScoring {
+                    matrix,
+                    gap_open: args.get_named_float("gap_open").unwrap_or(-10.0) as f32,
+                    gap_extend: args.get_named_float("gap_extend").unwrap_or(-1.0) as f32,
+                };
+
+                align_by_sequence(ctx, source_sel, target_sel, &params, &scoring)
+            }
             "kabsch" | _ => align_by_kabsch(ctx, source_sel, target_sel, &params),
         }
     }
@@ -175,6 +206,7 @@ fn align_by_sequence(
     source_sel: &str,
     target_sel: &str,
     params: &SuperposeParams,
+    scoring: &AlignmentScoring,
 ) -> CmdResult {
     // Evaluate selections
     let source_results = evaluate_selection(ctx.viewer, source_sel)?;
@@ -196,7 +228,7 @@ fn align_by_sequence(
     }
 
     // Sequence alignment
-    let alignment = global_align(&source_seq, &target_seq, &AlignmentScoring::default());
+    let alignment = global_align(&source_seq, &target_seq, scoring);
 
     // Extract matched Cα pairs
     let mut ca_pairs: Vec<(usize, usize)> = Vec::new();
