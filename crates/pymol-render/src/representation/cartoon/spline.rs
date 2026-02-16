@@ -193,10 +193,8 @@ pub fn interpolate_backbone(
             // This is the exact PyMOL formula from CartoonGenerateSample
             let position = pos1 * f1 + pos2 * f0 + (tangent1 * f3 - tangent2 * f2) * f4;
 
-            // Orientation interpolation: use simple smooth blend
-            // The f1*f2 / f0*f3 weighting creates near-zero weights at endpoints,
-            // producing garbage normals. Simple f1/f0 blend is sufficient and artifact-free.
-            let normal = normalize_safe(orient1 * f1 + orient2 * f0);
+            // Orientation interpolation (PyMOL's formula)
+            let normal = normalize_safe(orient1 * (f1 * f2) + orient2 * (f0 * f3));
 
             // Tangent will be recomputed after all points are generated
             let tangent = normalize_safe(pos2 - pos1);

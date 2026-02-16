@@ -237,33 +237,6 @@ fn ensure_orientation_consistency(orientations: &[Vec3]) -> Vec<Vec3> {
     consistent
 }
 
-/// Check if a frame is near a helix-loop boundary within the given range
-fn is_near_helix_boundary(frames: &[FrameWithMetadata], i: usize, range: usize) -> bool {
-    use pymol_mol::SecondaryStructure;
-
-    let is_helix_ss = |ss: SecondaryStructure| -> bool {
-        matches!(ss, SecondaryStructure::Helix | SecondaryStructure::Helix310 | SecondaryStructure::HelixPi)
-    };
-
-    let current_is_helix = is_helix_ss(frames[i].ss_type);
-    let start = i.saturating_sub(range);
-    let end = (i + range).min(frames.len() - 1);
-
-    for j in start..=end {
-        if j != i {
-            let other_is_helix = is_helix_ss(frames[j].ss_type);
-            // Boundary: one is helix, the other isn't (and isn't sheet)
-            if current_is_helix != other_is_helix
-                && frames[j].ss_type != SecondaryStructure::Sheet
-                && frames[i].ss_type != SecondaryStructure::Sheet
-            {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Smooth reference frames while preserving consistent ribbon orientation
 ///
 /// Uses parallel transport with blending to ensure smooth, continuous frames.
@@ -298,27 +271,19 @@ fn smooth_frames(frames: &mut [FrameWithMetadata], cycles: u32) {
         if transport_len > 1e-6 {
             let transported_norm = transported / transport_len;
 
-            // For frames near helix boundaries, strongly prefer transported for continuity
-            let near_helix_boundary = is_near_helix_boundary(frames, i, 3);
+            // Blend between transported and original based on agreement
+            let agreement = transported_norm.dot(orig_binormal);
 
-            let new_binormal = if near_helix_boundary {
-                // Strong preference for transported binormal at helix boundaries
-                transported_norm
+            let new_binormal = if agreement > 0.5 {
+                // Good agreement - blend towards original
+                let blend = agreement;
+                normalize_safe(transported_norm * (1.0 - blend * 0.5) + orig_binormal * (blend * 0.5))
+            } else if agreement < -0.5 {
+                // Opposite - use transported for continuity
+                normalize_safe(transported_norm)
             } else {
-                // Blend between transported and original based on agreement
-                let agreement = transported_norm.dot(orig_binormal);
-
-                if agreement > 0.5 {
-                    // Good agreement - blend towards original
-                    let blend = agreement;
-                    normalize_safe(transported_norm * (1.0 - blend * 0.5) + orig_binormal * (blend * 0.5))
-                } else if agreement < -0.5 {
-                    // Opposite - use transported for continuity
-                    normalize_safe(transported_norm)
-                } else {
-                    // Poor agreement - use transported
-                    transported_norm
-                }
+                // Poor agreement - use transported
+                transported_norm
             };
 
             // Compute normal from binormal: N = B × T

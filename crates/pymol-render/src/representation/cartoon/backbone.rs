@@ -544,79 +544,47 @@ fn smooth_helices(segment: &mut BackboneSegment, _smooth_cycles: u32) {
         }
 
         // Handle helix-loop transition at the C-terminus (end of helix)
-        // Extend the helix orientation pattern into 2-3 adjacent loop residues with decay
+        // Extend the helix orientation pattern into 1-2 adjacent loop residues
         if last + 1 < len {
             let helix_end_orient = segment.guide_points[last].orientation;
-            let extend_count = 3.min(len - last - 1);
+            let next_idx = last + 1;
+            let next_orient = segment.guide_points[next_idx].orientation;
 
-            for offset in 1..=extend_count {
-                let idx = last + offset;
-                if idx >= len {
-                    break;
+            // Check if the next residue is a loop (not helix or sheet)
+            let next_ss = segment.guide_points[next_idx].ss_type;
+            if !is_helix(next_ss) && next_ss != SecondaryStructure::Sheet {
+                // Ensure consistent direction with helix end
+                if helix_end_orient.dot(next_orient) < 0.0 {
+                    segment.guide_points[next_idx].orientation = next_orient * -1.0;
                 }
 
-                let next_ss = segment.guide_points[idx].ss_type;
-                // Stop at next helix or sheet
-                if is_helix(next_ss) || next_ss == SecondaryStructure::Sheet {
-                    break;
-                }
-
-                let next_orient = segment.guide_points[idx].orientation;
-                // Flip if pointing opposite
-                let next_orient = if helix_end_orient.dot(next_orient) < 0.0 {
-                    next_orient * -1.0
-                } else {
-                    next_orient
-                };
-
-                // Decay: 0.7, 0.4, 0.2 for offsets 1, 2, 3
-                let helix_weight = match offset {
-                    1 => 0.7,
-                    2 => 0.4,
-                    3 => 0.2,
-                    _ => 0.0,
-                };
-                let loop_weight = 1.0 - helix_weight;
-
-                segment.guide_points[idx].orientation =
-                    normalize_safe(helix_end_orient * helix_weight + next_orient * loop_weight);
+                // Blend the first loop residue's orientation toward the helix end
+                let blended = normalize_safe(
+                    helix_end_orient * 0.6 + segment.guide_points[next_idx].orientation * 0.4
+                );
+                segment.guide_points[next_idx].orientation = blended;
             }
         }
 
         // Handle loop-helix transition at the N-terminus (start of helix)
-        // Extend the helix orientation pattern backward into 2-3 preceding loop residues
         if first > 0 {
             let helix_start_orient = segment.guide_points[first].orientation;
-            let extend_count = 3.min(first);
+            let prev_idx = first - 1;
+            let prev_orient = segment.guide_points[prev_idx].orientation;
 
-            for offset in 1..=extend_count {
-                let idx = first - offset;
-
-                let prev_ss = segment.guide_points[idx].ss_type;
-                // Stop at another helix or sheet
-                if is_helix(prev_ss) || prev_ss == SecondaryStructure::Sheet {
-                    break;
+            // Check if the previous residue is a loop
+            let prev_ss = segment.guide_points[prev_idx].ss_type;
+            if !is_helix(prev_ss) && prev_ss != SecondaryStructure::Sheet {
+                // Ensure consistent direction with helix start
+                if helix_start_orient.dot(prev_orient) < 0.0 {
+                    segment.guide_points[prev_idx].orientation = prev_orient * -1.0;
                 }
 
-                let prev_orient = segment.guide_points[idx].orientation;
-                // Flip if pointing opposite
-                let prev_orient = if helix_start_orient.dot(prev_orient) < 0.0 {
-                    prev_orient * -1.0
-                } else {
-                    prev_orient
-                };
-
-                // Decay: 0.7, 0.4, 0.2 for offsets 1, 2, 3
-                let helix_weight = match offset {
-                    1 => 0.7,
-                    2 => 0.4,
-                    3 => 0.2,
-                    _ => 0.0,
-                };
-                let loop_weight = 1.0 - helix_weight;
-
-                segment.guide_points[idx].orientation =
-                    normalize_safe(helix_start_orient * helix_weight + prev_orient * loop_weight);
+                // Blend the last loop residue's orientation toward the helix start
+                let blended = normalize_safe(
+                    helix_start_orient * 0.6 + segment.guide_points[prev_idx].orientation * 0.4
+                );
+                segment.guide_points[prev_idx].orientation = blended;
             }
         }
     }
@@ -625,18 +593,6 @@ fn smooth_helices(segment: &mut BackboneSegment, _smooth_cycles: u32) {
 // ============================================================================
 // Normal Refinement (RepCartoonRefineNormals equivalent)
 // ============================================================================
-
-/// Check if position `i` is within `range` residues of a helix
-fn is_near_helix(segment: &BackboneSegment, i: usize, range: usize) -> bool {
-    let start = i.saturating_sub(range);
-    let end = (i + range).min(segment.len() - 1);
-    for j in start..=end {
-        if j != i && is_helix(segment.guide_points[j].ss_type) {
-            return true;
-        }
-    }
-    false
-}
 
 /// Refine orientation vectors to prevent flips and kinks (RepCartoonRefineNormals)
 ///
@@ -673,23 +629,18 @@ fn refine_normals(segment: &mut BackboneSegment) {
     }
 
     // Step 2: Generate alternative orientations (original and inverted)
-    // For helices and residues adjacent to helices, don't allow inversion
+    // For helices, don't allow inversion (would confuse inside/outside)
     let mut alternatives: Vec<[Vec3; 2]> = vec![[Vec3::new(0.0, 1.0, 0.0); 2]; len];
     for i in 0..len {
         let orient = segment.guide_points[i].orientation;
         let ss_type = segment.guide_points[i].ss_type;
 
-        let skip_inversion = is_helix(ss_type);
-
-        // Also protect residues near helices (blended in smooth_helices)
-        let near_helix = !skip_inversion && is_near_helix(segment, i, 2);
-
         // Original orientation
         alternatives[i][0] = orient;
 
-        // Inverted orientation (only for non-helices far from helix boundaries)
-        if skip_inversion || near_helix {
-            alternatives[i][1] = orient; // Keep same — don't offer inverted alternative
+        // Inverted orientation (only for non-helices)
+        if is_helix(ss_type) {
+            alternatives[i][1] = orient; // Keep same for helices
         } else {
             alternatives[i][1] = orient * -1.0;
         }
