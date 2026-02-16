@@ -1,7 +1,7 @@
 //! Object commands: delete, rename, create, copy, group, ungroup
 
 use pymol_mol::{AtomIndex, ObjectMolecule};
-use pymol_scene::MoleculeObject;
+use pymol_scene::{DirtyFlags, MoleculeObject};
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
@@ -16,6 +16,10 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(CopyCommand);
     registry.register(GroupCommand);
     registry.register(UngroupCommand);
+    registry.register(StateCommand);
+    registry.register(CountStatesCommand);
+    registry.register(SplitStatesCommand);
+    registry.register(ExtractCommand);
 }
 
 // ============================================================================
@@ -202,7 +206,7 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
 
-        let _source_state = args
+        let source_state = args
             .get_int(2)
             .or_else(|| args.get_named_int("source_state"))
             .unwrap_or(0);
@@ -218,6 +222,14 @@ EXAMPLES
                 CmdError::Selection(format!("No atoms matching '{}'", selection))
             })?;
 
+        // Convert 1-indexed source_state to 0-indexed Option
+        // source_state=0 means all states, N>0 means state N (1-indexed)
+        let state_opt = if source_state > 0 {
+            Some((source_state - 1) as usize)
+        } else {
+            None
+        };
+
         // Get source molecule (read-only borrow)
         let new_mol = {
             let mol_obj = ctx
@@ -227,7 +239,7 @@ EXAMPLES
                 .ok_or_else(|| CmdError::ObjectNotFound(src_name.clone()))?;
             let src_mol = mol_obj.molecule();
 
-            extract_molecule(src_mol, &sel_result, name)
+            extract_molecule(src_mol, &sel_result, name, state_opt)
         };
 
         let atom_count = new_mol.atom_count();
@@ -247,10 +259,14 @@ EXAMPLES
 }
 
 /// Extract a subset of atoms from a molecule based on a selection result.
+///
+/// If `source_state` is `None`, all states are copied. If `Some(i)` (0-indexed),
+/// only that single state is copied into the new object.
 fn extract_molecule(
     src: &ObjectMolecule,
     selection: &pymol_select::SelectionResult,
     name: &str,
+    source_state: Option<usize>,
 ) -> ObjectMolecule {
     use std::collections::HashMap;
 
@@ -274,8 +290,14 @@ fn extract_molecule(
         }
     }
 
+    // Determine which states to copy
+    let states: Vec<usize> = match source_state {
+        Some(s) => vec![s],
+        None => (0..src.state_count()).collect(),
+    };
+
     // Copy coordinate sets (extract coords for selected atoms only)
-    for state in 0..src.state_count() {
+    for state in states {
         if let Some(cs) = src.get_coord_set(state) {
             let mut coords = Vec::with_capacity(selected_indices.len() * 3);
             for &old_idx in &selected_indices {
@@ -470,6 +492,387 @@ EXAMPLES
 
         if !ctx.quiet {
             ctx.print(&format!(" Ungrouped \"{}\" (not yet implemented)", name));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// state command
+// ============================================================================
+
+struct StateCommand;
+
+impl Command for StateCommand {
+    fn name(&self) -> &str {
+        "state"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["frame"]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "state" sets the displayed state for objects.
+
+USAGE
+
+    state N [, object]
+
+ARGUMENTS
+
+    N = integer: state number (1-indexed)
+    object = string: object name (default: all objects)
+
+EXAMPLES
+
+    state 1
+    state 5, 1nmr
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let state_num = args
+            .get_int(0)
+            .or_else(|| args.get_named_int("N"))
+            .ok_or_else(|| CmdError::MissingArgument("N".to_string()))?;
+
+        if state_num < 1 {
+            return Err(CmdError::invalid_arg("N", "State number must be >= 1"));
+        }
+
+        let state_idx = (state_num - 1) as usize;
+
+        let object = args
+            .get_str(1)
+            .or_else(|| args.get_named_str("object"));
+
+        if let Some(obj_name) = object {
+            // Set state for a specific object
+            let mol_obj = ctx.viewer.objects_mut().get_molecule_mut(obj_name)
+                .ok_or_else(|| CmdError::ObjectNotFound(obj_name.to_string()))?;
+            if !mol_obj.set_display_state(state_idx) {
+                return Err(CmdError::execution(format!(
+                    "State {} is out of range for \"{}\" ({} states)",
+                    state_num, obj_name, mol_obj.molecule().state_count()
+                )));
+            }
+        } else {
+            // Set state for all objects
+            let names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+            for name in &names {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(name) {
+                    mol_obj.set_display_state(state_idx);
+                }
+            }
+        }
+
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            if let Some(obj_name) = object {
+                ctx.print(&format!(" State {} for \"{}\"", state_num, obj_name));
+            } else {
+                ctx.print(&format!(" State {}", state_num));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// count_states command
+// ============================================================================
+
+struct CountStatesCommand;
+
+impl Command for CountStatesCommand {
+    fn name(&self) -> &str {
+        "count_states"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "count_states" reports the number of states in an object.
+
+USAGE
+
+    count_states [selection]
+
+ARGUMENTS
+
+    selection = string: object or selection (default: all)
+
+EXAMPLES
+
+    count_states
+    count_states 1nmr
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let selection = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("selection"));
+
+        let mut max_states = 0usize;
+
+        if let Some(sel) = selection {
+            // Try as object name first
+            if let Some(mol_obj) = ctx.viewer.objects().get_molecule(sel) {
+                let count = mol_obj.molecule().state_count();
+                max_states = max_states.max(count);
+                if !ctx.quiet {
+                    ctx.print(&format!(" \"{}\" has {} states.", sel, count));
+                }
+            } else {
+                // Try as selection — report for all matching objects
+                let results = evaluate_selection(ctx.viewer, sel)?;
+                for (obj_name, sel_result) in &results {
+                    if sel_result.count() > 0 {
+                        if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
+                            let count = mol_obj.molecule().state_count();
+                            max_states = max_states.max(count);
+                            if !ctx.quiet {
+                                ctx.print(&format!(" \"{}\" has {} states.", obj_name, count));
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Report for all objects
+            let names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+            for name in &names {
+                if let Some(mol_obj) = ctx.viewer.objects().get_molecule(name) {
+                    let count = mol_obj.molecule().state_count();
+                    max_states = max_states.max(count);
+                    if !ctx.quiet {
+                        ctx.print(&format!(" \"{}\" has {} states.", name, count));
+                    }
+                }
+            }
+        }
+
+        if !ctx.quiet {
+            ctx.print(&format!(" cmd.count_states: {} states.", max_states));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// split_states command
+// ============================================================================
+
+struct SplitStatesCommand;
+
+impl Command for SplitStatesCommand {
+    fn name(&self) -> &str {
+        "split_states"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "split_states" creates individual objects for each state of a
+    multi-state object.
+
+USAGE
+
+    split_states object [, first [, last [, prefix ]]]
+
+ARGUMENTS
+
+    object = string: source object name
+    first = integer: first state (1-indexed, default: 1)
+    last = integer: last state (1-indexed, default: last)
+    prefix = string: name prefix (default: object_)
+
+EXAMPLES
+
+    split_states 1nmr
+    split_states 1nmr, first=1, last=5
+    split_states 1nmr, prefix=model_
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let object = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("object"))
+            .ok_or_else(|| CmdError::MissingArgument("object".to_string()))?;
+
+        let mol_obj = ctx.viewer.objects().get_molecule(object)
+            .ok_or_else(|| CmdError::ObjectNotFound(object.to_string()))?;
+        let n_states = mol_obj.molecule().state_count();
+
+        if n_states == 0 {
+            return Err(CmdError::execution(format!("\"{}\" has no states", object)));
+        }
+
+        let first = args
+            .get_int(1)
+            .or_else(|| args.get_named_int("first"))
+            .map(|v| (v.max(1) - 1) as usize)
+            .unwrap_or(0);
+
+        let last = args
+            .get_int(2)
+            .or_else(|| args.get_named_int("last"))
+            .map(|v| (v.max(1) as usize).min(n_states))
+            .unwrap_or(n_states);
+
+        let prefix = args
+            .get_str(3)
+            .or_else(|| args.get_named_str("prefix"))
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{}_", object));
+
+        // Collect new molecules first (borrow src as read-only)
+        let new_mols: Vec<(String, ObjectMolecule)> = {
+            let mol_obj = ctx.viewer.objects().get_molecule(object).unwrap();
+            let src_mol = mol_obj.molecule();
+
+            // Build an "all atoms" selection
+            let all_sel = pymol_select::SelectionResult::all(src_mol.atom_count());
+
+            (first..last)
+                .map(|state_idx| {
+                    let name = format!("{}{:04}", prefix, state_idx + 1);
+                    let mol = extract_molecule(src_mol, &all_sel, &name, Some(state_idx));
+                    (name, mol)
+                })
+                .collect()
+        };
+
+        let count = new_mols.len();
+        for (name, mol) in new_mols {
+            let mol_obj = MoleculeObject::with_name(mol, &name);
+            ctx.viewer.objects_mut().add(mol_obj);
+        }
+
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            ctx.print(&format!(
+                " Split \"{}\" into {} objects ({}{:04} to {}{:04})",
+                object, count, prefix, first + 1, prefix, last
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// extract command
+// ============================================================================
+
+struct ExtractCommand;
+
+impl Command for ExtractCommand {
+    fn name(&self) -> &str {
+        "extract"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "extract" creates a new object from a selection and removes
+    those atoms from the source object.
+
+USAGE
+
+    extract name, selection [, source_state]
+
+ARGUMENTS
+
+    name = string: name for the new object
+    selection = string: selection of atoms to extract
+    source_state = integer: state to copy from (default: 0 = all)
+
+EXAMPLES
+
+    extract ligand, organic
+    extract chainA, chain A
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let name = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("name"))
+            .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
+
+        let selection = args
+            .get_str(1)
+            .or_else(|| args.get_named_str("selection"))
+            .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
+
+        let source_state = args
+            .get_int(2)
+            .or_else(|| args.get_named_int("source_state"))
+            .unwrap_or(0);
+
+        // Convert 1-indexed source_state to 0-indexed Option
+        let state_opt = if source_state > 0 {
+            Some((source_state - 1) as usize)
+        } else {
+            None
+        };
+
+        // Evaluate selection
+        let results = evaluate_selection(ctx.viewer, selection)?;
+
+        // Find first object with selected atoms
+        let (src_name, sel_result) = results
+            .into_iter()
+            .find(|(_, sel)| sel.count() > 0)
+            .ok_or_else(|| {
+                CmdError::Selection(format!("No atoms matching '{}'", selection))
+            })?;
+
+        // Extract molecule from source (read-only borrow)
+        let (new_mol, remove_indices) = {
+            let mol_obj = ctx.viewer.objects().get_molecule(&src_name)
+                .ok_or_else(|| CmdError::ObjectNotFound(src_name.clone()))?;
+            let src_mol = mol_obj.molecule();
+
+            let new_mol = extract_molecule(src_mol, &sel_result, name, state_opt);
+            let remove_indices: Vec<AtomIndex> = sel_result.indices().collect();
+            (new_mol, remove_indices)
+        };
+
+        let atom_count = new_mol.atom_count();
+
+        // Add the new object
+        let mol_obj = MoleculeObject::with_name(new_mol, name);
+        ctx.viewer.objects_mut().add(mol_obj);
+
+        // Remove atoms from source
+        if let Some(src_obj) = ctx.viewer.objects_mut().get_molecule_mut(&src_name) {
+            src_obj.molecule_mut().remove_atoms(&remove_indices);
+            src_obj.invalidate(DirtyFlags::ALL);
+        }
+
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            ctx.print(&format!(
+                " Extracted {} atoms from \"{}\" into \"{}\"",
+                atom_count, src_name, name
+            ));
         }
 
         Ok(())

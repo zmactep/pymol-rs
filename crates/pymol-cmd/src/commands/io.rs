@@ -108,10 +108,14 @@ EXAMPLES
             });
 
         // Get state (optional, 0 = append)
-        let _state = args
+        let state = args
             .get_int(2)
             .or_else(|| args.get_named_int("state"))
             .unwrap_or(0);
+
+        if state != 0 {
+            ctx.print(" Warning: state= parameter not yet fully supported, loading all states.");
+        }
 
         // Get format (optional, auto-detect)
         let format = args
@@ -358,10 +362,10 @@ EXAMPLES
         } else if let Some(ray_img) = ctx.viewer.get_raytraced_image() {
             // Export stored raytraced image
             use image::RgbaImage;
-            
+
             let img = RgbaImage::from_raw(ray_img.width, ray_img.height, ray_img.data.clone())
                 .ok_or_else(|| CmdError::execution("Invalid raytraced image data".to_string()))?;
-            
+
             img.save(&path)
                 .map_err(|e| CmdError::execution(format!("Failed to save PNG: {}", e)))?;
 

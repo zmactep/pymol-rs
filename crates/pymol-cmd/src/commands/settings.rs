@@ -156,6 +156,28 @@ EXAMPLES
             .get_str(2)
             .or_else(|| args.get_named_str("selection"));
 
+        // Intercept "set state, N" — switch displayed state for all objects
+        if name == "state" {
+            let value_str = value_str.ok_or_else(|| CmdError::MissingArgument("value".to_string()))?;
+            let state_num: i64 = value_str.parse()
+                .map_err(|_| CmdError::invalid_arg("value", format!("Invalid state number: {}", value_str)))?;
+            if state_num < 1 {
+                return Err(CmdError::invalid_arg("value", "State number must be >= 1"));
+            }
+            let state_idx = (state_num - 1) as usize;
+            let names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+            for obj_name in &names {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(obj_name) {
+                    mol_obj.set_display_state(state_idx);
+                }
+            }
+            ctx.viewer.request_redraw();
+            if !ctx.quiet {
+                ctx.print(&format!(" state = {}", state_num));
+            }
+            return Ok(());
+        }
+
         // Look up the setting by name
         let id = get_setting_id(name)
             .ok_or_else(|| CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))?;
@@ -185,7 +207,7 @@ EXAMPLES
         };
 
         // Check if this is a representation color setting
-        let is_rep_color_setting = matches!(id, 
+        let is_rep_color_setting = matches!(id,
             setting_id::stick_color |
             setting_id::line_color |
             setting_id::cartoon_color |
@@ -326,7 +348,7 @@ EXAMPLES
                 }
             }
         }
-        
+
         // Special handling for transparency - invalidate all molecule representations
         // so surfaces get rebuilt with the new transparency value
         if id == setting_id::transparency {
@@ -351,7 +373,7 @@ EXAMPLES
 
         // Special handling for cartoon geometry settings - invalidate all molecule
         // representations so cartoons get rebuilt with the new settings
-        if matches!(id, 
+        if matches!(id,
             setting_id::cartoon_fancy_helices |
             setting_id::cartoon_fancy_sheets |
             setting_id::cartoon_oval_width |
@@ -423,6 +445,26 @@ EXAMPLES
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
+
+        // Intercept "get state" — report displayed state for each object
+        if name == "state" {
+            let obj_arg = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            if let Some(obj_name) = obj_arg {
+                if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
+                    ctx.print(&format!(" state (int) = {} for \"{}\"", mol_obj.display_state() + 1, obj_name));
+                } else {
+                    return Err(CmdError::ObjectNotFound(obj_name.to_string()));
+                }
+            } else {
+                let names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                for obj_name in &names {
+                    if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
+                        ctx.print(&format!(" state (int) = {} for \"{}\"", mol_obj.display_state() + 1, obj_name));
+                    }
+                }
+            }
+            return Ok(());
+        }
 
         // Look up the setting by name
         let id = get_setting_id(name)
@@ -562,7 +604,7 @@ EXAMPLES
             .get_int(1)
             .or_else(|| args.get_named_int("state"))
             .unwrap_or(1) as usize;
-        
+
         // Convert to 0-indexed state
         let state_idx = if state > 0 { state - 1 } else { 0 };
 

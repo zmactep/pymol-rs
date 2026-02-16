@@ -865,6 +865,91 @@ impl ObjectMolecule {
     }
 
     // =========================================================================
+    // Atom Removal
+    // =========================================================================
+
+    /// Remove atoms by indices, reindexing remaining atoms and bonds.
+    ///
+    /// This removes the specified atoms, any bonds involving those atoms,
+    /// and updates all coordinate sets. Remaining atom/bond indices are
+    /// compacted so they remain contiguous.
+    pub fn remove_atoms(&mut self, indices: &[AtomIndex]) {
+        if indices.is_empty() {
+            return;
+        }
+
+        let n_atoms = self.atoms.len();
+
+        // Build a set of atoms to remove for O(1) lookup
+        let mut remove_set = vec![false; n_atoms];
+        for &idx in indices {
+            if idx.as_usize() < n_atoms {
+                remove_set[idx.as_usize()] = true;
+            }
+        }
+
+        // Build old→new index mapping (-1 means removed)
+        let mut old_to_new: Vec<Option<u32>> = vec![None; n_atoms];
+        let mut new_idx = 0u32;
+        for old_idx in 0..n_atoms {
+            if !remove_set[old_idx] {
+                old_to_new[old_idx] = Some(new_idx);
+                new_idx += 1;
+            }
+        }
+
+        // Filter atoms (keep only non-removed)
+        let mut new_atoms = Vec::with_capacity(new_idx as usize);
+        for (i, atom) in self.atoms.drain(..).enumerate() {
+            if !remove_set[i] {
+                new_atoms.push(atom);
+            }
+        }
+        self.atoms = new_atoms;
+
+        // Filter bonds: keep only bonds where both atoms survived, and remap indices
+        let mut new_bonds = Vec::new();
+        for bond in &self.bonds {
+            if let (Some(new_a1), Some(new_a2)) = (
+                old_to_new[bond.atom1.as_usize()],
+                old_to_new[bond.atom2.as_usize()],
+            ) {
+                let mut new_bond = bond.clone();
+                new_bond.atom1 = AtomIndex(new_a1);
+                new_bond.atom2 = AtomIndex(new_a2);
+                new_bonds.push(new_bond);
+            }
+        }
+        self.bonds = new_bonds;
+
+        // Rebuild atom_bonds mapping
+        self.atom_bonds = vec![SmallVec::new(); self.atoms.len()];
+        for (bi, bond) in self.bonds.iter().enumerate() {
+            let bond_idx = BondIndex(bi as u32);
+            self.atom_bonds[bond.atom1.as_usize()].push(bond_idx);
+            self.atom_bonds[bond.atom2.as_usize()].push(bond_idx);
+        }
+
+        // Update coordinate sets: extract coords for surviving atoms only
+        for cs in &mut self.coord_sets {
+            let mut new_coords = Vec::with_capacity(self.atoms.len() * 3);
+            for old_idx in 0..n_atoms {
+                if remove_set[old_idx] {
+                    continue;
+                }
+                if let Some(v) = cs.get_atom_coord(AtomIndex(old_idx as u32)) {
+                    new_coords.push(v.x);
+                    new_coords.push(v.y);
+                    new_coords.push(v.z);
+                } else {
+                    new_coords.extend_from_slice(&[0.0, 0.0, 0.0]);
+                }
+            }
+            *cs = CoordSet::from_coords(new_coords);
+        }
+    }
+
+    // =========================================================================
     // Selection Support
     // =========================================================================
 
