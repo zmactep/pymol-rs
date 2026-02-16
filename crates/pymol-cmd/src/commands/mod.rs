@@ -2,6 +2,7 @@
 //!
 //! This module contains all built-in command implementations organized by category.
 
+pub mod align;
 pub mod control;
 pub mod display;
 pub mod io;
@@ -46,4 +47,7 @@ pub fn register_all(registry: &mut CommandRegistry) {
 
     // Transform commands (translate, rotate, transform_selection)
     transform::register(registry);
+
+    // Alignment commands
+    align::register(registry);
 }

@@ -1,7 +1,11 @@
 //! Object commands: delete, rename, create, copy, group, ungroup
 
+use pymol_mol::{AtomIndex, ObjectMolecule};
+use pymol_scene::MoleculeObject;
+
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
 /// Register object commands
@@ -198,22 +202,100 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
 
-        // TODO: Implement create with selection support
-        // This would:
-        // 1. Evaluate the selection
-        // 2. Extract atoms matching the selection
-        // 3. Create a new ObjectMolecule with those atoms
-        // 4. Add to the registry
+        let _source_state = args
+            .get_int(2)
+            .or_else(|| args.get_named_int("source_state"))
+            .unwrap_or(0);
+
+        // Evaluate selection
+        let results = evaluate_selection(ctx.viewer, selection)?;
+
+        // Find first object with selected atoms
+        let (src_name, sel_result) = results
+            .into_iter()
+            .find(|(_, sel)| sel.count() > 0)
+            .ok_or_else(|| {
+                CmdError::Selection(format!("No atoms matching '{}'", selection))
+            })?;
+
+        // Get source molecule (read-only borrow)
+        let new_mol = {
+            let mol_obj = ctx
+                .viewer
+                .objects()
+                .get_molecule(&src_name)
+                .ok_or_else(|| CmdError::ObjectNotFound(src_name.clone()))?;
+            let src_mol = mol_obj.molecule();
+
+            extract_molecule(src_mol, &sel_result, name)
+        };
+
+        let atom_count = new_mol.atom_count();
+        let mol_obj = MoleculeObject::with_name(new_mol, name);
+        ctx.viewer.objects_mut().add(mol_obj);
+        ctx.viewer.request_redraw();
 
         if !ctx.quiet {
             ctx.print(&format!(
-                " Creating \"{}\" from \"{}\" (not yet implemented)",
-                name, selection
+                " Created \"{}\" from \"{}\" with {} atoms",
+                name, selection, atom_count
             ));
         }
 
         Ok(())
     }
+}
+
+/// Extract a subset of atoms from a molecule based on a selection result.
+fn extract_molecule(
+    src: &ObjectMolecule,
+    selection: &pymol_select::SelectionResult,
+    name: &str,
+) -> ObjectMolecule {
+    use std::collections::HashMap;
+
+    let selected_indices: Vec<AtomIndex> = selection.indices().collect();
+    let mut new_mol = ObjectMolecule::with_capacity(name, selected_indices.len(), 0);
+
+    // Build old→new atom index mapping and copy atoms
+    let mut index_map: HashMap<u32, AtomIndex> = HashMap::new();
+    for &old_idx in &selected_indices {
+        let atom = src.get_atom(old_idx).unwrap().clone();
+        let new_idx = new_mol.add_atom(atom);
+        index_map.insert(old_idx.0, new_idx);
+    }
+
+    // Copy bonds where both endpoints are selected
+    for bond in src.bonds() {
+        if let (Some(&new_a1), Some(&new_a2)) =
+            (index_map.get(&bond.atom1.0), index_map.get(&bond.atom2.0))
+        {
+            let _ = new_mol.add_bond(new_a1, new_a2, bond.order);
+        }
+    }
+
+    // Copy coordinate sets (extract coords for selected atoms only)
+    for state in 0..src.state_count() {
+        if let Some(cs) = src.get_coord_set(state) {
+            let mut coords = Vec::with_capacity(selected_indices.len() * 3);
+            for &old_idx in &selected_indices {
+                if let Some(v) = cs.get_atom_coord(old_idx) {
+                    coords.push(v.x);
+                    coords.push(v.y);
+                    coords.push(v.z);
+                } else {
+                    coords.extend_from_slice(&[0.0, 0.0, 0.0]);
+                }
+            }
+            let new_cs = pymol_mol::CoordSet::from_coords(coords);
+            new_mol.add_coord_set(new_cs);
+        }
+    }
+
+    // Classify atoms (protein, nucleic, etc.)
+    new_mol.classify_atoms();
+
+    new_mol
 }
 
 // ============================================================================
@@ -259,19 +341,25 @@ EXAMPLES
             .or_else(|| args.get_named_str("source"))
             .ok_or_else(|| CmdError::MissingArgument("source".to_string()))?;
 
-        // Check that source exists
-        if !ctx.viewer.objects().contains(source) {
-            return Err(CmdError::ObjectNotFound(source.to_string()));
-        }
+        // Clone the source molecule
+        let cloned_mol = {
+            let mol_obj = ctx
+                .viewer
+                .objects()
+                .get_molecule(source)
+                .ok_or_else(|| CmdError::ObjectNotFound(source.to_string()))?;
+            mol_obj.molecule().clone()
+        };
 
-        // TODO: Implement proper object cloning
-        // ObjectMolecule doesn't implement Clone, so we'd need to
-        // serialize/deserialize or implement a deep copy method
+        let atom_count = cloned_mol.atom_count();
+        let mol_obj = MoleculeObject::with_name(cloned_mol, target);
+        ctx.viewer.objects_mut().add(mol_obj);
+        ctx.viewer.request_redraw();
 
         if !ctx.quiet {
             ctx.print(&format!(
-                " Copy from \"{}\" to \"{}\" (not yet fully implemented)",
-                source, target
+                " Created \"{}\" as copy of \"{}\" ({} atoms)",
+                target, source, atom_count
             ));
         }
 

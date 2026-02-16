@@ -1,0 +1,12 @@
+[package]
+name = "pymol-algos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Computational algorithms for PyMOL-RS (alignment, SVD, sequence alignment)"
+
+[dependencies]
+lin_alg = { workspace = true }
+thiserror = { workspace = true }

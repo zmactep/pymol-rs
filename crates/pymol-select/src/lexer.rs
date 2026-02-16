@@ -8,7 +8,7 @@ use nom::{
     bytes::complete::{tag, take_while, take_while1},
     character::complete::{char, multispace0, digit1},
     combinator::{opt, recognize, value, eof},
-    sequence::{delimited, pair, preceded},
+    sequence::{delimited, pair, preceded, tuple},
 };
 
 use crate::error::ParseError;
@@ -234,10 +234,13 @@ fn ident(input: &str) -> LexResult<'_, Token> {
 
 /// Parse an identifier that starts with a digit (like atom names "1H", "2HG")
 fn digit_ident(input: &str) -> LexResult<'_, Token> {
-    let (input, s) = recognize(pair(
+    // Match digit(s) followed by at least one letter, then any alphanumeric/quote chars.
+    // This handles PDB codes like "1ubq", "1t46", "1hpx" as well as atom names like "1H".
+    let (input, s) = recognize(tuple((
         digit1,
         take_while1(|c: char| c.is_alphabetic() || c == '\''),
-    ))(input)?;
+        take_while(|c: char| c.is_alphanumeric() || c == '\''),
+    )))(input)?;
     Ok((input, Token::Ident(s.to_string())))
 }
 

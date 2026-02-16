@@ -11,6 +11,7 @@ members = [
     "crates/pymol-scene",
     "crates/pymol-cmd",
     "crates/pymol-gui",
+    "crates/pymol-algos",
 ]
 # pymol-python requires maturin to build (use: cd crates/pymol-python && maturin build)
 exclude = ["crates/pymol-python"]
@@ -34,6 +35,7 @@ pymol-raytracer = { path = "crates/pymol-raytracer" }
 pymol-scene = { path = "crates/pymol-scene" }
 pymol-cmd = { path = "crates/pymol-cmd" }
 pymol-gui = { path = "crates/pymol-gui" }
+pymol-algos = { path = "crates/pymol-algos" }
 
 # External dependencies
 bitflags = "2"
