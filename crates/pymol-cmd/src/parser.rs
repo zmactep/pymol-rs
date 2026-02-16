@@ -277,11 +277,23 @@ fn parse_command_name(input: &str) -> IResult<&str, &str> {
     ))(input)
 }
 
-/// Parse command arguments (comma-separated list)
+/// Parse command arguments (comma-separated or space-separated list)
+///
+/// PyMOL accepts both comma and space as argument separators in many commands.
+/// For example, `mset 1 x60` uses space separation while `color red, chain A`
+/// uses comma separation. This parser handles both.
 fn parse_arguments(input: &str) -> IResult<&str, Vec<(Option<String>, ArgValue)>> {
     let (input, first) = parse_argument(input)?;
+
+    // Try comma-separated args first, then fall back to space-separated
     let (input, rest) = many0(preceded(
-        tuple((multispace0, char(','), multispace0)),
+        alt((
+            // Comma separator (with optional whitespace)
+            map(tuple((multispace0, char(','), multispace0)), |_| ()),
+            // Space separator (only whitespace, no comma) — must have at least one space
+            // Only match if the next char is not a comma or end-of-input
+            map(take_while1(|c: char| c == ' ' || c == '\t'), |_| ()),
+        )),
         parse_argument,
     ))(input)?;
 

@@ -4,11 +4,9 @@
 //! Uses a stateful menu system where buttons only update state,
 //! and a single menu is rendered at the end to avoid overlapping popups.
 
-use std::collections::HashMap;
-
 use egui::{Color32, RichText, Ui, Vec2, Pos2, Id, Align2};
 use pymol_mol::RepMask;
-use pymol_scene::{ObjectRegistry, SelectionEntry};
+use pymol_scene::{ObjectRegistry, SelectionEntry, SelectionManager};
 
 /// Minimum size for action buttons (A, S, H, L, C) to ensure consistent sizing
 const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(22.0);
@@ -448,7 +446,7 @@ impl ObjectListPanel {
         &mut self,
         ui: &mut Ui,
         registry: &ObjectRegistry,
-        selections: &HashMap<String, SelectionEntry>,
+        selections: &SelectionManager,
     ) -> Vec<ObjectAction> {
         let mut actions = Vec::new();
         let mut menu_button_clicked = false;

@@ -1087,7 +1087,7 @@ impl App {
                 let mut ctx = EvalContext::single(mol);
 
                 // Add all named selections to context (for reference resolution)
-                for (sel_name, entry) in &self.state.selections {
+                for (sel_name, entry) in self.state.selections.iter() {
                     if let Ok(sel_ast) = pymol_select::parse(&entry.expression) {
                         if let Ok(sel_result) = pymol_select::evaluate(&sel_ast, &ctx) {
                             ctx.add_selection(sel_name.clone(), sel_result);

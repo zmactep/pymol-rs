@@ -9,8 +9,9 @@ use pymol_cmd::ViewerLike;
 use pymol_render::RenderContext;
 use pymol_render::ColorResolver;
 use pymol_scene::{
-    capture_png_to_file, raytrace_scene, raytrace_to_file, Camera, LoopMode, Object,
-    ObjectRegistry, RaytraceInput, SceneStoreMask, SelectionEntry,
+    capture_png_to_file, raytrace_scene, raytrace_to_file, Camera, Movie, NamedColors,
+    ObjectRegistry, RaytracedImage, RaytraceInput, SceneManager, SceneStoreMask,
+    SelectionManager, ViewManager,
 };
 
 use crate::async_tasks::TaskRunner;
@@ -36,89 +37,37 @@ pub struct ViewerAdapter<'a> {
 }
 
 impl<'a> ViewerLike for ViewerAdapter<'a> {
-    fn objects(&self) -> &ObjectRegistry {
-        &self.state.registry
-    }
+    // =========================================================================
+    // Required Accessors
+    // =========================================================================
 
-    fn objects_mut(&mut self) -> &mut ObjectRegistry {
-        &mut self.state.registry
-    }
-
-    fn camera(&self) -> &Camera {
-        &self.state.camera
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        &mut self.state.camera
-    }
-
-    fn settings(&self) -> &pymol_settings::GlobalSettings {
-        &self.state.settings
-    }
-
-    fn settings_mut(&mut self) -> &mut pymol_settings::GlobalSettings {
-        &mut self.state.settings
-    }
-
-    fn zoom_all(&mut self) {
-        if let Some((min, max)) = self.state.registry.extent() {
-            self.state.camera.zoom_to(min, max);
-            self.state.raytraced_image = None; // Clear raytraced overlay on camera change
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn zoom_on(&mut self, name: &str) {
-        if let Some(obj) = self.state.registry.get(name) {
-            if let Some((min, max)) = Object::extent(obj) {
-                self.state.camera.zoom_to(min, max);
-                self.state.raytraced_image = None; // Clear raytraced overlay on camera change
-                *self.needs_redraw = true;
-            }
-        }
-    }
-
-    fn center_all(&mut self) {
-        if let Some((min, max)) = self.state.registry.extent() {
-            self.state.camera.center_to(min, max);
-            self.state.raytraced_image = None; // Clear raytraced overlay on camera change
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn center_on(&mut self, name: &str) {
-        if let Some(obj) = self.state.registry.get(name) {
-            if let Some((min, max)) = Object::extent(obj) {
-                self.state.camera.center_to(min, max);
-                self.state.raytraced_image = None; // Clear raytraced overlay on camera change
-                *self.needs_redraw = true;
-            }
-        }
-    }
-
-    fn reset_view(&mut self) {
-        self.state.camera = Camera::new();
-        self.state.raytraced_image = None; // Clear raytraced overlay on camera change
-        if let Some((min, max)) = self.state.registry.extent() {
-            self.state.camera.reset_view(min, max);
-            *self.needs_redraw = true;
-        }
-    }
+    fn objects(&self) -> &ObjectRegistry { &self.state.registry }
+    fn objects_mut(&mut self) -> &mut ObjectRegistry { &mut self.state.registry }
+    fn camera(&self) -> &Camera { &self.state.camera }
+    fn camera_mut(&mut self) -> &mut Camera { &mut self.state.camera }
+    fn settings(&self) -> &pymol_settings::GlobalSettings { &self.state.settings }
+    fn settings_mut(&mut self) -> &mut pymol_settings::GlobalSettings { &mut self.state.settings }
+    fn movie(&self) -> &Movie { &self.state.movie }
+    fn movie_mut(&mut self) -> &mut Movie { &mut self.state.movie }
+    fn scenes(&self) -> &SceneManager { &self.state.scenes }
+    fn scenes_mut(&mut self) -> &mut SceneManager { &mut self.state.scenes }
+    fn views(&self) -> &ViewManager { &self.state.views }
+    fn views_mut(&mut self) -> &mut ViewManager { &mut self.state.views }
+    fn selections(&self) -> &SelectionManager { &self.state.selections }
+    fn selections_mut(&mut self) -> &mut SelectionManager { &mut self.state.selections }
+    fn named_colors(&self) -> &NamedColors { &self.state.named_colors }
+    fn clear_color(&self) -> [f32; 3] { self.state.clear_color }
+    fn set_clear_color(&mut self, color: [f32; 3]) { self.state.clear_color = color; }
+    fn raytraced_image_ref(&self) -> Option<&RaytracedImage> { self.state.raytraced_image.as_ref() }
+    fn set_raytraced_image_internal(&mut self, image: Option<RaytracedImage>) { self.state.raytraced_image = image; }
 
     fn request_redraw(&mut self) {
         *self.needs_redraw = true;
     }
 
-    fn color_index(&self, name: &str) -> Option<u32> {
-        self.state.named_colors.get_by_name(name).map(|(idx, _)| idx)
-    }
-
-    fn set_background_color(&mut self, r: f32, g: f32, b: f32) {
-        self.state.clear_color[0] = r;
-        self.state.clear_color[1] = g;
-        self.state.clear_color[2] = b;
-        *self.needs_redraw = true;
-    }
+    // =========================================================================
+    // GPU-specific overrides
+    // =========================================================================
 
     fn capture_png(
         &mut self,
@@ -206,77 +155,9 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
             .map_err(|e| e.to_string())
     }
 
-    fn set_raytraced_image(&mut self, image: Option<pymol_scene::RaytracedImage>) {
-        self.state.raytraced_image = image;
-        *self.needs_redraw = true;
-    }
-
-    fn get_raytraced_image(&self) -> Option<&pymol_scene::RaytracedImage> {
-        self.state.raytraced_image.as_ref()
-    }
-
-    fn get_selection(&self, name: &str) -> Option<&str> {
-        self.state.selections.get(name).map(|e| e.expression.as_str())
-    }
-
-    fn define_selection(&mut self, name: &str, selection: &str) {
-        self.state.selections.insert(name.to_string(), SelectionEntry::new(selection.to_string()));
-        *self.needs_redraw = true;
-    }
-
-    fn remove_selection(&mut self, name: &str) -> bool {
-        let removed = self.state.selections.remove(name).is_some();
-        if removed {
-            *self.needs_redraw = true;
-        }
-        removed
-    }
-
-    fn rename_selection(&mut self, old_name: &str, new_name: &str) -> bool {
-        if let Some(entry) = self.state.selections.remove(old_name) {
-            self.state.selections.insert(new_name.to_string(), entry);
-            *self.needs_redraw = true;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn selection_names(&self) -> Vec<String> {
-        self.state.selections.keys().cloned().collect()
-    }
-
-    fn set_selection_visible(&mut self, name: &str, visible: bool) {
-        if let Some(entry) = self.state.selections.get_mut(name) {
-            entry.visible = visible;
-            *self.needs_redraw = true;
-        }
-    }
-
-    fn is_selection_visible(&self, name: &str) -> bool {
-        self.state.selections.get(name).map(|e| e.visible).unwrap_or(false)
-    }
-
-    fn indicate_selection(&mut self, selection: &str) {
-        // For backwards compatibility: create or update "indicate" selection and make it visible
-        self.state.selections.insert("indicate".to_string(), SelectionEntry::new(selection.to_string()));
-        *self.needs_redraw = true;
-    }
-
-    fn clear_indication(&mut self) {
-        // Hide all selection indicators
-        for entry in self.state.selections.values_mut() {
-            entry.visible = false;
-        }
-        *self.needs_redraw = true;
-    }
-
-    fn indicated_selection(&self) -> Option<&str> {
-        // Return the first visible selection expression (for backwards compat)
-        self.state.selections.values()
-            .find(|e| e.visible)
-            .map(|e| e.expression.as_str())
-    }
+    // =========================================================================
+    // GUI-specific override
+    // =========================================================================
 
     fn request_async_fetch(&mut self, code: &str, name: &str, format: u8) -> bool {
         let fmt = match format {
@@ -288,7 +169,7 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
     }
 
     // =========================================================================
-    // Scene Management
+    // Per-impl methods (borrow checker constraints)
     // =========================================================================
 
     fn scene_store(&mut self, key: &str, storemask: u32) {
@@ -306,116 +187,6 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         Ok(())
     }
 
-    fn scene_delete(&mut self, key: &str) -> bool {
-        self.state.scenes.delete(key).is_some()
-    }
-
-    fn scene_list(&self) -> Vec<String> {
-        self.state.scenes.list().to_vec()
-    }
-
-    fn scene_rename(&mut self, old_key: &str, new_key: &str) -> Result<(), String> {
-        self.state.scenes.rename(old_key, new_key).map_err(|e: pymol_scene::SceneError| e.to_string())
-    }
-
-    fn scene_clear(&mut self) {
-        self.state.scenes.clear();
-    }
-
-    // =========================================================================
-    // Movie Control
-    // =========================================================================
-
-    fn movie_play(&mut self) {
-        self.state.movie.play();
-        *self.needs_redraw = true;
-    }
-
-    fn movie_stop(&mut self) {
-        self.state.movie.stop();
-        *self.needs_redraw = true;
-    }
-
-    fn movie_pause(&mut self) {
-        self.state.movie.pause();
-    }
-
-    fn movie_toggle(&mut self) {
-        self.state.movie.toggle();
-        *self.needs_redraw = true;
-    }
-
-    fn movie_goto(&mut self, frame: usize) {
-        self.state.movie.goto_frame(frame);
-        *self.needs_redraw = true;
-    }
-
-    fn movie_next(&mut self) {
-        self.state.movie.next_frame();
-        *self.needs_redraw = true;
-    }
-
-    fn movie_prev(&mut self) {
-        self.state.movie.prev_frame();
-        *self.needs_redraw = true;
-    }
-
-    fn movie_set_fps(&mut self, fps: f32) {
-        self.state.movie.set_fps(fps);
-    }
-
-    fn movie_frame_count(&self) -> usize {
-        self.state.movie.frame_count()
-    }
-
-    fn movie_current_frame(&self) -> usize {
-        self.state.movie.current_frame()
-    }
-
-    fn movie_is_playing(&self) -> bool {
-        self.state.movie.is_playing()
-    }
-
-    fn movie_set_loop_mode(&mut self, mode: u8) {
-        let loop_mode = match mode {
-            1 => LoopMode::Loop,
-            2 => LoopMode::Swing,
-            _ => LoopMode::Once,
-        };
-        self.state.movie.set_loop_mode(loop_mode);
-    }
-
-    fn movie_set_frame_count(&mut self, count: usize) {
-        self.state.movie.set_frame_count(count);
-    }
-
-    // =========================================================================
-    // Rock Animation
-    // =========================================================================
-
-    fn rock_toggle(&mut self) {
-        let current = self.state.movie.is_rock_enabled();
-        self.state.movie.set_rock(!current);
-        *self.needs_redraw = true;
-    }
-
-    fn rock_set(&mut self, enabled: bool) {
-        self.state.movie.set_rock(enabled);
-        *self.needs_redraw = true;
-    }
-
-    fn rock_is_enabled(&self) -> bool {
-        self.state.movie.is_rock_enabled()
-    }
-
-    // =========================================================================
-    // Named View Storage - delegate to ViewManager
-    // =========================================================================
-
-    fn view_store(&mut self, key: &str) {
-        self.state.views.store(key, &self.state.camera);
-    }
-
     fn view_recall(&mut self, key: &str, animate: f32) -> Result<(), String> {
         self.state
             .views
@@ -425,29 +196,35 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
         Ok(())
     }
 
-    fn view_delete(&mut self, key: &str) -> bool {
-        self.state.views.delete(key).is_some()
-    }
-
-    fn view_list(&self) -> Vec<String> {
-        self.state.views.list().to_vec()
-    }
-
-    fn view_clear(&mut self) {
-        self.state.views.clear();
+    fn capture_frame_png(
+        &mut self,
+        frame: usize,
+        path: &Path,
+        width: Option<u32>,
+        height: Option<u32>,
+    ) -> Result<(), String> {
+        self.state.movie.goto_frame(frame);
+        if let Some(view) = self.state.movie.interpolated_view() {
+            self.state.camera.set_view(view);
+        }
+        if let Some(scene_name) = self.state.movie.current_scene_name().map(|s| s.to_string()) {
+            if let Some(scene) = self.state.scenes.get(&scene_name) {
+                scene.apply(&mut self.state.camera, &mut self.state.registry, false, 0.0);
+                if let Some(view) = self.state.movie.interpolated_view() {
+                    self.state.camera.set_view(view);
+                }
+            }
+        }
+        self.capture_png(path, width, height)
     }
 
     // =========================================================================
-    // Viewport / Window Size
+    // Viewport override
     // =========================================================================
 
     fn viewport_size(&self) -> (u32, u32) {
-        // Return the default size as we don't have direct window access
         self.default_size
     }
-
-    // Note: viewport_set_size and fullscreen methods use default implementations
-    // since we don't have direct window access from the adapter
 }
 
 impl<'a> ViewerAdapter<'a> {

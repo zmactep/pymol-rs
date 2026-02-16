@@ -7,6 +7,7 @@ use ahash::AHashMap;
 use std::time::{Duration, Instant};
 
 use crate::camera::SceneView;
+use crate::quat::{self, Quat};
 
 /// Movie loop mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -33,6 +34,15 @@ impl Default for PlayDirection {
     }
 }
 
+/// Object-specific keyframe data
+#[derive(Debug, Clone)]
+pub struct ObjectKeyframe {
+    /// Object transform matrix
+    pub transform: Option<lin_alg::f32::Mat4>,
+    /// Coordinate set state
+    pub state: Option<usize>,
+}
+
 /// A single movie frame
 #[derive(Debug, Clone, Default)]
 pub struct MovieFrame {
@@ -44,6 +54,14 @@ pub struct MovieFrame {
     pub commands: Vec<String>,
     /// Message to display
     pub message: Option<String>,
+    /// Scene keyframe reference (name of a stored scene)
+    pub scene_name: Option<String>,
+    /// Whether this frame is a camera keyframe
+    pub is_camera_keyframe: bool,
+    /// Per-object keyframes
+    pub object_keyframes: AHashMap<String, ObjectKeyframe>,
+    /// Global state index for this frame (from mset specification)
+    pub state_index: usize,
 }
 
 impl MovieFrame {
@@ -128,6 +146,8 @@ pub struct Movie {
     rock_angle: f32,
     /// Whether rock mode is enabled
     rock_enabled: bool,
+    /// Precomputed interpolated views for all frames between keyframes
+    precomputed_views: Vec<Option<SceneView>>,
 }
 
 impl Default for Movie {
@@ -152,6 +172,7 @@ impl Movie {
             interpolation_t: 0.0,
             rock_angle: 0.0,
             rock_enabled: false,
+            precomputed_views: Vec::new(),
         }
     }
 
@@ -221,6 +242,7 @@ impl Movie {
     /// Clear all frames
     pub fn clear(&mut self) {
         self.frames.clear();
+        self.precomputed_views.clear();
         self.current_frame = 0;
         self.stop();
     }
@@ -228,9 +250,35 @@ impl Movie {
     /// Set the number of frames (resizing the movie)
     pub fn set_frame_count(&mut self, count: usize) {
         self.frames.resize_with(count, MovieFrame::new);
+        self.precomputed_views.clear();
         if self.current_frame >= count && count > 0 {
             self.current_frame = count - 1;
         }
+    }
+
+    /// Set frames from an mset specification (state index per frame).
+    ///
+    /// The `states` vec contains one state index per frame.
+    pub fn set_from_spec(&mut self, states: Vec<usize>) {
+        let count = states.len();
+        self.frames.resize_with(count, MovieFrame::new);
+        for (i, state) in states.into_iter().enumerate() {
+            self.frames[i].state_index = state;
+        }
+        self.precomputed_views.clear();
+        if self.current_frame >= count && count > 0 {
+            self.current_frame = count - 1;
+        }
+    }
+
+    /// Append frames from an mset specification onto the existing movie.
+    pub fn append_from_spec(&mut self, states: Vec<usize>) {
+        for state in states {
+            let mut frame = MovieFrame::new();
+            frame.state_index = state;
+            self.frames.push(frame);
+        }
+        self.precomputed_views.clear();
     }
 
     /// Get the FPS
@@ -441,89 +489,278 @@ impl Movie {
         self.current_frame != old_frame
     }
 
-    /// Get the interpolated view between current and next frame
+    /// Get the view for the current frame.
+    ///
+    /// Prefers precomputed interpolated views. Falls back to per-frame views
+    /// or simple linear interpolation between adjacent frames.
     pub fn interpolated_view(&self) -> Option<SceneView> {
-        if !self.interpolate || self.frames.is_empty() {
-            return self.frames.get(self.current_frame).and_then(|f| f.view.clone());
+        if self.frames.is_empty() {
+            return None;
         }
 
-        let current_view = self.frames.get(self.current_frame).and_then(|f| f.view.clone());
-        
-        // Find next frame with a view
-        let next_idx = match self.direction {
-            PlayDirection::Forward => {
-                if self.current_frame + 1 < self.frames.len() {
-                    self.current_frame + 1
-                } else {
-                    return current_view;
-                }
-            }
-            PlayDirection::Backward => {
-                if self.current_frame > 0 {
-                    self.current_frame - 1
-                } else {
-                    return current_view;
-                }
-            }
-        };
+        // Use precomputed views if available
+        if let Some(view) = self.precomputed_views.get(self.current_frame).and_then(|v| v.clone()) {
+            return Some(view);
+        }
 
-        let next_view = self.frames.get(next_idx).and_then(|f| f.view.clone());
+        // Fall back to per-frame stored view
+        self.frames.get(self.current_frame).and_then(|f| f.view.clone())
+    }
 
-        match (current_view, next_view) {
-            (Some(current), Some(next)) => {
-                Some(Self::lerp_view(&current, &next, self.interpolation_t))
-            }
-            (Some(current), None) => Some(current),
-            (None, Some(next)) => Some(next),
-            (None, None) => None,
+    // =========================================================================
+    // Keyframe Management
+    // =========================================================================
+
+    /// Store a camera keyframe at the given frame index.
+    pub fn store_camera_keyframe(&mut self, frame: usize, view: SceneView) {
+        if frame < self.frames.len() {
+            self.frames[frame].view = Some(view);
+            self.frames[frame].is_camera_keyframe = true;
         }
     }
 
-    /// Linear interpolation between two views
-    fn lerp_view(from: &SceneView, to: &SceneView, t: f32) -> SceneView {
-        let t = t.clamp(0.0, 1.0);
-        
-        // Interpolate position
-        let position = lin_alg::f32::Vec3::new(
-            from.position.x + (to.position.x - from.position.x) * t,
-            from.position.y + (to.position.y - from.position.y) * t,
-            from.position.z + (to.position.z - from.position.z) * t,
-        );
-
-        // Interpolate origin
-        let origin = lin_alg::f32::Vec3::new(
-            from.origin.x + (to.origin.x - from.origin.x) * t,
-            from.origin.y + (to.origin.y - from.origin.y) * t,
-            from.origin.z + (to.origin.z - from.origin.z) * t,
-        );
-
-        // Interpolate clip planes and FOV
-        let clip_front = from.clip_front + (to.clip_front - from.clip_front) * t;
-        let clip_back = from.clip_back + (to.clip_back - from.clip_back) * t;
-        let fov = from.fov + (to.fov - from.fov) * t;
-
-        // For rotation, we should use quaternion slerp, but for simplicity
-        // we'll interpolate the rotation matrix directly (works for small angles)
-        // A proper implementation would extract quaternions and slerp them
-        let rotation = Self::lerp_mat4(&from.rotation, &to.rotation, t);
-
-        SceneView {
-            rotation,
-            position,
-            origin,
-            clip_front,
-            clip_back,
-            fov,
+    /// Store a scene keyframe at the given frame index.
+    pub fn store_scene_keyframe(&mut self, frame: usize, scene_name: &str, view: SceneView) {
+        if frame < self.frames.len() {
+            self.frames[frame].scene_name = Some(scene_name.to_string());
+            self.frames[frame].view = Some(view);
+            self.frames[frame].is_camera_keyframe = true;
         }
     }
 
-    /// Linear interpolation between matrices (not ideal for rotations, but works for small changes)
-    fn lerp_mat4(from: &lin_alg::f32::Mat4, to: &lin_alg::f32::Mat4, t: f32) -> lin_alg::f32::Mat4 {
-        let mut result = lin_alg::f32::Mat4::new_identity();
-        for i in 0..16 {
-            result.data[i] = from.data[i] + (to.data[i] - from.data[i]) * t;
+    /// Store an object keyframe at the given frame index.
+    pub fn store_object_keyframe(&mut self, frame: usize, object: &str, state: Option<usize>) {
+        if frame < self.frames.len() {
+            self.frames[frame].object_keyframes.insert(
+                object.to_string(),
+                ObjectKeyframe {
+                    transform: None,
+                    state,
+                },
+            );
         }
-        result
+    }
+
+    /// Clear camera keyframe at a specific frame, or all if `frame` is None.
+    pub fn clear_camera_keyframes(&mut self, frame: Option<usize>) {
+        match frame {
+            Some(f) => {
+                if f < self.frames.len() {
+                    self.frames[f].view = None;
+                    self.frames[f].is_camera_keyframe = false;
+                    self.frames[f].scene_name = None;
+                }
+            }
+            None => {
+                for f in &mut self.frames {
+                    f.view = None;
+                    f.is_camera_keyframe = false;
+                    f.scene_name = None;
+                }
+            }
+        }
+        self.precomputed_views.clear();
+    }
+
+    /// Clear object keyframes at a specific frame for a specific object.
+    pub fn clear_object_keyframes(&mut self, frame: Option<usize>, object: &str) {
+        match frame {
+            Some(f) => {
+                if f < self.frames.len() {
+                    self.frames[f].object_keyframes.remove(object);
+                }
+            }
+            None => {
+                for f in &mut self.frames {
+                    f.object_keyframes.remove(object);
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Keyframe Interpolation
+    // =========================================================================
+
+    /// Compute smooth interpolated views for all frames between keyframes.
+    ///
+    /// Uses Catmull-Rom cubic Hermite splines for position/origin/clip/fov
+    /// and quaternion SLERP for rotation.
+    pub fn interpolate_keyframes(&mut self, loop_movie: bool) {
+        let n = self.frames.len();
+        if n == 0 {
+            return;
+        }
+
+        // Collect camera keyframe indices and views
+        let keyframes: Vec<(usize, SceneView)> = self
+            .frames
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.is_camera_keyframe && f.view.is_some())
+            .map(|(i, f)| (i, f.view.clone().unwrap()))
+            .collect();
+
+        if keyframes.is_empty() {
+            self.precomputed_views = vec![None; n];
+            return;
+        }
+
+        // Single keyframe: all frames get that view
+        if keyframes.len() == 1 {
+            let view = &keyframes[0].1;
+            self.precomputed_views = vec![Some(view.clone()); n];
+            return;
+        }
+
+        let mut views: Vec<Option<SceneView>> = vec![None; n];
+
+        // Extract quaternions and scalar data for each keyframe
+        let kf_quats: Vec<Quat> = keyframes
+            .iter()
+            .map(|(_, v)| Quat::from_mat4(&v.rotation).normalized())
+            .collect();
+
+        let kf_count = keyframes.len();
+
+        // Interpolate between each consecutive pair of keyframes
+        for seg in 0..kf_count {
+            let next_seg = if seg + 1 < kf_count {
+                seg + 1
+            } else if loop_movie {
+                0 // wrap around
+            } else {
+                break; // no more segments
+            };
+
+            let (start_frame, ref start_view) = keyframes[seg];
+            let (end_frame, ref end_view) = keyframes[next_seg];
+
+            // Compute span (number of frames in this segment)
+            let span = if end_frame > start_frame {
+                end_frame - start_frame
+            } else if loop_movie && next_seg == 0 {
+                // Wrap-around: frames from start to end of movie, then from 0 to end_frame
+                n - start_frame + end_frame
+            } else {
+                continue;
+            };
+
+            if span == 0 {
+                continue;
+            }
+
+            // Get tangent control points for Catmull-Rom
+            let prev_seg = if seg > 0 {
+                seg - 1
+            } else if loop_movie {
+                kf_count - 1
+            } else {
+                seg
+            };
+            let next_next_seg = if next_seg + 1 < kf_count {
+                next_seg + 1
+            } else if loop_movie {
+                0
+            } else {
+                next_seg
+            };
+
+            let prev_view = &keyframes[prev_seg].1;
+            let next_next_view = &keyframes[next_next_seg].1;
+
+            // Catmull-Rom tangents for position
+            let m0_pos = quat::catmull_rom_tangent_vec3(&prev_view.position, &end_view.position);
+            let m1_pos =
+                quat::catmull_rom_tangent_vec3(&start_view.position, &next_next_view.position);
+
+            // Catmull-Rom tangents for origin
+            let m0_org = quat::catmull_rom_tangent_vec3(&prev_view.origin, &end_view.origin);
+            let m1_org =
+                quat::catmull_rom_tangent_vec3(&start_view.origin, &next_next_view.origin);
+
+            // Scalar tangents
+            let m0_cf = quat::catmull_rom_tangent(prev_view.clip_front, end_view.clip_front);
+            let m1_cf =
+                quat::catmull_rom_tangent(start_view.clip_front, next_next_view.clip_front);
+            let m0_cb = quat::catmull_rom_tangent(prev_view.clip_back, end_view.clip_back);
+            let m1_cb = quat::catmull_rom_tangent(start_view.clip_back, next_next_view.clip_back);
+            let m0_fov = quat::catmull_rom_tangent(prev_view.fov, end_view.fov);
+            let m1_fov = quat::catmull_rom_tangent(start_view.fov, next_next_view.fov);
+
+            let q0 = &kf_quats[seg];
+            let q1 = &kf_quats[next_seg];
+
+            for step in 0..=span {
+                let frame_idx = (start_frame + step) % n;
+                let t = step as f32 / span as f32;
+
+                let position = quat::hermite_vec3(
+                    &start_view.position,
+                    &m0_pos,
+                    &end_view.position,
+                    &m1_pos,
+                    t,
+                );
+                let origin = quat::hermite_vec3(
+                    &start_view.origin,
+                    &m0_org,
+                    &end_view.origin,
+                    &m1_org,
+                    t,
+                );
+                let clip_front =
+                    quat::hermite(start_view.clip_front, m0_cf, end_view.clip_front, m1_cf, t);
+                let clip_back =
+                    quat::hermite(start_view.clip_back, m0_cb, end_view.clip_back, m1_cb, t);
+                let fov = quat::hermite(start_view.fov, m0_fov, end_view.fov, m1_fov, t);
+
+                let rotation = Quat::slerp(q0, q1, t).to_mat4();
+
+                views[frame_idx] = Some(SceneView {
+                    rotation,
+                    position,
+                    origin,
+                    clip_front,
+                    clip_back,
+                    fov,
+                });
+            }
+        }
+
+        // Fill frames before the first keyframe (hold first keyframe view)
+        let first_kf_frame = keyframes[0].0;
+        let first_view = keyframes[0].1.clone();
+        for i in 0..first_kf_frame {
+            if views[i].is_none() {
+                views[i] = Some(first_view.clone());
+            }
+        }
+
+        // Fill frames after the last keyframe (hold last keyframe view)
+        if !loop_movie {
+            let last_kf_frame = keyframes[kf_count - 1].0;
+            let last_view = keyframes[kf_count - 1].1.clone();
+            for i in (last_kf_frame + 1)..n {
+                if views[i].is_none() {
+                    views[i] = Some(last_view.clone());
+                }
+            }
+        }
+
+        self.precomputed_views = views;
+    }
+
+    /// Check if precomputed interpolation data is available.
+    pub fn has_interpolation(&self) -> bool {
+        !self.precomputed_views.is_empty()
+    }
+
+    /// Get the scene name for the current frame, if any.
+    pub fn current_scene_name(&self) -> Option<&str> {
+        self.frames
+            .get(self.current_frame)
+            .and_then(|f| f.scene_name.as_deref())
     }
 
     /// Enable or disable rock mode
@@ -549,7 +786,7 @@ impl Movie {
         if !self.rock_enabled {
             return 0.0;
         }
-        
+
         self.rock_angle += dt * speed;
         amplitude * self.rock_angle.sin()
     }
@@ -577,19 +814,19 @@ mod tests {
     #[test]
     fn test_movie_frame_navigation() {
         let mut movie = Movie::with_frames(5);
-        
+
         assert_eq!(movie.current_frame(), 0);
         movie.next_frame();
         assert_eq!(movie.current_frame(), 1);
         movie.prev_frame();
         assert_eq!(movie.current_frame(), 0);
-        
+
         movie.goto_frame(3);
         assert_eq!(movie.current_frame(), 3);
-        
+
         movie.fast_forward();
         assert_eq!(movie.current_frame(), 4);
-        
+
         movie.rewind();
         assert_eq!(movie.current_frame(), 0);
     }
@@ -597,14 +834,14 @@ mod tests {
     #[test]
     fn test_movie_add_remove_frames() {
         let mut movie = Movie::new();
-        
+
         movie.add_frame(MovieFrame::new());
         movie.add_frame(MovieFrame::new());
         assert_eq!(movie.frame_count(), 2);
-        
+
         movie.remove_frame(0);
         assert_eq!(movie.frame_count(), 1);
-        
+
         movie.clear();
         assert!(movie.is_empty());
     }
@@ -612,10 +849,10 @@ mod tests {
     #[test]
     fn test_movie_fps() {
         let mut movie = Movie::new();
-        
+
         movie.set_fps(60.0);
         assert_eq!(movie.fps(), 60.0);
-        
+
         movie.set_fps(0.0); // Should clamp to minimum
         assert!(movie.fps() >= 0.1);
     }
@@ -623,7 +860,7 @@ mod tests {
     #[test]
     fn test_movie_loop_mode() {
         let mut movie = Movie::new();
-        
+
         assert_eq!(movie.loop_mode(), LoopMode::Once);
         movie.set_loop_mode(LoopMode::Loop);
         assert_eq!(movie.loop_mode(), LoopMode::Loop);
@@ -632,18 +869,18 @@ mod tests {
     #[test]
     fn test_movie_playback_state() {
         let mut movie = Movie::with_frames(3);
-        
+
         assert!(movie.is_stopped());
-        
+
         movie.play();
         assert!(movie.is_playing());
-        
+
         movie.pause();
         assert!(movie.is_paused());
-        
+
         movie.resume();
         assert!(movie.is_playing());
-        
+
         movie.stop();
         assert!(movie.is_stopped());
     }
@@ -651,13 +888,13 @@ mod tests {
     #[test]
     fn test_movie_toggle() {
         let mut movie = Movie::with_frames(3);
-        
+
         movie.toggle(); // stopped -> playing
         assert!(movie.is_playing());
-        
+
         movie.toggle(); // playing -> paused
         assert!(movie.is_paused());
-        
+
         movie.toggle(); // paused -> playing
         assert!(movie.is_playing());
     }
@@ -665,12 +902,12 @@ mod tests {
     #[test]
     fn test_movie_frame_data() {
         let mut frame = MovieFrame::new();
-        
+
         assert!(frame.is_empty());
-        
+
         frame.set_object_state("protein", 5);
         frame.add_command("show cartoon");
-        
+
         assert!(!frame.is_empty());
         assert_eq!(frame.object_states.get("protein"), Some(&5));
         assert_eq!(frame.commands.len(), 1);
@@ -683,7 +920,7 @@ mod tests {
         movie.direction = PlayDirection::Forward;
         movie.current_frame = 2; // Last frame
         movie.state = PlaybackState::Playing;
-        
+
         movie.advance_frame();
         assert_eq!(movie.current_frame(), 0); // Should wrap to first
     }
@@ -695,7 +932,7 @@ mod tests {
         movie.direction = PlayDirection::Forward;
         movie.current_frame = 2; // Last frame
         movie.state = PlaybackState::Playing;
-        
+
         movie.advance_frame();
         assert_eq!(movie.current_frame(), 1); // Should reverse
         assert_eq!(movie.direction, PlayDirection::Backward);

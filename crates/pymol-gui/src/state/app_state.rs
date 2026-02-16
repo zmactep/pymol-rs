@@ -3,11 +3,9 @@
 //! Contains all domain/scene data that can exist independently of rendering:
 //! object registry, camera, selections, settings, colors, and command executor.
 
-use std::collections::HashMap;
-
 use pymol_cmd::{ArgHint, CommandExecutor};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
-use pymol_scene::{Camera, Movie, ObjectRegistry, RaytracedImage, SceneManager, SelectionEntry, ViewManager};
+use pymol_scene::{Camera, Movie, ObjectRegistry, RaytracedImage, SceneManager, SelectionManager, ViewManager};
 use pymol_settings::GlobalSettings;
 
 /// Application state containing all scene/domain data
@@ -19,8 +17,8 @@ pub struct AppState {
     pub registry: ObjectRegistry,
     /// Camera for view control
     pub camera: Camera,
-    /// Named selections (name -> entry with expression and visibility)
-    pub selections: HashMap<String, SelectionEntry>,
+    /// Named selections manager
+    pub selections: SelectionManager,
     /// Scene manager for named view snapshots
     pub scenes: SceneManager,
     /// Named views (simpler than scenes - just camera state)
@@ -71,7 +69,7 @@ impl AppState {
         Self {
             registry: ObjectRegistry::new(),
             camera: Camera::new(),
-            selections: HashMap::new(),
+            selections: SelectionManager::new(),
             scenes: SceneManager::new(),
             views: ViewManager::new(),
             movie: Movie::new(),
