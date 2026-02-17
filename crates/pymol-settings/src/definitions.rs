@@ -6,7 +6,7 @@
 use crate::setting::{Setting, SettingLevel, SettingType, SettingValue};
 
 /// Total number of settings
-pub const SETTING_COUNT: usize = 798;
+pub const SETTING_COUNT: usize = 802;
 
 // =============================================================================
 // Setting ID Constants
@@ -844,6 +844,12 @@ pub mod id {
     pub const salt_bridge_distance: u16 = 795;
     pub const use_tessellation_shaders: u16 = 796;
     pub const cell_color: u16 = 797;
+
+    // 798-801: Silhouette settings
+    pub const silhouettes: u16 = 798;
+    pub const silhouette_width: u16 = 799;
+    pub const silhouette_color: u16 = 800;
+    pub const silhouette_depth_jump: u16 = 801;
 }
 
 // =============================================================================
@@ -1728,6 +1734,11 @@ pub static SETTINGS: &[Setting] = &[
     s_float!(795, "salt_bridge_distance", Global, 5.0),
     s_bool!(796, "use_tessellation_shaders", Global, true),
     s_color!(797, "cell_color", ObjectState, -1),
+    // 798-801: Silhouette settings
+    s_bool!(798, "silhouettes", Global, false),
+    s_float!(799, "silhouette_width", Global, 1.0, 0.5, 10.0),
+    s_float3!(800, "silhouette_color", Global, 0.0, 0.0, 0.0),
+    s_float!(801, "silhouette_depth_jump", Global, 0.03, 0.001, 0.5),
 ];
 
 /// Initialize a settings store with all default values

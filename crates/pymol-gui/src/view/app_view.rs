@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use egui::ViewportId;
+use pymol_render::silhouette::SilhouettePipeline;
 use pymol_render::RenderContext;
 use winit::dpi::PhysicalSize;
 use winit::window::Window;
@@ -33,6 +34,8 @@ pub struct AppView {
     pub surface_config: Option<wgpu::SurfaceConfiguration>,
     /// Depth texture view
     pub depth_view: Option<wgpu::TextureView>,
+    /// Silhouette edge rendering pipeline
+    pub silhouette_pipeline: Option<SilhouettePipeline>,
 
     // =========================================================================
     // egui Integration
@@ -82,6 +85,7 @@ impl AppView {
             surface: None,
             surface_config: None,
             depth_view: None,
+            silhouette_pipeline: None,
             egui_ctx: egui::Context::default(),
             egui_state: None,
             egui_renderer: None,
@@ -170,11 +174,15 @@ impl AppView {
         // Create render context (takes ownership of device and queue)
         let render_context = RenderContext::new(device, queue, format);
 
+        // Create silhouette pipeline
+        let silhouette_pipeline = SilhouettePipeline::new(render_context.device(), format);
+
         // Store everything
         self.window = Some(window);
         self.surface = Some(surface);
         self.surface_config = Some(config);
         self.depth_view = Some(depth_view);
+        self.silhouette_pipeline = Some(silhouette_pipeline);
         self.render_context = Some(render_context);
         self.egui_state = Some(egui_state);
         self.egui_renderer = Some(egui_renderer);
@@ -203,7 +211,7 @@ impl AppView {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         texture.create_view(&wgpu::TextureViewDescriptor::default())

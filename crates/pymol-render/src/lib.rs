@@ -51,6 +51,7 @@ mod error;
 pub mod picking;
 pub mod pipeline;
 mod representation;
+pub mod silhouette;
 mod uniforms;
 mod vertex;
 

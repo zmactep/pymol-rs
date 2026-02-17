@@ -443,6 +443,29 @@ impl App {
             }
         }
 
+        // Silhouette pass (after main scene, before egui)
+        if self.state.settings.get_bool(pymol_settings::id::silhouettes) {
+            if let (Some(silhouette), Some(depth_view)) = (&self.view.silhouette_pipeline, &self.view.depth_view) {
+                let thickness = self.state.settings.get_float(pymol_settings::id::silhouette_width);
+                let depth_jump = self.state.settings.get_float(pymol_settings::id::silhouette_depth_jump);
+                let color_rgb = self.state.settings.get_float3(pymol_settings::id::silhouette_color);
+                let color = [color_rgb[0], color_rgb[1], color_rgb[2], 1.0];
+                silhouette.render(
+                    &mut encoder,
+                    context.queue(),
+                    context.device(),
+                    &view,
+                    depth_view,
+                    width,
+                    height,
+                    thickness,
+                    depth_jump,
+                    color,
+                    None,
+                );
+            }
+        }
+
         // Render egui output
         if let (Some((clipped_primitives, textures_delta)), Some(egui_renderer)) =
             (egui_output, &mut self.view.egui_renderer)

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
+use pymol_render::silhouette::SilhouettePipeline;
 use pymol_render::{ColorResolver, RenderContext};
 use pymol_settings::GlobalSettings;
 use winit::application::ApplicationHandler;
@@ -55,6 +56,8 @@ pub struct Viewer {
     instance: wgpu::Instance,
     /// Render context (owns device, queue, pipelines, shared buffers)
     render_context: Option<RenderContext>,
+    /// Silhouette edge rendering pipeline
+    silhouette_pipeline: Option<SilhouettePipeline>,
 
     // =========================================================================
     // Window State
@@ -145,6 +148,7 @@ impl Viewer {
         Self {
             instance,
             render_context: None,
+            silhouette_pipeline: None,
             window: None,
             pending_window: Some(("PyMOL-RS".to_string(), 1024, 768)),
             camera: Camera::new(),
@@ -213,11 +217,15 @@ impl Viewer {
         // Create render context - it takes ownership of device and queue
         let render_context = RenderContext::new(device, queue, surface_format);
 
+        // Create silhouette pipeline
+        let silhouette_pipeline = SilhouettePipeline::new(render_context.device(), surface_format);
+
         // Set camera aspect ratio
         self.camera.set_aspect(window.aspect_ratio());
 
         self.window = Some(window);
         self.render_context = Some(render_context);
+        self.silhouette_pipeline = Some(silhouette_pipeline);
         self.needs_redraw = true;
 
         Ok(())
@@ -685,6 +693,31 @@ impl Viewer {
                         mol_obj.render(&mut render_pass, context);
                     }
                 }
+            }
+        }
+
+        // Silhouette pass (after main scene, before submit)
+        if self.settings.get_bool(pymol_settings::id::silhouettes) {
+            if let Some(silhouette) = &self.silhouette_pipeline {
+                let width = window.width();
+                let height = window.height();
+                let thickness = self.settings.get_float(pymol_settings::id::silhouette_width);
+                let depth_jump = self.settings.get_float(pymol_settings::id::silhouette_depth_jump);
+                let color_rgb = self.settings.get_float3(pymol_settings::id::silhouette_color);
+                let color = [color_rgb[0], color_rgb[1], color_rgb[2], 1.0];
+                silhouette.render(
+                    &mut encoder,
+                    context.queue(),
+                    context.device(),
+                    &view,
+                    window.depth_view(),
+                    width,
+                    height,
+                    thickness,
+                    depth_jump,
+                    color,
+                    None,
+                );
             }
         }
 
