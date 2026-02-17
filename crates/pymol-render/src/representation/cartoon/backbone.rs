@@ -283,7 +283,11 @@ pub fn smooth_orientations(segment: &mut BackboneSegment, cycles: u32) {
     }
 }
 
-/// Apply all PyMOL-style smoothing operations to a backbone segment
+/// Apply all PyMOL-style smoothing operations to a backbone segment.
+///
+/// **Note:** This function is used only by the **ribbon** representation
+/// (via `build_cartoon_geometry`). The cartoon representation uses
+/// `pipeline::generate_segment_cartoon` which has its own smoothing pipeline.
 ///
 /// This applies smoothing in the correct order:
 /// 1. Helix smoothing (heavy orientation smoothing to prevent ribbon twist)

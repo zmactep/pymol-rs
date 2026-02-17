@@ -1,7 +1,11 @@
-//! Reference frame calculation for cartoon representation
+//! Reference frame calculation for cartoon representation.
 //!
 //! Calculates local coordinate frames along the backbone curve for
 //! orienting ribbon cross-sections.
+//!
+//! **Note:** `generate_frames()` is used by the **ribbon** representation
+//! (via `build_cartoon_geometry`). The cartoon representation uses
+//! `pipeline.rs` which builds frames inline during extrusion.
 
 use lin_alg::f32::Vec3;
 

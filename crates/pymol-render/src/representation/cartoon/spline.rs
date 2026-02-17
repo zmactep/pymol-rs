@@ -1,7 +1,12 @@
-//! Backbone interpolation for cartoon representation
+//! Backbone interpolation for cartoon representation.
 //!
 //! Implements PyMOL's exact interpolation algorithm for smooth cartoon curves.
 //! Based on analysis of PyMOL's RepCartoon.cpp CartoonGenerateSample function.
+//!
+//! **Note:** `interpolate_backbone()` is used by the **ribbon** representation
+//! (via `frame::generate_frames` → `build_cartoon_geometry`). The cartoon
+//! representation uses `pipeline.rs` which has its own interpolation
+//! (`cartoon_generate_sample`).
 
 use lin_alg::f32::Vec3;
 

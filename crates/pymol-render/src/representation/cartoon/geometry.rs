@@ -943,7 +943,7 @@ fn flush_segment(
 }
 
 /// Connect two profile rings with triangles (for round profiles)
-fn connect_rings(indices: &mut Vec<u32>, ring1_start: u32, ring2_start: u32, profile_len: u32) {
+pub fn connect_rings(indices: &mut Vec<u32>, ring1_start: u32, ring2_start: u32, profile_len: u32) {
     for j in 0..profile_len {
         let j_next = (j + 1) % profile_len;
 
@@ -974,7 +974,7 @@ fn connect_rings(indices: &mut Vec<u32>, ring1_start: u32, ring2_start: u32, pro
 /// - `ring_starts`: Start vertex index of each ring along the path
 /// - `num_faces`: Number of face pairs (4 for sheets with sides, 2 for dumbbells)
 /// - `vertices_per_ring`: Total vertices per ring (num_faces * 2)
-fn generate_face_strips(
+pub fn generate_face_strips(
     indices: &mut Vec<u32>,
     ring_starts: &[usize],
     num_faces: usize,
@@ -1102,7 +1102,7 @@ fn generate_sheet_connector(
 ///
 /// Builds 4 quad strips (top, bottom, left side, right side) plus caps.
 /// In fancy mode, the C-terminal end has an arrow head instead of a flat cap.
-fn generate_explicit_sheet(
+pub fn generate_explicit_sheet(
     vertices: &mut Vec<MeshVertex>,
     indices: &mut Vec<u32>,
     frames: &[FrameWithMetadata],
@@ -1377,7 +1377,7 @@ fn generate_explicit_sheet(
 /// - `is_start`: true for the start of a segment, false for the end
 /// - `is_arrow_tip`: true if this is at an arrow tip (skip cap since geometry tapers to a point)
 /// - `dumbbell_taper`: taper factor for Flat2Face caps (0.0 = fully tapered, 1.0 = full size)
-fn cap_tube_end(
+pub fn cap_tube_end(
     vertices: &mut Vec<MeshVertex>,
     indices: &mut Vec<u32>,
     frame_meta: &FrameWithMetadata,
@@ -1507,7 +1507,7 @@ pub fn find_helix_regions(frames: &[FrameWithMetadata]) -> Vec<(usize, usize)> {
 ///
 /// # Returns
 /// (vertices, indices) for the edge tubes
-fn generate_dumbbell_edge_tubes(
+pub fn generate_dumbbell_edge_tubes(
     frames: &[FrameWithMetadata],
     helix_regions: &[(usize, usize)],
     settings: &CartoonGeometrySettings,

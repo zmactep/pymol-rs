@@ -29,6 +29,7 @@
 pub mod backbone;
 pub mod frame;
 pub mod geometry;
+pub mod pipeline;
 pub mod spline;
 pub mod utils;
 
@@ -45,12 +46,16 @@ use self::backbone::{
 };
 use self::frame::generate_frames;
 use self::geometry::{find_sheet_termini, generate_cartoon_mesh, CartoonGeometrySettings};
+use self::pipeline::{generate_segment_cartoon, PipelineSettings};
 use self::spline::InterpolationSettings;
 
-/// Build cartoon/ribbon mesh geometry from molecular data.
+/// Build cartoon/ribbon mesh geometry from molecular data (old pipeline).
 ///
-/// This is the shared pipeline used by both CartoonRep and RibbonRep:
-/// extract backbone → smooth → generate frames → extrude geometry.
+/// **Note:** This function is now used only by **RibbonRep**. The cartoon
+/// representation uses `pipeline::generate_segment_cartoon` directly in
+/// `CartoonRep::build()`.
+///
+/// Pipeline: extract backbone → smooth → generate frames → extrude geometry.
 ///
 /// The caller provides representation-specific settings (setting IDs, geometry config,
 /// rep mask) and this function handles the common processing loop.
@@ -193,6 +198,8 @@ impl Representation for CartoonRep {
         const CARTOON_SMOOTH_FIRST: u16 = 257;
         const CARTOON_SMOOTH_LAST: u16 = 258;
         const CARTOON_REFINE_NORMALS: u16 = 112;
+        const CARTOON_ROUND_HELICES: u16 = 111;
+        const CARTOON_REFINE: u16 = 123;
 
         let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
         let sampling = settings.get_int_if_defined(CARTOON_SAMPLING).unwrap_or(7);
@@ -200,10 +207,13 @@ impl Representation for CartoonRep {
         let power_b = settings.get_float_if_defined(CARTOON_POWER_B).unwrap_or(0.52);
         let throw = settings.get_float_if_defined(CARTOON_THROW).unwrap_or(1.35);
 
-        let smooth_settings = CartoonSmoothSettings {
-            smooth_cycles: settings
-                .get_int_if_defined(CARTOON_SMOOTH_CYCLES)
-                .unwrap_or(2) as u32,
+        let subdivisions = if sampling < 0 { 7u32 } else { (sampling as u32).max(7) };
+
+        let pipeline_settings = PipelineSettings {
+            sampling: subdivisions,
+            power_a: power,
+            power_b,
+            throw_factor: throw,
             flat_cycles: settings
                 .get_int_if_defined(CARTOON_FLAT_CYCLES)
                 .unwrap_or(4) as u32,
@@ -213,33 +223,44 @@ impl Representation for CartoonRep {
             smooth_last: settings
                 .get_int_if_defined(CARTOON_SMOOTH_LAST)
                 .unwrap_or(1) as u32,
+            smooth_cycles: settings
+                .get_int_if_defined(CARTOON_SMOOTH_CYCLES)
+                .unwrap_or(2) as u32,
             refine_normals: settings
                 .get_bool_if_defined(CARTOON_REFINE_NORMALS)
                 .unwrap_or(true),
-        };
-
-        let subdivisions = if sampling < 0 { 7u32 } else { (sampling as u32).max(7) };
-
-        let interp_settings = InterpolationSettings {
-            power_a: power,
-            power_b,
-            throw_factor: throw,
+            round_helices: settings
+                .get_bool_if_defined(CARTOON_ROUND_HELICES)
+                .unwrap_or(true),
+            refine: settings
+                .get_int_if_defined(CARTOON_REFINE)
+                .unwrap_or(5) as u32,
         };
 
         let geom_settings =
             CartoonGeometrySettings::from_resolver(settings).with_subdivisions(subdivisions);
 
-        let (vertices, indices) = build_cartoon_geometry(
-            molecule,
-            coord_set,
-            colors,
-            &smooth_settings,
-            &interp_settings,
-            &geom_settings,
-            subdivisions,
-            gap_cutoff,
-            pymol_mol::RepMask::CARTOON,
-        );
+        // Use the new PyMOL-compatible pipeline
+        let mut segments =
+            extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON);
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        for segment in &mut segments {
+            if segment.len() < 2 {
+                continue;
+            }
+
+            let (mut seg_verts, seg_indices) =
+                generate_segment_cartoon(segment, &pipeline_settings, &geom_settings);
+
+            let base = vertices.len() as u32;
+            vertices.append(&mut seg_verts);
+            indices.extend(seg_indices.iter().map(|i| i + base));
+        }
+
+        let (vertices, indices) = (vertices, indices);
 
         self.vertices = vertices;
         self.indices = indices;
