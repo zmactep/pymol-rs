@@ -54,7 +54,7 @@ pub use definitions::{
 pub use error::SettingError;
 pub use setting::{Setting, SettingLevel, SettingType, SettingValue};
 pub use side_effects::{
-    FnSideEffect, SettingSideEffect, SideEffectCategory, SideEffectRegistry,
+    get_side_effects, FnSideEffect, SettingSideEffect, SideEffectCategory, SideEffectRegistry,
 };
 pub use shading_mode::ShadingMode;
 pub use store::{

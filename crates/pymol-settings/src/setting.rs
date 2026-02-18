@@ -503,3 +503,9 @@ mod tests {
         assert_eq!(setting.clamp(15.0), 10.0);
     }
 }
+
+// =============================================================================
+// Setting Handler Trait
+// =============================================================================
+
+// SettingHandler trait reserved for future per-setting dispatch

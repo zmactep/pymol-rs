@@ -679,6 +679,30 @@ mod tests {
     }
 
     #[test]
+    fn test_float3_bracketed() {
+        // set bg_rgb, [1.0, 1.0, 1.0] — brackets should keep the list as one argument
+        let cmd = parse_command("set bg_rgb, [1.0, 1.0, 1.0]").unwrap();
+        assert_eq!(cmd.name, "set");
+        assert_eq!(cmd.get_str(0), Some("bg_rgb"));
+        if let Some(ArgValue::List(items)) = cmd.get_arg(1) {
+            assert_eq!(items.len(), 3);
+        } else {
+            panic!("Expected list argument for bracketed Float3");
+        }
+    }
+
+    #[test]
+    fn test_float3_comma_separated() {
+        // set bg_rgb, 1.0, 1.0, 1.0 — three separate float args (assembled by set command)
+        let cmd = parse_command("set bg_rgb, 1.0, 1.0, 1.0").unwrap();
+        assert_eq!(cmd.name, "set");
+        assert_eq!(cmd.get_str(0), Some("bg_rgb"));
+        assert_eq!(cmd.get_float(1), Some(1.0));
+        assert_eq!(cmd.get_float(2), Some(1.0));
+        assert_eq!(cmd.get_float(3), Some(1.0));
+    }
+
+    #[test]
     fn test_selection_with_not_operator() {
         // "not" should not be partially matched as "no" (boolean)
         let cmd = parse_command("select nca, not (chain A)").unwrap();

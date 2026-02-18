@@ -77,7 +77,7 @@ pub enum SideEffectCategory {
 #[allow(non_upper_case_globals)]
 pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
     use crate::definitions::id::*;
-    
+
     match id {
         // Stereo settings
         stereo | stereo_mode | anaglyph_mode => vec![
@@ -85,44 +85,69 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
             SideEffectCategory::ShaderReload,
             SideEffectCategory::OrthoDirty,
         ],
-        
+
         // Lighting settings
         light_count | spec_count | precomputed_lighting => vec![
             SideEffectCategory::ShaderComputeLighting,
             SideEffectCategory::SceneInvalidate,
         ],
-        
-        dot_lighting | mesh_lighting | field_of_view | fog_start | 
+
+        dot_lighting | mesh_lighting | field_of_view | fog_start |
         two_sided_lighting | transparency_global_sort | dot_normals | mesh_normals => vec![
             SideEffectCategory::SceneInvalidate,
         ],
-        
+
         // Sequence view settings
         seq_view | seq_view_label_spacing | seq_view_label_mode |
         seq_view_label_start | seq_view_format | seq_view_color => vec![
             SideEffectCategory::SeqChanged,
         ],
-        
+
         // UI settings
         show_frame_rate | group_full_member_names | group_arrow_prefix => vec![
             SideEffectCategory::OrthoDirty,
         ],
-        
+
         // Build settings
         defer_builds_mode => vec![
             SideEffectCategory::FullRebuild,
         ],
-        
+
         // Grid settings
         grid_mode | grid_slot | grid_max => vec![
             SideEffectCategory::SceneChanged,
         ],
-        
+
         // Pick surface
         pick_surface | pickable => vec![
             SideEffectCategory::SceneChanged,
         ],
-        
+
+        // Representation geometry settings - need rep rebuild
+        sphere_scale | transparency | surface_quality |
+        stick_radius | line_width |
+        cartoon_fancy_helices | cartoon_fancy_sheets |
+        cartoon_oval_width | cartoon_oval_length |
+        cartoon_rect_width | cartoon_rect_length |
+        cartoon_loop_radius | cartoon_dumbbell_width |
+        cartoon_dumbbell_length | cartoon_dumbbell_radius |
+        cartoon_round_helices | cartoon_sampling |
+        cartoon_smooth_loops => vec![
+            SideEffectCategory::RepresentationRebuild,
+        ],
+
+        // Representation color settings - need rep rebuild
+        stick_color | line_color | cartoon_color |
+        surface_color | mesh_color | sphere_color |
+        ribbon_color => vec![
+            SideEffectCategory::RepresentationRebuild,
+        ],
+
+        // Background color settings
+        bg_rgb | bg_rgb_top | bg_rgb_bottom => vec![
+            SideEffectCategory::ViewportUpdate,
+        ],
+
         _ => vec![],
     }
 }

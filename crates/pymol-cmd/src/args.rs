@@ -77,7 +77,13 @@ impl ArgValue {
             ArgValue::Int(i) => Some(i.to_string()),
             ArgValue::Float(f) => Some(f.to_string()),
             ArgValue::Bool(b) => Some(if *b { "on".to_string() } else { "off".to_string() }),
-            ArgValue::List(_) | ArgValue::None => None,
+            ArgValue::List(items) => {
+                let parts: Vec<String> = items.iter()
+                    .filter_map(|item| item.to_string_repr())
+                    .collect();
+                Some(format!("[{}]", parts.join(", ")))
+            }
+            ArgValue::None => None,
         }
     }
 

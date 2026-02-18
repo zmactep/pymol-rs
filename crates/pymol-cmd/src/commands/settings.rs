@@ -7,7 +7,7 @@ use crate::error::{CmdError, CmdResult};
 use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_scene::DirtyFlags;
 use pymol_select::AtomIndex;
-use pymol_settings::{get_setting, get_setting_id, id as setting_id, ShadingMode, SettingType, SettingValue};
+use pymol_settings::{get_setting, get_setting_id, get_side_effects, id as setting_id, ShadingMode, SideEffectCategory, SettingType, SettingValue};
 
 /// Register settings commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -109,7 +109,223 @@ fn format_setting_value(value: &SettingValue) -> String {
 // set command
 // ============================================================================
 
+/// Map a rep color setting ID to the corresponding field accessor in AtomReprColors
+fn rep_color_field(id: u16) -> Option<fn(&mut pymol_mol::AtomColors) -> &mut i32> {
+    match id {
+        setting_id::stick_color => Some(|c| &mut c.stick),
+        setting_id::line_color => Some(|c| &mut c.line),
+        setting_id::cartoon_color => Some(|c| &mut c.cartoon),
+        setting_id::surface_color => Some(|c| &mut c.surface),
+        setting_id::mesh_color => Some(|c| &mut c.mesh),
+        setting_id::sphere_color => Some(|c| &mut c.sphere),
+        setting_id::ribbon_color => Some(|c| &mut c.ribbon),
+        _ => None,
+    }
+}
+
 struct SetCommand;
+
+impl SetCommand {
+    /// Handle the pseudo-setting "set state, N"
+    fn handle_set_state<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        value_str: Option<String>,
+    ) -> CmdResult {
+        let value_str = value_str.ok_or_else(|| CmdError::MissingArgument("value".to_string()))?;
+        let state_num: i64 = value_str.parse()
+            .map_err(|_| CmdError::invalid_arg("value", format!("Invalid state number: {}", value_str)))?;
+        if state_num < 1 {
+            return Err(CmdError::invalid_arg("value", "State number must be >= 1"));
+        }
+        let state_idx = (state_num - 1) as usize;
+        let names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+        for obj_name in &names {
+            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(obj_name) {
+                mol_obj.set_display_state(state_idx);
+            }
+        }
+        ctx.viewer.request_redraw();
+        if !ctx.quiet {
+            ctx.print(&format!(" state = {}", state_num));
+        }
+        Ok(())
+    }
+
+    /// Parse a value string with per-setting overrides (shading_mode aliases, color names)
+    fn parse_value<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        id: u16,
+        setting_type: SettingType,
+        value_str: &str,
+    ) -> CmdResult<SettingValue> {
+        // shading_mode: accept string aliases
+        if id == setting_id::shading_mode {
+            return if let Some(mode) = ShadingMode::from_str_alias(value_str) {
+                Ok(SettingValue::Int(i32::from(mode)))
+            } else {
+                Err(CmdError::invalid_arg(
+                    "value",
+                    format!("Unknown shading mode '{}'. Use classic or skripkin", value_str),
+                ))
+            };
+        }
+
+        // Color type: resolve names/schemes
+        if setting_type == SettingType::Color {
+            // Accept [r, g, b] float vector → convert to 0x00RRGGBB integer
+            if value_str.starts_with('[') && value_str.ends_with(']') {
+                let inner = value_str[1..value_str.len()-1].trim();
+                let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+                if parts.len() == 3 {
+                    if let (Ok(r), Ok(g), Ok(b)) = (
+                        parts[0].parse::<f32>(),
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                    ) {
+                        let ri = (r.clamp(0.0, 1.0) * 255.0) as i32;
+                        let gi = (g.clamp(0.0, 1.0) * 255.0) as i32;
+                        let bi = (b.clamp(0.0, 1.0) * 255.0) as i32;
+                        return Ok(SettingValue::Color((ri << 16) | (gi << 8) | bi));
+                    }
+                }
+            }
+
+            if let Ok(v) = value_str.parse::<i32>() {
+                return Ok(SettingValue::Color(v));
+            }
+            let color_index = match value_str.to_lowercase().as_str() {
+                "atomic" | "cpk" | "element" | "by_element" => -1,
+                "chain" | "by_chain" | "chainbow" => -2,
+                "ss" | "secondary_structure" | "by_ss" | "dssp" => -3,
+                "b" | "b_factor" | "bfactor" | "by_b" => -4,
+                _ => {
+                    ctx.viewer
+                        .color_index(value_str)
+                        .map(|idx| idx as i32)
+                        .ok_or_else(|| CmdError::invalid_arg("value", format!("Unknown color: {}", value_str)))?
+                }
+            };
+            return Ok(SettingValue::Color(color_index));
+        }
+
+        // Default type-based parsing
+        parse_setting_value(value_str, setting_type)
+    }
+
+    /// Apply a rep color per-atom via the dispatch table
+    fn apply_per_atom_color<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        selection_str: &str,
+        color_index: i32,
+        field_accessor: fn(&mut pymol_mol::AtomColors) -> &mut i32,
+    ) -> CmdResult<usize> {
+        let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
+        let mut total_affected = 0usize;
+
+        for (obj_name, selected) in selection_results {
+            let count = selected.count();
+            if count > 0 {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            *field_accessor(&mut atom.repr.colors) = color_index;
+                        }
+                    }
+                    total_affected += count;
+                    mol_obj.invalidate(DirtyFlags::COLOR);
+                }
+            }
+        }
+
+        Ok(total_affected)
+    }
+
+    /// Apply sphere_scale per-atom
+    fn apply_per_atom_sphere_scale<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        selection_str: &str,
+        scale_value: f32,
+    ) -> CmdResult<usize> {
+        let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
+        let mut total_affected = 0usize;
+
+        for (obj_name, selected) in selection_results {
+            let count = selected.count();
+            if count > 0 {
+                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            atom.repr.sphere_scale = Some(scale_value);
+                        }
+                    }
+                    total_affected += count;
+                    mol_obj.invalidate(DirtyFlags::REPS);
+                }
+            }
+        }
+
+        Ok(total_affected)
+    }
+
+    /// Apply side effects based on setting categories from get_side_effects()
+    fn apply_side_effects<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        id: u16,
+        value: &SettingValue,
+    ) {
+        let categories = get_side_effects(id);
+        for category in categories {
+            match category {
+                SideEffectCategory::RepresentationRebuild => {
+                    // Special case: surface_quality needs propagation
+                    if id == setting_id::surface_quality {
+                        if let SettingValue::Int(quality) = value {
+                            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                            for obj_name in names {
+                                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                                    mol.set_surface_quality(*quality);
+                                }
+                            }
+                        }
+                    }
+                    // Invalidate all molecule representations
+                    let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                    for obj_name in names {
+                        if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                            mol.invalidate_representations();
+                        }
+                    }
+                }
+                SideEffectCategory::SceneInvalidate
+                | SideEffectCategory::SceneChanged
+                | SideEffectCategory::FullRebuild => {
+                    // These all need a redraw (handled after this function)
+                }
+                SideEffectCategory::ViewportUpdate => {
+                    // Background color: convert color int to RGB floats and apply
+                    if matches!(id, setting_id::bg_rgb | setting_id::bg_rgb_top | setting_id::bg_rgb_bottom) {
+                        if let SettingValue::Color(color_int) = value {
+                            let r = ((*color_int >> 16) & 0xFF) as f32 / 255.0;
+                            let g = ((*color_int >> 8) & 0xFF) as f32 / 255.0;
+                            let b = (*color_int & 0xFF) as f32 / 255.0;
+                            ctx.viewer.set_background_color(r, g, b);
+                        }
+                    }
+                }
+                _ => {
+                    // Other categories (ShaderReload, etc.) — not yet wired
+                }
+            }
+        }
+    }
+}
 
 impl Command for SetCommand {
     fn name(&self) -> &str {
@@ -142,6 +358,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        // === 1. Parse arguments ===
         let name = args
             .get_str(0)
             .or_else(|| args.get_named_str("name"))
@@ -156,40 +373,22 @@ EXAMPLES
             .get_str(2)
             .or_else(|| args.get_named_str("selection"));
 
-        // Intercept "set state, N" — switch displayed state for all objects
+        // === 2. Intercept pseudo-settings ===
         if name == "state" {
-            let value_str = value_str.ok_or_else(|| CmdError::MissingArgument("value".to_string()))?;
-            let state_num: i64 = value_str.parse()
-                .map_err(|_| CmdError::invalid_arg("value", format!("Invalid state number: {}", value_str)))?;
-            if state_num < 1 {
-                return Err(CmdError::invalid_arg("value", "State number must be >= 1"));
-            }
-            let state_idx = (state_num - 1) as usize;
-            let names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-            for obj_name in &names {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(obj_name) {
-                    mol_obj.set_display_state(state_idx);
-                }
-            }
-            ctx.viewer.request_redraw();
-            if !ctx.quiet {
-                ctx.print(&format!(" state = {}", state_num));
-            }
-            return Ok(());
+            return self.handle_set_state(ctx, value_str);
         }
 
-        // Look up the setting by name
+        // === 3. Resolve setting ===
         let id = get_setting_id(name)
             .ok_or_else(|| CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))?;
 
         let setting = get_setting(id)
             .ok_or_else(|| CmdError::invalid_arg("name", "Invalid setting ID"))?;
 
-        // If no value provided, toggle boolean settings or show current value
+        // === 4. Handle missing value (boolean toggle) ===
         let value_str = match value_str {
             Some(v) => v,
             None => {
-                // For boolean settings, toggle
                 if setting.setting_type == SettingType::Bool {
                     let current = ctx.viewer.settings().get_bool(id);
                     let new_value = !current;
@@ -206,209 +405,84 @@ EXAMPLES
             }
         };
 
-        // Check if this is a representation color setting
-        let is_rep_color_setting = matches!(id,
-            setting_id::stick_color |
-            setting_id::line_color |
-            setting_id::cartoon_color |
-            setting_id::surface_color |
-            setting_id::mesh_color |
-            setting_id::sphere_color |
-            setting_id::ribbon_color
-        );
-
-        // For shading_mode, accept string aliases (classic/skripkin)
-        let value = if id == setting_id::shading_mode {
-            if let Some(mode) = ShadingMode::from_str_alias(&value_str) {
-                SettingValue::Int(i32::from(mode))
+        // === 5. Parse value (with per-setting overrides) ===
+        // For Float3 settings: collect 3 comma-separated floats into a single value
+        // e.g. "set silhouette_color, 1.0, 1.0, 1.0" → Float3([1.0, 1.0, 1.0])
+        // When floats are collected from args 2,3 — selection shifts to arg 4
+        // Also collect for Color settings — supports "set bg_rgb, 1.0, 1.0, 1.0"
+        let (value_str, selection) = if (setting.setting_type == SettingType::Float3
+            || setting.setting_type == SettingType::Color)
+            && !value_str.starts_with('[')
+            && value_str.parse::<f32>().is_ok()
+        {
+            if let (Some(y), Some(z)) = (
+                args.get_arg(2).and_then(|v| v.to_string_repr()),
+                args.get_arg(3).and_then(|v| v.to_string_repr()),
+            ) {
+                if y.parse::<f32>().is_ok() && z.parse::<f32>().is_ok() {
+                    let combined = format!("[{}, {}, {}]", value_str, y, z);
+                    let shifted_selection = args.get_str(4).or_else(|| args.get_named_str("selection"));
+                    (combined, shifted_selection)
+                } else {
+                    (value_str, selection)
+                }
             } else {
-                return Err(CmdError::invalid_arg(
-                    "value",
-                    format!("Unknown shading mode '{}'. Use classic or skripkin", value_str),
-                ));
-            }
-        } else if setting.setting_type == SettingType::Color {
-            // Try to parse as integer first
-            if let Ok(v) = value_str.parse::<i32>() {
-                SettingValue::Color(v)
-            } else {
-                // Check for special color schemes first (these use negative indices)
-                // -1: by element (atomic/CPK)
-                // -2: by chain
-                // -3: by secondary structure
-                // -4: by B-factor
-                let color_index = match value_str.to_lowercase().as_str() {
-                    "atomic" | "cpk" | "element" | "by_element" => -1,
-                    "chain" | "by_chain" | "chainbow" => -2,
-                    "ss" | "secondary_structure" | "by_ss" | "dssp" => -3,
-                    "b" | "b_factor" | "bfactor" | "by_b" => -4,
-                    _ => {
-                        // Try to resolve as named color
-                        ctx.viewer
-                            .color_index(&value_str)
-                            .map(|idx| idx as i32)
-                            .ok_or_else(|| CmdError::invalid_arg("value", format!("Unknown color: {}", value_str)))?
-                    }
-                };
-                SettingValue::Color(color_index)
+                (value_str, selection)
             }
         } else {
-            parse_setting_value(&value_str, setting.setting_type)?
+            (value_str, selection)
         };
 
-        // Handle representation color settings - default to "all" if no selection provided
-        if is_rep_color_setting {
+        let value = self.parse_value(ctx, id, setting.setting_type, &value_str)?;
+
+        // === 6. Apply (per-atom or global) ===
+        // Per-atom rep color
+        if let Some(field_accessor) = rep_color_field(id) {
             let selection_str = selection.unwrap_or("all");
             let color_index = match &value {
                 SettingValue::Color(idx) => *idx,
                 _ => return Err(CmdError::execution("Expected color value")),
             };
 
-            // Evaluate the selection
-            let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
-            let mut total_affected = 0usize;
-
-            // Apply color to atoms matching the selection
-            for (obj_name, selected) in selection_results {
-                let count = selected.count();
-                if count > 0 {
-                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                        let mol_mut = mol_obj.molecule_mut();
-                        for idx in selected.indices() {
-                            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                match id {
-                                    setting_id::stick_color => atom.repr.colors.stick = color_index,
-                                    setting_id::line_color => atom.repr.colors.line = color_index,
-                                    setting_id::cartoon_color => atom.repr.colors.cartoon = color_index,
-                                    setting_id::surface_color => atom.repr.colors.surface = color_index,
-                                    setting_id::mesh_color => atom.repr.colors.mesh = color_index,
-                                    setting_id::sphere_color => atom.repr.colors.sphere = color_index,
-                                    setting_id::ribbon_color => atom.repr.colors.ribbon = color_index,
-                                    _ => {}
-                                }
-                            }
-                        }
-                        total_affected += count;
-                        mol_obj.invalidate(DirtyFlags::COLOR);
-                    }
-                }
-            }
-
+            let total_affected = self.apply_per_atom_color(ctx, selection_str, color_index, field_accessor)?;
             ctx.viewer.request_redraw();
 
             if !ctx.quiet {
                 ctx.print(&format!(" Set {} = {} for {} atoms", name, value_str, total_affected));
             }
-
             return Ok(());
         }
 
-        // Handle sphere_scale - can be applied per-atom like in original PyMOL
+        // Per-atom sphere_scale
         if id == setting_id::sphere_scale {
-            let scale_value = match &value {
-                SettingValue::Float(v) => *v,
-                _ => return Err(CmdError::execution("Expected float value for sphere_scale")),
-            };
-
-            // If selection is provided, apply per-atom
             if let Some(selection_str) = selection {
-                let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
-                let mut total_affected = 0usize;
+                let scale_value = match &value {
+                    SettingValue::Float(v) => *v,
+                    _ => return Err(CmdError::execution("Expected float value for sphere_scale")),
+                };
 
-                for (obj_name, selected) in selection_results {
-                    let count = selected.count();
-                    if count > 0 {
-                        if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                            let mol_mut = mol_obj.molecule_mut();
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                    atom.repr.sphere_scale = Some(scale_value);
-                                }
-                            }
-                            total_affected += count;
-                            mol_obj.invalidate(DirtyFlags::REPS);
-                        }
-                    }
-                }
-
+                let total_affected = self.apply_per_atom_sphere_scale(ctx, selection_str, scale_value)?;
                 ctx.viewer.request_redraw();
 
                 if !ctx.quiet {
                     ctx.print(&format!(" Set sphere_scale = {} for {} atoms", scale_value, total_affected));
                 }
-
                 return Ok(());
             }
-            // If no selection, fall through to set global value
+            // No selection → fall through to global set
         }
 
-        // Set the global value
+        // Global set
         ctx.viewer.settings_mut().set(id, value.clone())
             .map_err(|e| CmdError::execution(e.to_string()))?;
 
-        // Special handling for surface_quality - propagate to all molecules
-        if id == setting_id::surface_quality {
-            if let SettingValue::Int(quality) = &value {
-                let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-                for obj_name in names {
-                    if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                        mol.set_surface_quality(*quality);
-                    }
-                }
-            }
-        }
-
-        // Special handling for transparency - invalidate all molecule representations
-        // so surfaces get rebuilt with the new transparency value
-        if id == setting_id::transparency {
-            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-            for obj_name in names {
-                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    mol.invalidate_representations();
-                }
-            }
-        }
-
-        // Special handling for sphere_scale - invalidate all molecule representations
-        // so spheres get rebuilt with the new scale value
-        if id == setting_id::sphere_scale {
-            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-            for obj_name in names {
-                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    mol.invalidate_representations();
-                }
-            }
-        }
-
-        // Special handling for cartoon geometry settings - invalidate all molecule
-        // representations so cartoons get rebuilt with the new settings
-        if matches!(id,
-            setting_id::cartoon_fancy_helices |
-            setting_id::cartoon_fancy_sheets |
-            setting_id::cartoon_oval_width |
-            setting_id::cartoon_oval_length |
-            setting_id::cartoon_rect_width |
-            setting_id::cartoon_rect_length |
-            setting_id::cartoon_loop_radius |
-            setting_id::cartoon_dumbbell_width |
-            setting_id::cartoon_dumbbell_length |
-            setting_id::cartoon_dumbbell_radius |
-            setting_id::cartoon_round_helices |
-            setting_id::cartoon_sampling |
-            setting_id::cartoon_smooth_loops
-        ) {
-            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-            for obj_name in names {
-                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    mol.invalidate_representations();
-                }
-            }
-        }
+        // === 7. Side effects (driven by get_side_effects) ===
+        self.apply_side_effects(ctx, id, &value);
 
         ctx.viewer.request_redraw();
 
+        // === 8. Print feedback ===
         if !ctx.quiet {
-            // For shading_mode, show the human-readable name
             if id == setting_id::shading_mode {
                 if let SettingValue::Int(v) = &value {
                     let mode = ShadingMode::from(*v);

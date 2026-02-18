@@ -684,6 +684,27 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        // Try [r, g, b] vector first (from ArgValue::List)
+        if let Some(crate::args::ArgValue::List(items)) = args.get_arg(0) {
+            if items.len() == 3 {
+                if let (Some(r), Some(g), Some(b)) = (
+                    items[0].as_float().map(|v| v as f32),
+                    items[1].as_float().map(|v| v as f32),
+                    items[2].as_float().map(|v| v as f32),
+                ) {
+                    ctx.viewer.set_background_color(
+                        r.clamp(0.0, 1.0),
+                        g.clamp(0.0, 1.0),
+                        b.clamp(0.0, 1.0),
+                    );
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Background color set to [{:.2}, {:.2}, {:.2}]", r, g, b));
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
         let color_name = args
             .get_str(0)
             .or_else(|| args.get_named_str("color"))
