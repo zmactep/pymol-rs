@@ -103,10 +103,19 @@ pub struct MoleculeObject {
 
 impl MoleculeObject {
     /// Create a new molecule object
-    pub fn new(molecule: ObjectMolecule) -> Self {
+    pub fn new(mut molecule: ObjectMolecule) -> Self {
         let mut state = ObjectState::default();
-        // Default to lines representation
-        state.visible_reps.set_visible(RepMask::LINES);
+        // Default representation: cartoon + sticks for hetatm (like PyMOL)
+        // Object-level: enable both cartoon and sticks so renderer processes them
+        state.visible_reps.set_visible(RepMask::CARTOON);
+        state.visible_reps.set_visible(RepMask::STICKS);
+        // Per-atom: cartoon for all, sticks only for hetatm
+        for atom in molecule.atoms_mut() {
+            atom.repr.visible_reps = RepMask::CARTOON;
+            if atom.state.hetatm {
+                atom.repr.visible_reps.set_visible(RepMask::STICKS);
+            }
+        }
 
         Self {
             molecule,

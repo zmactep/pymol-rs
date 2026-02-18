@@ -48,7 +48,7 @@ impl Command for DeleteCommand {
     }
 
     fn arg_hints(&self) -> &[ArgHint] {
-        &[ArgHint::Object]
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
