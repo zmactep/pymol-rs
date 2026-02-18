@@ -262,7 +262,7 @@ impl PyObjectMolecule {
     fn count_atoms_by_name(&self, name: &str) -> usize {
         self.inner
             .atoms()
-            .filter(|a| a.name == name)
+            .filter(|a| &*a.name == name)
             .count()
     }
 
