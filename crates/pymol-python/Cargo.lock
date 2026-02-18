@@ -2474,6 +2474,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pymol-algos"
+version = "0.1.0"
+dependencies = [
+ "lin_alg",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "pymol-cmd"
 version = "0.1.0"
 dependencies = [
@@ -2482,6 +2490,7 @@ dependencies = [
  "lin_alg",
  "log",
  "nom",
+ "pymol-algos",
  "pymol-color",
  "pymol-io",
  "pymol-mol",

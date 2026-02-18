@@ -14,6 +14,8 @@ pub struct CompletionState {
     pub visible: bool,
     /// Position in input where completion starts (byte offset)
     pub start_pos: usize,
+    /// Whether to scroll to the selected item (set on arrow key navigation, cleared after scroll)
+    pub scroll_to_selected: bool,
 }
 
 impl CompletionState {
@@ -46,6 +48,7 @@ impl CompletionState {
     pub fn select_next(&mut self) {
         if !self.suggestions.is_empty() {
             self.selected = (self.selected + 1) % self.suggestions.len();
+            self.scroll_to_selected = true;
         }
     }
 
@@ -55,6 +58,7 @@ impl CompletionState {
             self.selected = self.selected
                 .checked_sub(1)
                 .unwrap_or(self.suggestions.len() - 1);
+            self.scroll_to_selected = true;
         }
     }
 

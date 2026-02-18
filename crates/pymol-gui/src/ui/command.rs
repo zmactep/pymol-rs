@@ -208,7 +208,7 @@ impl CommandLinePanel {
                                         },
                                     );
 
-                                    if is_selected {
+                                    if is_selected && state.completion.scroll_to_selected {
                                         resp.response.scroll_to_me(Some(egui::Align::Center));
                                     }
                                     if resp.response.interact(Sense::click()).clicked() {
@@ -221,6 +221,9 @@ impl CommandLinePanel {
                         ui.label(RichText::new("Tab/Enter: select | Up/Down: navigate | Esc: close").size(10.0).color(Color32::from_rgb(120, 120, 140)));
                     });
             });
+
+        // Clear scroll flag after rendering
+        state.completion.scroll_to_selected = false;
 
         if let Some(idx) = clicked_idx {
             state.completion.selected = idx;
