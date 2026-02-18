@@ -32,9 +32,7 @@ pub use ipc::{
 };
 
 // Re-export state types
-pub use state::{
-    AppState, CommandLineState, CompletionState, OutputBufferState, OutputKind, OutputMessage,
-};
+pub use state::{CommandLineState, CompletionState, OutputBufferState, OutputKind, OutputMessage};
 
 // Re-export view types
 pub use view::{AppView, UiConfig};

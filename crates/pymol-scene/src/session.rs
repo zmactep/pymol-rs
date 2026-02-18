@@ -1,27 +1,40 @@
-//! Application State
+//! Session — pure scene state
 //!
-//! Contains all domain/scene data that can exist independently of rendering:
-//! object registry, camera, selections, settings, colors, and command executor.
+//! [`Session`] holds all domain/scene data that can exist independently of
+//! rendering: object registry, camera, selections, settings, colors, etc.
+//!
+//! This is the single source of truth that both the GUI (`pymol-gui`) and
+//! any headless adapter can own. GPU resources live elsewhere (e.g., in
+//! `pymol-render::RenderContext`).
 
-use pymol_cmd::{ArgHint, CommandExecutor};
 use pymol_color::{ChainColors, ElementColors, NamedColors};
-use pymol_scene::{Camera, Movie, ObjectRegistry, RaytracedImage, SceneManager, SelectionManager, ViewManager};
 use pymol_settings::GlobalSettings;
 
-/// Application state containing all scene/domain data
-pub struct AppState {
+use crate::camera::Camera;
+use crate::movie::Movie;
+use crate::object::ObjectRegistry;
+use crate::scene::SceneManager;
+use crate::selection::SelectionManager;
+use crate::view::ViewManager;
+use crate::viewer_trait::RaytracedImage;
+
+/// Pure scene state — no GPU resources, no window, no event loop.
+///
+/// Owns all molecular objects, camera state, named selections, scenes,
+/// views, animation, settings, and color tables.
+pub struct Session {
     // =========================================================================
     // Scene
     // =========================================================================
-    /// Object registry (molecules, etc.)
+    /// Object registry (molecules, surfaces, maps, CGO, etc.)
     pub registry: ObjectRegistry,
     /// Camera for view control
     pub camera: Camera,
     /// Named selections manager
     pub selections: SelectionManager,
-    /// Scene manager for named view snapshots
+    /// Scene manager for named snapshots (camera + object state)
     pub scenes: SceneManager,
-    /// Named views (simpler than scenes - just camera state)
+    /// Named views (camera state only — simpler than scenes)
     pub views: ViewManager,
     /// Movie player for frame-based animation
     pub movie: Movie,
@@ -29,25 +42,19 @@ pub struct AppState {
     // =========================================================================
     // Settings and Colors
     // =========================================================================
-    /// Global settings
+    /// Global rendering settings
     pub settings: GlobalSettings,
-    /// Named colors
+    /// Named colors table (e.g., "red", "carbon")
     pub named_colors: NamedColors,
-    /// Element colors
+    /// Per-element color defaults
     pub element_colors: ElementColors,
-    /// Chain colors
+    /// Chain-based coloring (unit struct)
     pub chain_colors: ChainColors,
-
-    // =========================================================================
-    // Command System
-    // =========================================================================
-    /// Command executor
-    pub executor: CommandExecutor,
 
     // =========================================================================
     // Visual Properties
     // =========================================================================
-    /// Clear/background color
+    /// Background (clear) color as linear RGB floats
     pub clear_color: [f32; 3],
 
     // =========================================================================
@@ -57,14 +64,14 @@ pub struct AppState {
     pub raytraced_image: Option<RaytracedImage>,
 }
 
-impl Default for AppState {
+impl Default for Session {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AppState {
-    /// Create a new application state with default values
+impl Session {
+    /// Create a new session with default values.
     pub fn new() -> Self {
         Self {
             registry: ObjectRegistry::new(),
@@ -77,19 +84,8 @@ impl AppState {
             named_colors: NamedColors::default(),
             element_colors: ElementColors::default(),
             chain_colors: ChainColors,
-            executor: CommandExecutor::new(),
             clear_color: [0.0, 0.0, 0.0],
             raytraced_image: None,
         }
-    }
-
-    /// Get all command names for autocomplete (queries executor registry)
-    pub fn command_names(&self) -> impl Iterator<Item = &str> {
-        self.executor.registry().all_names()
-    }
-
-    /// Get commands that take file paths as first argument
-    pub fn path_commands(&self) -> Vec<&str> {
-        self.executor.registry().commands_with_hint(ArgHint::Path, 0)
     }
 }

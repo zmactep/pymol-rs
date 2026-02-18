@@ -8,8 +8,9 @@
 //! - [`MoleculeObject`] - Molecular object with cached representations
 //! - [`Scene`] and [`SceneManager`] - Named scene snapshots
 //! - [`ViewManager`] - Named view storage (camera state only)
-//! - [`Window`] - winit window with wgpu surface
-//! - [`Viewer`] - Main application coordinating rendering
+//! - [`Session`] - Pure scene state (objects, camera, settings, colors)
+//! - [`SessionAdapter`] - Bridges `Session` to `ViewerLike` for command execution
+//! - [`ViewerLike`] - Trait for command dispatch
 //!
 //! # Architecture
 //!
@@ -19,25 +20,6 @@
 //! - `pymol-color`: Color system
 //! - `pymol-settings`: Configuration
 //! - `winit`: Window and event handling
-//!
-//! # Example
-//!
-//! ```ignore
-//! use pymol_scene::{Viewer, MoleculeObject};
-//! use pymol_mol::ObjectMolecule;
-//!
-//! // Create viewer
-//! let mut viewer = pollster::block_on(Viewer::new())?;
-//!
-//! // Load a molecule
-//! viewer.load("protein.pdb", None)?;
-//!
-//! // Center camera on molecule
-//! viewer.center_all();
-//!
-//! // Run the event loop
-//! viewer.run()?;
-//! ```
 
 mod camera;
 mod capture;
@@ -51,9 +33,10 @@ mod pick;
 mod raytrace;
 mod scene;
 mod selection;
+mod session;
+mod session_adapter;
 mod uniform;
 mod view;
-mod viewer;
 mod viewer_trait;
 mod window;
 
@@ -68,10 +51,11 @@ pub use object::{DirtyFlags, Label, LabelAnchor, LabelObject, MoleculeObject, Ob
 pub use pick::{PickHit, Picker};
 pub use scene::{Scene, SceneAtomData, SceneManager, SceneObjectData, ScenePerAtomData, SceneStoreMask};
 pub use selection::{SelectionEntry, SelectionManager};
+pub use session::Session;
+pub use session_adapter::SessionAdapter;
 pub use raytrace::{raytrace_scene, raytrace_to_file, RaytraceError, RaytraceInput};
 pub use uniform::setup_uniforms;
 pub use view::ViewManager;
-pub use viewer::{run, Viewer};
 pub use viewer_trait::{RaytracedImage, ViewerLike};
 pub use window::Window;
 
@@ -81,9 +65,10 @@ pub use pymol_color::NamedColors;
 /// Re-export commonly used types for convenience
 pub mod prelude {
     pub use crate::camera::{Camera, Projection, SceneView};
-    pub use crate::error::{SceneError, SceneResult, ViewerError};
+    pub use crate::error::{SceneError, SceneResult};
     pub use crate::object::{MoleculeObject, Object, ObjectRegistry, ObjectState, ObjectType};
-    pub use crate::viewer::Viewer;
+    pub use crate::session::Session;
+    pub use crate::session_adapter::SessionAdapter;
     pub use crate::viewer_trait::{RaytracedImage, ViewerLike};
     pub use crate::scene::{Scene, SceneManager};
     pub use crate::view::ViewManager;

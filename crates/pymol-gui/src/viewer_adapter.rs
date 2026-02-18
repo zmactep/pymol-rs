@@ -14,18 +14,18 @@ use pymol_scene::{
     SelectionManager, ViewManager,
 };
 
+use pymol_scene::Session;
+
 use crate::async_tasks::TaskRunner;
 use crate::fetch::FetchTask;
-use crate::state::AppState;
 
-/// Adapter that wraps AppState to implement ViewerLike for command execution
+/// Adapter that wraps Session to implement ViewerLike for command execution
 ///
-/// This struct borrows a reference to the application state and
-/// implements the `ViewerLike` trait, allowing commands to interact with
-/// the application state in a uniform way.
+/// Borrows scene state and provides GUI-specific overrides (async fetch,
+/// render context access) on top of the standard `ViewerLike` interface.
 pub struct ViewerAdapter<'a> {
-    /// Reference to the application state
-    pub state: &'a mut AppState,
+    /// Reference to the scene state
+    pub state: &'a mut Session,
     /// Reference to task runner for background operations
     pub task_runner: &'a TaskRunner,
     /// Reference to render context for GPU operations (None if not yet initialized)

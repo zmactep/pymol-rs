@@ -27,7 +27,8 @@ use crate::ipc::{
     ExternalCommandRegistry, IpcCallbackTask, IpcRequest, IpcResponse, IpcServer,
     OutputKind as IpcOutputKind,
 };
-use crate::state::{AppState, CommandLineState, OutputBufferState};
+use pymol_scene::Session;
+use crate::state::{CommandLineState, OutputBufferState};
 use crate::view::AppView;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
@@ -43,10 +44,12 @@ pub struct App {
     // =========================================================================
     // Core Components
     // =========================================================================
-    /// Application state (scene, camera, settings, colors, executor)
-    pub state: AppState,
+    /// Application state (scene, camera, settings, colors)
+    pub state: Session,
     /// Application view (GPU, window, egui)
     pub view: AppView,
+    /// Command executor (registry of all built-in commands)
+    executor: CommandExecutor,
 
     // =========================================================================
     // UI State (separated)
@@ -173,8 +176,9 @@ impl App {
     /// * `headless` - If true, the window will not be displayed initially
     pub fn new(headless: bool) -> Self {
         let mut app = Self {
-            state: AppState::new(),
+            state: Session::new(),
             view: AppView::new(),
+            executor: CommandExecutor::new(),
             output: OutputBufferState::new(),
             command_line: CommandLineState::new(),
             object_list_panel: ObjectListPanel::new(),
@@ -670,10 +674,10 @@ impl App {
         let pending_messages = self.task_runner.pending_messages();
 
         // Get command names for autocomplete (combine built-in + external)
-        let builtin_names: Vec<&str> = self.state.command_names().collect();
+        let builtin_names: Vec<&str> = self.executor.registry().all_names().collect();
         let external_names: Vec<&str> = self.external_commands.names().collect();
         let all_command_names: Vec<&str> = builtin_names.into_iter().chain(external_names).collect();
-        let path_commands = self.state.path_commands();
+        let path_commands = self.executor.registry().commands_with_hint(pymol_cmd::ArgHint::Path, 0);
 
         // Update raytraced overlay texture if there's a new image
         // This must happen outside the egui closure to avoid borrow conflicts
@@ -995,13 +999,13 @@ impl App {
             needs_redraw: &mut self.needs_redraw,
         };
 
-        // Use a fresh executor to avoid borrowing issues with self
-        // The executor is stateless for single command execution
-        let mut executor = CommandExecutor::new();
+        // Temporarily take the executor out to avoid a borrow conflict
+        // (adapter already borrows self.state and self.needs_redraw mutably).
+        let mut executor = std::mem::replace(&mut self.executor, CommandExecutor::new());
+        let result = executor.do_with_options(&mut adapter, cmd, true, false);
+        self.executor = executor;
 
-        // Execute the command using the proper CommandExecutor
-        // Use do_with_options to capture output messages
-        match executor.do_with_options(&mut adapter, cmd, true, false) {
+        match result {
             Ok(output) => {
                 // Display any output messages from the command with appropriate styling
                 for msg in output.messages {
