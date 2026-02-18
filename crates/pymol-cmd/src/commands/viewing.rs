@@ -8,7 +8,7 @@ use pymol_scene::{Object, RaytracedImage}; // For extent() method on MoleculeObj
 use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
@@ -39,6 +39,10 @@ struct ZoomCommand;
 impl Command for ZoomCommand {
     fn name(&self) -> &str {
         "zoom"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -138,6 +142,10 @@ struct CenterCommand;
 impl Command for CenterCommand {
     fn name(&self) -> &str {
         "center"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -256,6 +264,10 @@ struct OrientCommand;
 impl Command for OrientCommand {
     fn name(&self) -> &str {
         "orient"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {

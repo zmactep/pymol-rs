@@ -121,6 +121,13 @@ impl NamedColors {
     }
 
     /// Iterate over all named colors
+    /// Get all registered color names
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.by_name.keys().map(|s| s.as_str()).collect();
+        names.sort();
+        names
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, Color)> + '_ {
         self.by_name
             .iter()

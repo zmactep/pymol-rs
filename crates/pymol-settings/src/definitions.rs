@@ -873,6 +873,18 @@ pub fn get_setting_id(name: &str) -> Option<u16> {
     SETTINGS.iter().find(|s| s.name == name).map(|s| s.id)
 }
 
+/// Get a list of all non-Blank setting names.
+///
+/// Returns names of all settings that are not of type `Blank` (unused/reserved).
+/// Useful for autocomplete in the command line.
+pub fn setting_names() -> Vec<&'static str> {
+    SETTINGS
+        .iter()
+        .filter(|s| s.setting_type != SettingType::Blank)
+        .map(|s| s.name)
+        .collect()
+}
+
 // Helper macros for defining settings
 macro_rules! s_blank {
     ($id:expr, $name:expr) => {

@@ -5,7 +5,7 @@
 use egui::{Key, TextEdit, Ui, Color32, RichText, ScrollArea, Sense, Id};
 
 use crate::state::CommandLineState;
-use super::completion::generate_completions;
+use super::completion::{generate_completions, CompletionContext};
 
 /// ID for the command line text edit widget
 const COMMAND_INPUT_ID: &str = "pymol_command_input";
@@ -32,8 +32,7 @@ impl CommandLinePanel {
     pub fn show(
         ui: &mut Ui,
         state: &mut CommandLineState,
-        command_names: &[&str],
-        path_commands: &[&str],
+        ctx: &CompletionContext,
     ) -> CommandAction {
         let mut action = CommandAction::None;
         let mut text_edit_rect = egui::Rect::NOTHING;
@@ -90,7 +89,7 @@ impl CommandLinePanel {
                 if state.completion.visible {
                     state.completion.apply_to_input(&mut state.input);
                 } else {
-                    Self::trigger_completion(state, command_names, path_commands);
+                    Self::trigger_completion(state, ctx);
                 }
                 restore_focus = true;
             }
@@ -142,9 +141,9 @@ impl CommandLinePanel {
 
     /// Generate completions for current input
     /// If there's exactly one match, apply it immediately without showing popup
-    fn trigger_completion(state: &mut CommandLineState, command_names: &[&str], path_commands: &[&str]) {
+    fn trigger_completion(state: &mut CommandLineState, ctx: &CompletionContext) {
         let cursor_pos = state.input.len();
-        let result = generate_completions(&state.input, cursor_pos, command_names, path_commands);
+        let result = generate_completions(&state.input, cursor_pos, ctx);
 
         if result.suggestions.len() == 1 {
             // Single match - apply immediately using CompletionState temporarily

@@ -1,5 +1,6 @@
 //! Selection commands: select, deselect, indicate
 
+use crate::ArgHint;
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
@@ -98,13 +99,35 @@ pub fn select_with_context(
     let mut total_count = 0;
     let mut results: Vec<(String, SelectionResult)> = Vec::new();
 
+    // Parse the selection expression once (shared across all objects)
+    let parsed_expr = pymol_select::parse(selection)
+        .map_err(|e| CmdError::invalid_arg("selection", format!("parse error: {:?}", e)))?;
+
     // For each molecule, evaluate the selection in a context that includes named selections
+    // and object names as implicit selections
     for (obj_name, mol) in &molecules {
         // Build context for this single molecule
         let mut ctx = EvalContext::single(mol);
 
+        // Add all object names as implicit selections.
+        // For the current object → all atoms selected; for others → empty selection.
+        // This allows "select x, objA and resi 1-10" to work correctly:
+        // when evaluating against objA, "objA" selects all atoms;
+        // when evaluating against objB, "objA" selects nothing (0 atoms).
+        for (other_name, _) in &molecules {
+            if *other_name == *obj_name {
+                // Current object: select all atoms
+                let all = SelectionResult::all(mol.atom_count());
+                ctx.add_selection(other_name.to_string(), all);
+            } else {
+                // Other object: empty selection (0 atoms in this context)
+                let empty = SelectionResult::none(mol.atom_count());
+                ctx.add_selection(other_name.to_string(), empty);
+            }
+        }
+
         // Pre-evaluate and add named selections to the context
-        // We evaluate each named selection against this molecule and add it to the context
+        // (these override object names if there's a conflict)
         for sel_name in &selection_names {
             if let Some(sel_expr) = viewer.get_selection(sel_name) {
                 // Parse and evaluate the named selection expression
@@ -117,22 +140,15 @@ pub fn select_with_context(
         }
 
         // Now evaluate the target selection with named selections available
-        match pymol_select::parse(selection) {
-            Ok(expr) => {
-                match pymol_select::evaluate(&expr, &ctx) {
-                    Ok(result) => {
-                        let count = result.count();
-                        total_count += count;
-                        results.push((obj_name.to_string(), result));
-                    }
-                    Err(e) => {
-                        log::debug!("Selection evaluation error for {}: {:?}", obj_name, e);
-                        // Continue with other molecules, don't fail completely
-                    }
-                }
+        match pymol_select::evaluate(&parsed_expr, &ctx) {
+            Ok(result) => {
+                let count = result.count();
+                total_count += count;
+                results.push((obj_name.to_string(), result));
             }
             Err(e) => {
-                return Err(CmdError::invalid_arg("selection", format!("parse error: {:?}", e)));
+                log::debug!("Selection evaluation error for {}: {:?}", obj_name, e);
+                // Continue with other molecules, don't fail completely
             }
         }
     }
@@ -168,6 +184,10 @@ struct SelectCommand;
 impl Command for SelectCommand {
     fn name(&self) -> &str {
         "select"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -280,6 +300,10 @@ struct DeselectCommand;
 impl Command for DeselectCommand {
     fn name(&self) -> &str {
         "deselect"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::NamedSelection]
     }
 
     fn help(&self) -> &str {

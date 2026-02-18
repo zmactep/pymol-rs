@@ -48,8 +48,8 @@ mod store;
 
 // Re-export main types
 pub use definitions::{
-    create_default_settings, get_setting, get_setting_id, get_string_default, SETTINGS,
-    SETTING_COUNT,
+    create_default_settings, get_setting, get_setting_id, get_string_default, setting_names,
+    SETTINGS, SETTING_COUNT,
 };
 pub use error::SettingError;
 pub use setting::{Setting, SettingLevel, SettingType, SettingValue};

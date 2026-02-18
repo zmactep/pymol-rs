@@ -677,7 +677,12 @@ impl App {
         let builtin_names: Vec<&str> = self.executor.registry().all_names().collect();
         let external_names: Vec<&str> = self.external_commands.names().collect();
         let all_command_names: Vec<&str> = builtin_names.into_iter().chain(external_names).collect();
-        let path_commands = self.executor.registry().commands_with_hint(pymol_cmd::ArgHint::Path, 0);
+
+        // Build completion context
+        let setting_names = pymol_settings::setting_names();
+        let color_names: Vec<String> = self.state.named_colors.names().iter().map(|s| s.to_string()).collect();
+        let object_names: Vec<String> = self.state.registry.names().map(|s| s.to_string()).collect();
+        let selection_names: Vec<String> = self.state.selections.names();
 
         // Update raytraced overlay texture if there's a new image
         // This must happen outside the egui closure to avoid borrow conflicts
@@ -706,6 +711,17 @@ impl App {
             let named_colors = &self.state.named_colors;
             let object_list_panel = &mut self.object_list_panel;
             let sequence_panel = &mut self.sequence_panel;
+            let cmd_registry = self.executor.registry();
+            let setting_names_refs: Vec<&str> = setting_names.iter().copied().collect();
+
+            let completion_ctx = crate::ui::completion::CompletionContext {
+                command_names: &all_command_names,
+                registry: &cmd_registry,
+                setting_names: &setting_names_refs,
+                color_names: &color_names,
+                object_names: &object_names,
+                selection_names: &selection_names,
+            };
 
             self.view.egui_ctx.run(raw_input, |ctx| {
                 // Top panel - output and command line
@@ -715,7 +731,7 @@ impl App {
                         ui.separator();
                     }
 
-                    match CommandLinePanel::show(ui, command_line, &all_command_names, &path_commands) {
+                    match CommandLinePanel::show(ui, command_line, &completion_ctx) {
                         CommandAction::Execute(cmd) => {
                             commands_to_execute.push(cmd);
                         }
@@ -1245,7 +1261,19 @@ impl App {
                 // Build context for this molecule with named selections
                 let mut ctx = EvalContext::single(mol);
 
+                // Add all object names as implicit selections so cross-object
+                // references resolve correctly (e.g., "select x, objA and resi 1-10")
+                let atom_count = mol.atom_count();
+                for other_name in names {
+                    if other_name == mol_name {
+                        ctx.add_selection(other_name.to_string(), SelectionResult::all(atom_count));
+                    } else {
+                        ctx.add_selection(other_name.to_string(), SelectionResult::none(atom_count));
+                    }
+                }
+
                 // Add all named selections to context (for reference resolution)
+                // These override object names if there's a conflict
                 for (sel_name, entry) in self.state.selections.iter() {
                     if let Ok(sel_ast) = pymol_select::parse(&entry.expression) {
                         if let Ok(sel_result) = pymol_select::evaluate(&sel_ast, &ctx) {

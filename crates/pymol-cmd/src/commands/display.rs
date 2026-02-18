@@ -5,9 +5,20 @@ use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
+
+/// Simple glob matching (prefix* and *suffix patterns)
+fn glob_match(pattern: &str, name: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return name.starts_with(prefix);
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return name.ends_with(suffix);
+    }
+    pattern == name
+}
 
 /// Register display commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -53,6 +64,10 @@ struct ShowCommand;
 impl Command for ShowCommand {
     fn name(&self) -> &str {
         "show"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Representation, ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -151,6 +166,10 @@ impl Command for HideCommand {
         "hide"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Representation, ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -247,6 +266,10 @@ impl Command for ShowAsCommand {
         "show_as"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Representation, ArgHint::Selection]
+    }
+
     fn aliases(&self) -> &[&str] {
         &["as"]
     }
@@ -340,6 +363,10 @@ impl Command for EnableCommand {
         "enable"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -368,6 +395,7 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .unwrap_or("all");
 
+        // Enable matching objects
         let object_names: Vec<String> = ctx
             .viewer
             .objects()
@@ -378,6 +406,14 @@ EXAMPLES
 
         for obj_name in &object_names {
             let _ = ctx.viewer.objects_mut().enable(obj_name, true);
+        }
+
+        // Enable matching selections
+        let sel_names = ctx.viewer.selections().names();
+        for sel_name in &sel_names {
+            if name == "all" || sel_name == name || glob_match(name, sel_name) {
+                ctx.viewer.selections_mut().set_visible(sel_name, true);
+            }
         }
 
         ctx.viewer.request_redraw();
@@ -401,11 +437,15 @@ impl Command for DisableCommand {
         "disable"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
 
-    "disable" makes objects invisible.
+    "disable" makes objects or selections invisible.
 
 USAGE
 
@@ -413,13 +453,13 @@ USAGE
 
 ARGUMENTS
 
-    name = string: object name pattern (default: all)
+    name = string: object or selection name pattern (default: all)
 
 EXAMPLES
 
     disable
     disable protein
-    disable obj*
+    disable sele
 "#
     }
 
@@ -429,6 +469,7 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .unwrap_or("all");
 
+        // Disable matching objects
         let object_names: Vec<String> = ctx
             .viewer
             .objects()
@@ -439,6 +480,14 @@ EXAMPLES
 
         for obj_name in &object_names {
             let _ = ctx.viewer.objects_mut().enable(obj_name, false);
+        }
+
+        // Disable matching selections
+        let sel_names = ctx.viewer.selections().names();
+        for sel_name in &sel_names {
+            if name == "all" || sel_name == name || glob_match(name, sel_name) {
+                ctx.viewer.selections_mut().set_visible(sel_name, false);
+            }
         }
 
         ctx.viewer.request_redraw();
@@ -462,11 +511,15 @@ impl Command for ToggleCommand {
         "toggle"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
 
-    "toggle" toggles object visibility.
+    "toggle" toggles visibility of objects or selections.
 
 USAGE
 
@@ -474,11 +527,12 @@ USAGE
 
 ARGUMENTS
 
-    name = string: object name
+    name = string: object or selection name
 
 EXAMPLES
 
     toggle protein
+    toggle sele
 "#
     }
 
@@ -488,25 +542,45 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
-        // Get current state
-        let currently_enabled = ctx
-            .viewer
-            .objects()
-            .get(name)
-            .map(|o| o.is_enabled())
-            .unwrap_or(false);
+        let mut found = false;
 
-        let _ = ctx.viewer.objects_mut().enable(name, !currently_enabled);
+        // Try object first
+        if let Some(obj) = ctx.viewer.objects().get(name) {
+            let currently_enabled = obj.is_enabled();
+            let _ = ctx.viewer.objects_mut().enable(name, !currently_enabled);
+            found = true;
 
-        ctx.viewer.request_redraw();
-
-        if !ctx.quiet {
-            if currently_enabled {
-                ctx.print(&format!(" Disabled \"{}\"", name));
-            } else {
-                ctx.print(&format!(" Enabled \"{}\"", name));
+            if !ctx.quiet {
+                if currently_enabled {
+                    ctx.print(&format!(" Disabled \"{}\"", name));
+                } else {
+                    ctx.print(&format!(" Enabled \"{}\"", name));
+                }
             }
         }
+
+        // Try selection
+        if !found {
+            let currently_visible = ctx.viewer.selections().is_visible(name);
+            if ctx.viewer.selections().names().contains(&name.to_string()) {
+                ctx.viewer.selections_mut().set_visible(name, !currently_visible);
+                found = true;
+
+                if !ctx.quiet {
+                    if currently_visible {
+                        ctx.print(&format!(" Disabled selection \"{}\"", name));
+                    } else {
+                        ctx.print(&format!(" Enabled selection \"{}\"", name));
+                    }
+                }
+            }
+        }
+
+        if !found {
+            return Err(CmdError::ObjectNotFound(name.to_string()));
+        }
+
+        ctx.viewer.request_redraw();
 
         Ok(())
     }
@@ -521,6 +595,10 @@ struct ColorCommand;
 impl Command for ColorCommand {
     fn name(&self) -> &str {
         "color"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Color, ArgHint::Selection]
     }
 
     fn aliases(&self) -> &[&str] {
@@ -655,6 +733,10 @@ struct BgColorCommand;
 impl Command for BgColorCommand {
     fn name(&self) -> &str {
         "bg_color"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Color]
     }
 
     fn aliases(&self) -> &[&str] {

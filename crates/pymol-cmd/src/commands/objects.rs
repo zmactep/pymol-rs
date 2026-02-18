@@ -4,9 +4,23 @@ use pymol_mol::{AtomIndex, ObjectMolecule};
 use pymol_scene::{DirtyFlags, MoleculeObject};
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
+
+/// Simple glob matching (prefix* and *suffix patterns)
+fn glob_match(pattern: &str, name: &str) -> bool {
+    if pattern == "*" || pattern == "all" {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return name.starts_with(prefix);
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return name.ends_with(suffix);
+    }
+    pattern == name
+}
 
 /// Register object commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -33,11 +47,15 @@ impl Command for DeleteCommand {
         "delete"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Object]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
 
-    "delete" removes objects or selections.
+    "delete" removes objects and/or named selections.
 
 USAGE
 
@@ -45,12 +63,13 @@ USAGE
 
 ARGUMENTS
 
-    name = string: object or selection name pattern
+    name = string: object or selection name (supports glob patterns)
 
 EXAMPLES
 
     delete protein
     delete obj*
+    delete sele
     delete all
 "#
     }
@@ -61,8 +80,11 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
-        // Get matching objects
-        let matches: Vec<String> = ctx
+        let mut deleted_objects = 0usize;
+        let mut deleted_selections = 0usize;
+
+        // Delete matching objects
+        let obj_matches: Vec<String> = ctx
             .viewer
             .objects()
             .matching(name)
@@ -70,22 +92,44 @@ EXAMPLES
             .map(|s| s.to_string())
             .collect();
 
-        if matches.is_empty() {
-            return Err(CmdError::ObjectNotFound(name.to_string()));
+        for obj_name in &obj_matches {
+            ctx.viewer.objects_mut().remove(obj_name);
+            deleted_objects += 1;
         }
 
-        let count = matches.len();
-        for obj_name in matches {
-            ctx.viewer.objects_mut().remove(&obj_name);
+        // Delete matching named selections
+        // "all" deletes all selections too
+        if name == "all" {
+            let sel_names = ctx.viewer.selections().names();
+            deleted_selections = sel_names.len();
+            for sel_name in sel_names {
+                ctx.viewer.remove_selection(&sel_name);
+            }
+        } else {
+            // Try exact match or glob pattern on selections
+            let sel_names = ctx.viewer.selections().names();
+            for sel_name in &sel_names {
+                if sel_name == name || glob_match(name, sel_name) {
+                    ctx.viewer.remove_selection(sel_name);
+                    deleted_selections += 1;
+                }
+            }
+        }
+
+        let total = deleted_objects + deleted_selections;
+        if total == 0 {
+            return Err(CmdError::ObjectNotFound(name.to_string()));
         }
 
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            if count == 1 {
-                ctx.print(&format!(" Deleted \"{}\"", name));
-            } else {
-                ctx.print(&format!(" Deleted {} objects matching \"{}\"", count, name));
+            match (deleted_objects, deleted_selections) {
+                (o, 0) if o == 1 => ctx.print(&format!(" Deleted \"{}\"", name)),
+                (o, 0) => ctx.print(&format!(" Deleted {} objects matching \"{}\"", o, name)),
+                (0, s) if s == 1 => ctx.print(&format!(" Deleted selection \"{}\"", name)),
+                (0, s) => ctx.print(&format!(" Deleted {} selections matching \"{}\"", s, name)),
+                (o, s) => ctx.print(&format!(" Deleted {} objects and {} selections matching \"{}\"", o, s, name)),
             }
         }
 
@@ -170,6 +214,10 @@ impl Command for CreateCommand {
         "create"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -230,8 +278,8 @@ EXAMPLES
             None
         };
 
-        // Get source molecule (read-only borrow)
-        let new_mol = {
+        // Get source molecule and its representations (read-only borrow)
+        let (new_mol, source_reps) = {
             let mol_obj = ctx
                 .viewer
                 .objects()
@@ -239,11 +287,12 @@ EXAMPLES
                 .ok_or_else(|| CmdError::ObjectNotFound(src_name.clone()))?;
             let src_mol = mol_obj.molecule();
 
-            extract_molecule(src_mol, &sel_result, name, state_opt)
+            (extract_molecule(src_mol, &sel_result, name, state_opt), mol_obj.visible_reps())
         };
 
         let atom_count = new_mol.atom_count();
-        let mol_obj = MoleculeObject::with_name(new_mol, name);
+        let mut mol_obj = MoleculeObject::with_name(new_mol, name);
+        mol_obj.set_visible_reps(source_reps);
         ctx.viewer.objects_mut().add(mol_obj);
         ctx.viewer.request_redraw();
 
@@ -331,11 +380,15 @@ impl Command for CopyCommand {
         "copy"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
 
-    "copy" creates a copy of an object.
+    "copy" creates a new object from an object or selection.
 
 USAGE
 
@@ -344,11 +397,13 @@ USAGE
 ARGUMENTS
 
     target = string: name for the new object
-    source = string: object to copy
+    source = string: object name or selection expression
 
 EXAMPLES
 
     copy protein_copy, protein
+    copy active_site, byres around 5 ligand
+    copy chainA, chain A
 "#
     }
 
@@ -363,24 +418,51 @@ EXAMPLES
             .or_else(|| args.get_named_str("source"))
             .ok_or_else(|| CmdError::MissingArgument("source".to_string()))?;
 
-        // Clone the source molecule
-        let cloned_mol = {
-            let mol_obj = ctx
-                .viewer
-                .objects()
-                .get_molecule(source)
-                .ok_or_else(|| CmdError::ObjectNotFound(source.to_string()))?;
-            mol_obj.molecule().clone()
+        // Try as full object copy first (exact name match, no selection parsing)
+        if let Some(mol_obj) = ctx.viewer.objects().get_molecule(source) {
+            let cloned_mol = mol_obj.molecule().clone();
+            let source_reps = mol_obj.visible_reps();
+            let atom_count = cloned_mol.atom_count();
+
+            let mut new_obj = MoleculeObject::with_name(cloned_mol, target);
+            new_obj.set_visible_reps(source_reps);
+            ctx.viewer.objects_mut().add(new_obj);
+            ctx.viewer.request_redraw();
+
+            if !ctx.quiet {
+                ctx.print(&format!(
+                    " Created \"{}\" as copy of \"{}\" ({} atoms)",
+                    target, source, atom_count
+                ));
+            }
+            return Ok(());
+        }
+
+        // Otherwise treat as selection expression (like create)
+        let results = evaluate_selection(ctx.viewer, source)?;
+
+        let (src_name, sel_result) = results
+            .into_iter()
+            .find(|(_, sel)| sel.count() > 0)
+            .ok_or_else(|| {
+                CmdError::Selection(format!("No atoms matching '{}'", source))
+            })?;
+
+        let (new_mol, source_reps) = {
+            let mol_obj = ctx.viewer.objects().get_molecule(&src_name)
+                .ok_or_else(|| CmdError::ObjectNotFound(src_name.clone()))?;
+            (extract_molecule(mol_obj.molecule(), &sel_result, target, None), mol_obj.visible_reps())
         };
 
-        let atom_count = cloned_mol.atom_count();
-        let mol_obj = MoleculeObject::with_name(cloned_mol, target);
-        ctx.viewer.objects_mut().add(mol_obj);
+        let atom_count = new_mol.atom_count();
+        let mut new_obj = MoleculeObject::with_name(new_mol, target);
+        new_obj.set_visible_reps(source_reps);
+        ctx.viewer.objects_mut().add(new_obj);
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
             ctx.print(&format!(
-                " Created \"{}\" as copy of \"{}\" ({} atoms)",
+                " Created \"{}\" from \"{}\" ({} atoms)",
                 target, source, atom_count
             ));
         }
@@ -785,6 +867,10 @@ impl Command for ExtractCommand {
         "extract"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -856,8 +942,14 @@ EXAMPLES
 
         let atom_count = new_mol.atom_count();
 
-        // Add the new object
-        let mol_obj = MoleculeObject::with_name(new_mol, name);
+        // Copy visible representations from source object
+        let source_reps = ctx.viewer.objects().get_molecule(&src_name)
+            .map(|obj| obj.visible_reps())
+            .unwrap_or_default();
+
+        // Add the new object with same representations as source
+        let mut mol_obj = MoleculeObject::with_name(new_mol, name);
+        mol_obj.set_visible_reps(source_reps);
         ctx.viewer.objects_mut().add(mol_obj);
 
         // Remove atoms from source

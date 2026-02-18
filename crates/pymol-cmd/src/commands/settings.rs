@@ -1,7 +1,7 @@
 //! Settings commands: set, get, unset, dss
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 use pymol_mol::dss::{assign_secondary_structure, DssSettings};
@@ -332,6 +332,10 @@ impl Command for SetCommand {
         "set"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Setting]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -510,6 +514,10 @@ impl Command for GetCommand {
         "get"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Setting]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -596,6 +604,10 @@ struct UnsetCommand;
 impl Command for UnsetCommand {
     fn name(&self) -> &str {
         "unset"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Setting]
     }
 
     fn help(&self) -> &str {

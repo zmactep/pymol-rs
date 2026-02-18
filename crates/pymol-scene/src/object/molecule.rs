@@ -180,6 +180,17 @@ impl MoleculeObject {
         self.dirty
     }
 
+    /// Get the visible representations mask
+    pub fn visible_reps(&self) -> RepMask {
+        self.state.visible_reps
+    }
+
+    /// Set the visible representations mask (e.g., copying from another object)
+    pub fn set_visible_reps(&mut self, reps: RepMask) {
+        self.state.visible_reps = reps;
+        self.dirty |= DirtyFlags::REPS;
+    }
+
     /// Show a representation
     ///
     /// This sets visibility both at the object level and for all atoms.

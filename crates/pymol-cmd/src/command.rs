@@ -35,6 +35,8 @@ pub enum ArgHint {
     Color,
     /// Setting name
     Setting,
+    /// Named selection only (no objects)
+    NamedSelection,
 }
 
 // ============================================================================

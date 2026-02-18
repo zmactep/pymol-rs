@@ -278,7 +278,9 @@ fn parse_primary(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> 
         }
         Token::Ident(ref s) => {
             if let Some(kw) = lookup(s) {
-                match kw.keyword_type() {
+                // Save position so we can backtrack if keyword parse fails
+                let saved_pos = stream.position();
+                let result = match kw.keyword_type() {
                     KeywordType::Sel0 => parse_sel0(stream, kw),
                     KeywordType::Sel1 => parse_sel1(stream, kw),
                     KeywordType::Sel2 => parse_sel2(stream, kw),
@@ -289,6 +291,16 @@ fn parse_primary(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> 
                     KeywordType::Opr2 => {
                         // Binary operators shouldn't appear here
                         Err(ParseError::UnexpectedToken(s.clone()))
+                    }
+                };
+                // If keyword parse failed, backtrack and treat as selection/object name
+                // This handles cases where an object name shadows a keyword (e.g., "ss")
+                match result {
+                    Ok(expr) => Ok(expr),
+                    Err(_) => {
+                        stream.set_position(saved_pos);
+                        stream.next();
+                        Ok(SelectionExpr::Selection(s.clone()))
                     }
                 }
             } else {

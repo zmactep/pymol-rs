@@ -3,8 +3,14 @@
 //! Provides tab completion for:
 //! - Command names (when typing the first word)
 //! - File/directory paths (for I/O commands like load, save, png, cd, ls)
+//! - Setting names (for set, get, unset)
+//! - Color names (for color, bg_color)
+//! - Representation names (for show, hide, as)
+//! - Object/selection names (for zoom, center, delete, etc.)
 
 use std::path::Path;
+
+use pymol_cmd::{ArgHint, CommandRegistry};
 
 /// Result of completion generation
 #[derive(Debug)]
@@ -25,72 +31,260 @@ impl CompletionResult {
     }
 }
 
+/// Static list of representation names for completion
+const REPRESENTATION_NAMES: &[&str] = &[
+    "cartoon", "sticks", "lines", "spheres", "surface", "mesh",
+    "ribbon", "dots", "nonbonded", "nb_spheres", "labels", "cell",
+    "cgo", "everything",
+];
+
+/// Context for generating completions, holding all available name lists
+pub struct CompletionContext<'a> {
+    pub command_names: &'a [&'a str],
+    pub registry: &'a CommandRegistry,
+    pub setting_names: &'a [&'a str],
+    pub color_names: &'a [String],
+    pub object_names: &'a [String],
+    pub selection_names: &'a [String],
+}
+
 /// Generate completions for the current command input
-///
-/// # Arguments
-/// * `input` - The current command line text
-/// * `cursor_pos` - Byte position of the cursor in the input
-/// * `command_names` - List of available command names for completion
-/// * `path_commands` - List of command names that take file paths as first argument
-///
-/// # Returns
-/// A `CompletionResult` with the start position and list of suggestions
 pub fn generate_completions(
     input: &str,
     cursor_pos: usize,
-    command_names: &[&str],
-    path_commands: &[&str],
+    ctx: &CompletionContext,
 ) -> CompletionResult {
-    // Ensure cursor position is valid
     let cursor_pos = cursor_pos.min(input.len());
     let text_before_cursor = &input[..cursor_pos];
 
-    // Parse words before cursor
-    let words: Vec<&str> = text_before_cursor.split_whitespace().collect();
-    let ends_with_space = text_before_cursor.ends_with(char::is_whitespace);
+    // Parse into command + segments (comma-separated, bracket-aware)
+    let parsed = parse_input(text_before_cursor);
 
-    if words.is_empty() {
-        // Empty input - show all commands
-        complete_command("", cursor_pos, command_names)
-    } else if words.len() == 1 && !ends_with_space {
-        // Typing first word - complete command name
-        complete_command(words[0], cursor_pos, command_names)
-    } else if is_path_command(&words[0].to_lowercase(), path_commands) {
-        // First word is a path command - complete file path
-        complete_path(text_before_cursor, cursor_pos)
-    } else {
-        // No completion for other cases
-        CompletionResult::empty(cursor_pos)
+    match parsed {
+        ParsedInput::Empty => {
+            // Show all commands
+            complete_from_list("", cursor_pos, ctx.command_names)
+        }
+        ParsedInput::CommandPrefix(prefix) => {
+            // Completing command name
+            complete_from_list(prefix, cursor_pos - prefix.len(), ctx.command_names)
+        }
+        ParsedInput::Argument { command, arg_index, prefix, prefix_start } => {
+            // Look up arg hints for this command
+            if let Some(cmd) = ctx.registry.get(&command.to_lowercase()) {
+                let hints: &[ArgHint] = cmd.arg_hints();
+
+                // Special case: "set" arg_index=1 → setting value completion
+                if command.eq_ignore_ascii_case("set") && arg_index == 1 {
+                    return complete_setting_value(text_before_cursor, prefix, prefix_start, ctx);
+                }
+
+                if let Some(hint) = hints.get(arg_index) {
+                    match hint {
+                        ArgHint::Path => complete_path(text_before_cursor, cursor_pos),
+                        ArgHint::Setting => complete_from_list(prefix, prefix_start, ctx.setting_names),
+                        ArgHint::Color => {
+                            // Include color scheme keywords too
+                            let schemes: &[&str] = &["atomic", "chain", "ss", "b"];
+                            let mut suggestions = filter_prefix(prefix, ctx.color_names.iter().map(|s| s.as_str()));
+                            suggestions.extend(filter_prefix(prefix, schemes.iter().copied()));
+                            suggestions.sort();
+                            CompletionResult { start_pos: prefix_start, suggestions }
+                        }
+                        ArgHint::Representation => complete_from_static(prefix, prefix_start, REPRESENTATION_NAMES),
+                        ArgHint::Object => complete_from_list(prefix, prefix_start, &ctx.object_names.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
+                        ArgHint::Selection => {
+                            // Object names + selection names
+                            let mut suggestions = filter_prefix(prefix, ctx.object_names.iter().map(|s| s.as_str()));
+                            suggestions.extend(filter_prefix(prefix, ctx.selection_names.iter().map(|s| s.as_str())));
+                            suggestions.sort();
+                            suggestions.dedup();
+                            CompletionResult { start_pos: prefix_start, suggestions }
+                        }
+                        ArgHint::NamedSelection => {
+                            complete_from_list(prefix, prefix_start, &ctx.selection_names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+                        }
+                        ArgHint::None => CompletionResult::empty(cursor_pos),
+                    }
+                } else {
+                    // No hint for this position - no completion
+                    CompletionResult::empty(cursor_pos)
+                }
+            } else {
+                // Unknown command
+                CompletionResult::empty(cursor_pos)
+            }
+        }
     }
 }
 
-/// Check if a command name is in the path commands list (case-insensitive)
-fn is_path_command(cmd: &str, path_commands: &[&str]) -> bool {
-    path_commands.iter().any(|pc| pc.eq_ignore_ascii_case(cmd))
+/// Parsed representation of the input before cursor
+enum ParsedInput<'a> {
+    /// Empty input
+    Empty,
+    /// Typing the first word (command name)
+    CommandPrefix(&'a str),
+    /// Typing an argument
+    Argument {
+        command: &'a str,
+        arg_index: usize,
+        prefix: &'a str,
+        prefix_start: usize,
+    },
 }
 
-/// Complete command names
-fn complete_command(prefix: &str, cursor_pos: usize, command_names: &[&str]) -> CompletionResult {
+/// Parse input into command and current argument position
+fn parse_input(text: &str) -> ParsedInput<'_> {
+    if text.is_empty() {
+        return ParsedInput::Empty;
+    }
+
+    // Split into segments by commas (bracket-aware)
+    let segments = split_by_commas(text);
+
+    if segments.is_empty() {
+        return ParsedInput::Empty;
+    }
+
+    // First segment: "command arg0_prefix" or just "command_prefix"
+    let first_seg = segments[0];
+    let first_words: Vec<&str> = first_seg.split_whitespace().collect();
+
+    if first_words.is_empty() {
+        return ParsedInput::Empty;
+    }
+
+    let ends_with_space = first_seg.ends_with(char::is_whitespace);
+
+    if segments.len() == 1 && first_words.len() == 1 && !ends_with_space {
+        // Still typing the command name
+        return ParsedInput::CommandPrefix(first_words[0]);
+    }
+
+    let command = first_words[0];
+
+    if segments.len() == 1 {
+        // Still in first segment, after command name
+        // arg_index = 0, prefix is everything after command
+        let cmd_end = first_seg.find(char::is_whitespace).unwrap_or(first_seg.len());
+        let after_cmd = &first_seg[cmd_end..];
+        let prefix = after_cmd.trim_start();
+        let prefix_start = text.len() - prefix.len();
+        return ParsedInput::Argument {
+            command,
+            arg_index: 0,
+            prefix,
+            prefix_start,
+        };
+    }
+
+    // We're in segment N (N >= 1), which means arg_index = N - 1... wait:
+    // segment 0 = "command arg0", segment 1 = " arg1", segment 2 = " arg2"
+    // So arg_index = segments.len() - 1
+    let arg_index = segments.len() - 1;
+    let last_seg = segments[arg_index];
+    let prefix = last_seg.trim_start();
+    let prefix_start = text.len() - prefix.len();
+
+    ParsedInput::Argument {
+        command,
+        arg_index,
+        prefix,
+        prefix_start,
+    }
+}
+
+/// Split text by commas, respecting brackets and quotes
+fn split_by_commas(text: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut depth = 0i32;
+    let mut in_quote = false;
+    let mut last_start = 0;
+
+    for (i, ch) in text.char_indices() {
+        match ch {
+            '"' | '\'' => in_quote = !in_quote,
+            '(' | '[' | '{' if !in_quote => depth += 1,
+            ')' | ']' | '}' if !in_quote => depth -= 1,
+            ',' if !in_quote && depth <= 0 => {
+                segments.push(&text[last_start..i]);
+                last_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    segments.push(&text[last_start..]);
+    segments
+}
+
+/// Complete setting value (special case for `set name, <value>`)
+fn complete_setting_value(
+    text: &str,
+    prefix: &str,
+    prefix_start: usize,
+    _ctx: &CompletionContext,
+) -> CompletionResult {
+    // Extract setting name from arg 0
+    let segments = split_by_commas(text);
+    if segments.is_empty() {
+        return CompletionResult::empty(prefix_start);
+    }
+
+    let first_seg = segments[0];
+    let first_words: Vec<&str> = first_seg.split_whitespace().collect();
+    let setting_name = if first_words.len() >= 2 { first_words[1] } else { return CompletionResult::empty(prefix_start); };
+
+    // Look up setting type
+    if let Some(id) = pymol_settings::get_setting_id(setting_name) {
+        if let Some(setting) = pymol_settings::get_setting(id) {
+            let values: &[&str] = match setting.setting_type {
+                pymol_settings::SettingType::Bool => &["on", "off"],
+                pymol_settings::SettingType::Int if id == pymol_settings::id::shading_mode => &["classic", "skripkin"],
+                _ => return CompletionResult::empty(prefix_start),
+            };
+            return complete_from_static(prefix, prefix_start, values);
+        }
+    }
+
+    CompletionResult::empty(prefix_start)
+}
+
+/// Filter items by case-insensitive prefix
+fn filter_prefix<'a>(prefix: &str, items: impl Iterator<Item = &'a str>) -> Vec<String> {
     let prefix_lower = prefix.to_lowercase();
-    let mut matches: Vec<String> = command_names
+    items
+        .filter(|item| item.to_lowercase().starts_with(&prefix_lower))
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Complete from a dynamic list of names
+fn complete_from_list(prefix: &str, prefix_start: usize, names: &[&str]) -> CompletionResult {
+    let prefix_lower = prefix.to_lowercase();
+    let mut matches: Vec<String> = names
         .iter()
-        .filter(|cmd| cmd.to_lowercase().starts_with(&prefix_lower))
+        .filter(|name| name.to_lowercase().starts_with(&prefix_lower))
         .map(|s| s.to_string())
         .collect();
-
-    // Sort alphabetically for consistent display
     matches.sort();
+    CompletionResult { start_pos: prefix_start, suggestions: matches }
+}
 
-    CompletionResult {
-        start_pos: cursor_pos - prefix.len(),
-        suggestions: matches,
-    }
+/// Complete from a static list
+fn complete_from_static(prefix: &str, start_pos: usize, names: &[&str]) -> CompletionResult {
+    let prefix_lower = prefix.to_lowercase();
+    let mut matches: Vec<String> = names
+        .iter()
+        .filter(|name| name.to_lowercase().starts_with(&prefix_lower))
+        .map(|s| s.to_string())
+        .collect();
+    matches.sort();
+    CompletionResult { start_pos, suggestions: matches }
 }
 
 /// Complete file/directory paths
 fn complete_path(input: &str, _cursor_pos: usize) -> CompletionResult {
     // Find where the path argument starts
-    // Skip the command and find the start of the path portion
     let path_start = find_path_start(input);
     let path_portion = &input[path_start..];
 
@@ -100,36 +294,36 @@ fn complete_path(input: &str, _cursor_pos: usize) -> CompletionResult {
 
     // Determine the directory to search and the prefix to match
     let (search_dir, prefix) = if expanded_path.is_dir() && path_portion.ends_with('/') {
-        // Path ends with / - list contents of that directory
         (expanded_path.to_path_buf(), String::new())
     } else if let Some(parent) = expanded_path.parent() {
-        // Get parent directory and filename prefix
         let prefix = expanded_path
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        (parent.to_path_buf(), prefix)
+        // Empty parent means bare filename (e.g. "1" without "./" prefix)
+        // Use cwd so we get relative paths
+        let dir = if parent.as_os_str().is_empty() {
+            Path::new(".").to_path_buf()
+        } else {
+            parent.to_path_buf()
+        };
+        (dir, prefix)
     } else {
-        // No parent - use current directory
-        (std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()), expanded.clone())
+        (Path::new(".").to_path_buf(), expanded.clone())
     };
 
-    // Read directory contents and filter by prefix
     let mut suggestions = Vec::new();
 
     if let Ok(entries) = std::fs::read_dir(&search_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_string();
 
-            // Skip hidden files unless prefix starts with '.'
             if name.starts_with('.') && !prefix.starts_with('.') {
                 continue;
             }
 
             if name.to_lowercase().starts_with(&prefix.to_lowercase()) {
-                // Build the full suggestion
                 let mut suggestion = if path_portion.starts_with('~') {
-                    // Keep tilde in suggestion
                     format!("~/{}", 
                         search_dir
                             .strip_prefix(dirs::home_dir().unwrap_or_default())
@@ -143,7 +337,6 @@ fn complete_path(input: &str, _cursor_pos: usize) -> CompletionResult {
                     search_dir.join(&name).display().to_string()
                 };
 
-                // Add trailing slash for directories
                 if entry.path().is_dir() {
                     suggestion.push('/');
                 }
@@ -153,7 +346,6 @@ fn complete_path(input: &str, _cursor_pos: usize) -> CompletionResult {
         }
     }
 
-    // Sort alphabetically, directories first
     suggestions.sort_by(|a, b| {
         let a_is_dir = a.ends_with('/');
         let b_is_dir = b.ends_with('/');
@@ -172,26 +364,20 @@ fn complete_path(input: &str, _cursor_pos: usize) -> CompletionResult {
 
 /// Find the byte position where the path argument starts in the input
 fn find_path_start(input: &str) -> usize {
-    // Skip the command name and any following whitespace
     let mut chars = input.char_indices().peekable();
 
     // Skip command (first word)
     while let Some((_, c)) = chars.peek() {
-        if c.is_whitespace() {
-            break;
-        }
+        if c.is_whitespace() { break; }
         chars.next();
     }
 
     // Skip whitespace after command
     while let Some((_, c)) = chars.peek() {
-        if !c.is_whitespace() {
-            break;
-        }
+        if !c.is_whitespace() { break; }
         chars.next();
     }
 
-    // Return position of path start, or end of input
     chars.peek().map(|(i, _)| *i).unwrap_or(input.len())
 }
 
@@ -210,25 +396,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_command_completion() {
-        let commands = vec!["load", "label", "ls", "log", "zoom"];
-        let path_commands = vec!["load", "ls"];
+    fn test_split_by_commas() {
+        assert_eq!(split_by_commas("set sphere_scale, 0.5"), vec!["set sphere_scale", " 0.5"]);
+        assert_eq!(split_by_commas("color green, chain A"), vec!["color green", " chain A"]);
+        assert_eq!(split_by_commas("show cartoon"), vec!["show cartoon"]);
+        // Brackets
+        assert_eq!(split_by_commas("set bg_rgb, [1.0, 0.5, 0.0]"), vec!["set bg_rgb", " [1.0, 0.5, 0.0]"]);
+    }
 
-        // Complete "l"
-        let result = generate_completions("l", 1, &commands, &path_commands);
-        assert_eq!(result.start_pos, 0);
-        assert!(result.suggestions.contains(&"load".to_string()));
-        assert!(result.suggestions.contains(&"label".to_string()));
-        assert!(result.suggestions.contains(&"ls".to_string()));
-        assert!(result.suggestions.contains(&"log".to_string()));
-        assert!(!result.suggestions.contains(&"zoom".to_string()));
+    #[test]
+    fn test_parse_input_empty() {
+        assert!(matches!(parse_input(""), ParsedInput::Empty));
+    }
 
-        // Complete "lo"
-        let result = generate_completions("lo", 2, &commands, &path_commands);
-        assert_eq!(result.start_pos, 0);
-        assert!(result.suggestions.contains(&"load".to_string()));
-        assert!(result.suggestions.contains(&"log".to_string()));
-        assert!(!result.suggestions.contains(&"label".to_string()));
+    #[test]
+    fn test_parse_input_command_prefix() {
+        match parse_input("lo") {
+            ParsedInput::CommandPrefix("lo") => {}
+            _ => panic!("Expected CommandPrefix"),
+        }
+    }
+
+    #[test]
+    fn test_parse_input_argument() {
+        match parse_input("set sphere_sc") {
+            ParsedInput::Argument { command: "set", arg_index: 0, prefix: "sphere_sc", .. } => {}
+            _ => panic!("Expected Argument for arg 0"),
+        }
+
+        match parse_input("set sphere_scale, ") {
+            ParsedInput::Argument { command: "set", arg_index: 1, prefix: "", .. } => {}
+            _ => panic!("Expected Argument for arg 1"),
+        }
+
+        match parse_input("color green, ") {
+            ParsedInput::Argument { command: "color", arg_index: 1, prefix: "", .. } => {}
+            _ => panic!("Expected Argument for arg 1"),
+        }
     }
 
     #[test]
