@@ -290,8 +290,14 @@ pub fn raytrace_scene(
     let ray_trace_disco_factor = input.settings.get_float(pymol_settings::id::ray_trace_disco_factor);
     let ray_trace_gain = input.settings.get_float(pymol_settings::id::ray_trace_gain);
 
+    // Shading mode determines the lighting pipeline
+    let shading_mode = pymol_settings::ShadingMode::from_settings(input.settings);
+
     // Multi-light support (PyMOL light_count setting)
-    let light_count = input.settings.get_int(pymol_settings::id::light_count);
+    let light_count = match shading_mode {
+        pymol_settings::ShadingMode::Skripkin => 1,
+        pymol_settings::ShadingMode::Classic => input.settings.get_int(pymol_settings::id::light_count),
+    };
 
     // spec_count controls how many positional lights contribute specular
     // -1 (default) means all positional lights contribute specular

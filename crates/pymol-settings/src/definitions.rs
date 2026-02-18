@@ -6,7 +6,7 @@
 use crate::setting::{Setting, SettingLevel, SettingType, SettingValue};
 
 /// Total number of settings
-pub const SETTING_COUNT: usize = 802;
+pub const SETTING_COUNT: usize = 807;
 
 // =============================================================================
 // Setting ID Constants
@@ -850,6 +850,13 @@ pub mod id {
     pub const silhouette_width: u16 = 799;
     pub const silhouette_color: u16 = 800;
     pub const silhouette_depth_jump: u16 = 801;
+
+    // 802-806: Shading mode & multi-directional shadow AO
+    pub const shading_mode: u16 = 802;
+    pub const skripkin_directions: u16 = 803;
+    pub const skripkin_map_size: u16 = 804;
+    pub const skripkin_bias: u16 = 805;
+    pub const skripkin_intensity: u16 = 806;
 }
 
 // =============================================================================
@@ -1736,9 +1743,16 @@ pub static SETTINGS: &[Setting] = &[
     s_color!(797, "cell_color", ObjectState, -1),
     // 798-801: Silhouette settings
     s_bool!(798, "silhouettes", Global, false),
-    s_float!(799, "silhouette_width", Global, 1.0, 0.5, 10.0),
+    s_float!(799, "silhouette_width", Global, 4.0, 0.5, 10.0),
     s_float3!(800, "silhouette_color", Global, 0.0, 0.0, 0.0),
     s_float!(801, "silhouette_depth_jump", Global, 0.03, 0.001, 0.5),
+    // 802-806: Shading mode & multi-directional shadow AO
+    // shading_mode: 0 = classic (PyMOL default lighting), 1 = skripkin (ambient + AO shadows)
+    s_int!(802, "shading_mode", Global, 0, 0, 1),
+    s_int!(803, "skripkin_directions", Global, 64),
+    s_int!(804, "skripkin_map_size", Global, 128),
+    s_float!(805, "skripkin_bias", Global, 0.01, 0.0, 0.1),
+    s_float!(806, "skripkin_intensity", Global, 1.0, 0.0, 2.0),
 ];
 
 /// Initialize a settings store with all default values

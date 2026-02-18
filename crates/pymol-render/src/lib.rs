@@ -51,12 +51,15 @@ mod error;
 pub mod picking;
 pub mod pipeline;
 mod representation;
+pub mod multishadow;
+pub mod shading;
 pub mod silhouette;
 mod uniforms;
 mod vertex;
 
 // Re-export main types
 pub use color_resolver::ColorResolver;
+pub use shading::{ShadingManager, ShadingPipeline, ShadowPassState};
 pub use context::RenderContext;
 pub use error::RenderError;
 pub use representation::{RepType, Representation};

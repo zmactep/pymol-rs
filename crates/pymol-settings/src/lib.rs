@@ -42,6 +42,7 @@
 mod definitions;
 mod error;
 mod setting;
+pub mod shading_mode;
 mod side_effects;
 mod store;
 
@@ -55,6 +56,7 @@ pub use setting::{Setting, SettingLevel, SettingType, SettingValue};
 pub use side_effects::{
     FnSideEffect, SettingSideEffect, SideEffectCategory, SideEffectRegistry,
 };
+pub use shading_mode::ShadingMode;
 pub use store::{
     GlobalSettings, SerializedSetting, SettingResolver, SettingStore, UniqueId, UniqueSettings,
 };

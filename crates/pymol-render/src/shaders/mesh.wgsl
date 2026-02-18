@@ -45,6 +45,19 @@ struct GlobalUniforms {
 @group(0) @binding(0)
 var<uniform> uniforms: GlobalUniforms;
 
+// Shadow sampling (group 1) — multi-directional shadow map AO
+struct ShadowParams {
+    shadow_count: u32,
+    grid_size: u32,
+    bias: f32,
+    intensity: f32,
+}
+
+@group(1) @binding(0) var shadow_atlas: texture_2d<f32>;
+@group(1) @binding(1) var shadow_sampler: sampler;
+@group(1) @binding(2) var<uniform> shadow_params: ShadowParams;
+@group(1) @binding(3) var<storage, read> shadow_matrices: array<mat4x4<f32>>;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -57,24 +70,26 @@ struct VertexOutput {
     @location(1) normal_view: vec3<f32>,
     @location(2) position_view: vec3<f32>,
     @location(3) view_depth: f32,
+    @location(4) world_pos: vec3<f32>,
 }
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    
+
     let world_pos = vec4<f32>(input.position, 1.0);
     let view_pos = uniforms.view * world_pos;
-    
+
     output.clip_position = uniforms.view_proj * world_pos;
     output.color = input.color;
-    
+
     // Transform normal to view space (using normal matrix = inverse transpose of view)
     // For now, assume no non-uniform scaling, so we can use view matrix directly
     output.normal_view = (uniforms.view * vec4<f32>(input.normal, 0.0)).xyz;
     output.position_view = view_pos.xyz;
     output.view_depth = -view_pos.z;
-    
+    output.world_pos = input.position;
+
     return output;
 }
 
@@ -85,39 +100,39 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 fn pymol_lighting(normal: vec3<f32>, view_dir: vec3<f32>, base_color: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
     let v = normalize(view_dir);
-    
+
     // Ambient contribution
     var color = base_color * uniforms.ambient;
-    
+
     // === HEADLIGHT (camera light) ===
     // Light comes from camera direction - always active
     let headlight_ndotl = max(dot(n, v), 0.0);
     color += base_color * headlight_ndotl * uniforms.direct;
-    
+
     // Headlight specular (Blinn-Phong)
     if uniforms.spec_direct > 0.0 && headlight_ndotl > 0.0 {
         let spec = pow(headlight_ndotl, uniforms.spec_direct_power);
         color += vec3<f32>(1.0) * spec * uniforms.spec_direct;
     }
-    
+
     // === POSITIONAL LIGHTS ===
     // light_count = 1: ambient only (no positional lights)
     // light_count = 2: 1 positional light
     // light_count = N: N-1 positional lights
     let num_pos_lights = max(uniforms.light_count - 1, 0);
-    
+
     // Resolve spec_count: -1 means all positional lights contribute specular
     let effective_spec_count = select(uniforms.spec_count, num_pos_lights, uniforms.spec_count < 0);
-    
+
     for (var i = 0; i < num_pos_lights; i++) {
         // Light directions are already in view space (PyMOL convention)
         // Negate because PyMOL defines direction FROM light TO scene
         let l = normalize(-uniforms.light_dirs[i].xyz);
-        
+
         // Diffuse contribution (always applied)
         let ndotl = max(dot(n, l), 0.0);
         color += base_color * ndotl * uniforms.reflect;
-        
+
         // Specular contribution (Blinn-Phong) - only if i < effective_spec_count
         if uniforms.specular > 0.0 && ndotl > 0.0 && i < effective_spec_count {
             let h = normalize(l + v);
@@ -126,7 +141,7 @@ fn pymol_lighting(normal: vec3<f32>, view_dir: vec3<f32>, base_color: vec3<f32>)
             color += vec3<f32>(1.0) * spec * uniforms.specular;
         }
     }
-    
+
     return color;
 }
 
@@ -155,23 +170,70 @@ fn apply_depth_cue(color: vec3<f32>, depth: f32) -> vec3<f32> {
 fn fs_main(input: VertexOutput, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     // Get the interpolated normal in view space
     var normal = normalize(input.normal_view);
-    
+
     // View direction (from fragment to camera, camera at origin in view space)
     let view_dir = normalize(-input.position_view);
-    
+
     // Two-sided lighting: ensure normal faces the camera
     // If dot(normal, view_dir) < 0, the normal points away from the camera
     // This handles both back-facing triangles and inconsistent vertex normals
     if dot(normal, view_dir) < 0.0 {
         normal = -normal;
     }
-    
+
     // Calculate lighting using PyMOL multi-light model
     var color = pymol_lighting(normal, view_dir, input.color.rgb);
-    
+
+    // Apply multi-directional shadow AO
+    let ao = compute_shadow_ao(input.world_pos);
+    color *= ao;
+
     // Apply depth cue and fog
     color = apply_depth_cue(color, input.view_depth);
     color = apply_fog(color, input.view_depth);
-    
+
     return vec4<f32>(color, input.color.a);
+}
+
+// Compute ambient occlusion from multi-directional shadow maps
+fn compute_shadow_ao(world_pos: vec3<f32>) -> f32 {
+    if shadow_params.shadow_count == 0u {
+        return 1.0;
+    }
+
+    var lit_count = 0u;
+    let count = shadow_params.shadow_count;
+    let grid = shadow_params.grid_size;
+
+    for (var i = 0u; i < count; i++) {
+        let shadow_pos = shadow_matrices[i] * vec4<f32>(world_pos, 1.0);
+        let ndc = shadow_pos.xyz / shadow_pos.w;
+
+        // NDC to UV (0-1 range)
+        let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
+
+        // Skip if outside shadow map
+        if uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 {
+            lit_count += 1u;
+            continue;
+        }
+
+        // Compute atlas UV for tile i
+        let col = i % grid;
+        let row = i / grid;
+        let tile_uv = vec2<f32>(
+            (f32(col) + uv.x) / f32(grid),
+            (f32(row) + uv.y) / f32(grid),
+        );
+
+        let shadow_depth = textureSample(shadow_atlas, shadow_sampler, tile_uv).r;
+        let fragment_depth = ndc.z;
+
+        if fragment_depth <= shadow_depth + shadow_params.bias {
+            lit_count += 1u;
+        }
+    }
+
+    let fraction_lit = f32(lit_count) / f32(count);
+    return mix(1.0, fraction_lit, shadow_params.intensity);
 }

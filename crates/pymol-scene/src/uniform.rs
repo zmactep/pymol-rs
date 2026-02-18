@@ -57,13 +57,13 @@ pub fn compute_reflect_scale(light_count: i32, light_dirs: &[[f32; 3]]) -> f32 {
 /// let uniforms = setup_uniforms(&camera, &settings, clear_color, (width, height));
 /// context.update_uniforms(&uniforms);
 /// ```
-pub fn setup_uniforms(
+/// Setup common uniform fields shared by all shading modes (camera, background, viewport, clip).
+fn setup_common_uniforms(
+    uniforms: &mut GlobalUniforms,
     camera: &Camera,
-    settings: &GlobalSettings,
     clear_color: [f32; 3],
     viewport_size: (f32, f32),
-) -> GlobalUniforms {
-    let mut uniforms = GlobalUniforms::new();
+) {
     uniforms.set_camera(camera.view_matrix(), camera.projection_matrix());
     uniforms.set_background(clear_color);
     uniforms.set_viewport(viewport_size.0, viewport_size.1);
@@ -71,17 +71,54 @@ pub fn setup_uniforms(
     let camera_pos = camera.world_position();
     uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
 
-    // Multi-light support (PyMOL light_count setting)
-    // light_count = 1: ambient only
-    // light_count = 2: ambient + 1 directional light
-    // light_count = 3-10: ambient + (N-1) directional lights
-    let light_count = settings.get_int(pymol_settings::id::light_count);
+    // Clip planes from camera
+    let current_view = camera.current_view();
+    uniforms.set_clip_planes(current_view.clip_front, current_view.clip_back);
+}
 
-    // spec_count controls how many positional lights contribute specular
-    // -1 (default) means all positional lights contribute specular
+/// Setup fog parameters from settings (shared helper).
+fn setup_fog(
+    uniforms: &mut GlobalUniforms,
+    settings: &GlobalSettings,
+    clear_color: [f32; 3],
+    clip_front: f32,
+    clip_back: f32,
+) {
+    let depth_cue_enabled = settings.get_bool(pymol_settings::id::depth_cue);
+    let fog_density = settings.get_float(pymol_settings::id::fog);
+
+    if depth_cue_enabled && fog_density > 0.0 {
+        let fog_start_ratio = settings.get_float(pymol_settings::id::fog_start);
+        let fog_start_actual = (clip_back - clip_front) * fog_start_ratio + clip_front;
+
+        let fog_end_actual = if (fog_density - 1.0).abs() < 0.001 {
+            clip_back
+        } else {
+            fog_start_actual + (clip_back - fog_start_actual) / fog_density
+        };
+
+        uniforms.set_fog(fog_start_actual, fog_end_actual, fog_density, clear_color);
+        uniforms.set_depth_cue(1.0);
+    }
+}
+
+/// Setup uniforms for Classic shading mode.
+///
+/// Reads all classic PyMOL lighting settings: light_count, ambient, direct, reflect,
+/// specular, shininess, multi-light directions, fog, depth cue.
+pub fn setup_classic_uniforms(
+    camera: &Camera,
+    settings: &GlobalSettings,
+    clear_color: [f32; 3],
+    viewport_size: (f32, f32),
+) -> GlobalUniforms {
+    let mut uniforms = GlobalUniforms::new();
+    setup_common_uniforms(&mut uniforms, camera, clear_color, viewport_size);
+
+    // Multi-light support
+    let light_count = settings.get_int(pymol_settings::id::light_count);
     let spec_count = settings.get_int(pymol_settings::id::spec_count);
 
-    // Gather light directions from settings (light, light2, ..., light9)
     let light_setting_ids = [
         pymol_settings::id::light,
         pymol_settings::id::light2,
@@ -101,7 +138,7 @@ pub fn setup_uniforms(
 
     uniforms.set_lights(light_count, spec_count, &light_dirs);
 
-    // Lighting settings (PyMOL dual-light model)
+    // Classic PyMOL dual-light model
     let ambient = settings.get_float(pymol_settings::id::ambient);
     let direct = settings.get_float(pymol_settings::id::direct);
     let reflect = settings.get_float(pymol_settings::id::reflect);
@@ -110,14 +147,11 @@ pub fn setup_uniforms(
     let spec_direct = settings.get_float(pymol_settings::id::spec_direct);
     let spec_direct_power = settings.get_float(pymol_settings::id::spec_direct_power);
 
-    // PyMOL brightness consistency adjustments:
-    // 1. Scale reflect based on light directions to maintain consistent brightness
-    // 2. When light_count < 2, redirect reflect energy to direct (headlight)
+    // PyMOL brightness consistency adjustments
     let reflect_scale = compute_reflect_scale(light_count, &light_dirs);
     let reflect_scaled = reflect * reflect_scale;
 
     let (direct_adjusted, reflect_final) = if light_count < 2 {
-        // No positional lights - add reflect to direct (PyMOL behavior)
         ((direct + reflect_scaled).min(1.0), 0.0)
     } else {
         (direct, reflect_scaled)
@@ -133,41 +167,62 @@ pub fn setup_uniforms(
         spec_direct_power,
     );
 
-    // Clip planes from camera
+    // Fog
     let current_view = camera.current_view();
-    let clip_front = current_view.clip_front;
-    let clip_back = current_view.clip_back;
-    uniforms.set_clip_planes(clip_front, clip_back);
-
-    // Fog parameters (PyMOL-compatible)
-    // depth_cue controls whether fog is enabled
-    let depth_cue_enabled = settings.get_bool(pymol_settings::id::depth_cue);
-    let fog_density = settings.get_float(pymol_settings::id::fog);
-
-    if depth_cue_enabled && fog_density > 0.0 {
-        // fog_start setting is a ratio (0.0-1.0) between clip planes
-        let fog_start_ratio = settings.get_float(pymol_settings::id::fog_start);
-
-        // Compute actual fog distances based on clip planes
-        // FogStart = (back - front) * fog_start_ratio + front
-        let fog_start_actual = (clip_back - clip_front) * fog_start_ratio + clip_front;
-
-        // FogEnd depends on fog density
-        let fog_end_actual = if (fog_density - 1.0).abs() < 0.001 {
-            // If density is ~1.0, fog ends at back clip plane
-            clip_back
-        } else {
-            // Otherwise scale the fog range by density
-            fog_start_actual + (clip_back - fog_start_actual) / fog_density
-        };
-
-        // Set fog with background color (so objects fade to background)
-        uniforms.set_fog(fog_start_actual, fog_end_actual, fog_density, clear_color);
-
-        // Enable depth cue (darkening based on depth)
-        uniforms.set_depth_cue(1.0);
-    }
-    // else: fog_density and depth_cue remain at 0.0 (disabled) from defaults
+    setup_fog(&mut uniforms, settings, clear_color, current_view.clip_front, current_view.clip_back);
 
     uniforms
+}
+
+/// Setup uniforms for Skripkin shading mode.
+///
+/// Pure ambient lighting + multi-directional shadow AO. reflect, fog, direct
+/// (headlight), and spec_direct are always forced to 0 — all depth comes from
+/// shadow AO, not from camera-direction or positional lights.
+pub fn setup_skripkin_uniforms(
+    camera: &Camera,
+    settings: &GlobalSettings,
+    clear_color: [f32; 3],
+    viewport_size: (f32, f32),
+) -> GlobalUniforms {
+    let mut uniforms = GlobalUniforms::new();
+    setup_common_uniforms(&mut uniforms, camera, clear_color, viewport_size);
+
+    // No positional lights and no headlight — light_count=0.
+    uniforms.set_lights(0, 0, &[]);
+
+    let ambient = settings.get_float(pymol_settings::id::ambient);
+    let specular = settings.get_float(pymol_settings::id::specular);
+    let shininess = settings.get_float(pymol_settings::id::shininess);
+
+    uniforms.set_lighting(
+        ambient,
+        0.0, // direct (headlight) always 0 in Skripkin mode
+        0.0, // reflect always 0 in Skripkin mode
+        specular,
+        shininess,
+        0.0, // spec_direct always 0 in Skripkin mode
+        0.0, // spec_direct_power always 0 in Skripkin mode
+    );
+
+    // fog always 0 in Skripkin mode
+
+    uniforms
+}
+
+/// Setup global uniforms for rendering (dispatches to mode-specific function).
+///
+/// This is the single source of truth for uniform setup logic, used by both
+/// the `Viewer` and GUI's `App::render()`.
+pub fn setup_uniforms(
+    camera: &Camera,
+    settings: &GlobalSettings,
+    clear_color: [f32; 3],
+    viewport_size: (f32, f32),
+) -> GlobalUniforms {
+    let shading_mode = pymol_settings::ShadingMode::from_settings(settings);
+    match shading_mode {
+        pymol_settings::ShadingMode::Classic => setup_classic_uniforms(camera, settings, clear_color, viewport_size),
+        pymol_settings::ShadingMode::Skripkin => setup_skripkin_uniforms(camera, settings, clear_color, viewport_size),
+    }
 }

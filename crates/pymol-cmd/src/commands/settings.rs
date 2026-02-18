@@ -7,7 +7,7 @@ use crate::error::{CmdError, CmdResult};
 use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_scene::DirtyFlags;
 use pymol_select::AtomIndex;
-use pymol_settings::{get_setting, get_setting_id, id as setting_id, SettingType, SettingValue};
+use pymol_settings::{get_setting, get_setting_id, id as setting_id, ShadingMode, SettingType, SettingValue};
 
 /// Register settings commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -217,8 +217,17 @@ EXAMPLES
             setting_id::ribbon_color
         );
 
-        // For color settings, try to resolve color names
-        let value = if setting.setting_type == SettingType::Color {
+        // For shading_mode, accept string aliases (classic/skripkin)
+        let value = if id == setting_id::shading_mode {
+            if let Some(mode) = ShadingMode::from_str_alias(&value_str) {
+                SettingValue::Int(i32::from(mode))
+            } else {
+                return Err(CmdError::invalid_arg(
+                    "value",
+                    format!("Unknown shading mode '{}'. Use classic or skripkin", value_str),
+                ));
+            }
+        } else if setting.setting_type == SettingType::Color {
             // Try to parse as integer first
             if let Ok(v) = value_str.parse::<i32>() {
                 SettingValue::Color(v)
@@ -399,7 +408,17 @@ EXAMPLES
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            ctx.print(&format!(" {} = {}", name, format_setting_value(&value)));
+            // For shading_mode, show the human-readable name
+            if id == setting_id::shading_mode {
+                if let SettingValue::Int(v) = &value {
+                    let mode = ShadingMode::from(*v);
+                    ctx.print(&format!(" {} = {}", name, mode.name()));
+                } else {
+                    ctx.print(&format!(" {} = {}", name, format_setting_value(&value)));
+                }
+            } else {
+                ctx.print(&format!(" {} = {}", name, format_setting_value(&value)));
+            }
         }
 
         Ok(())
@@ -478,7 +497,17 @@ EXAMPLES
             .ok_or_else(|| CmdError::execution("Failed to get setting value"))?;
 
         // Display the value with type information
-        ctx.print(&format!(" {} ({}) = {}", name, setting.setting_type, format_setting_value(&value)));
+        // For shading_mode, show the human-readable name
+        if id == setting_id::shading_mode {
+            if let SettingValue::Int(v) = &value {
+                let mode = ShadingMode::from(*v);
+                ctx.print(&format!(" {} = {} ({})", name, v, mode.name()));
+            } else {
+                ctx.print(&format!(" {} = {}", name, format_setting_value(&value)));
+            }
+        } else {
+            ctx.print(&format!(" {} ({}) = {}", name, setting.setting_type, format_setting_value(&value)));
+        }
 
         Ok(())
     }

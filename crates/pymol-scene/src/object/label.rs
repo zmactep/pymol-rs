@@ -304,6 +304,7 @@ impl LabelObject {
                 let pipeline = context.line_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                 lines.render(render_pass);
             }
         }

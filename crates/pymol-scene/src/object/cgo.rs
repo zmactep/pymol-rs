@@ -579,6 +579,7 @@ impl CgoObject {
                 let pipeline = context.line_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                 cache.lines.render(render_pass);
             }
 
@@ -587,6 +588,7 @@ impl CgoObject {
                 let pipeline = context.mesh_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                 cache.mesh.render(render_pass);
             }
 
@@ -595,6 +597,7 @@ impl CgoObject {
                 let pipeline = context.sphere_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                 render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                 render_pass.set_index_buffer(
                     context.quad_index_buffer().slice(..),
@@ -608,6 +611,7 @@ impl CgoObject {
                 let pipeline = context.cylinder_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                 render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                 render_pass.set_index_buffer(
                     context.quad_index_buffer().slice(..),

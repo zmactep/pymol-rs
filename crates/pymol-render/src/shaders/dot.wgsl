@@ -38,6 +38,19 @@ struct GlobalUniforms {
 @group(0) @binding(0)
 var<uniform> uniforms: GlobalUniforms;
 
+// Shadow sampling (group 1) — multi-directional shadow map AO
+struct ShadowParams {
+    shadow_count: u32,
+    grid_size: u32,
+    bias: f32,
+    intensity: f32,
+}
+
+@group(1) @binding(0) var shadow_atlas: texture_2d<f32>;
+@group(1) @binding(1) var shadow_sampler: sampler;
+@group(1) @binding(2) var<uniform> shadow_params: ShadowParams;
+@group(1) @binding(3) var<storage, read> shadow_matrices: array<mat4x4<f32>>;
+
 // Billboard vertex
 struct BillboardVertex {
     @location(10) offset: vec2<f32>,
@@ -55,26 +68,28 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) view_depth: f32,
+    @location(3) world_pos: vec3<f32>,
 }
 
 @vertex
 fn vs_main(billboard: BillboardVertex, instance: DotInstance) -> VertexOutput {
     var output: VertexOutput;
-    
+
     // Transform dot position to view space
     let pos_world = vec4<f32>(instance.position, 1.0);
     let pos_view = (uniforms.view * pos_world).xyz;
-    
+
     // Create billboard quad in view space
     // Size is in screen pixels, convert to view space units
     let pixel_size = instance.size * 0.01; // Approximate scaling
     let billboard_pos = pos_view + vec3<f32>(billboard.offset * pixel_size, 0.0);
-    
+
     output.clip_position = uniforms.proj * vec4<f32>(billboard_pos, 1.0);
     output.color = instance.color;
     output.uv = billboard.offset;
     output.view_depth = -pos_view.z;
-    
+    output.world_pos = instance.position;
+
     return output;
 }
 
@@ -106,15 +121,63 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if dist > 1.0 {
         discard;
     }
-    
+
     // Soft edge for anti-aliasing
     let alpha = 1.0 - smoothstep(0.8, 1.0, dist);
-    
+
     var color = input.color.rgb;
-    
+
+    // Apply multi-directional shadow AO
+    let ao = compute_shadow_ao(input.world_pos);
+    color *= ao;
+
     // Apply depth cue and fog
     color = apply_depth_cue(color, input.view_depth);
     color = apply_fog(color, input.view_depth);
-    
+
     return vec4<f32>(color, input.color.a * alpha);
+}
+
+// Multi-directional shadow AO: for each shadow direction, project fragment
+// into shadow map tile and compare depths to determine occlusion.
+fn compute_shadow_ao(world_pos: vec3<f32>) -> f32 {
+    if shadow_params.shadow_count == 0u {
+        return 1.0;
+    }
+
+    var lit_count = 0u;
+    let count = shadow_params.shadow_count;
+    let grid = shadow_params.grid_size;
+
+    for (var i = 0u; i < count; i++) {
+        let shadow_pos = shadow_matrices[i] * vec4<f32>(world_pos, 1.0);
+        let ndc = shadow_pos.xyz / shadow_pos.w;
+
+        // NDC to UV (0-1 range)
+        let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 1.0 - (ndc.y * 0.5 + 0.5));
+
+        // Skip if outside shadow map
+        if uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 {
+            lit_count += 1u;
+            continue;
+        }
+
+        // Compute atlas UV for tile i
+        let col = i % grid;
+        let row = i / grid;
+        let tile_uv = vec2<f32>(
+            (f32(col) + uv.x) / f32(grid),
+            (f32(row) + uv.y) / f32(grid),
+        );
+
+        let shadow_depth = textureSample(shadow_atlas, shadow_sampler, tile_uv).r;
+        let fragment_depth = ndc.z;
+
+        if fragment_depth <= shadow_depth + shadow_params.bias {
+            lit_count += 1u;
+        }
+    }
+
+    let fraction_lit = f32(lit_count) / f32(count);
+    return mix(1.0, fraction_lit, shadow_params.intensity);
 }

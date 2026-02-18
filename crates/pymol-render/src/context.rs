@@ -4,9 +4,11 @@
 //! needed for rendering molecular representations.
 
 use crate::buffer::{create_uniform_buffer, update_uniform_buffer};
+use crate::multishadow::{ShadowSampling, create_disabled_shadow_bind_group};
 use crate::pipeline::{depth_stencil_state, get_blend_state, BlendMode, PipelineKey, PipelineType};
 use crate::uniforms::GlobalUniforms;
 use crate::vertex::{CylinderVertex, DotVertex, LineVertex, MeshVertex, SphereVertex, BILLBOARD_VERTICES, QUAD_INDICES};
+use pymol_settings::ShadingMode;
 use wgpu::util::DeviceExt;
 
 /// Main render context for molecular visualization
@@ -22,11 +24,17 @@ pub struct RenderContext {
     surface_format: wgpu::TextureFormat,
     /// Depth texture format
     depth_format: wgpu::TextureFormat,
-    /// Global uniforms buffer
-    uniform_buffer: wgpu::Buffer,
-    /// Bind group for global uniforms
-    uniform_bind_group: wgpu::BindGroup,
-    /// Bind group layout for global uniforms
+    /// Classic mode uniforms buffer
+    classic_uniform_buffer: wgpu::Buffer,
+    /// Skripkin mode uniforms buffer
+    skripkin_uniform_buffer: wgpu::Buffer,
+    /// Bind group for classic mode uniforms
+    classic_uniform_bind_group: wgpu::BindGroup,
+    /// Bind group for skripkin mode uniforms
+    skripkin_uniform_bind_group: wgpu::BindGroup,
+    /// Currently active shading mode (determines which bind group is used)
+    active_shading_mode: ShadingMode,
+    /// Bind group layout for global uniforms (shared by both modes)
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     /// Billboard vertex buffer (shared by sphere and cylinder impostors)
     billboard_vertex_buffer: wgpu::Buffer,
@@ -34,6 +42,10 @@ pub struct RenderContext {
     quad_index_buffer: wgpu::Buffer,
     /// Compiled shaders
     shaders: Shaders,
+    /// Shadow sampling resources (bind group layout, buffers, sampler)
+    shadow_sampling: ShadowSampling,
+    /// Default shadow bind group (disabled, shadow_count=0)
+    shadow_bind_group: wgpu::BindGroup,
 }
 
 /// Compiled shader modules
@@ -57,9 +69,10 @@ impl RenderContext {
     ) -> Self {
         let depth_format = wgpu::TextureFormat::Depth32Float;
 
-        // Create uniform buffer and bind group layout
+        // Create separate uniform buffers for each shading mode
         let uniforms = GlobalUniforms::default();
-        let uniform_buffer = create_uniform_buffer(&device, "Global Uniforms", &uniforms);
+        let classic_uniform_buffer = create_uniform_buffer(&device, "Classic Uniforms", &uniforms);
+        let skripkin_uniform_buffer = create_uniform_buffer(&device, "Skripkin Uniforms", &uniforms);
 
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -76,12 +89,21 @@ impl RenderContext {
                 }],
             });
 
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Global Uniforms Bind Group"),
+        let classic_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Classic Uniforms Bind Group"),
             layout: &uniform_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
+                resource: classic_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        let skripkin_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Skripkin Uniforms Bind Group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: skripkin_uniform_buffer.as_entire_binding(),
             }],
         });
 
@@ -124,17 +146,26 @@ impl RenderContext {
             }),
         };
 
+        // Create shadow sampling resources
+        let shadow_sampling = ShadowSampling::new(&device);
+        let shadow_bind_group = create_disabled_shadow_bind_group(&device, &shadow_sampling);
+
         Self {
             device,
             queue,
             surface_format,
             depth_format,
-            uniform_buffer,
-            uniform_bind_group,
+            classic_uniform_buffer,
+            skripkin_uniform_buffer,
+            classic_uniform_bind_group,
+            skripkin_uniform_bind_group,
+            active_shading_mode: ShadingMode::Classic,
             uniform_bind_group_layout,
             billboard_vertex_buffer,
             quad_index_buffer,
             shaders,
+            shadow_sampling,
+            shadow_bind_group,
         }
     }
 
@@ -158,14 +189,51 @@ impl RenderContext {
         self.depth_format
     }
 
-    /// Update global uniforms
-    pub fn update_uniforms(&self, uniforms: &GlobalUniforms) {
-        update_uniform_buffer(&self.queue, &self.uniform_buffer, uniforms);
+    /// Update uniforms for a specific shading mode
+    pub fn update_uniforms_for_mode(&self, mode: ShadingMode, uniforms: &GlobalUniforms) {
+        let buffer = match mode {
+            ShadingMode::Classic => &self.classic_uniform_buffer,
+            ShadingMode::Skripkin => &self.skripkin_uniform_buffer,
+        };
+        update_uniform_buffer(&self.queue, buffer, uniforms);
     }
 
-    /// Get the uniform bind group for shaders
+    /// Update global uniforms (writes to the active mode's buffer)
+    pub fn update_uniforms(&self, uniforms: &GlobalUniforms) {
+        self.update_uniforms_for_mode(self.active_shading_mode, uniforms);
+    }
+
+    /// Set the active shading mode (determines which bind group is used for rendering)
+    pub fn set_active_shading_mode(&mut self, mode: ShadingMode) {
+        self.active_shading_mode = mode;
+    }
+
+    /// Get the active shading mode
+    pub fn active_shading_mode(&self) -> ShadingMode {
+        self.active_shading_mode
+    }
+
+    /// Get the uniform bind group for the active shading mode
     pub fn uniform_bind_group(&self) -> &wgpu::BindGroup {
-        &self.uniform_bind_group
+        match self.active_shading_mode {
+            ShadingMode::Classic => &self.classic_uniform_bind_group,
+            ShadingMode::Skripkin => &self.skripkin_uniform_bind_group,
+        }
+    }
+
+    /// Get the shadow sampling bind group (group 1)
+    pub fn shadow_bind_group(&self) -> &wgpu::BindGroup {
+        &self.shadow_bind_group
+    }
+
+    /// Set the active shadow bind group (called when shadow atlas is ready)
+    pub fn set_shadow_bind_group(&mut self, bind_group: wgpu::BindGroup) {
+        self.shadow_bind_group = bind_group;
+    }
+
+    /// Get the shadow sampling resources
+    pub fn shadow_sampling(&self) -> &ShadowSampling {
+        &self.shadow_sampling
     }
 
     /// Get the billboard vertex buffer
@@ -242,7 +310,7 @@ impl RenderContext {
     ) -> wgpu::RenderPipeline {
         let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Impostor Pipeline Layout"),
-            bind_group_layouts: &[&self.uniform_bind_group_layout],
+            bind_group_layouts: &[&self.uniform_bind_group_layout, &self.shadow_sampling.bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -300,7 +368,7 @@ impl RenderContext {
     fn create_line_pipeline(&self, key: PipelineKey) -> wgpu::RenderPipeline {
         let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Line Pipeline Layout"),
-            bind_group_layouts: &[&self.uniform_bind_group_layout],
+            bind_group_layouts: &[&self.uniform_bind_group_layout, &self.shadow_sampling.bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -347,7 +415,7 @@ impl RenderContext {
     fn create_mesh_pipeline(&self, key: PipelineKey) -> wgpu::RenderPipeline {
         let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Mesh Pipeline Layout"),
-            bind_group_layouts: &[&self.uniform_bind_group_layout],
+            bind_group_layouts: &[&self.uniform_bind_group_layout, &self.shadow_sampling.bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -394,7 +462,7 @@ impl RenderContext {
     fn create_dot_pipeline(&self, key: PipelineKey) -> wgpu::RenderPipeline {
         let pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Dot Pipeline Layout"),
-            bind_group_layouts: &[&self.uniform_bind_group_layout],
+            bind_group_layouts: &[&self.uniform_bind_group_layout, &self.shadow_sampling.bind_group_layout],
             push_constant_ranges: &[],
         });
 

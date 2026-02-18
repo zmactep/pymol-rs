@@ -467,6 +467,7 @@ impl MoleculeObject {
                     let pipeline = context.line_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     lines.render(render_pass);
                 }
             }
@@ -480,6 +481,7 @@ impl MoleculeObject {
                     let cylinder_pipeline = context.cylinder_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&cylinder_pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                     render_pass.set_index_buffer(
                         context.quad_index_buffer().slice(..),
@@ -493,6 +495,7 @@ impl MoleculeObject {
                             let sphere_pipeline = context.sphere_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                             render_pass.set_pipeline(&sphere_pipeline);
                             render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                            render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                             render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                             render_pass.set_index_buffer(
                                 context.quad_index_buffer().slice(..),
@@ -513,6 +516,7 @@ impl MoleculeObject {
                     let pipeline = context.sphere_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                     render_pass.set_index_buffer(
                         context.quad_index_buffer().slice(..),
@@ -530,6 +534,7 @@ impl MoleculeObject {
                     let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                     render_pass.set_index_buffer(
                         context.quad_index_buffer().slice(..),
@@ -547,6 +552,7 @@ impl MoleculeObject {
                     let pipeline = context.mesh_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     cartoon.render(render_pass);
                 }
             }
@@ -559,6 +565,7 @@ impl MoleculeObject {
                     let pipeline = context.mesh_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     ribbon.render(render_pass);
                 }
             }
@@ -577,6 +584,7 @@ impl MoleculeObject {
                     let pipeline = context.mesh_pipeline(blend_mode);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     surface.render(render_pass);
                 }
             }
@@ -589,6 +597,7 @@ impl MoleculeObject {
                     let pipeline = context.line_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                     mesh.render(render_pass);
                 }
             }
@@ -604,6 +613,7 @@ impl MoleculeObject {
                 let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
                 render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
                 render_pass.set_index_buffer(
                     context.quad_index_buffer().slice(..),
@@ -680,6 +690,105 @@ impl MoleculeObject {
     /// Check if mesh representation is visible
     pub fn is_mesh_visible(&self) -> bool {
         self.state.visible_reps.is_visible(RepMask::MESH)
+    }
+
+    /// Render all representations into a depth-only shadow pass.
+    ///
+    /// The caller must have already set the viewport to the correct atlas tile
+    /// and begun a depth-only render pass. The shadow pipelines use the same
+    /// vertex layouts as the main pipelines, so we can reuse the same
+    /// `render()` calls on each representation after setting the shadow pipeline.
+    pub fn render_shadow_depth<'a>(
+        &'a self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        shadow_pipelines: &'a pymol_render::multishadow::ShadowPipelines,
+        shadow_bind_group: &'a wgpu::BindGroup,
+        context: &'a RenderContext,
+    ) {
+        if !self.state.enabled {
+            return;
+        }
+
+        let vis = &self.state.visible_reps;
+
+        // Mesh-based representations (cartoon, ribbon, surface) use mesh shadow pipeline
+        let has_mesh = (vis.is_visible(RepMask::CARTOON) && self.representations.cartoon.as_ref().map_or(false, |r| !r.is_empty()))
+            || (vis.is_visible(RepMask::RIBBON) && self.representations.ribbon.as_ref().map_or(false, |r| !r.is_empty()))
+            || (vis.is_visible(RepMask::SURFACE) && self.representations.surface.as_ref().map_or(false, |r| !r.is_empty()));
+
+        if has_mesh {
+            render_pass.set_pipeline(&shadow_pipelines.mesh_pipeline);
+            render_pass.set_bind_group(0, shadow_bind_group, &[]);
+
+            if vis.is_visible(RepMask::CARTOON) {
+                if let Some(ref cartoon) = self.representations.cartoon {
+                    if !cartoon.is_empty() {
+                        cartoon.render(render_pass);
+                    }
+                }
+            }
+            if vis.is_visible(RepMask::RIBBON) {
+                if let Some(ref ribbon) = self.representations.ribbon {
+                    if !ribbon.is_empty() {
+                        ribbon.render(render_pass);
+                    }
+                }
+            }
+            if vis.is_visible(RepMask::SURFACE) {
+                if let Some(ref surface) = self.representations.surface {
+                    if !surface.is_empty() {
+                        surface.render(render_pass);
+                    }
+                }
+            }
+        }
+
+        // Sphere-based representations use sphere shadow pipeline
+        let has_spheres = vis.is_visible(RepMask::SPHERES) && self.representations.spheres.as_ref().map_or(false, |r| !r.is_empty());
+        let has_stick_caps = vis.is_visible(RepMask::STICKS)
+            && self.representations.sticks.as_ref().map_or(false, |s| s.sphere_count() > 0);
+
+        if has_spheres || has_stick_caps {
+            render_pass.set_pipeline(&shadow_pipelines.sphere_pipeline);
+            render_pass.set_bind_group(0, shadow_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
+            render_pass.set_index_buffer(
+                context.quad_index_buffer().slice(..),
+                wgpu::IndexFormat::Uint16,
+            );
+
+            if has_spheres {
+                if let Some(ref spheres) = self.representations.spheres {
+                    spheres.render(render_pass);
+                }
+            }
+            if has_stick_caps {
+                if let Some(ref sticks) = self.representations.sticks {
+                    if let Some(sphere_buffer) = sticks.sphere_buffer() {
+                        render_pass.set_vertex_buffer(1, sphere_buffer.slice(..));
+                        render_pass.draw_indexed(0..6, 0, 0..sticks.sphere_count());
+                    }
+                }
+            }
+        }
+
+        // Cylinder representations use cylinder shadow pipeline
+        if vis.is_visible(RepMask::STICKS) {
+            if let Some(ref sticks) = self.representations.sticks {
+                if !sticks.is_empty() {
+                    render_pass.set_pipeline(&shadow_pipelines.cylinder_pipeline);
+                    render_pass.set_bind_group(0, shadow_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
+                    render_pass.set_index_buffer(
+                        context.quad_index_buffer().slice(..),
+                        wgpu::IndexFormat::Uint16,
+                    );
+                    sticks.render(render_pass);
+                }
+            }
+        }
+
+        // Lines and dots skip shadow depth — they have negligible depth contribution
     }
 }
 
