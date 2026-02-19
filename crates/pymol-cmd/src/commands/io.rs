@@ -129,6 +129,7 @@ EXAMPLES
                 "mol2" => FileFormat::Mol2,
                 "xyz" => FileFormat::Xyz,
                 "cif" | "mmcif" => FileFormat::Cif,
+                "gro" => FileFormat::Gro,
                 _ => FileFormat::Unknown,
             });
 

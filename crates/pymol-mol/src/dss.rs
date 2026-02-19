@@ -12,7 +12,8 @@
 
 use bitflags::bitflags;
 use lin_alg::f32::Vec3;
-use std::collections::HashMap;
+
+use crate::spatial::SpatialGrid;
 use std::f32::consts::PI;
 
 use crate::coordset::CoordSet;
@@ -186,51 +187,8 @@ const HBOND_POWER_A: f32 = 1.6;
 const HBOND_POWER_B: f32 = 5.0;
 
 // ============================================================================
-// Spatial Grid for H-Bond Detection
+// Spatial Grid for H-Bond Detection — see crate::spatial::SpatialGrid
 // ============================================================================
-
-/// Simple spatial hash grid for efficient neighbor queries
-struct SpatialGrid {
-    cells: HashMap<(i32, i32, i32), Vec<usize>>,
-    cell_size: f32,
-}
-
-impl SpatialGrid {
-    fn new(cell_size: f32) -> Self {
-        Self {
-            cells: HashMap::new(),
-            cell_size,
-        }
-    }
-
-    fn cell_key(&self, pos: Vec3) -> (i32, i32, i32) {
-        (
-            (pos.x / self.cell_size).floor() as i32,
-            (pos.y / self.cell_size).floor() as i32,
-            (pos.z / self.cell_size).floor() as i32,
-        )
-    }
-
-    fn insert(&mut self, pos: Vec3, idx: usize) {
-        let key = self.cell_key(pos);
-        self.cells.entry(key).or_default().push(idx);
-    }
-
-    /// Iterate over all indices in the 3×3×3 neighborhood of the given position
-    fn query_neighbors(&self, pos: Vec3, out: &mut Vec<usize>) {
-        out.clear();
-        let (cx, cy, cz) = self.cell_key(pos);
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                for dz in -1..=1 {
-                    if let Some(indices) = self.cells.get(&(cx + dx, cy + dy, cz + dz)) {
-                        out.extend_from_slice(indices);
-                    }
-                }
-            }
-        }
-    }
-}
 
 /// Internal structure for residue data during DSS calculation
 #[derive(Debug, Clone)]

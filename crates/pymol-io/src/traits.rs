@@ -22,6 +22,8 @@ pub enum FileFormat {
     Cif,
     /// XYZ coordinate format
     Xyz,
+    /// GROMACS GRO format
+    Gro,
     /// Unknown format
     Unknown,
 }
@@ -36,6 +38,7 @@ impl FileFormat {
             "mol2" | "ml2" => FileFormat::Mol2,
             "cif" | "mmcif" => FileFormat::Cif,
             "xyz" => FileFormat::Xyz,
+            "gro" => FileFormat::Gro,
             _ => FileFormat::Unknown,
         }
     }
@@ -62,6 +65,7 @@ impl FileFormat {
             FileFormat::Mol2 => "mol2",
             FileFormat::Cif => "cif",
             FileFormat::Xyz => "xyz",
+            FileFormat::Gro => "gro",
             FileFormat::Unknown => "",
         }
     }
@@ -74,6 +78,7 @@ impl FileFormat {
             FileFormat::Mol2 => "MOL2",
             FileFormat::Cif => "mmCIF",
             FileFormat::Xyz => "XYZ",
+            FileFormat::Gro => "GRO",
             FileFormat::Unknown => "Unknown",
         }
     }
@@ -220,6 +225,7 @@ pub fn create_reader<R: Read + 'static>(
         FileFormat::Mol2 => Ok(Box::new(crate::mol2::Mol2Reader::new(reader))),
         FileFormat::Xyz => Ok(Box::new(crate::xyz::XyzReader::new(reader))),
         FileFormat::Cif => Ok(Box::new(crate::cif::CifReader::new(reader))),
+        FileFormat::Gro => Ok(Box::new(crate::gro::GroReader::new(reader))),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
 }
@@ -235,6 +241,7 @@ pub fn create_writer<W: Write + 'static>(
         FileFormat::Mol2 => Ok(Box::new(crate::mol2::Mol2Writer::new(writer))),
         FileFormat::Xyz => Ok(Box::new(crate::xyz::XyzWriter::new(writer))),
         FileFormat::Cif => Ok(Box::new(crate::cif::CifWriter::new(writer))),
+        FileFormat::Gro => Err(IoError::UnknownFormat("GRO writing not supported".to_string())),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
 }

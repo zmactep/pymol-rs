@@ -58,6 +58,7 @@ pub mod cif;
 pub mod compress;
 pub mod detect;
 pub mod error;
+pub mod gro;
 pub mod mol2;
 pub mod pdb;
 pub mod sdf;
@@ -113,6 +114,7 @@ pub fn read_file_format(path: &Path, format: FileFormat) -> IoResult<ObjectMolec
         }),
         FileFormat::Xyz => xyz::read_xyz(path),
         FileFormat::Cif => cif::read_cif(path),
+        FileFormat::Gro => gro::read_gro(path),
         FileFormat::Unknown => Err(IoError::UnknownFormat(
             path.to_string_lossy().into_owned(),
         )),
@@ -133,6 +135,7 @@ pub fn read_all_format(path: &Path, format: FileFormat) -> IoResult<Vec<ObjectMo
         FileFormat::Mol2 => mol2::read_mol2(path),
         FileFormat::Xyz => xyz::read_xyz(path).map(|m| vec![m]),
         FileFormat::Cif => cif::read_cif(path).map(|m| vec![m]),
+        FileFormat::Gro => gro::read_gro(path).map(|m| vec![m]),
         FileFormat::Unknown => Err(IoError::UnknownFormat(
             path.to_string_lossy().into_owned(),
         )),
@@ -191,6 +194,7 @@ pub fn parse_str(content: &str, format: FileFormat) -> IoResult<ObjectMolecule> 
         }),
         FileFormat::Xyz => xyz::read_xyz_str(content),
         FileFormat::Cif => cif::read_cif_str(content),
+        FileFormat::Gro => gro::read_gro_str(content),
         FileFormat::Unknown => Err(IoError::UnknownFormat("string input".to_string())),
     }
 }

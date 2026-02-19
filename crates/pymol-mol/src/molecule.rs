@@ -4,12 +4,13 @@
 //! It holds atoms, bonds, coordinate sets, and settings.
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_settings::{GlobalSettings, UniqueSettings};
 use smallvec::SmallVec;
 
-use crate::atom::Atom;
+use crate::atom::{Atom, AtomResidue};
 use crate::bond::{Bond, BondOrder};
 use crate::coordset::{rotation_matrix, CoordSet, Symmetry};
 use crate::error::{MolError, MolResult};
@@ -417,7 +418,10 @@ impl ObjectMolecule {
     /// Generate bonds for a specific coordinate state
     ///
     /// Creates bonds between atoms based on distance criteria.
+    /// Uses a spatial hash grid for O(n) performance instead of O(n²) all-pairs.
     pub fn generate_bonds_for_state(&mut self, tolerance: f32, state: usize) {
+        use crate::spatial::SpatialGrid;
+
         let coord_set = match self.coord_sets.get(state) {
             Some(cs) => cs,
             None => return,
@@ -437,7 +441,8 @@ impl ObjectMolecule {
 
         let atom_data: Vec<AtomData> = (0..n_atoms)
             .map(|i| {
-                let coord = coord_set.get_atom_coord(AtomIndex(i as u32))
+                let coord = coord_set
+                    .get_atom_coord(AtomIndex(i as u32))
                     .unwrap_or(Vec3::new(0.0, 0.0, 0.0));
                 let atom = &self.atoms[i];
                 AtomData {
@@ -448,14 +453,34 @@ impl ObjectMolecule {
             })
             .collect();
 
-        // Bonds to add (collected first to avoid borrow issues)
-        let mut new_bonds: Vec<(AtomIndex, AtomIndex)> = Vec::new();
+        // Compute the maximum possible bonding cutoff to use as cell size.
+        // This ensures all potential bonds are found within the 3×3×3 neighborhood.
+        let max_vdw = atom_data
+            .iter()
+            .map(|a| a.vdw)
+            .fold(0.0f32, f32::max);
+        let max_cutoff = 2.0 * max_vdw * tolerance;
 
-        // Check all pairs
+        // Build spatial hash grid — O(n)
+        let mut grid = SpatialGrid::new(max_cutoff);
+        for (i, ad) in atom_data.iter().enumerate() {
+            grid.insert(ad.coord, i);
+        }
+
+        // Find bonded pairs using spatial grid — O(n·k) where k is avg neighbors per cell
+        let mut new_bonds: Vec<(AtomIndex, AtomIndex)> = Vec::new();
+        let mut neighbors = Vec::new();
+
         for i in 0..n_atoms {
             let a1 = &atom_data[i];
+            grid.query_neighbors(a1.coord, &mut neighbors);
 
-            for j in (i + 1)..n_atoms {
+            for &j in &neighbors {
+                // Only check j > i to avoid duplicate pairs
+                if j <= i {
+                    continue;
+                }
+
                 let a2 = &atom_data[j];
 
                 // Calculate distance squared
@@ -481,9 +506,15 @@ impl ObjectMolecule {
             }
         }
 
-        // Add the bonds
-        for (atom1, atom2) in new_bonds {
-            let _ = self.add_bond(atom1, atom2, BondOrder::Single);
+        // Bulk-insert bonds without duplicate checking (j > i guarantees uniqueness)
+        for (a1, a2) in new_bonds {
+            let bond = Bond::new(a1, a2, BondOrder::Single);
+            let bond_index = BondIndex(self.bonds.len() as u32);
+            self.bonds.push(bond);
+            self.atom_bonds[a1.as_usize()].push(bond_index);
+            self.atom_bonds[a2.as_usize()].push(bond_index);
+            self.atoms[a1.as_usize()].state.bonded = true;
+            self.atoms[a2.as_usize()].state.bonded = true;
         }
     }
 
@@ -704,16 +735,14 @@ impl ObjectMolecule {
                     AtomFlags::POLYMER | AtomFlags::NUCLEIC
                 } else if is_water(resn) {
                     AtomFlags::SOLVENT
-                } else if is_hetatm {
-                    // HETATM records that aren't water - could be ligands, etc.
-                    // For now, classify based on content
+                } else {
+                    // Non-polymer atoms: ligands, ions, etc.
+                    // Classify based on content (carbon → organic, otherwise inorganic)
                     if residue.atoms.iter().any(|a| a.element.is_carbon()) {
                         AtomFlags::ORGANIC
                     } else {
                         AtomFlags::INORGANIC
                     }
-                } else {
-                    AtomFlags::empty()
                 };
 
                 // Find guide atom (CA for proteins, C4' for nucleic acids)
@@ -740,9 +769,15 @@ impl ObjectMolecule {
 
         // Apply flags to atoms
         for (range, mask, guide_idx) in residue_info {
+            let is_non_polymer = !mask.contains(AtomFlags::POLYMER);
             for idx in range {
                 if let Some(atom) = self.atoms.get_mut(idx) {
                     atom.state.flags |= mask;
+                    // Mark non-polymer atoms as hetatm for proper representation
+                    // (mirrors PyMOL's need_hetatm_classification post-processing)
+                    if is_non_polymer {
+                        atom.state.hetatm = true;
+                    }
                 }
             }
             // Set guide flag on the guide atom
@@ -751,6 +786,203 @@ impl ObjectMolecule {
                     atom.state.flags |= AtomFlags::GUIDE;
                 }
             }
+        }
+    }
+
+    // =========================================================================
+    // Chain Assignment
+    // =========================================================================
+
+    /// Assign chain IDs to atoms that have no chain information
+    ///
+    /// This is designed for formats like GRO that lack chain identifiers.
+    /// The algorithm classifies residues by type (protein, nucleic, solvent,
+    /// ion, lipid, other) and assigns sequential chain letters.
+    ///
+    /// Chain breaks occur when:
+    /// - Residue category changes
+    /// - Residue number decreases (GROMACS wraps at 99999)
+    /// - No backbone bond between consecutive polymer residues
+    ///
+    /// All solvent residues share one chain. All ions share one chain.
+    ///
+    /// Must be called after `classify_atoms()` and `generate_bonds()`.
+    pub fn assign_chains(&mut self) {
+        use crate::residue::{classify_residue, ResidueCategory};
+
+        // Only act if all atoms have empty chain IDs
+        if self.atoms.iter().any(|a| !a.residue.chain.is_empty()) {
+            return;
+        }
+
+        // Phase 1: Collect residue info
+        let residues: Vec<(std::ops::Range<usize>, ResidueCategory, i32)> = self
+            .residues()
+            .map(|r| {
+                let cat = classify_residue(r.resn());
+                let resv = r.resv();
+                (r.atom_range, cat, resv)
+            })
+            .collect();
+
+        if residues.is_empty() {
+            return;
+        }
+
+        // Phase 2: Assign chain labels
+        let mut chain_labels: Vec<String> = vec![String::new(); residues.len()];
+        let mut chain_gen = ChainIdGenerator::new();
+
+        let mut solvent_indices: Vec<usize> = Vec::new();
+        let mut ion_indices: Vec<usize> = Vec::new();
+
+        let mut i = 0;
+        while i < residues.len() {
+            let cat = residues[i].1;
+
+            match cat {
+                ResidueCategory::Protein | ResidueCategory::Nucleic => {
+                    let chain_id = chain_gen.next();
+                    chain_labels[i] = chain_id.clone();
+
+                    let mut j = i + 1;
+                    while j < residues.len() {
+                        let next_cat = residues[j].1;
+                        let next_resv = residues[j].2;
+                        let prev_resv = residues[j - 1].2;
+
+                        // Break on category change
+                        if next_cat != cat {
+                            break;
+                        }
+                        // Break on resnum decrease (GROMACS wrap)
+                        if next_resv < prev_resv {
+                            break;
+                        }
+                        // Break if no backbone bond
+                        if !self.has_backbone_bond(&residues[j - 1].0, &residues[j].0, cat) {
+                            break;
+                        }
+
+                        chain_labels[j] = chain_id.clone();
+                        j += 1;
+                    }
+                    i = j;
+                }
+                ResidueCategory::Solvent => {
+                    solvent_indices.push(i);
+                    i += 1;
+                }
+                ResidueCategory::Ion => {
+                    ion_indices.push(i);
+                    i += 1;
+                }
+                ResidueCategory::Lipid => {
+                    let chain_id = chain_gen.next();
+                    chain_labels[i] = chain_id.clone();
+
+                    let mut j = i + 1;
+                    while j < residues.len() {
+                        if residues[j].1 != ResidueCategory::Lipid {
+                            break;
+                        }
+                        if residues[j].2 < residues[j - 1].2 {
+                            break;
+                        }
+                        chain_labels[j] = chain_id.clone();
+                        j += 1;
+                    }
+                    i = j;
+                }
+                ResidueCategory::Other => {
+                    let chain_id = chain_gen.next();
+                    chain_labels[i] = chain_id.clone();
+
+                    let mut j = i + 1;
+                    while j < residues.len() {
+                        if residues[j].1 != ResidueCategory::Other {
+                            break;
+                        }
+                        if residues[j].2 < residues[j - 1].2 {
+                            break;
+                        }
+                        chain_labels[j] = chain_id.clone();
+                        j += 1;
+                    }
+                    i = j;
+                }
+            }
+        }
+
+        // Assign shared chain for solvent and ions
+        if !solvent_indices.is_empty() {
+            let solvent_chain = chain_gen.next();
+            for &idx in &solvent_indices {
+                chain_labels[idx] = solvent_chain.clone();
+            }
+        }
+        if !ion_indices.is_empty() {
+            let ion_chain = chain_gen.next();
+            for &idx in &ion_indices {
+                chain_labels[idx] = ion_chain.clone();
+            }
+        }
+
+        // Phase 3: Apply chain labels to atoms
+        let residue_ranges: Vec<std::ops::Range<usize>> =
+            self.residues().map(|r| r.atom_range).collect();
+
+        for (res_idx, range) in residue_ranges.iter().enumerate() {
+            let chain = &chain_labels[res_idx];
+            if chain.is_empty() {
+                continue;
+            }
+
+            let first_atom = &self.atoms[range.start];
+            let new_residue = Arc::new(AtomResidue::from_parts(
+                chain.as_str(),
+                &first_atom.residue.resn,
+                first_atom.residue.resv,
+                first_atom.residue.inscode,
+                &first_atom.residue.segi,
+            ));
+
+            for atom_idx in range.clone() {
+                self.atoms[atom_idx].residue = new_residue.clone();
+            }
+        }
+    }
+
+    /// Check if there's a backbone bond between two consecutive residues
+    fn has_backbone_bond(
+        &self,
+        prev_range: &std::ops::Range<usize>,
+        curr_range: &std::ops::Range<usize>,
+        cat: crate::residue::ResidueCategory,
+    ) -> bool {
+        use crate::residue::ResidueCategory;
+
+        let (prev_name, curr_name) = match cat {
+            ResidueCategory::Protein => ("C", "N"),
+            ResidueCategory::Nucleic => ("O3'", "P"),
+            _ => return false,
+        };
+
+        let prev_atom_idx = self.atoms[prev_range.clone()]
+            .iter()
+            .enumerate()
+            .find(|(_, a)| &*a.name == prev_name)
+            .map(|(local, _)| AtomIndex((prev_range.start + local) as u32));
+
+        let curr_atom_idx = self.atoms[curr_range.clone()]
+            .iter()
+            .enumerate()
+            .find(|(_, a)| &*a.name == curr_name)
+            .map(|(local, _)| AtomIndex((curr_range.start + local) as u32));
+
+        match (prev_atom_idx, curr_atom_idx) {
+            (Some(p), Some(c)) => self.find_bond(p, c).is_some(),
+            _ => false,
         }
     }
 
@@ -1093,6 +1325,43 @@ impl MoleculeBuilder {
     }
 }
 
+// ============================================================================
+// Chain ID Generator
+// ============================================================================
+
+/// Generates chain IDs: A, B, C, ..., Z, AA, AB, ..., AZ, BA, ...
+struct ChainIdGenerator {
+    counter: usize,
+}
+
+impl ChainIdGenerator {
+    fn new() -> Self {
+        Self { counter: 0 }
+    }
+
+    fn next(&mut self) -> String {
+        let id = self.counter;
+        self.counter += 1;
+
+        if id < 26 {
+            String::from((b'A' + id as u8) as char)
+        } else {
+            // Bijective base-26: 26=AA, 27=AB, ..., 51=AZ, 52=BA, ...
+            let mut result = String::new();
+            let mut n = id;
+            loop {
+                result.insert(0, (b'A' + (n % 26) as u8) as char);
+                n /= 26;
+                if n == 0 {
+                    break;
+                }
+                n -= 1;
+            }
+            result
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1324,5 +1593,195 @@ mod tests {
         mol.classify_atoms();
         let residue = mol.residues().next().unwrap();
         assert!(residue.is_protein(), "Residue should be protein after classification");
+    }
+
+    #[test]
+    fn test_chain_id_generator() {
+        let mut gen = ChainIdGenerator::new();
+        assert_eq!(gen.next(), "A");
+        assert_eq!(gen.next(), "B");
+        // Skip to Z
+        for _ in 2..26 {
+            gen.next();
+        }
+        assert_eq!(gen.next(), "AA");
+        assert_eq!(gen.next(), "AB");
+    }
+
+    #[test]
+    fn test_assign_chains_protein_solvent_ions() {
+        use crate::atom::AtomResidue;
+        use std::sync::Arc;
+
+        let mut mol = ObjectMolecule::new("test");
+
+        // Protein: ALA(1) - GLY(2)
+        let ala_res = Arc::new(AtomResidue::from_parts("", "ALA", 1, ' ', ""));
+        for name in &["N", "CA", "C", "O"] {
+            let mut atom = Atom::new(*name, if *name == "N" { Element::Nitrogen } else if *name == "O" { Element::Oxygen } else { Element::Carbon });
+            atom.residue = ala_res.clone();
+            mol.add_atom(atom);
+        }
+        let gly_res = Arc::new(AtomResidue::from_parts("", "GLY", 2, ' ', ""));
+        for name in &["N", "CA", "C", "O"] {
+            let mut atom = Atom::new(*name, if *name == "N" { Element::Nitrogen } else if *name == "O" { Element::Oxygen } else { Element::Carbon });
+            atom.residue = gly_res.clone();
+            mol.add_atom(atom);
+        }
+
+        // Ion: NA(3)
+        let na_res = Arc::new(AtomResidue::from_parts("", "NA", 3, ' ', ""));
+        let mut na = Atom::new("NA", Element::Sodium);
+        na.residue = na_res.clone();
+        mol.add_atom(na);
+
+        // Solvent: SOL(4), SOL(5)
+        for resv in [4, 5] {
+            let sol_res = Arc::new(AtomResidue::from_parts("", "SOL", resv, ' ', ""));
+            for name in &["OW", "HW1", "HW2"] {
+                let mut atom = Atom::new(*name, if *name == "OW" { Element::Oxygen } else { Element::Hydrogen });
+                atom.residue = sol_res.clone();
+                mol.add_atom(atom);
+            }
+        }
+
+        // Add coordinates (needed for bond generation)
+        // ALA: N(0,0,0) CA(1.47,0,0) C(2.5,1.2,0) O(2.5,2.4,0)
+        // GLY: N(3.8,0.5,0) CA(5.2,0.5,0) C(6.3,1.7,0) O(6.3,2.9,0)
+        // Place C of ALA and N of GLY close enough for a bond (~1.33 Å)
+        let coords = vec![
+            // ALA
+            Vec3::new(0.0, 0.0, 0.0),   // N
+            Vec3::new(1.47, 0.0, 0.0),   // CA
+            Vec3::new(2.5, 1.2, 0.0),    // C
+            Vec3::new(2.5, 2.4, 0.0),    // O
+            // GLY — N close to ALA's C for backbone bond
+            Vec3::new(3.8, 1.2, 0.0),    // N (1.3 Å from C)
+            Vec3::new(5.2, 1.2, 0.0),    // CA
+            Vec3::new(6.3, 2.4, 0.0),    // C
+            Vec3::new(6.3, 3.6, 0.0),    // O
+            // NA ion far away
+            Vec3::new(20.0, 20.0, 20.0), // NA
+            // SOL 1
+            Vec3::new(30.0, 30.0, 30.0), // OW
+            Vec3::new(30.5, 30.5, 30.0), // HW1
+            Vec3::new(30.5, 29.5, 30.0), // HW2
+            // SOL 2
+            Vec3::new(35.0, 35.0, 35.0), // OW
+            Vec3::new(35.5, 35.5, 35.0), // HW1
+            Vec3::new(35.5, 34.5, 35.0), // HW2
+        ];
+        let cs = CoordSet::from_vec3(&coords);
+        mol.add_coord_set(cs);
+
+        mol.classify_atoms();
+        mol.generate_bonds(0.6);
+        mol.assign_chains();
+
+        // Protein should be chain A
+        assert_eq!(mol.atoms_slice()[0].residue.chain, "A"); // ALA
+        assert_eq!(mol.atoms_slice()[4].residue.chain, "A"); // GLY
+
+        // Ion should share a chain
+        let ion_chain = &mol.atoms_slice()[8].residue.chain;
+        assert!(!ion_chain.is_empty());
+
+        // Solvent should share a chain
+        let sol_chain = &mol.atoms_slice()[9].residue.chain;
+        assert!(!sol_chain.is_empty());
+
+        // Ion and solvent chains should be different from protein and each other
+        assert_ne!(ion_chain, "A");
+        assert_ne!(sol_chain, "A");
+        assert_ne!(ion_chain, sol_chain);
+    }
+
+    #[test]
+    fn test_assign_chains_noop_when_chains_exist() {
+        use crate::atom::AtomResidue;
+        use std::sync::Arc;
+
+        let mut mol = ObjectMolecule::new("test");
+
+        let res = Arc::new(AtomResidue::from_parts("X", "ALA", 1, ' ', ""));
+        let mut atom = Atom::new("CA", Element::Carbon);
+        atom.residue = res;
+        mol.add_atom(atom);
+
+        let cs = CoordSet::from_vec3(&[Vec3::new(0.0, 0.0, 0.0)]);
+        mol.add_coord_set(cs);
+
+        mol.assign_chains();
+
+        // Chain should remain "X" (not overwritten)
+        assert_eq!(mol.atoms_slice()[0].residue.chain, "X");
+    }
+
+    #[test]
+    fn test_assign_chains_resnum_wrap() {
+        use crate::atom::AtomResidue;
+        use std::sync::Arc;
+
+        let mut mol = ObjectMolecule::new("test");
+        let mut coords = Vec::new();
+
+        // First protein block: ALA(99998), GLY(99999) — bonded backbone
+        let ala1 = Arc::new(AtomResidue::from_parts("", "ALA", 99998, ' ', ""));
+        let ala1_names = [("N", Element::Nitrogen), ("CA", Element::Carbon), ("C", Element::Carbon), ("O", Element::Oxygen)];
+        let ala1_coords = [
+            Vec3::new(0.0, 0.0, 0.0),   // N
+            Vec3::new(1.47, 0.0, 0.0),   // CA
+            Vec3::new(2.52, 1.25, 0.0),  // C
+            Vec3::new(2.52, 2.40, 0.0),  // O
+        ];
+        for ((name, elem), coord) in ala1_names.iter().zip(&ala1_coords) {
+            let mut atom = Atom::new(*name, *elem);
+            atom.residue = ala1.clone();
+            mol.add_atom(atom);
+            coords.push(*coord);
+        }
+
+        let gly1 = Arc::new(AtomResidue::from_parts("", "GLY", 99999, ' ', ""));
+        let gly1_names = [("N", Element::Nitrogen), ("CA", Element::Carbon), ("C", Element::Carbon), ("O", Element::Oxygen)];
+        let gly1_coords = [
+            Vec3::new(3.80, 1.25, 0.0),  // N — 1.28 Å from ALA's C (bonded)
+            Vec3::new(5.24, 1.25, 0.0),  // CA
+            Vec3::new(6.30, 2.45, 0.0),  // C
+            Vec3::new(6.30, 3.60, 0.0),  // O
+        ];
+        for ((name, elem), coord) in gly1_names.iter().zip(&gly1_coords) {
+            let mut atom = Atom::new(*name, *elem);
+            atom.residue = gly1.clone();
+            mol.add_atom(atom);
+            coords.push(*coord);
+        }
+
+        // Second protein block (resnum wraps): ALA(1) — far from first block
+        let ala2 = Arc::new(AtomResidue::from_parts("", "ALA", 1, ' ', ""));
+        let ala2_names = [("N", Element::Nitrogen), ("CA", Element::Carbon), ("C", Element::Carbon), ("O", Element::Oxygen)];
+        let ala2_coords = [
+            Vec3::new(20.0, 0.0, 0.0),
+            Vec3::new(21.47, 0.0, 0.0),
+            Vec3::new(22.52, 1.25, 0.0),
+            Vec3::new(22.52, 2.40, 0.0),
+        ];
+        for ((name, elem), coord) in ala2_names.iter().zip(&ala2_coords) {
+            let mut atom = Atom::new(*name, *elem);
+            atom.residue = ala2.clone();
+            mol.add_atom(atom);
+            coords.push(*coord);
+        }
+
+        let cs = CoordSet::from_vec3(&coords);
+        mol.add_coord_set(cs);
+
+        mol.classify_atoms();
+        mol.generate_bonds(0.6);
+        mol.assign_chains();
+
+        // First block = chain A, second block = chain B (due to resnum decrease)
+        assert_eq!(mol.atoms_slice()[0].residue.chain, "A");
+        assert_eq!(mol.atoms_slice()[4].residue.chain, "A");
+        assert_eq!(mol.atoms_slice()[8].residue.chain, "B");
     }
 }

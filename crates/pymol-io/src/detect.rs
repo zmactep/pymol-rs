@@ -69,6 +69,11 @@ fn detect_from_lines(lines: &[String]) -> FileFormat {
         return FileFormat::Sdf;
     }
 
+    // Check for GRO format (before XYZ — both have integer on line 2)
+    if is_gro_format(lines) {
+        return FileFormat::Gro;
+    }
+
     // Check for XYZ format
     if is_xyz_format(lines) {
         return FileFormat::Xyz;
@@ -127,6 +132,39 @@ fn is_sdf_format(lines: &[String]) -> bool {
     let has_version = counts_line.contains("V2000") || counts_line.contains("V3000");
 
     atom_count.is_some() && bond_count.is_some() && (has_version || counts_line.len() >= 33)
+}
+
+/// Check if content looks like GRO format
+///
+/// GRO format: title line, atom count, then fixed-width atom lines (≥44 chars)
+/// with residue number (5), residue name (5), atom name (5), atom number (5),
+/// x (8.3f), y (8.3f), z (8.3f).
+fn is_gro_format(lines: &[String]) -> bool {
+    if lines.len() < 3 {
+        return false;
+    }
+
+    // Line 2 (index 1) should be an integer atom count
+    let second_line = lines[1].trim();
+    if second_line.parse::<u32>().is_err() {
+        return false;
+    }
+
+    // Line 3 (index 2) should be a fixed-width atom line ≥44 chars
+    let atom_line = &lines[2];
+    if atom_line.len() < 44 {
+        return false;
+    }
+
+    // Check that positions 20..28, 28..36, 36..44 parse as floats
+    let x_ok = atom_line.get(20..28).map(|s| s.trim().parse::<f64>().is_ok()).unwrap_or(false);
+    let y_ok = atom_line.get(28..36).map(|s| s.trim().parse::<f64>().is_ok()).unwrap_or(false);
+    let z_ok = atom_line.get(36..44).map(|s| s.trim().parse::<f64>().is_ok()).unwrap_or(false);
+
+    // Check that positions 0..5 contain a residue number (integer)
+    let resnum_ok = atom_line.get(0..5).map(|s| s.trim().parse::<i32>().is_ok()).unwrap_or(false);
+
+    resnum_ok && x_ok && y_ok && z_ok
 }
 
 /// Check if content looks like XYZ format
@@ -197,6 +235,16 @@ mod tests {
             "O  0.0 0.0 0.0".to_string(),
         ];
         assert_eq!(detect_from_lines(&lines), FileFormat::Xyz);
+    }
+
+    #[test]
+    fn test_detect_gro() {
+        let lines = vec![
+            "GROningen MAchine for Chemical Simulation".to_string(),
+            "3".to_string(),
+            "    1SOL     OW    1   0.230   0.628   0.113".to_string(),
+        ];
+        assert_eq!(detect_from_lines(&lines), FileFormat::Gro);
     }
 
     #[test]

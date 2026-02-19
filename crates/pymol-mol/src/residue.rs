@@ -326,11 +326,78 @@ pub fn is_nucleotide(resn: &str) -> bool {
 }
 
 /// Common water residue names
-pub const WATER_NAMES: &[&str] = &["HOH", "WAT", "H2O", "DOD", "TIP", "TIP3", "SPC"];
+pub const WATER_NAMES: &[&str] = &["HOH", "WAT", "H2O", "DOD", "TIP", "TIP3", "SPC", "SOL"];
 
 /// Check if a residue name is water
 pub fn is_water(resn: &str) -> bool {
     WATER_NAMES.contains(&resn)
+}
+
+/// Common ion residue names (GROMACS / CHARMM / AMBER / OPLS conventions)
+pub const ION_NAMES: &[&str] = &[
+    // Monatomic cations
+    "NA", "NA+", "K", "K+", "CA2", "MG2",
+    "ZN", "ZN2", "FE", "FE2", "CU", "CU2",
+    "MN", "MN2", "NI", "CO", "CD",
+    "LI", "LI+", "RB", "CS", "BA", "SR",
+    // Monatomic anions
+    "CL", "CL-", "BR", "I-",
+    // CHARMM / OPLS force field variants
+    "SOD", "POT", "CLA", "CAL",
+];
+
+/// Check if a residue name is a known ion
+pub fn is_ion(resn: &str) -> bool {
+    ION_NAMES.contains(&resn)
+}
+
+/// Common lipid residue names (CHARMM36 / AMBER / Slipids / Martini conventions)
+pub const LIPID_NAMES: &[&str] = &[
+    // Phosphatidylcholines
+    "POPC", "DPPC", "DMPC", "DSPC", "DOPC", "DLPC", "DAPC", "DEPC",
+    // Phosphatidylethanolamines
+    "POPE", "DPPE", "DMPE", "DSPE", "DOPE", "DLPE",
+    // Phosphatidylglycerols / serines / inositols
+    "POPG", "DPPG", "DMPG", "DOPG", "POPS", "DPPS", "DOPS", "POPI",
+    // Sphingomyelins
+    "PSM", "SSM", "NSM",
+    // Cholesterol
+    "CHOL", "CHL1", "CLR",
+    // Ceramides / Cardiolipin
+    "CER", "CERA", "CDL1", "CDL2",
+];
+
+/// Check if a residue name is a known lipid
+pub fn is_lipid(resn: &str) -> bool {
+    LIPID_NAMES.contains(&resn)
+}
+
+/// Residue category for chain assignment
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResidueCategory {
+    Protein,
+    Nucleic,
+    Solvent,
+    Ion,
+    Lipid,
+    Other,
+}
+
+/// Classify a residue by its name into a category
+pub(crate) fn classify_residue(resn: &str) -> ResidueCategory {
+    if is_amino_acid(resn) {
+        ResidueCategory::Protein
+    } else if is_nucleotide(resn) {
+        ResidueCategory::Nucleic
+    } else if is_water(resn) {
+        ResidueCategory::Solvent
+    } else if is_ion(resn) {
+        ResidueCategory::Ion
+    } else if is_lipid(resn) {
+        ResidueCategory::Lipid
+    } else {
+        ResidueCategory::Other
+    }
 }
 
 #[cfg(test)]
@@ -516,5 +583,37 @@ mod tests {
         assert_eq!(residue_to_char("DA"), 'A');
         assert_eq!(residue_to_char("HOH"), '?');
         assert_eq!(residue_to_char("UNK"), '?');
+    }
+
+    #[test]
+    fn test_is_ion() {
+        assert!(is_ion("NA"));
+        assert!(is_ion("CL"));
+        assert!(is_ion("MG2"));
+        assert!(is_ion("SOD"));
+        assert!(is_ion("CLA"));
+        assert!(!is_ion("ALA"));
+        assert!(!is_ion("SOL"));
+    }
+
+    #[test]
+    fn test_is_lipid() {
+        assert!(is_lipid("POPC"));
+        assert!(is_lipid("CHOL"));
+        assert!(is_lipid("DPPC"));
+        assert!(is_lipid("CHL1"));
+        assert!(!is_lipid("ALA"));
+        assert!(!is_lipid("SOL"));
+        assert!(!is_lipid("NA"));
+    }
+
+    #[test]
+    fn test_classify_residue() {
+        assert_eq!(classify_residue("ALA"), ResidueCategory::Protein);
+        assert_eq!(classify_residue("DA"), ResidueCategory::Nucleic);
+        assert_eq!(classify_residue("SOL"), ResidueCategory::Solvent);
+        assert_eq!(classify_residue("NA"), ResidueCategory::Ion);
+        assert_eq!(classify_residue("POPC"), ResidueCategory::Lipid);
+        assert_eq!(classify_residue("UNK"), ResidueCategory::Other);
     }
 }

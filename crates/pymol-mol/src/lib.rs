@@ -49,6 +49,7 @@ mod index;
 mod iterator;
 mod molecule;
 mod residue;
+mod spatial;
 mod secondary;
 
 // Re-export main types
@@ -64,9 +65,10 @@ pub use flags::{AtomFlags, AtomGeometry, Chirality, Stereo};
 pub use index::{AtomIndex, BondIndex, CoordIndex, StateIndex, INVALID_INDEX};
 pub use molecule::{MoleculeBuilder, ObjectMolecule};
 pub use residue::{
-    atoms_same_chain, atoms_same_residue, atoms_same_segment, is_amino_acid, is_nucleotide,
-    is_water, nucleotide_to_char, residue_to_char, three_to_one, ChainIterator, ChainView,
-    ResidueIterator, ResidueKey, ResidueView, AMINO_ACIDS, NUCLEOTIDES, WATER_NAMES,
+    atoms_same_chain, atoms_same_residue, atoms_same_segment, is_amino_acid, is_ion, is_lipid,
+    is_nucleotide, is_water, nucleotide_to_char, residue_to_char, three_to_one, ChainIterator,
+    ChainView, ResidueIterator, ResidueKey, ResidueView, AMINO_ACIDS, ION_NAMES, LIPID_NAMES,
+    NUCLEOTIDES, WATER_NAMES,
 };
 pub use secondary::SecondaryStructure;
 

@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>PyMOL, reimagined in Rust.</strong><br>
-  Same power. Modern core. 12 crates, ~77K lines, zero legacy baggage.
+  Same power. Modern core. Zero legacy baggage.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ PyMOL is the gold standard for molecular visualization — but it's 25 years of 
 |---|---|---|
 | **Language** | C / C++ / Python | Rust + wgpu |
 | **Rendering** | OpenGL 2.x fixed pipeline | WebGPU (wgpu), GPU impostors |
-| **Architecture** | Monolithic | 12 independent crates |
+| **Architecture** | Monolithic | Independent crates |
 | **Python** | Embedded CPython | PyO3 bindings (optional) |
 | **Memory safety** | Manual | Guaranteed at compile time |
 | **Cross-platform** | Build scripts per OS | Single `cargo build` |
@@ -65,7 +65,7 @@ make release && make run
 
 ## What works
 
-**Formats:** PDB · mmCIF · MOL2 · SDF/MOL · XYZ (+ gzip)
+**Formats:** PDB · mmCIF · MOL2 · SDF/MOL · XYZ · GRO (+ gzip)
 
 **Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots
 
@@ -77,6 +77,8 @@ polymer and not solvent
 ```
 
 **Commands** — familiar PyMOL verbs: `load`, `show`, `hide`, `color`, `select`, `zoom`, `center`, `orient`, `png`, `ray`, …
+
+**Sessions** — save and load your sessions with high-efficiency `.prs` file format or use your old PyMOL sessions with `.pse` parser.
 
 **GUI** — egui-based interface with command line, object panel, and viewport:
 
@@ -116,6 +118,7 @@ pymol-rs/  (12 crates)
 ├── pymol-render      wgpu rendering engine
 ├── pymol-raytracer   Offline ray tracing
 ├── pymol-scene       Viewer, camera, scene graph
+├── pymol-session     Sessions save and load (`.prs` and `.pse`)
 ├── pymol-cmd         Command parser & executor
 ├── pymol-gui         GUI (egui)
 └── pymol-python      Python bindings (PyO3 / maturin)
@@ -129,7 +132,6 @@ Each crate is independently usable. Want just the selection parser? `pymol-selec
 - [ ] Crystallographic symmetry mates
 - [ ] Electron density maps
 - [ ] Movie export
-- [ ] Session files (.pse)
 
 ## License
 
