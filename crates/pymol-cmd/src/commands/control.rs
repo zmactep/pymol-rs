@@ -1,6 +1,6 @@
 //! Control commands: quit, reinitialize, refresh, rebuild, run
 
-use pymol_scene::DirtyFlags;
+use pymol_scene::{DirtyFlags, Session};
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
@@ -110,16 +110,10 @@ EXAMPLES
 
         match what.to_lowercase().as_str() {
             "everything" | "all" => {
-                ctx.viewer.objects_mut().clear();
-                // Clear all selections
-                for name in ctx.viewer.selection_names() {
-                    ctx.viewer.remove_selection(&name);
-                }
-                // TODO: Reset settings to defaults
-                ctx.viewer.reset_view();
+                ctx.viewer.replace_session(Session::new());
             }
             "settings" => {
-                // TODO: Reset settings to defaults
+                ctx.viewer.settings_mut().reset_all();
             }
             "objects" => {
                 ctx.viewer.objects_mut().clear();
