@@ -145,6 +145,30 @@ impl MoleculeObject {
         }
     }
 
+    /// Create a named molecule object preserving per-atom representation state.
+    ///
+    /// Like `from_raw()`, this does NOT reset per-atom `visible_reps`. The object-level
+    /// `visible_reps` is computed as the union of all per-atom reps so the renderer
+    /// enables all needed representation pipelines.
+    pub fn from_raw_with_name(mut molecule: ObjectMolecule, name: &str) -> Self {
+        molecule.name = name.to_string();
+        let mut obj_reps = RepMask::default();
+        for atom in molecule.atoms() {
+            obj_reps = obj_reps.union(atom.repr.visible_reps);
+        }
+        let mut state = ObjectState::default();
+        state.visible_reps = obj_reps;
+        Self {
+            molecule,
+            state,
+            display_state: 0,
+            representations: RepresentationCache::default(),
+            dirty: DirtyFlags::ALL,
+            surface_quality: 0,
+            settings: None,
+        }
+    }
+
     /// Create a molecule object with a specific name
     pub fn with_name(molecule: ObjectMolecule, name: &str) -> Self {
         let mut obj = Self::new(molecule);

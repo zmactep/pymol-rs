@@ -291,7 +291,7 @@ EXAMPLES
         };
 
         let atom_count = new_mol.atom_count();
-        let mut mol_obj = MoleculeObject::with_name(new_mol, name);
+        let mut mol_obj = MoleculeObject::from_raw_with_name(new_mol, name);
         mol_obj.set_visible_reps(source_reps);
         ctx.viewer.objects_mut().add(mol_obj);
         ctx.viewer.request_redraw();
@@ -424,7 +424,7 @@ EXAMPLES
             let source_reps = mol_obj.visible_reps();
             let atom_count = cloned_mol.atom_count();
 
-            let mut new_obj = MoleculeObject::with_name(cloned_mol, target);
+            let mut new_obj = MoleculeObject::from_raw_with_name(cloned_mol, target);
             new_obj.set_visible_reps(source_reps);
             ctx.viewer.objects_mut().add(new_obj);
             ctx.viewer.request_redraw();
@@ -455,7 +455,7 @@ EXAMPLES
         };
 
         let atom_count = new_mol.atom_count();
-        let mut new_obj = MoleculeObject::with_name(new_mol, target);
+        let mut new_obj = MoleculeObject::from_raw_with_name(new_mol, target);
         new_obj.set_visible_reps(source_reps);
         ctx.viewer.objects_mut().add(new_obj);
         ctx.viewer.request_redraw();
@@ -824,26 +824,29 @@ EXAMPLES
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("{}_", object));
 
-        // Collect new molecules first (borrow src as read-only)
-        let new_mols: Vec<(String, ObjectMolecule)> = {
+        // Collect new molecules and source reps (borrow src as read-only)
+        let (new_mols, source_reps) = {
             let mol_obj = ctx.viewer.objects().get_molecule(object).unwrap();
             let src_mol = mol_obj.molecule();
+            let reps = mol_obj.visible_reps();
 
             // Build an "all atoms" selection
             let all_sel = pymol_select::SelectionResult::all(src_mol.atom_count());
 
-            (first..last)
+            let mols: Vec<(String, ObjectMolecule)> = (first..last)
                 .map(|state_idx| {
                     let name = format!("{}{:04}", prefix, state_idx + 1);
                     let mol = extract_molecule(src_mol, &all_sel, &name, Some(state_idx));
                     (name, mol)
                 })
-                .collect()
+                .collect();
+            (mols, reps)
         };
 
         let count = new_mols.len();
         for (name, mol) in new_mols {
-            let mol_obj = MoleculeObject::with_name(mol, &name);
+            let mut mol_obj = MoleculeObject::from_raw_with_name(mol, &name);
+            mol_obj.set_visible_reps(source_reps);
             ctx.viewer.objects_mut().add(mol_obj);
         }
 
@@ -951,8 +954,8 @@ EXAMPLES
             .map(|obj| obj.visible_reps())
             .unwrap_or_default();
 
-        // Add the new object with same representations as source
-        let mut mol_obj = MoleculeObject::with_name(new_mol, name);
+        // Add the new object preserving per-atom representations from source
+        let mut mol_obj = MoleculeObject::from_raw_with_name(new_mol, name);
         mol_obj.set_visible_reps(source_reps);
         ctx.viewer.objects_mut().add(mol_obj);
 
