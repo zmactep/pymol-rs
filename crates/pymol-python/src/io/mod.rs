@@ -22,6 +22,8 @@ pub enum PyFileFormat {
     Cif,
     /// XYZ format
     Xyz,
+    /// GROMACS GRO format
+    Gro,
     /// Unknown format
     Unknown,
 }
@@ -34,6 +36,7 @@ impl From<pymol_io::FileFormat> for PyFileFormat {
             pymol_io::FileFormat::Mol2 => PyFileFormat::Mol2,
             pymol_io::FileFormat::Cif => PyFileFormat::Cif,
             pymol_io::FileFormat::Xyz => PyFileFormat::Xyz,
+            pymol_io::FileFormat::Gro => PyFileFormat::Gro,
             pymol_io::FileFormat::Unknown => PyFileFormat::Unknown,
         }
     }
@@ -47,6 +50,7 @@ impl From<PyFileFormat> for pymol_io::FileFormat {
             PyFileFormat::Mol2 => pymol_io::FileFormat::Mol2,
             PyFileFormat::Cif => pymol_io::FileFormat::Cif,
             PyFileFormat::Xyz => pymol_io::FileFormat::Xyz,
+            PyFileFormat::Gro => pymol_io::FileFormat::Gro,
             PyFileFormat::Unknown => pymol_io::FileFormat::Unknown,
         }
     }
@@ -61,6 +65,7 @@ impl PyFileFormat {
             PyFileFormat::Mol2 => "FileFormat.Mol2",
             PyFileFormat::Cif => "FileFormat.Cif",
             PyFileFormat::Xyz => "FileFormat.Xyz",
+            PyFileFormat::Gro => "FileFormat.Gro",
             PyFileFormat::Unknown => "FileFormat.Unknown",
         }
     }
