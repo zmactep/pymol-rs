@@ -3,6 +3,7 @@
 use std::f32::consts::PI;
 
 use lin_alg::f32::{Mat4, Vec3};
+use pymol_algos::svd3;
 use pymol_mol::AtomIndex;
 use pymol_scene::{Object, RaytracedImage}; // For extent() method on MoleculeObject
 use pymol_settings::id as setting_id;
@@ -11,6 +12,86 @@ use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
+
+// ============================================================================
+// Shared helpers for selection-based viewing commands
+// ============================================================================
+
+/// Compute the bounding box (min, max) of atoms matching a selection expression.
+///
+/// Returns `None` if no atoms match or all atoms lack coordinates.
+fn selection_extent(
+    viewer: &dyn ViewerLike,
+    selection: &str,
+) -> CmdResult<Option<(Vec3, Vec3)>> {
+    let selection_results = evaluate_selection(viewer, selection)?;
+
+    let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+    let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+    let mut has_coords = false;
+
+    for (obj_name, selected) in &selection_results {
+        if selected.count() > 0 {
+            if let Some(mol_obj) = viewer.objects().get_molecule(obj_name) {
+                let mol = mol_obj.molecule();
+                let state = mol.current_state;
+                for idx in selected.indices() {
+                    if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
+                        min.x = min.x.min(coord.x);
+                        min.y = min.y.min(coord.y);
+                        min.z = min.z.min(coord.z);
+                        max.x = max.x.max(coord.x);
+                        max.y = max.y.max(coord.y);
+                        max.z = max.z.max(coord.z);
+                        has_coords = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if has_coords {
+        Ok(Some((min, max)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Collect all 3D coordinates of atoms matching a selection expression.
+fn collect_selection_coords(
+    viewer: &dyn ViewerLike,
+    selection: &str,
+) -> CmdResult<Vec<Vec3>> {
+    let selection_results = evaluate_selection(viewer, selection)?;
+    let mut coords = Vec::new();
+
+    for (obj_name, selected) in &selection_results {
+        if selected.count() > 0 {
+            if let Some(mol_obj) = viewer.objects().get_molecule(obj_name) {
+                let mol = mol_obj.molecule();
+                let state = mol.current_state;
+                for idx in selected.indices() {
+                    if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
+                        coords.push(coord);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(coords)
+}
+
+/// Apply an axis-angle rotation to the camera's rotation matrix.
+fn apply_camera_rotation(camera: &mut pymol_scene::Camera, angle_deg: f32, ax: f32, ay: f32, az: f32) {
+    let angle_rad = angle_deg * PI / 180.0;
+    let len = (ax * ax + ay * ay + az * az).sqrt();
+    if len < 1e-10 {
+        return;
+    }
+    let axis = Vec3::new(ax / len, ay / len, az / len);
+    camera.rotate(axis, angle_rad);
+}
 
 /// Register viewing commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -124,10 +205,19 @@ EXAMPLES
             return Ok(());
         }
 
-        // TODO: Use pymol-select for atom selections
+        // Try as selection expression (resi 28, chain A, name CA, etc.)
+        if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
+            ctx.viewer.camera_mut().zoom_to(min, max);
+            ctx.viewer.set_raytraced_image(None);
+            ctx.viewer.request_redraw();
+            if !ctx.quiet {
+                ctx.print(&format!(" Zoomed to \"{}\"", selection));
+            }
+            return Ok(());
+        }
 
         Err(CmdError::Selection(format!(
-            "No objects matching '{}'",
+            "No atoms matching '{}'",
             selection
         )))
     }
@@ -211,41 +301,13 @@ EXAMPLES
         }
 
         // Try as selection expression (resi 28, chain A, name CA, etc.)
-        let selection_results = evaluate_selection(ctx.viewer, selection)?;
-        if !selection_results.is_empty() {
-            // Compute bounding box of selected atoms
-            let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-            let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
-            let mut has_coords = false;
-
-            for (obj_name, selected) in &selection_results {
-                if selected.count() > 0 {
-                    if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
-                        let mol = mol_obj.molecule();
-                        let state = mol.current_state;
-                        for idx in selected.indices() {
-                            if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
-                                min.x = min.x.min(coord.x);
-                                min.y = min.y.min(coord.y);
-                                min.z = min.z.min(coord.z);
-                                max.x = max.x.max(coord.x);
-                                max.y = max.y.max(coord.y);
-                                max.z = max.z.max(coord.z);
-                                has_coords = true;
-                            }
-                        }
-                    }
-                }
+        if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
+            ctx.viewer.camera_mut().center_to(min, max);
+            ctx.viewer.request_redraw();
+            if !ctx.quiet {
+                ctx.print(&format!(" Centered on \"{}\"", selection));
             }
-
-            if has_coords {
-                ctx.viewer.camera_mut().center_to(min, max);
-                ctx.viewer.request_redraw();
-                if !ctx.quiet {
-                    ctx.print(&format!(" Centered on \"{}\"", selection));
-                }
-                return Ok(());
-            }
+            return Ok(());
         }
 
         Err(CmdError::Selection(format!(
@@ -299,9 +361,140 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .unwrap_or("all");
 
-        // Reset view which includes resetting rotation
-        // TODO: implement proper principal axis orientation
-        ctx.viewer.reset_view();
+        // 1. Collect coordinates from the selection
+        let coords = collect_selection_coords(ctx.viewer, selection)?;
+        if coords.is_empty() {
+            return Err(CmdError::Selection(format!(
+                "No atoms matching '{}'",
+                selection
+            )));
+        }
+
+        // 2. Compute centroid
+        let n = coords.len() as f32;
+        let mut cx = 0.0f32;
+        let mut cy = 0.0f32;
+        let mut cz = 0.0f32;
+        for c in &coords {
+            cx += c.x;
+            cy += c.y;
+            cz += c.z;
+        }
+        cx /= n;
+        cy /= n;
+        cz /= n;
+
+        // 3. Build moment of inertia tensor (3×3 symmetric matrix)
+        //    Following PyMOL's approach:
+        //    d[i][i] = Σ(|r|² - r_i²)
+        //    d[i][j] = -Σ(r_i * r_j)   for i ≠ j
+        let mut inertia = [[0.0f32; 3]; 3];
+        for c in &coords {
+            let dx = c.x - cx;
+            let dy = c.y - cy;
+            let dz = c.z - cz;
+            let r2 = dx * dx + dy * dy + dz * dz;
+
+            inertia[0][0] += r2 - dx * dx;
+            inertia[0][1] += -dx * dy;
+            inertia[0][2] += -dx * dz;
+            inertia[1][0] += -dy * dx;
+            inertia[1][1] += r2 - dy * dy;
+            inertia[1][2] += -dy * dz;
+            inertia[2][0] += -dz * dx;
+            inertia[2][1] += -dz * dy;
+            inertia[2][2] += r2 - dz * dz;
+        }
+
+        // 4. Eigendecompose via SVD (for symmetric PSD, SVD = eigendecomposition)
+        //    svd3 takes column-major [[f32; 3]; 3] — symmetric matrix is its own transpose
+        let svd = svd3(&inertia);
+
+        // svd.u columns are eigenvectors, svd.s are eigenvalues (sorted descending)
+        // svd.u[col][row] in column-major layout
+
+        // 5. Build rotation matrix from eigenvectors
+        let mut rot_cols = [
+            [svd.u[0][0], svd.u[0][1], svd.u[0][2]], // column 0 (largest eigenvalue)
+            [svd.u[1][0], svd.u[1][1], svd.u[1][2]], // column 1
+            [svd.u[2][0], svd.u[2][1], svd.u[2][2]], // column 2 (smallest eigenvalue)
+        ];
+
+        // Normalize columns
+        for col in &mut rot_cols {
+            let len = (col[0] * col[0] + col[1] * col[1] + col[2] * col[2]).sqrt();
+            if len > 1e-10 {
+                col[0] /= len;
+                col[1] /= len;
+                col[2] /= len;
+            }
+        }
+
+        // Ensure right-handedness: cross(col0, col1) should align with col2
+        let cross = [
+            rot_cols[0][1] * rot_cols[1][2] - rot_cols[0][2] * rot_cols[1][1],
+            rot_cols[0][2] * rot_cols[1][0] - rot_cols[0][0] * rot_cols[1][2],
+            rot_cols[0][0] * rot_cols[1][1] - rot_cols[0][1] * rot_cols[1][0],
+        ];
+        let dot = cross[0] * rot_cols[2][0] + cross[1] * rot_cols[2][1] + cross[2] * rot_cols[2][2];
+        if dot < 0.0 {
+            rot_cols[2][0] = -rot_cols[2][0];
+            rot_cols[2][1] = -rot_cols[2][1];
+            rot_cols[2][2] = -rot_cols[2][2];
+        }
+
+        // 6. Build Mat4 from column-major rotation
+        //    Mat4 stores column-major: data[col*4 + row]
+        let mut rotation = Mat4::new_identity();
+        rotation.data[0] = rot_cols[0][0];
+        rotation.data[1] = rot_cols[0][1];
+        rotation.data[2] = rot_cols[0][2];
+        rotation.data[4] = rot_cols[1][0];
+        rotation.data[5] = rot_cols[1][1];
+        rotation.data[6] = rot_cols[1][2];
+        rotation.data[8] = rot_cols[2][0];
+        rotation.data[9] = rot_cols[2][1];
+        rotation.data[10] = rot_cols[2][2];
+
+        // 7. Reorder axes: smallest eigenvalue → X, largest → Z
+        //    SVD returns s[0] >= s[1] >= s[2], so column 0 has the largest
+        //    eigenvalue and column 2 the smallest. We need to swap columns
+        //    0 ↔ 2 so the most spread axis maps to Z.
+        //    A 90° rotation around Y swaps X ↔ Z.
+        let old_rotation = ctx.viewer.camera().view().rotation.clone();
+        ctx.viewer.camera_mut().view_mut().rotation = rotation;
+        apply_camera_rotation(ctx.viewer.camera_mut(), 90.0, 0.0, 1.0, 0.0);
+
+        // 8. Choose orientation closest to previous view (minimize perturbation)
+        let new_rotation = ctx.viewer.camera().view().rotation.clone();
+
+        // Compare each axis direction with old rotation
+        let x_dot = old_rotation.data[0] * new_rotation.data[0]
+            + old_rotation.data[4] * new_rotation.data[4]
+            + old_rotation.data[8] * new_rotation.data[8];
+        let y_dot = old_rotation.data[1] * new_rotation.data[1]
+            + old_rotation.data[5] * new_rotation.data[5]
+            + old_rotation.data[9] * new_rotation.data[9];
+        let z_dot = old_rotation.data[2] * new_rotation.data[2]
+            + old_rotation.data[6] * new_rotation.data[6]
+            + old_rotation.data[10] * new_rotation.data[10];
+
+        // If two axes flip, do a 180° rotation around the third to correct
+        if x_dot > 0.0 && y_dot < 0.0 && z_dot < 0.0 {
+            apply_camera_rotation(ctx.viewer.camera_mut(), 180.0, 1.0, 0.0, 0.0);
+        } else if x_dot < 0.0 && y_dot > 0.0 && z_dot < 0.0 {
+            apply_camera_rotation(ctx.viewer.camera_mut(), 180.0, 0.0, 1.0, 0.0);
+        } else if x_dot < 0.0 && y_dot < 0.0 && z_dot > 0.0 {
+            apply_camera_rotation(ctx.viewer.camera_mut(), 180.0, 0.0, 0.0, 1.0);
+        }
+
+        // 9. Zoom to fit the selection
+        if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
+            ctx.viewer.camera_mut().zoom_to(min, max);
+        }
+
+        ctx.viewer.set_raytraced_image(None);
+        ctx.viewer.request_redraw();
 
         if !ctx.quiet {
             ctx.print(&format!(" Oriented to \"{}\"", selection));
@@ -952,10 +1145,26 @@ SEE ALSO
             }
         }
 
-        // TODO: Use pymol-select for atom selections
+        // Try as selection expression (resi 28, chain A, name CA, etc.)
+        if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
+            let center = Vec3::new(
+                (min.x + max.x) * 0.5,
+                (min.y + max.y) * 0.5,
+                (min.z + max.z) * 0.5,
+            );
+            ctx.viewer.camera_mut().view_mut().origin = center.clone();
+            ctx.viewer.request_redraw();
+            if !ctx.quiet {
+                ctx.print(&format!(
+                    " Origin set to \"{}\" at [{:.3}, {:.3}, {:.3}]",
+                    selection, center.x, center.y, center.z
+                ));
+            }
+            return Ok(());
+        }
 
         Err(CmdError::Selection(format!(
-            "No objects matching '{}'",
+            "No atoms matching '{}'",
             selection
         )))
     }
