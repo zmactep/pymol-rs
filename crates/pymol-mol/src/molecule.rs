@@ -729,9 +729,12 @@ impl ObjectMolecule {
                     .unwrap_or(true);
 
                 // Determine classification flags
+                // Note: nucleotides are recognised even with HETATM (common for
+                // modified bases), but proteins keep the !is_hetatm guard because
+                // small peptides can legitimately be HETATM ligands.
                 let mask = if !is_hetatm && is_amino_acid(resn) {
                     AtomFlags::POLYMER | AtomFlags::PROTEIN
-                } else if !is_hetatm && is_nucleotide(resn) {
+                } else if is_nucleotide(resn) {
                     AtomFlags::POLYMER | AtomFlags::NUCLEIC
                 } else if is_water(resn) {
                     AtomFlags::SOLVENT

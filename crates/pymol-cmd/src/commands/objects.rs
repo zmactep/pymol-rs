@@ -762,6 +762,10 @@ impl Command for SplitStatesCommand {
         "split_states"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Object]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION

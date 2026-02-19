@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use egui::{Color32, RichText, Ui};
 use pymol_color::NamedColors;
-use pymol_mol::{residue_to_char, ObjectMolecule};
+use pymol_mol::{is_ion, is_water, residue_to_char, ObjectMolecule};
 use pymol_scene::{Object, ObjectRegistry};
 
 /// Compress a sorted list of residue numbers into range notation.
@@ -48,9 +48,15 @@ pub struct SeqResidue {
     pub resn: String,
     pub resv: i32,
     pub display_char: char,
+    /// Full display label: single char for polymer residues, "[ATP]" for ligands
+    pub display_label: String,
+    /// Number of character cells this residue occupies in the sequence row
+    pub char_width: usize,
     pub atom_range: Range<usize>,
     /// Base color index of the CA atom (or first atom), for display coloring
     pub color_index: i32,
+    /// True for protein/nucleic polymer residues; false for ligands/lipids
+    pub is_polymer: bool,
 }
 
 /// Sequence data for one chain
@@ -145,6 +151,9 @@ impl SequencePanel {
     }
 
     /// Compute the desired panel height based on the number of objects and chains.
+    ///
+    /// When the total chain count exceeds 4, the panel defaults to showing 4 chains
+    /// and the rest are accessible via vertical scroll.
     pub fn desired_height(&mut self, registry: &ObjectRegistry) -> f32 {
         if self.needs_rebuild(registry) {
             self.rebuild_cache(registry);
@@ -152,14 +161,18 @@ impl SequencePanel {
         if self.sequences.is_empty() {
             return 30.0;
         }
-        let row_height = 14.0;
+        // These must match the values used in show().
+        // row_height: egui Body text style is typically ~18px (14pt font).
+        // ruler_height: 10px for the residue-number ruler above each chain row.
+        let row_height = 18.0;
         let ruler_height = 10.0;
-        let mut h = 0.0;
-        for seq_obj in &self.sequences {
-            h += seq_obj.chains.len() as f32 * (ruler_height + row_height);
-            h += 2.0; // spacing after object
-        }
-        h + 8.0 // panel padding
+        let spacing = 2.0;
+        let chain_height = ruler_height + row_height;
+        let total_chains: usize = self.sequences.iter().map(|s| s.chains.len()).sum();
+        let visible_chains = total_chains.min(4) as f32;
+        let obj_spacing = self.sequences.len() as f32 * spacing;
+        // 16.0 accounts for panel padding + scroll area chrome
+        visible_chains * chain_height + obj_spacing + 16.0
     }
 
     /// Show the sequence panel and return any actions
@@ -210,6 +223,12 @@ impl SequencePanel {
             .map(|seq_obj| seq_obj.chains.len() as f32 * (ruler_height + row_height))
             .collect();
 
+        // Outer vertical scroll — keeps all three columns in sync when the
+        // total chain height exceeds the panel (e.g. nucleosome with 12+ chains).
+        egui::ScrollArea::vertical()
+            .id_salt("sequence_vscroll")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
         // Three-column layout: vertical object names | chain labels | scrollable sequences
         ui.horizontal(|ui| {
             // Column 1: horizontal object names (fixed, truncated)
@@ -277,7 +296,7 @@ impl SequencePanel {
                 }
             });
 
-            // Column 3: scrollable sequences
+            // Column 3: scrollable sequences (horizontal)
             egui::ScrollArea::horizontal()
                 .id_salt("sequence_hscroll")
                 .auto_shrink([false, false])
@@ -305,6 +324,7 @@ impl SequencePanel {
                     });
                 });
         });
+            });
 
         actions
     }
@@ -338,41 +358,62 @@ fn render_chain_sequence(
         return;
     }
 
+    // Precompute cumulative x-offsets (in char cells) for each residue
+    let mut x_offsets: Vec<usize> = Vec::with_capacity(n);
+    let mut cumulative = 0usize;
+    for residue in &chain.residues {
+        x_offsets.push(cumulative);
+        cumulative += residue.char_width;
+    }
+    let total_cells = cumulative;
+    let total_width = cw * total_cells as f32;
+
     // --- Ruler row: residue numbers above the sequence ---
     let (ruler_rect, _) =
-        ui.allocate_exact_size(egui::vec2(cw * n as f32, 10.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(total_width, 10.0), egui::Sense::hover());
     let ruler_painter = ui.painter_at(ruler_rect);
     let ruler_font = egui::FontId::new(8.0, egui::FontFamily::Monospace);
     let ruler_color = Color32::from_rgb(120, 120, 120);
 
     for (res_idx, residue) in chain.residues.iter().enumerate() {
         if res_idx == 0 || res_idx % 10 == 0 {
-            let x = ruler_rect.min.x + cw * res_idx as f32;
-            ruler_painter.text(
-                egui::pos2(x, ruler_rect.min.y),
-                egui::Align2::LEFT_TOP,
-                format!("{}", residue.resv),
-                ruler_font.clone(),
-                ruler_color,
-            );
+            let x = ruler_rect.min.x + cw * x_offsets[res_idx] as f32;
+            let label = format!("{}", residue.resv);
+            // Skip if the label would overflow past the ruler width
+            let label_width = label.len() as f32 * cw * 0.7; // ruler font is 8pt vs 12pt char width
+            if x + label_width <= ruler_rect.max.x {
+                ruler_painter.text(
+                    egui::pos2(x, ruler_rect.min.y),
+                    egui::Align2::LEFT_TOP,
+                    label,
+                    ruler_font.clone(),
+                    ruler_color,
+                );
+            }
         }
     }
 
     // --- Sequence row: single interactive rect with painted characters ---
     let row_height = ui.text_style_height(&egui::TextStyle::Body);
     let (seq_rect, response) = ui.allocate_exact_size(
-        egui::vec2(cw * n as f32, row_height),
+        egui::vec2(total_width, row_height),
         egui::Sense::click_and_drag(),
     );
 
     let painter = ui.painter_at(seq_rect);
     let seq_font = egui::FontId::new(12.0, egui::FontFamily::Monospace);
     let seq_font_bold = egui::FontId::new(12.0, egui::FontFamily::Monospace);
+    let ligand_font = egui::FontId::new(10.0, egui::FontFamily::Monospace);
 
-    // Helper: convert pointer x position to residue index
+    // Helper: convert pointer x position to residue index using cumulative offsets
     let pointer_to_res_idx = |pos: egui::Pos2| -> usize {
         let rel_x = pos.x - seq_rect.min.x;
-        (rel_x / cw).floor().max(0.0).min((n - 1) as f32) as usize
+        let cell = (rel_x / cw).floor().max(0.0) as usize;
+        // Binary search: find the last residue whose x_offset <= cell
+        match x_offsets.binary_search(&cell) {
+            Ok(idx) => idx.min(n - 1),
+            Err(idx) => idx.saturating_sub(1).min(n - 1),
+        }
     };
 
     // Determine the active drag range for this chain (if any)
@@ -392,8 +433,10 @@ fn render_chain_sequence(
 
     // Draw drag highlight background
     if let Some(ref range) = drag_range {
-        let x_start = seq_rect.min.x + cw * (*range.start() as f32);
-        let x_end = seq_rect.min.x + cw * (*range.end() as f32 + 1.0);
+        let x_start = seq_rect.min.x + cw * x_offsets[*range.start()] as f32;
+        let end_res = *range.end();
+        let x_end = seq_rect.min.x
+            + cw * (x_offsets[end_res] + chain.residues[end_res].char_width) as f32;
         let highlight_rect = egui::Rect::from_min_max(
             egui::pos2(x_start, seq_rect.min.y),
             egui::pos2(x_end, seq_rect.max.y),
@@ -405,7 +448,7 @@ fn render_chain_sequence(
         );
     }
 
-    // Paint residue characters
+    // Paint residue labels
     for (res_idx, residue) in chain.residues.iter().enumerate() {
         let is_highlighted = highlighted.contains(&(
             object_name.to_string(),
@@ -417,20 +460,34 @@ fn render_chain_sequence(
             .as_ref()
             .is_some_and(|range| range.contains(&res_idx));
 
-        let (text_color, font) = if is_highlighted || is_in_drag {
-            (Color32::from_rgb(255, 80, 80), seq_font_bold.clone())
-        } else {
-            (resolve_residue_color(residue, named_colors), seq_font.clone())
-        };
+        let x = seq_rect.min.x + cw * x_offsets[res_idx] as f32;
 
-        let x = seq_rect.min.x + cw * res_idx as f32;
-        painter.text(
-            egui::pos2(x, seq_rect.min.y),
-            egui::Align2::LEFT_TOP,
-            residue.display_char.to_string(),
-            font,
-            text_color,
-        );
+        if is_highlighted || is_in_drag {
+            painter.text(
+                egui::pos2(x, seq_rect.min.y),
+                egui::Align2::LEFT_TOP,
+                &residue.display_label,
+                seq_font_bold.clone(),
+                Color32::from_rgb(255, 80, 80),
+            );
+        } else if residue.is_polymer {
+            painter.text(
+                egui::pos2(x, seq_rect.min.y),
+                egui::Align2::LEFT_TOP,
+                &residue.display_label,
+                seq_font.clone(),
+                resolve_residue_color(residue, named_colors),
+            );
+        } else {
+            // Non-polymer (ligand/lipid): dimmed, smaller font
+            painter.text(
+                egui::pos2(x, seq_rect.min.y + 1.0),
+                egui::Align2::LEFT_TOP,
+                &residue.display_label,
+                ligand_font.clone(),
+                Color32::from_rgb(140, 140, 140),
+            );
+        }
     }
 
     // --- Interaction logic ---
@@ -539,18 +596,41 @@ fn render_chain_sequence(
 }
 
 /// Build sequence data for one molecule object
+///
+/// ChainIterator groups *consecutive* atoms by chain ID. In mmCIF/PDB files,
+/// HETATM records often follow all ATOM records, so the same chain ID (e.g. "A")
+/// can appear multiple times — once for protein ATOMs and again for HETATM
+/// ligands. We merge these into a single SeqChain so that ligands appear on the
+/// same row as the polymer they belong to.
 fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
+    // chain_id → index into `chains`
+    let mut chain_index: std::collections::HashMap<String, usize> = Default::default();
     let mut chains: Vec<SeqChain> = Vec::new();
 
     for chain_view in mol.chains() {
-        let mut residues = Vec::new();
-
         for residue_view in chain_view.residues() {
-            if !residue_view.is_protein() && !residue_view.is_nucleic() {
-                continue;
-            }
+            let resn = residue_view.resn();
 
-            let display_char = residue_to_char(residue_view.resn());
+            // Determine display label
+            let (display_label, is_polymer) = if residue_view.is_protein()
+                || residue_view.is_nucleic()
+            {
+                // Standard polymer residue — single letter
+                (residue_to_char(resn).to_string(), true)
+            } else if is_water(resn) || is_ion(resn) {
+                // Solvent and ions — skip entirely
+                continue;
+            } else {
+                // Ligand, lipid, modified residue — show 3-letter code in brackets
+                (format!("[{}]", resn), false)
+            };
+
+            let display_char = if is_polymer {
+                residue_to_char(resn)
+            } else {
+                '?'
+            };
+            let char_width = display_label.len();
 
             let color_index = residue_view
                 .ca()
@@ -563,21 +643,29 @@ fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
                         .unwrap_or(-1)
                 });
 
-            residues.push(SeqResidue {
+            let seq_residue = SeqResidue {
                 chain: residue_view.chain().to_string(),
-                resn: residue_view.resn().to_string(),
+                resn: resn.to_string(),
                 resv: residue_view.resv(),
                 display_char,
+                display_label,
+                char_width,
                 atom_range: residue_view.atom_range.clone(),
                 color_index,
-            });
-        }
+                is_polymer,
+            };
 
-        if !residues.is_empty() {
-            chains.push(SeqChain {
-                chain_id: chain_view.id().to_string(),
-                residues,
-            });
+            let chain_id = chain_view.id().to_string();
+            if let Some(&idx) = chain_index.get(&chain_id) {
+                chains[idx].residues.push(seq_residue);
+            } else {
+                let idx = chains.len();
+                chain_index.insert(chain_id.clone(), idx);
+                chains.push(SeqChain {
+                    chain_id,
+                    residues: vec![seq_residue],
+                });
+            }
         }
     }
 

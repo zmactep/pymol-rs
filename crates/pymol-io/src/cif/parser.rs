@@ -743,6 +743,72 @@ _struct_conf.end_auth_seq_id 3
     }
 
     #[test]
+    fn test_parse_dna_nucleotides() {
+        // Test that DNA nucleotides are parsed and classified correctly
+        let cif_data = r#"data_TEST
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.auth_comp_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+ATOM 1  P P   DA I 1 DA 0.0 0.0 0.0
+ATOM 2  C "C4'" DA I 1 DA 1.0 0.0 0.0
+ATOM 3  P P   DT I 2 DT 2.0 0.0 0.0
+ATOM 4  C "C4'" DT I 2 DT 3.0 0.0 0.0
+ATOM 5  P P   DG I 3 DG 4.0 0.0 0.0
+ATOM 6  C "C4'" DG I 3 DG 5.0 0.0 0.0
+ATOM 7  P P   DC I 4 DC 6.0 0.0 0.0
+ATOM 8  C "C4'" DC I 4 DC 7.0 0.0 0.0
+"#;
+
+        let mut reader = CifReader::new(cif_data.as_bytes());
+        let mol = reader.read().unwrap();
+
+        assert_eq!(mol.atom_count(), 8);
+
+        // All atoms should be classified as nucleic
+        use pymol_mol::AtomFlags;
+        for atom in mol.atoms() {
+            assert!(
+                atom.state.flags.contains(AtomFlags::NUCLEIC),
+                "Atom {} in residue {} should have NUCLEIC flag",
+                atom.name,
+                atom.residue.resn
+            );
+            assert!(
+                atom.state.flags.contains(AtomFlags::POLYMER),
+                "Atom {} in residue {} should have POLYMER flag",
+                atom.name,
+                atom.residue.resn
+            );
+        }
+
+        // Check chain iteration: should have 1 chain (I) with 4 residues
+        let chains: Vec<_> = mol.chains().collect();
+        assert_eq!(chains.len(), 1, "Should have 1 chain");
+        assert_eq!(chains[0].id(), "I");
+
+        let residues: Vec<_> = chains[0].residues().collect();
+        assert_eq!(residues.len(), 4, "Chain I should have 4 residues");
+        assert_eq!(residues[0].resn(), "DA");
+        assert_eq!(residues[1].resn(), "DT");
+        assert_eq!(residues[2].resn(), "DG");
+        assert_eq!(residues[3].resn(), "DC");
+
+        // All should be classified as nucleic
+        for r in &residues {
+            assert!(r.is_nucleic(), "Residue {} should be nucleic", r.resn());
+        }
+    }
+
+    #[test]
     fn test_parse_loop_secondary_structure() {
         // Test loop format secondary structure (existing behavior)
         let cif_data = r#"data_TEST

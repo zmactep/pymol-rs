@@ -273,11 +273,24 @@ pub fn three_to_one(resn: &str) -> Option<char> {
 /// Convert nucleotide residue name to single character
 pub fn nucleotide_to_char(resn: &str) -> Option<char> {
     match resn {
+        // Standard bases
         "DA" | "A" | "ADE" => Some('A'),
         "DT" | "T" | "THY" => Some('T'),
         "DG" | "G" | "GUA" => Some('G'),
         "DC" | "C" | "CYT" => Some('C'),
         "U" | "URA" => Some('U'),
+        "DI" | "I" => Some('I'),
+        // Generic
+        "N" => Some('n'),
+        "DN" => Some('n'),
+        // Modified RNA — map to lowercase parent base or 'n'
+        "PSU" | "H2U" | "5MU" | "4SU" | "5BU" | "BRU" | "CBR" => Some('u'),
+        "5MC" | "OMC" => Some('c'),
+        "OMG" | "M2G" | "7MG" | "2MG" | "YYG" => Some('g'),
+        "1MA" => Some('a'),
+        // Modified DNA
+        "5CM" => Some('c'),
+        "8OG" => Some('g'),
         _ => None,
     }
 }
@@ -307,12 +320,19 @@ pub const AMINO_ACIDS: &[&str] = &[
 
 /// Standard nucleotide residue names
 pub const NUCLEOTIDES: &[&str] = &[
-    // DNA
-    "DA", "DC", "DG", "DT",
-    // RNA
-    "A", "C", "G", "U",
-    // Alternative names
+    // Standard DNA
+    "DA", "DC", "DG", "DT", "DI",
+    // Standard RNA
+    "A", "C", "G", "U", "I",
+    // Generic
+    "N", "DN",
+    // Alternative 3-letter names
     "ADE", "CYT", "GUA", "THY", "URA",
+    // Common modified RNA (PDB/RCSB)
+    "PSU", "5MC", "OMC", "OMG", "M2G", "5MU", "7MG", "2MG", "H2U",
+    "YYG", "1MA", "4SU", "5BU", "BRU", "CBR",
+    // Modified DNA
+    "5CM", "8OG",
 ];
 
 /// Check if a residue name is a standard amino acid
@@ -562,17 +582,28 @@ mod tests {
         assert_eq!(nucleotide_to_char("DT"), Some('T'));
         assert_eq!(nucleotide_to_char("DG"), Some('G'));
         assert_eq!(nucleotide_to_char("DC"), Some('C'));
+        assert_eq!(nucleotide_to_char("DI"), Some('I'));
         // RNA
         assert_eq!(nucleotide_to_char("A"), Some('A'));
         assert_eq!(nucleotide_to_char("U"), Some('U'));
         assert_eq!(nucleotide_to_char("G"), Some('G'));
         assert_eq!(nucleotide_to_char("C"), Some('C'));
+        assert_eq!(nucleotide_to_char("I"), Some('I'));
         // Alternative names
         assert_eq!(nucleotide_to_char("ADE"), Some('A'));
         assert_eq!(nucleotide_to_char("THY"), Some('T'));
         assert_eq!(nucleotide_to_char("GUA"), Some('G'));
         assert_eq!(nucleotide_to_char("CYT"), Some('C'));
         assert_eq!(nucleotide_to_char("URA"), Some('U'));
+        // Generic
+        assert_eq!(nucleotide_to_char("N"), Some('n'));
+        assert_eq!(nucleotide_to_char("DN"), Some('n'));
+        // Modified bases
+        assert_eq!(nucleotide_to_char("PSU"), Some('u'));
+        assert_eq!(nucleotide_to_char("5MC"), Some('c'));
+        assert_eq!(nucleotide_to_char("OMG"), Some('g'));
+        assert_eq!(nucleotide_to_char("1MA"), Some('a'));
+        assert_eq!(nucleotide_to_char("8OG"), Some('g'));
         // Unknown
         assert_eq!(nucleotide_to_char("HOH"), None);
     }
