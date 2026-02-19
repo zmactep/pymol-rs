@@ -266,6 +266,22 @@ pub fn three_to_one(resn: &str) -> Option<char> {
         "CYX" => Some('C'),
         // Non-standard but common
         "MSE" => Some('M'), "SEC" => Some('U'), "PYL" => Some('O'),
+        // Phosphorylated amino acids
+        "SEP" => Some('S'), "TPO" => Some('T'), "PTR" => Some('Y'),
+        // Methylated / acetylated / other common modifications
+        "MLY" | "M3L" | "MLZ" | "KCX" => Some('K'),
+        "OCS" | "CSO" | "CSS" | "CSD" | "CME" | "SCH" | "SMC" | "CSX" => Some('C'),
+        "NEP" => Some('H'),
+        "HSD" | "HSE" | "HSP" => Some('H'),
+        "ASH" => Some('D'),
+        "GLH" => Some('E'),
+        "LYN" => Some('K'),
+        "ARN" => Some('R'),
+        "TYS" => Some('Y'),
+        "FME" => Some('M'),
+        "SAM" => Some('M'),
+        "HYP" => Some('P'),
+        "UNK" => Some('X'),
         _ => None,
     }
 }
@@ -291,6 +307,15 @@ pub fn nucleotide_to_char(resn: &str) -> Option<char> {
         // Modified DNA
         "5CM" => Some('c'),
         "8OG" => Some('g'),
+        // More modified RNA/DNA
+        "2MA" | "6MA" | "A23" | "DZ" => Some('a'),
+        "IU" | "5IU" | "UFT" => Some('u'),
+        "5IC" | "3MC" | "CFZ" => Some('c'),
+        "G7M" | "O2G" | "RSQ" => Some('g'),
+        "LCA" => Some('a'),
+        "LCG" => Some('g'),
+        "LCC" => Some('c'),
+        "LCT" => Some('t'),
         _ => None,
     }
 }
@@ -307,11 +332,9 @@ pub const AMINO_ACIDS: &[&str] = &[
     "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
     "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
     // Histidine protonation variants
-    "HID", "HIE", "HIP",
+    "HID", "HIE", "HIP", "HSP", "HSD", "HSE",
     // Cysteine variants
     "CYX",
-    // N/C-terminal variants
-    "ACE", "NME",
     // Non-standard but common
     "MSE", "SEC", "PYL",
     // Charged variants
@@ -390,6 +413,21 @@ pub const LIPID_NAMES: &[&str] = &[
 /// Check if a residue name is a known lipid
 pub fn is_lipid(resn: &str) -> bool {
     LIPID_NAMES.contains(&resn)
+}
+
+/// N/C-terminal capping groups that are chemically adjacent to the polymer
+/// but have no standard 1-letter code. Always display in bracket notation.
+pub const CAPPING_GROUPS: &[&str] = &[
+    "ACE", // acetyl cap (N-terminus)
+    "NME", // N-methylamide cap (C-terminus)
+    "NHH", // amino cap (rare)
+    "FOR", // formyl cap
+    "NH2", // amide cap (C-terminus)
+];
+
+/// Check if a residue name is a capping group
+pub fn is_capping_group(resn: &str) -> bool {
+    CAPPING_GROUPS.contains(&resn)
 }
 
 /// Residue category for chain assignment
@@ -613,7 +651,7 @@ mod tests {
         assert_eq!(residue_to_char("ALA"), 'A');
         assert_eq!(residue_to_char("DA"), 'A');
         assert_eq!(residue_to_char("HOH"), '?');
-        assert_eq!(residue_to_char("UNK"), '?');
+        assert_eq!(residue_to_char("UNK"), 'X');
     }
 
     #[test]
@@ -636,6 +674,24 @@ mod tests {
         assert!(!is_lipid("ALA"));
         assert!(!is_lipid("SOL"));
         assert!(!is_lipid("NA"));
+    }
+
+    #[test]
+    fn test_three_to_one_noncanonical() {
+        assert_eq!(three_to_one("SEP"), Some('S'));
+        assert_eq!(three_to_one("TPO"), Some('T'));
+        assert_eq!(three_to_one("PTR"), Some('Y'));
+        assert_eq!(three_to_one("MLY"), Some('K'));
+        assert_eq!(three_to_one("HYP"), Some('P'));
+        assert_eq!(three_to_one("UNK"), Some('X'));
+    }
+
+    #[test]
+    fn test_is_capping_group() {
+        assert!(is_capping_group("ACE"));
+        assert!(is_capping_group("NME"));
+        assert!(!is_capping_group("ALA"));
+        assert!(!is_capping_group("HOH"));
     }
 
     #[test]

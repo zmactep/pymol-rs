@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use egui::{Color32, RichText, Ui};
 use pymol_color::NamedColors;
-use pymol_mol::{is_ion, is_water, residue_to_char, ObjectMolecule};
+use pymol_mol::{is_capping_group, is_ion, is_water, residue_to_char, ObjectMolecule};
 use pymol_scene::{Object, ObjectRegistry};
 
 /// Compress a sorted list of residue numbers into range notation.
@@ -471,11 +471,17 @@ fn render_chain_sequence(
                 Color32::from_rgb(255, 80, 80),
             );
         } else if residue.is_polymer {
+            // Use smaller font for bracketed non-canonical residues (e.g. [ACE], [SEP])
+            let font = if residue.char_width == 1 {
+                seq_font.clone()
+            } else {
+                ligand_font.clone()
+            };
             painter.text(
                 egui::pos2(x, seq_rect.min.y),
                 egui::Align2::LEFT_TOP,
                 &residue.display_label,
-                seq_font.clone(),
+                font,
                 resolve_residue_color(residue, named_colors),
             );
         } else {
@@ -612,16 +618,24 @@ fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
             let resn = residue_view.resn();
 
             // Determine display label
-            let (display_label, is_polymer) = if residue_view.is_protein()
-                || residue_view.is_nucleic()
-            {
-                // Standard polymer residue — single letter
-                (residue_to_char(resn).to_string(), true)
-            } else if is_water(resn) || is_ion(resn) {
-                // Solvent and ions — skip entirely
+            let (display_label, is_polymer) = if is_water(resn) || is_ion(resn) {
+                // Solvent and ions — always skip
                 continue;
+            } else if is_capping_group(resn) {
+                // ACE, NME, etc. — bracket notation, styled as polymer (part of chain)
+                (format!("[{}]", resn), true)
+            } else if residue_view.is_protein() || residue_view.is_nucleic() {
+                let ch = residue_to_char(resn);
+                if ch == '?' {
+                    // Non-canonical with no 1-letter mapping → bracket notation
+                    // but still classified as polymer (same chain coloring)
+                    (format!("[{}]", resn), true)
+                } else {
+                    // Standard or known-modified polymer residue — single letter
+                    (ch.to_string(), true)
+                }
             } else {
-                // Ligand, lipid, modified residue — show 3-letter code in brackets
+                // Ligand, lipid, unknown HETATM — bracket notation, non-polymer styling
                 (format!("[{}]", resn), false)
             };
 
