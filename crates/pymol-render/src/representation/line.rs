@@ -92,9 +92,9 @@ impl Representation for LineRep {
                 None => continue,
             };
 
-            // Check if atoms have lines representation visible
+            // Skip bond if either atom has lines hidden
             if !atom1.repr.visible_reps.is_visible(RepMask::LINES)
-                && !atom2.repr.visible_reps.is_visible(RepMask::LINES)
+                || !atom2.repr.visible_reps.is_visible(RepMask::LINES)
             {
                 continue;
             }

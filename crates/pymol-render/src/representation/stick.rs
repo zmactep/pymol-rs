@@ -145,9 +145,9 @@ impl Representation for StickRep {
                 None => continue,
             };
 
-            // Check if sticks representation is visible for either atom
+            // Skip bond if either atom has sticks hidden
             if !atom1.repr.visible_reps.is_visible(RepMask::STICKS)
-                && !atom2.repr.visible_reps.is_visible(RepMask::STICKS)
+                || !atom2.repr.visible_reps.is_visible(RepMask::STICKS)
             {
                 continue;
             }
@@ -284,11 +284,88 @@ impl Representation for StickRep {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lin_alg::f32::Vec3;
+    use pymol_color::{ChainColors, ElementColors, NamedColors};
+    use pymol_mol::{Atom, BondOrder, Element};
+    use pymol_settings::GlobalSettings;
+
+    use crate::color_resolver::ColorResolver;
 
     #[test]
     fn test_stick_rep_new() {
         let rep = StickRep::new();
         assert!(rep.is_dirty());
         assert!(rep.is_empty());
+    }
+
+    /// Helper: build a 2-atom molecule (N-H bond) with given stick visibility.
+    fn build_nh_molecule(n_visible: bool, h_visible: bool) -> (ObjectMolecule, CoordSet) {
+        let mut mol = ObjectMolecule::new("test");
+
+        let mut atom_n = Atom::new("N", Element::Nitrogen);
+        if n_visible {
+            atom_n.repr.visible_reps.set_visible(RepMask::STICKS);
+        }
+
+        let mut atom_h = Atom::new("H", Element::Hydrogen);
+        if h_visible {
+            atom_h.repr.visible_reps.set_visible(RepMask::STICKS);
+        }
+
+        let idx_n = mol.add_atom(atom_n);
+        let idx_h = mol.add_atom(atom_h);
+        let _ = mol.add_bond(idx_n, idx_h, BondOrder::Single);
+
+        let coords = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0)];
+        let coord_set = CoordSet::from_vec3(&coords);
+        mol.add_coord_set(coord_set.clone());
+
+        (mol, coord_set)
+    }
+
+    fn build_stick_rep(mol: &ObjectMolecule, coord_set: &CoordSet) -> StickRep {
+        static CHAIN_COLORS: ChainColors = ChainColors;
+        let named = NamedColors::default();
+        let elements = ElementColors::default();
+        let colors = ColorResolver::new(&named, &elements, &CHAIN_COLORS);
+
+        let global_settings = GlobalSettings::new();
+        let settings = SettingResolver::global(&global_settings);
+
+        let mut rep = StickRep::new();
+        rep.build(mol, coord_set, &colors, &settings);
+        rep
+    }
+
+    #[test]
+    fn test_both_atoms_visible_renders_bond() {
+        let (mol, cs) = build_nh_molecule(true, true);
+        let rep = build_stick_rep(&mol, &cs);
+        assert_eq!(rep.cylinder_count, 1);
+        assert_eq!(rep.sphere_count, 2);
+    }
+
+    #[test]
+    fn test_hide_sticks_on_hydrogen_hides_bond() {
+        let (mol, cs) = build_nh_molecule(true, false);
+        let rep = build_stick_rep(&mol, &cs);
+        assert_eq!(rep.cylinder_count, 0);
+        assert_eq!(rep.sphere_count, 0);
+    }
+
+    #[test]
+    fn test_hide_sticks_on_nitrogen_hides_bond() {
+        let (mol, cs) = build_nh_molecule(false, true);
+        let rep = build_stick_rep(&mol, &cs);
+        assert_eq!(rep.cylinder_count, 0);
+        assert_eq!(rep.sphere_count, 0);
+    }
+
+    #[test]
+    fn test_both_atoms_hidden_no_bond() {
+        let (mol, cs) = build_nh_molecule(false, false);
+        let rep = build_stick_rep(&mol, &cs);
+        assert_eq!(rep.cylinder_count, 0);
+        assert_eq!(rep.sphere_count, 0);
     }
 }
