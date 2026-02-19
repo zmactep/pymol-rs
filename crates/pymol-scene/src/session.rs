@@ -9,10 +9,11 @@
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_settings::GlobalSettings;
+use serde::{Deserialize, Serialize};
 
 use crate::camera::Camera;
 use crate::movie::Movie;
-use crate::object::ObjectRegistry;
+use crate::object::{ObjectRegistry, ObjectRegistrySnapshot};
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
 use crate::view::ViewManager;
@@ -22,6 +23,9 @@ use crate::viewer_trait::RaytracedImage;
 ///
 /// Owns all molecular objects, camera state, named selections, scenes,
 /// views, animation, settings, and color tables.
+///
+/// Implements `Serialize` and `Deserialize` via a proxy that converts
+/// the [`ObjectRegistry`] to/from an [`ObjectRegistrySnapshot`].
 pub struct Session {
     // =========================================================================
     // Scene
@@ -62,6 +66,61 @@ pub struct Session {
     // =========================================================================
     /// Stored raytraced image for display (from `ray` command without filename)
     pub raytraced_image: Option<RaytracedImage>,
+}
+
+/// Serializable proxy for [`Session`] (for deserialization).
+#[derive(Deserialize)]
+struct SessionProxy {
+    registry: ObjectRegistrySnapshot,
+    camera: Camera,
+    selections: SelectionManager,
+    scenes: SceneManager,
+    views: ViewManager,
+    movie: Movie,
+    settings: GlobalSettings,
+    named_colors: NamedColors,
+    element_colors: ElementColors,
+    chain_colors: ChainColors,
+    clear_color: [f32; 3],
+}
+
+impl Serialize for Session {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("Session", 11)?;
+        s.serialize_field("registry", &self.registry.to_snapshot())?;
+        s.serialize_field("camera", &self.camera)?;
+        s.serialize_field("selections", &self.selections)?;
+        s.serialize_field("scenes", &self.scenes)?;
+        s.serialize_field("views", &self.views)?;
+        s.serialize_field("movie", &self.movie)?;
+        s.serialize_field("settings", &self.settings)?;
+        s.serialize_field("named_colors", &self.named_colors)?;
+        s.serialize_field("element_colors", &self.element_colors)?;
+        s.serialize_field("chain_colors", &self.chain_colors)?;
+        s.serialize_field("clear_color", &self.clear_color)?;
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Session {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let proxy = SessionProxy::deserialize(deserializer)?;
+        Ok(Session {
+            registry: ObjectRegistry::from_snapshot(proxy.registry),
+            camera: proxy.camera,
+            selections: proxy.selections,
+            scenes: proxy.scenes,
+            views: proxy.views,
+            movie: proxy.movie,
+            settings: proxy.settings,
+            named_colors: proxy.named_colors,
+            element_colors: proxy.element_colors,
+            chain_colors: proxy.chain_colors,
+            clear_color: proxy.clear_color,
+            raytraced_image: None,
+        })
+    }
 }
 
 impl Default for Session {

@@ -2,12 +2,14 @@
 //!
 //! Provides the `Bond` struct and `BondOrder` enum for representing molecular bonds.
 
+use serde::{Deserialize, Serialize};
+
 use crate::index::AtomIndex;
 
 /// Bond order enumeration
 ///
 /// Represents the type/order of a chemical bond.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum BondOrder {
     /// Unknown or unspecified bond order
@@ -96,7 +98,7 @@ impl std::fmt::Display for BondOrder {
 /// Bond stereochemistry
 ///
 /// Used for representing E/Z isomerism and other stereochemical properties.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum BondStereo {
     /// No stereo specified
@@ -154,7 +156,7 @@ impl BondStereo {
 ///
 /// Represents the symmetry operation applied to the second atom of a bond
 /// (first atom implicitly uses identity operation 1_555).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct SymOp {
     /// Symmetry operation index (1-based, 0 = no symmetry)
     pub op: u8,
@@ -218,7 +220,7 @@ impl SymOp {
 ///
 /// Represents a chemical bond between two atoms.
 /// By convention, `atom1 < atom2` (indices are ordered).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bond {
     /// Index of the first atom (always atom1 < atom2)
     pub atom1: AtomIndex,

@@ -4,6 +4,7 @@
 //! atomic numbers, symbols, names, VdW radii, and atomic masses.
 
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::OnceLock;
 
@@ -12,7 +13,7 @@ use std::sync::OnceLock;
 /// Elements are represented by their atomic number, with special handling
 /// for the "lonepair" pseudo-element (atomic number 0) used in some
 /// molecular modeling contexts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Element {
     /// Lone pair / pseudo-atom (atomic number 0)

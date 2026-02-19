@@ -4,6 +4,7 @@
 //! They propagate visibility and transforms to their children.
 
 use lin_alg::f32::Vec3;
+use serde::{Deserialize, Serialize};
 
 use super::{Object, ObjectState, ObjectType};
 
@@ -14,7 +15,7 @@ use super::{Object, ObjectState, ObjectType};
 /// - Enable/disable all children recursively
 /// - Compute the combined bounding box of children
 /// - Be expanded/collapsed in the UI
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupObject {
     /// Group name
     name: String,

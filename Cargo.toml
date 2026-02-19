@@ -12,6 +12,7 @@ members = [
     "crates/pymol-cmd",
     "crates/pymol-gui",
     "crates/pymol-algos",
+    "crates/pymol-session",
 ]
 # pymol-python requires maturin to build (use: cd crates/pymol-python && maturin build)
 exclude = ["crates/pymol-python"]
@@ -36,9 +37,10 @@ pymol-scene = { path = "crates/pymol-scene" }
 pymol-cmd = { path = "crates/pymol-cmd" }
 pymol-gui = { path = "crates/pymol-gui" }
 pymol-algos = { path = "crates/pymol-algos" }
+pymol-session = { path = "crates/pymol-session" }
 
 # External dependencies
-bitflags = "2"
+bitflags = { version = "2", features = ["serde"] }
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
 wgpu = "27"
 winit = "0.30.12"
@@ -48,8 +50,8 @@ log = "0.4"
 env_logger = "0.11"
 bytemuck = { version = "1", features = ["derive"] }
 parking_lot = "0.12"
-ahash = "0.8"
-smallvec = "1"
+ahash = { version = "0.8", features = ["serde"] }
+smallvec = { version = "1", features = ["serde"] }
 memmap2 = "0.9"
 flate2 = "1"
 rayon = "1"
@@ -59,6 +61,8 @@ rustyline = "17"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pollster = "0.4"
 shellexpand = "3"
+serde = { version = "1", features = ["derive", "rc"] }
+rmp-serde = "1"
 
 # egui integration
 egui = "0.33"

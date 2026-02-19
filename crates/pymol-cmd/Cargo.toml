@@ -21,6 +21,7 @@ pymol-settings = { workspace = true }
 pymol-mol = { workspace = true }
 pymol-color = { workspace = true }
 pymol-algos = { workspace = true }
+pymol-session = { workspace = true }
 
 # External dependencies
 nom = { workspace = true }

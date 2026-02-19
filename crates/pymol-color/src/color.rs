@@ -1,7 +1,9 @@
 //! Core color types
 
+use serde::{Deserialize, Serialize};
+
 /// An RGB color with values in the range [0.0, 1.0]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
@@ -97,7 +99,7 @@ impl From<Color> for [f32; 3] {
 }
 
 /// A color index referencing either a named color or a custom color
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ColorIndex {
     /// Index into the named color table
     Named(u32),

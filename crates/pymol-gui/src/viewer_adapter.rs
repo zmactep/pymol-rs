@@ -56,12 +56,22 @@ impl<'a> ViewerLike for ViewerAdapter<'a> {
     fn selections(&self) -> &SelectionManager { &self.state.selections }
     fn selections_mut(&mut self) -> &mut SelectionManager { &mut self.state.selections }
     fn named_colors(&self) -> &NamedColors { &self.state.named_colors }
+    fn named_colors_mut(&mut self) -> &mut NamedColors { &mut self.state.named_colors }
     fn clear_color(&self) -> [f32; 3] { self.state.clear_color }
     fn set_clear_color(&mut self, color: [f32; 3]) { self.state.clear_color = color; }
     fn raytraced_image_ref(&self) -> Option<&RaytracedImage> { self.state.raytraced_image.as_ref() }
     fn set_raytraced_image_internal(&mut self, image: Option<RaytracedImage>) { self.state.raytraced_image = image; }
 
     fn request_redraw(&mut self) {
+        *self.needs_redraw = true;
+    }
+
+    fn session(&self) -> &Session { self.state }
+
+    fn replace_session(&mut self, session: Session) {
+        *self.state = session;
+        // Mark all objects dirty so representations rebuild
+        self.state.registry.mark_all_dirty();
         *self.needs_redraw = true;
     }
 

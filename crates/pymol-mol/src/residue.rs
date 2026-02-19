@@ -4,6 +4,8 @@
 //! Since PyMOL stores residue/chain information inline in atoms rather than
 //! as separate structures, this module provides view types for convenient access.
 
+use serde::{Deserialize, Serialize};
+
 use crate::atom::Atom;
 use crate::index::AtomIndex;
 use std::ops::Range;
@@ -14,7 +16,7 @@ pub use crate::iterator::{ChainIterator, ResidueIterator};
 /// Key for uniquely identifying a residue within a molecule
 ///
 /// A residue is uniquely identified by its chain, name, number, and insertion code.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResidueKey {
     /// Chain identifier
     pub chain: String,

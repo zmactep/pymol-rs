@@ -8,6 +8,7 @@ use bitflags::bitflags;
 use pymol_color::ColorIndex;
 use pymol_mol::RepMask;
 use pymol_settings::UniqueId;
+use serde::{Deserialize, Serialize};
 
 use crate::camera::{Camera, SceneView};
 use crate::error::{SceneError, SceneResult};
@@ -15,7 +16,7 @@ use crate::object::{DirtyFlags, ObjectRegistry, ObjectType};
 
 bitflags! {
     /// Flags indicating what to store in a scene
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct SceneStoreMask: u32 {
         /// Store camera view
         const VIEW = 0x01;
@@ -41,7 +42,7 @@ impl Default for SceneStoreMask {
 }
 
 /// Per-atom stored properties in a scene
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneAtomData {
     /// Atom color
     pub color: ColorIndex,
@@ -50,7 +51,7 @@ pub struct SceneAtomData {
 }
 
 /// Per-atom stored properties within an object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenePerAtomData {
     /// Atom color (i32 matching Atom.color)
     pub color: i32,
@@ -59,7 +60,7 @@ pub struct ScenePerAtomData {
 }
 
 /// Per-object stored properties in a scene
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneObjectData {
     /// Object enabled state
     pub enabled: bool,
@@ -78,7 +79,7 @@ pub struct SceneObjectData {
 ///
 /// A scene captures the visualization state at a particular moment,
 /// including camera position, object visibility, colors, and representations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scene {
     /// Scene name/key
     pub name: String,
@@ -237,7 +238,7 @@ impl Scene {
 }
 
 /// Scene manager for storing and recalling named scenes
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SceneManager {
     /// Stored scenes by name
     scenes: AHashMap<String, Scene>,

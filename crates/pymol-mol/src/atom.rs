@@ -8,6 +8,8 @@
 //! - [`AtomRepresentation`] - Display/visualization settings
 //! - [`Atom`] - Core identity and physical/chemical properties
 
+use serde::{Deserialize, Serialize};
+
 use crate::element::Element;
 use crate::flags::{AtomFlags, AtomGeometry, Chirality, Stereo};
 use crate::residue::ResidueKey;
@@ -16,7 +18,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 /// Representation visibility flags
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct RepMask(pub u32);
 
 impl RepMask {
@@ -25,23 +27,25 @@ impl RepMask {
     /// All representations visible
     pub const ALL: RepMask = RepMask(u32::MAX);
 
-    // Representation bit positions (matching PyMOL's cRepCyl, cRepSphere, etc.)
-    /// Lines representation
-    pub const LINES: RepMask = RepMask(1 << 0);
-    /// Spheres representation
+    // Representation bit positions matching PyMOL's C enum order:
+    // cRepCyl=0, cRepSphere=1, cRepSurface=2, cRepLabel=3,
+    // cRepNonbondedSphere=4, cRepCartoon=5, cRepRibbon=6, cRepLine=7
+    /// Sticks (cylinders) representation — PyMOL cRepCyl
+    pub const STICKS: RepMask = RepMask(1 << 0);
+    /// Spheres representation — PyMOL cRepSphere
     pub const SPHERES: RepMask = RepMask(1 << 1);
-    /// Surface representation
+    /// Surface representation — PyMOL cRepSurface
     pub const SURFACE: RepMask = RepMask(1 << 2);
-    /// Labels representation
+    /// Labels representation — PyMOL cRepLabel
     pub const LABELS: RepMask = RepMask(1 << 3);
-    /// Non-bonded spheres representation
+    /// Non-bonded spheres representation — PyMOL cRepNonbondedSphere
     pub const NONBONDED: RepMask = RepMask(1 << 4);
-    /// Cartoon representation
+    /// Cartoon representation — PyMOL cRepCartoon
     pub const CARTOON: RepMask = RepMask(1 << 5);
-    /// Ribbon representation
+    /// Ribbon representation — PyMOL cRepRibbon
     pub const RIBBON: RepMask = RepMask(1 << 6);
-    /// Sticks representation
-    pub const STICKS: RepMask = RepMask(1 << 7);
+    /// Lines representation — PyMOL cRepLine
+    pub const LINES: RepMask = RepMask(1 << 7);
     /// Mesh representation
     pub const MESH: RepMask = RepMask(1 << 8);
     /// Dots representation
@@ -104,7 +108,7 @@ pub const COLOR_UNSET: i32 = i32::MIN;
 /// Contains the base color index and optional per-representation color overrides.
 /// When a representation-specific color is `COLOR_UNSET`, the base color is used instead.
 /// Uses sentinel values instead of `Option<i32>` for memory efficiency (4 bytes vs 8 bytes per field).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AtomColors {
     /// Base color index (resolved via pymol-color crate)
     /// -1 = by element, -2 = by chain, -3 = by ss, -4 = by b-factor
@@ -235,7 +239,7 @@ impl AtomColors {
 /// assert_eq!(residue.chain, "A");
 /// assert_eq!(residue.resn, "ALA");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AtomResidue {
     /// Identity key (chain, resn, resv, inscode) - used for lookups
     pub key: ResidueKey,
@@ -288,7 +292,7 @@ impl AtomResidue {
 /// Per-atom state flags for chemical properties and bonding
 ///
 /// Contains flags that describe the atom's chemical state and classification.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AtomState {
     /// Atom flags (protein, solvent, organic, etc.)
     pub flags: AtomFlags,
@@ -310,7 +314,7 @@ pub struct AtomState {
 ///
 /// Contains all settings related to how the atom is displayed,
 /// including colors, visibility, labels, and per-atom settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AtomRepresentation {
     /// Color settings for different representations
     pub colors: AtomColors,
@@ -378,7 +382,7 @@ impl Default for AtomRepresentation {
 /// // Access residue info via Deref
 /// assert_eq!(atom.residue.resn, "");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Atom {
     // =========================================================================
     // Identity

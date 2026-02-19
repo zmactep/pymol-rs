@@ -9,3 +9,4 @@ license.workspace = true
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 ahash = { workspace = true }
+serde = { workspace = true }

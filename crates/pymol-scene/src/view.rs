@@ -7,6 +7,7 @@
 //! rotation, position, origin, clipping planes, and FOV.
 
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 
 use crate::camera::{Camera, SceneView};
 use crate::error::{SceneError, SceneResult};
@@ -15,7 +16,7 @@ use crate::error::{SceneError, SceneResult};
 ///
 /// Views are simpler than scenes - they only store the camera state,
 /// not colors, representations, or object visibility.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ViewManager {
     /// Stored views by name
     views: AHashMap<String, SceneView>,

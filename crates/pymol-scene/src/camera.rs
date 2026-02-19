@@ -6,10 +6,11 @@
 //! - [`CameraAnimation`]: Smooth transitions between views
 
 use lin_alg::f32::{Mat4, Vec3};
+use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
 
 /// Camera projection mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Projection {
     /// Perspective projection with depth foreshortening
     #[default]
@@ -27,13 +28,16 @@ pub enum Projection {
 /// - [22]: Front clipping plane distance
 /// - [23]: Back clipping plane distance
 /// - [24]: Field of view (degrees)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneView {
     /// Rotation matrix (model -> camera), 4x4 stored as column-major
+    #[serde(with = "crate::serde_helpers::mat4_serde")]
     pub rotation: Mat4,
     /// Camera position relative to origin (distance along z-axis typically)
+    #[serde(with = "crate::serde_helpers::vec3_serde")]
     pub position: Vec3,
     /// Origin (center of rotation in model space)
+    #[serde(with = "crate::serde_helpers::vec3_serde")]
     pub origin: Vec3,
     /// Front clipping plane distance
     pub clip_front: f32,
@@ -169,7 +173,7 @@ impl SceneView {
 }
 
 /// Animation state for smooth camera transitions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CameraAnimation {
     /// Starting view
     pub start: SceneView,
@@ -233,7 +237,7 @@ impl CameraAnimation {
 }
 
 /// Interactive camera controller
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Camera {
     /// Current view state
     view: SceneView,

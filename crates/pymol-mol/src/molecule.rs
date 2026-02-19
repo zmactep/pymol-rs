@@ -3,6 +3,8 @@
 //! Provides the `ObjectMolecule` struct which is the main container for molecular data.
 //! It holds atoms, bonds, coordinate sets, and settings.
 
+use serde::{Deserialize, Serialize};
+
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_settings::{GlobalSettings, UniqueSettings};
 use smallvec::SmallVec;
@@ -85,7 +87,7 @@ fn get_protein_bond_order(resn: &str, name1: &str, name2: &str) -> BondOrder {
 /// - Bond connectivity
 /// - Coordinates for one or more states (conformations)
 /// - Per-object and per-atom/bond settings
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectMolecule {
     // =========================================================================
     // Core Data
@@ -104,6 +106,8 @@ pub struct ObjectMolecule {
     // =========================================================================
     /// Map from atom index to list of bond indices involving that atom
     /// Uses SmallVec to avoid heap allocation for atoms with 4 or fewer bonds (common case)
+    /// Skipped during serialization — rebuilt from bonds via `rebuild_atom_bonds()`.
+    #[serde(skip)]
     atom_bonds: Vec<SmallVec<[BondIndex; 4]>>,
 
     // =========================================================================
@@ -165,6 +169,23 @@ impl ObjectMolecule {
         ObjectMolecule {
             name: name.into(),
             ..Default::default()
+        }
+    }
+
+    /// Rebuild the `atom_bonds` lookup table from the current bond list.
+    ///
+    /// This must be called after deserialization since `atom_bonds` is skipped
+    /// during serialization (it is derived data).
+    pub fn rebuild_atom_bonds(&mut self) {
+        self.atom_bonds = vec![SmallVec::new(); self.atoms.len()];
+        for (bi, bond) in self.bonds.iter().enumerate() {
+            let bond_idx = BondIndex(bi as u32);
+            if bond.atom1.as_usize() < self.atoms.len() {
+                self.atom_bonds[bond.atom1.as_usize()].push(bond_idx);
+            }
+            if bond.atom2.as_usize() < self.atoms.len() {
+                self.atom_bonds[bond.atom2.as_usize()].push(bond_idx);
+            }
         }
     }
 

@@ -1,9 +1,11 @@
 //! Color ramps for continuous coloring
 
+use serde::{Deserialize, Serialize};
+
 use crate::Color;
 
 /// Type of color ramp interpolation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RampType {
     /// Linear interpolation in RGB space
     Linear,
@@ -12,7 +14,7 @@ pub enum RampType {
 }
 
 /// A color ramp for mapping values to colors
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColorRamp {
     /// Name of the ramp
     pub name: String,

@@ -5,11 +5,12 @@
 
 use ahash::AHashMap;
 use pymol_select::{EvalContext, SelectionResult};
+use serde::{Deserialize, Serialize};
 
 use crate::object::ObjectRegistry;
 
 /// Entry for a named selection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectionEntry {
     /// The selection expression
     pub expression: String,
@@ -35,7 +36,7 @@ impl SelectionEntry {
 /// Manager for named selections
 ///
 /// Handles storage, retrieval, and evaluation of named selection expressions.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SelectionManager {
     /// Named selections (name -> entry with expression and visibility)
     selections: AHashMap<String, SelectionEntry>,

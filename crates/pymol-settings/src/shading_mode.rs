@@ -3,13 +3,15 @@
 //! Each shading mode defines its own lighting pipeline and parameters,
 //! ensuring that switching between modes has no side effects.
 
+use serde::{Deserialize, Serialize};
+
 use crate::store::GlobalSettings;
 
 /// Available shading modes.
 ///
 /// Each mode reads only its own set of parameters — Classic ignores
 /// skripkin_*, Skripkin ignores light_count/ambient/direct/reflect/specular.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(i32)]
 pub enum ShadingMode {
     /// Classic PyMOL lighting: multi-light, ambient + direct + reflect + specular.

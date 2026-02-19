@@ -5,15 +5,17 @@
 
 use lin_alg::f32::Vec3;
 use pymol_render::{LineRep, LineVertex, RenderContext, Representation};
+use serde::{Deserialize, Serialize};
 
 use super::{Object, ObjectState, ObjectType};
 
 /// A single label entry
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Label {
     /// Label text
     pub text: String,
     /// Position in world space
+    #[serde(with = "crate::serde_helpers::vec3_serde")]
     pub position: Vec3,
     /// Text color (RGBA)
     pub color: [f32; 4],
@@ -94,7 +96,7 @@ impl Label {
 }
 
 /// Label anchor point
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LabelAnchor {
     /// Anchor at bottom-left of text
     #[default]
@@ -121,6 +123,7 @@ pub enum LabelAnchor {
 ///
 /// LabelObject stores multiple labels that can be rendered together.
 /// Labels can be atom-attached (following atom positions) or free-floating.
+#[derive(Serialize, Deserialize)]
 pub struct LabelObject {
     /// Object name
     name: String,
@@ -131,9 +134,15 @@ pub struct LabelObject {
     /// Default anchor point
     anchor: LabelAnchor,
     /// Cached line representation for connectors
+    #[serde(skip)]
     connector_lines: Option<LineRep>,
     /// Whether cache needs rebuilding
+    #[serde(skip, default = "default_dirty_true")]
     dirty: bool,
+}
+
+fn default_dirty_true() -> bool {
+    true
 }
 
 impl LabelObject {

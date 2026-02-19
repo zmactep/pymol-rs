@@ -28,3 +28,4 @@ bitflags.workspace = true
 parking_lot.workspace = true
 pollster = "0.4"
 image.workspace = true
+serde = { workspace = true }

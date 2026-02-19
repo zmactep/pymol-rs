@@ -2,12 +2,13 @@
 //!
 //! Provides secondary structure classification for protein residues.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Secondary structure type for protein residues
 ///
 /// Based on DSSP classification used in PDB files and PyMOL.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SecondaryStructure {
     /// Loop, turn, or coil (no regular secondary structure)

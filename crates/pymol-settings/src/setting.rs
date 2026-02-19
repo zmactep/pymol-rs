@@ -1,9 +1,10 @@
 //! Setting definitions and value types
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Type of a setting value
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SettingType {
     /// Unused/placeholder setting
@@ -42,7 +43,7 @@ impl fmt::Display for SettingType {
 /// - `global` < `object` < `object-state`
 /// - `object-state` < `atom` < `atom-state`
 /// - `object-state` < `bond` < `bond-state`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SettingLevel {
     /// Deprecated/unused settings
@@ -106,7 +107,7 @@ impl fmt::Display for SettingLevel {
 }
 
 /// A setting value
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SettingValue {
     /// Boolean value
     Bool(bool),
@@ -259,7 +260,7 @@ impl From<&str> for SettingValue {
 }
 
 /// Metadata for a setting definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Setting {
     /// Unique identifier for the setting (stable across versions for session compatibility)
     pub id: u16,

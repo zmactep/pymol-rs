@@ -25,6 +25,7 @@ use lin_alg::f32::{Mat4, Vec3};
 use pymol_color::ColorIndex;
 use pymol_mol::RepMask;
 use pymol_settings::GlobalSettings;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{SceneError, SceneResult};
 
@@ -32,7 +33,7 @@ use crate::error::{SceneError, SceneResult};
 ///
 /// Identifies the type of a scene object for type-safe downcasting and
 /// type-specific operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ObjectType {
     /// Molecular object (atoms, bonds, coordinates)
     Molecule,
@@ -73,7 +74,7 @@ impl std::fmt::Display for ObjectType {
 /// Per-object visual state
 ///
 /// Contains the common visual properties shared by all object types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectState {
     /// Whether the object is enabled/visible
     pub enabled: bool,
@@ -84,6 +85,7 @@ pub struct ObjectState {
     /// 4x4 transformation matrix (TTT in PyMOL)
     ///
     /// This matrix is applied to all coordinates when rendering.
+    #[serde(with = "crate::serde_helpers::mat4_serde")]
     pub transform: Mat4,
 }
 
@@ -219,6 +221,10 @@ pub trait Object: Send + Sync {
 /// Object registry for managing named objects
 ///
 /// The registry stores all scene objects by name and maintains render order.
+///
+/// Note: The `objects` field contains trait objects (`Box<dyn Object>`) which
+/// cannot be directly serialized. Use [`ObjectRegistrySnapshot`] for
+/// serialization of the object data.
 pub struct ObjectRegistry {
     /// Objects stored by name
     objects: AHashMap<String, Box<dyn Object>>,
@@ -228,6 +234,126 @@ pub struct ObjectRegistry {
     next_id: u32,
     /// Generation counter, incremented on structural changes (add/remove/rename)
     generation: u64,
+}
+
+/// Serializable snapshot of the object registry.
+///
+/// Captures molecule objects and group objects (the two types that carry
+/// domain data). Render-only objects (surface, cgo, label, map) are
+/// omitted because they are transient GPU caches.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObjectRegistrySnapshot {
+    /// Molecule objects (name -> data)
+    pub molecules: Vec<(String, MoleculeObjectSnapshot)>,
+    /// Group objects (name -> data)
+    pub groups: Vec<(String, GroupObject)>,
+    /// Render order
+    pub render_order: Vec<String>,
+    /// Object states for all objects (name -> state)
+    pub object_states: Vec<(String, ObjectState)>,
+    /// Next id counter
+    pub next_id: u32,
+    /// Generation counter
+    pub generation: u64,
+}
+
+/// Serializable snapshot of a MoleculeObject (without render caches).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoleculeObjectSnapshot {
+    /// The underlying molecular data
+    pub molecule: pymol_mol::ObjectMolecule,
+    /// Visual state
+    pub state: ObjectState,
+    /// Current coordinate state index being displayed
+    pub display_state: usize,
+    /// Per-object settings override
+    pub settings: Option<GlobalSettings>,
+    /// Surface quality
+    pub surface_quality: i32,
+}
+
+impl ObjectRegistry {
+    /// Create a serializable snapshot of this registry.
+    pub fn to_snapshot(&self) -> ObjectRegistrySnapshot {
+        let mut molecules = Vec::new();
+        let mut groups = Vec::new();
+        let mut object_states = Vec::new();
+
+        for name in &self.render_order {
+            if let Some(obj) = self.objects.get(name) {
+                object_states.push((name.clone(), obj.state().clone()));
+                match obj.object_type() {
+                    ObjectType::Molecule => {
+                        if let Some(mol_obj) = self.get_molecule(name) {
+                            molecules.push((
+                                name.clone(),
+                                MoleculeObjectSnapshot {
+                                    molecule: mol_obj.molecule().clone(),
+                                    state: mol_obj.state().clone(),
+                                    display_state: mol_obj.display_state(),
+                                    settings: mol_obj.settings().cloned(),
+                                    surface_quality: mol_obj.surface_quality(),
+                                },
+                            ));
+                        }
+                    }
+                    ObjectType::Group => {
+                        if let Some(group) = self.get_group(name) {
+                            groups.push((name.clone(), group.clone()));
+                        }
+                    }
+                    _ => {
+                        // Surface, CGO, Label, Map objects are transient
+                    }
+                }
+            }
+        }
+
+        ObjectRegistrySnapshot {
+            molecules,
+            groups,
+            render_order: self.render_order.clone(),
+            object_states,
+            next_id: self.next_id,
+            generation: self.generation,
+        }
+    }
+
+    /// Restore from a serializable snapshot.
+    pub fn from_snapshot(snapshot: ObjectRegistrySnapshot) -> Self {
+        let mut registry = Self::new();
+        registry.next_id = snapshot.next_id;
+        registry.generation = snapshot.generation;
+
+        // Add molecules (use from_raw to preserve per-atom visible_reps)
+        for (name, snap) in snapshot.molecules {
+            let mut mol_obj = MoleculeObject::from_raw(snap.molecule);
+            mol_obj.molecule_mut().name = name.clone();
+            *mol_obj.state_mut() = snap.state;
+            if snap.display_state > 0 {
+                mol_obj.set_display_state(snap.display_state);
+            }
+            if let Some(settings) = snap.settings {
+                *mol_obj.get_or_create_settings() = settings;
+            }
+            mol_obj.set_surface_quality(snap.surface_quality);
+            registry.objects.insert(name, Box::new(mol_obj));
+        }
+
+        // Add groups
+        for (name, group) in snapshot.groups {
+            registry.objects.insert(name, Box::new(group));
+        }
+
+        // Restore render order (only names that exist)
+        registry.render_order = snapshot
+            .render_order
+            .into_iter()
+            .filter(|n| registry.objects.contains_key(n))
+            .collect();
+
+        registry
+    }
 }
 
 impl Default for ObjectRegistry {
@@ -262,10 +388,29 @@ impl ObjectRegistry {
         self.generation
     }
 
+    /// Mark all molecule objects as fully dirty so representations rebuild.
+    pub fn mark_all_dirty(&mut self) {
+        self.generation += 1;
+        let names: Vec<String> = self.names().map(|s| s.to_string()).collect();
+        for name in &names {
+            if let Some(mol) = self.get_molecule_mut(name) {
+                mol.invalidate(DirtyFlags::ALL);
+            }
+        }
+    }
+
     /// Add an object to the registry
     ///
     /// Returns the name used for the object. If an object with the same name
     /// already exists, it will be replaced.
+    /// Insert a pre-boxed object by name.
+    pub fn insert_boxed(&mut self, name: &str, obj: Box<dyn Object>) {
+        self.render_order.retain(|n| n != name);
+        self.render_order.push(name.to_string());
+        self.objects.insert(name.to_string(), obj);
+        self.generation += 1;
+    }
+
     pub fn add<O: Object + 'static>(&mut self, obj: O) -> &str {
         let name = obj.name().to_string();
         self.render_order.retain(|n| n != &name);

@@ -5,6 +5,7 @@
 use bitflags::bitflags;
 use lin_alg::f32::Vec3;
 use pymol_mol::{ObjectMolecule, RepMask};
+use serde::{Deserialize, Serialize};
 use pymol_render::{
     CartoonRep, ColorResolver, DotRep, LineRep, RenderContext, Representation, RibbonRep,
     SelectionIndicatorRep, SphereRep, StickRep, SurfaceRep, WireSurfaceRep,
@@ -16,7 +17,7 @@ use super::{Object, ObjectState, ObjectType};
 
 bitflags! {
     /// Flags indicating which aspects of a molecule need rebuilding
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct DirtyFlags: u32 {
         /// Coordinates have changed
         const COORDS = 0x01;
@@ -120,6 +121,22 @@ impl MoleculeObject {
         Self {
             molecule,
             state,
+            display_state: 0,
+            representations: RepresentationCache::default(),
+            dirty: DirtyFlags::ALL,
+            surface_quality: 0,
+            settings: None,
+        }
+    }
+
+    /// Restore a molecule object from a snapshot without resetting per-atom representations.
+    ///
+    /// Unlike `new()`, this preserves all atom-level state (visible_reps, colors, etc.)
+    /// exactly as stored in the molecule.
+    pub fn from_raw(molecule: ObjectMolecule) -> Self {
+        Self {
+            molecule,
+            state: ObjectState::default(),
             display_state: 0,
             representations: RepresentationCache::default(),
             dirty: DirtyFlags::ALL,

@@ -4,13 +4,14 @@
 //! Supports view interpolation, object state changes, and command execution.
 
 use ahash::AHashMap;
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 use crate::camera::SceneView;
 use crate::quat::{self, Quat};
 
 /// Movie loop mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LoopMode {
     /// Play once and stop
     #[default]
@@ -22,7 +23,7 @@ pub enum LoopMode {
 }
 
 /// Playback direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlayDirection {
     Forward,
     Backward,
@@ -35,16 +36,17 @@ impl Default for PlayDirection {
 }
 
 /// Object-specific keyframe data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectKeyframe {
     /// Object transform matrix
+    #[serde(with = "crate::serde_helpers::opt_mat4_serde")]
     pub transform: Option<lin_alg::f32::Mat4>,
     /// Coordinate set state
     pub state: Option<usize>,
 }
 
 /// A single movie frame
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MovieFrame {
     /// Camera view for this frame (if stored)
     pub view: Option<SceneView>,
@@ -100,7 +102,7 @@ impl MovieFrame {
 }
 
 /// Movie playback state
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaybackState {
     /// Movie is stopped at a specific frame
     Stopped,
@@ -120,7 +122,7 @@ impl Default for PlaybackState {
 ///
 /// Manages a sequence of frames with views, object states, and commands.
 /// Supports various playback modes including looping and swing (ping-pong).
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Movie {
     /// Movie frames
     frames: Vec<MovieFrame>,
@@ -135,8 +137,10 @@ pub struct Movie {
     /// Frames per second
     fps: f32,
     /// Frame delay (derived from fps)
+    #[serde(skip, default = "default_frame_delay")]
     frame_delay: Duration,
     /// Time of last frame advance
+    #[serde(skip)]
     last_frame_time: Option<Instant>,
     /// Whether to interpolate views between keyframes
     interpolate: bool,
@@ -147,7 +151,12 @@ pub struct Movie {
     /// Whether rock mode is enabled
     rock_enabled: bool,
     /// Precomputed interpolated views for all frames between keyframes
+    #[serde(skip)]
     precomputed_views: Vec<Option<SceneView>>,
+}
+
+fn default_frame_delay() -> Duration {
+    Duration::from_secs_f32(1.0 / 30.0)
 }
 
 impl Default for Movie {

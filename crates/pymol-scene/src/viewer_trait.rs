@@ -11,6 +11,7 @@
 use std::path::Path;
 
 use pymol_color::NamedColors;
+use serde::{Deserialize, Serialize};
 use pymol_settings::GlobalSettings;
 
 use crate::camera::Camera;
@@ -18,13 +19,14 @@ use crate::movie::{LoopMode, Movie};
 use crate::object::ObjectRegistry;
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
+use crate::session::Session;
 use crate::view::ViewManager;
 
 /// Stored raytraced image for display in the viewport
 ///
 /// When `ray` is called without a filename, the raytraced image is stored
 /// here for display. It persists until camera or scene changes occur.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RaytracedImage {
     /// RGBA image data, row-major, top-to-bottom
     pub data: Vec<u8>,
@@ -70,6 +72,14 @@ pub trait ViewerLike {
     /// Request a redraw
     fn request_redraw(&mut self);
 
+    /// Get a reference to the full session
+    fn session(&self) -> &Session;
+
+    /// Replace the entire session (for loading .pse/.prs files)
+    ///
+    /// Implementors should mark all objects as dirty so representations rebuild.
+    fn replace_session(&mut self, session: Session);
+
     // =========================================================================
     // Required Accessors — Sub-managers
     // =========================================================================
@@ -100,6 +110,8 @@ pub trait ViewerLike {
 
     /// Get a reference to the named colors table
     fn named_colors(&self) -> &NamedColors;
+    /// Get a mutable reference to the named colors table
+    fn named_colors_mut(&mut self) -> &mut NamedColors;
 
     // =========================================================================
     // Required Accessors — Simple State

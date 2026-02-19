@@ -1,10 +1,12 @@
 //! Named color registry
 
+use serde::{Deserialize, Serialize};
+
 use ahash::AHashMap;
 use crate::Color;
 
 /// Registry of named colors
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NamedColors {
     colors: Vec<Color>,
     by_name: AHashMap<String, u32>,
@@ -126,6 +128,22 @@ impl NamedColors {
         let mut names: Vec<&str> = self.by_name.keys().map(|s| s.as_str()).collect();
         names.sort();
         names
+    }
+
+    /// Merge colors from another registry, registering any that don't exist here.
+    /// Returns a mapping from old indices to new indices.
+    pub fn merge_from(&mut self, other: &NamedColors) -> AHashMap<u32, u32> {
+        let mut index_map = AHashMap::new();
+        for (name, &old_idx) in &other.by_name {
+            let color = other.colors[old_idx as usize];
+            let new_idx = if let Some(&existing) = self.by_name.get(name) {
+                existing
+            } else {
+                self.register(name, color)
+            };
+            index_map.insert(old_idx, new_idx);
+        }
+        index_map
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, Color)> + '_ {

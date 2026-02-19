@@ -1,5 +1,7 @@
 //! Setting storage and retrieval with hierarchical inheritance
 
+use serde::{Deserialize, Serialize};
+
 use ahash::AHashMap;
 use parking_lot::RwLock;
 
@@ -13,7 +15,7 @@ use crate::setting::{SettingLevel, SettingValue};
 
 /// Global settings store - holds session-wide settings
 /// Uses sparse HashMap storage for memory efficiency when most settings use defaults
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GlobalSettings {
     /// Current values (only stores non-default values)
     values: AHashMap<u16, SettingValue>,
@@ -231,7 +233,7 @@ fn is_session_blacklisted(id: u16) -> bool {
 }
 
 /// Serialized setting entry
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializedSetting {
     pub id: u16,
     pub value: SettingValue,
@@ -324,7 +326,7 @@ impl UniqueSettings {
 pub type UniqueId = i32;
 
 /// Entry in the unique settings storage
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct UniqueEntry {
     setting_id: u16,
     value: SettingValue,
@@ -332,7 +334,7 @@ struct UniqueEntry {
 
 /// Storage for per-atom/bond settings using a sparse representation
 /// Uses a linked-list style approach similar to PyMOL for memory efficiency
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct UniqueSettings {
     /// Map from unique_id to first entry index
     id_to_offset: AHashMap<UniqueId, usize>,

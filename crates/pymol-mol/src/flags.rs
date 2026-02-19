@@ -3,12 +3,13 @@
 //! Provides bitflags for atom properties and state.
 
 use bitflags::bitflags;
+use serde::{Deserialize, Serialize};
 
 bitflags! {
     /// Atom flags indicating various atom properties and states
     ///
     /// These flags are used for selection, display, and manipulation of atoms.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
     pub struct AtomFlags: u32 {
         /// Atom is in focus (for sculpting)
         const FOCUS = 0x00000001;
@@ -83,7 +84,7 @@ impl AtomFlags {
 }
 
 /// Atom geometry describing the bonding arrangement
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(i8)]
 pub enum AtomGeometry {
     /// No specific geometry
@@ -129,7 +130,7 @@ impl AtomGeometry {
 }
 
 /// Atom stereochemistry
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Stereo {
     /// No stereochemistry specified
@@ -156,7 +157,7 @@ impl Stereo {
 }
 
 /// Atom chirality (R/S nomenclature)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Chirality {
     /// No chirality specified

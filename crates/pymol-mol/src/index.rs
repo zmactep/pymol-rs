@@ -3,6 +3,7 @@
 //! Provides newtype wrappers around indices to prevent accidentally mixing
 //! atom indices with bond indices or coordinate set indices.
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Invalid index marker value
@@ -16,7 +17,7 @@ macro_rules! define_index {
         $name:ident, $debug_name:literal
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
         #[repr(transparent)]
         pub struct $name(pub u32);
 

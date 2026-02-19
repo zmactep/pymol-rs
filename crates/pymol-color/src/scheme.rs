@@ -1,9 +1,11 @@
 //! Coloring schemes for molecular visualization
 
+use serde::{Deserialize, Serialize};
+
 use crate::Color;
 
 /// Color scheme for coloring molecules
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColorScheme {
     /// Color by element type (CPK coloring)
     Element,
@@ -24,9 +26,33 @@ pub enum ColorScheme {
 }
 
 /// Element-based coloring (CPK colors)
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ElementColors {
+    #[serde(
+        serialize_with = "serialize_color_array",
+        deserialize_with = "deserialize_color_array"
+    )]
     colors: [Color; 119], // Elements 0-118
+}
+
+fn serialize_color_array<S: serde::Serializer>(
+    colors: &[Color; 119],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = serializer.serialize_seq(Some(119))?;
+    for c in colors.iter() {
+        seq.serialize_element(c)?;
+    }
+    seq.end()
+}
+
+fn deserialize_color_array<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[Color; 119], D::Error> {
+    let v: Vec<Color> = Vec::deserialize(deserializer)?;
+    v.try_into()
+        .map_err(|v: Vec<Color>| serde::de::Error::custom(format!("expected 119 colors, got {}", v.len())))
 }
 
 impl ElementColors {
@@ -121,6 +147,7 @@ impl Default for ElementColors {
 }
 
 /// Chain-based coloring
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ChainColors;
 
 impl ChainColors {

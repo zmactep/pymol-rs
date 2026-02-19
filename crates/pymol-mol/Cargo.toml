@@ -14,3 +14,4 @@ thiserror = { workspace = true }
 bitflags = { workspace = true }
 ahash = { workspace = true }
 smallvec = { workspace = true }
+serde = { workspace = true }

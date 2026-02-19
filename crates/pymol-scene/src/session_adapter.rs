@@ -56,12 +56,22 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     fn selections(&self) -> &SelectionManager { &self.session.selections }
     fn selections_mut(&mut self) -> &mut SelectionManager { &mut self.session.selections }
     fn named_colors(&self) -> &NamedColors { &self.session.named_colors }
+    fn named_colors_mut(&mut self) -> &mut NamedColors { &mut self.session.named_colors }
     fn clear_color(&self) -> [f32; 3] { self.session.clear_color }
     fn set_clear_color(&mut self, color: [f32; 3]) { self.session.clear_color = color; }
     fn raytraced_image_ref(&self) -> Option<&RaytracedImage> { self.session.raytraced_image.as_ref() }
     fn set_raytraced_image_internal(&mut self, image: Option<RaytracedImage>) { self.session.raytraced_image = image; }
 
     fn request_redraw(&mut self) {
+        *self.needs_redraw = true;
+    }
+
+    fn session(&self) -> &Session { self.session }
+
+    fn replace_session(&mut self, session: Session) {
+        *self.session = session;
+        // Mark all objects dirty so representations rebuild
+        self.session.registry.mark_all_dirty();
         *self.needs_redraw = true;
     }
 

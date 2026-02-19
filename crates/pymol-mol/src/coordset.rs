@@ -3,6 +3,8 @@
 //! Provides the `CoordSet` struct for storing atomic coordinates in a molecular state.
 //! Multi-state molecules have multiple coordinate sets, one per state/frame.
 
+use serde::{Deserialize, Serialize};
+
 use crate::index::{AtomIndex, CoordIndex, INVALID_INDEX};
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_settings::GlobalSettings;
@@ -11,7 +13,7 @@ use pymol_settings::GlobalSettings;
 ///
 /// For memory efficiency, uses identity mapping when all atoms have coordinates
 /// (the common case), and sparse mapping only when some atoms are missing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 enum CoordMapping {
     /// Identity mapping: coord_idx == atom_idx for all indices
     /// No arrays needed - just need to know the count
@@ -73,7 +75,7 @@ impl<'a> Iterator for CoordAtomIter<'a> {
 impl<'a> ExactSizeIterator for CoordAtomIter<'a> {}
 
 /// Symmetry information for a coordinate set
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Symmetry {
     /// Space group name (e.g., "P 21 21 21")
     pub space_group: String,
@@ -115,7 +117,7 @@ impl Symmetry {
 /// Not all atoms in the molecule necessarily have coordinates in every
 /// coordinate set. The `mapping` field handles the atom-to-coordinate mapping,
 /// using an efficient identity mapping when all atoms have coordinates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoordSet {
     /// Flat array of coordinates (3 floats per atom: x, y, z)
     coords: Vec<f32>,

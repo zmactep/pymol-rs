@@ -33,6 +33,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.3.4",
  "once_cell",
+ "serde",
  "version_check",
  "zerocopy",
 ]
@@ -257,6 +258,9 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "bitvec"
@@ -2419,6 +2423,7 @@ dependencies = [
  "pymol-mol",
  "pymol-scene",
  "pymol-select",
+ "pymol-session",
  "pymol-settings",
  "shellexpand",
  "thiserror 2.0.18",
@@ -2429,6 +2434,7 @@ name = "pymol-color"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "serde",
  "thiserror 2.0.18",
 ]
 
@@ -2486,6 +2492,7 @@ dependencies = [
  "bitflags 2.10.0",
  "lin_alg",
  "pymol-settings",
+ "serde",
  "smallvec",
  "thiserror 2.0.18",
 ]
@@ -2544,6 +2551,7 @@ dependencies = [
  "pymol-render",
  "pymol-select",
  "pymol-settings",
+ "serde",
  "thiserror 2.0.18",
  "wgpu",
  "winit",
@@ -2563,11 +2571,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "pymol-session"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "flate2",
+ "lin_alg",
+ "log",
+ "pymol-color",
+ "pymol-mol",
+ "pymol-scene",
+ "pymol-settings",
+ "rmp-serde",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "pymol-settings"
 version = "0.1.0"
 dependencies = [
  "ahash",
  "parking_lot",
+ "serde",
  "thiserror 2.0.18",
 ]
 
@@ -2876,6 +2902,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3152,6 +3197,9 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "smithay-client-toolkit"
