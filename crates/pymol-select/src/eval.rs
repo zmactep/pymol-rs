@@ -80,6 +80,7 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
                 SecondaryStructure::Helix310 => "G",
                 SecondaryStructure::HelixPi => "I",
                 SecondaryStructure::Bend => "B",
+                SecondaryStructure::NucleicRibbon => "N",
             };
             pattern.matches(ss_str, false)
         }),

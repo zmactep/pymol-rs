@@ -446,9 +446,9 @@ pub fn generate_cartoon_mesh(
     let helix_taper_frames = 8usize;
 
     for (i, frame_meta) in frames.iter().enumerate() {
-        // Skip ALL sheet frames — they are rendered by generate_explicit_sheet().
+        // Skip ALL sheet/nucleic ribbon frames — they are rendered by generate_explicit_sheet().
         // No overlap: loop ends exactly at boundary, sheet starts exactly at boundary.
-        if frame_meta.ss_type == SecondaryStructure::Sheet && !settings.uniform_tube {
+        if frame_meta.ss_type.is_flat_ribbon() && !settings.uniform_tube {
             // Flush any pending segment before skipping
             if let Some(profile_type) = current_profile_type {
                 if !segment_ring_starts.is_empty() {
@@ -672,13 +672,21 @@ pub fn generate_cartoon_mesh(
         for &(start, end) in sheet_termini {
             generate_explicit_sheet(&mut vertices, &mut indices, frames, start, end, settings);
         }
+
+        // Generate nucleic ribbon geometry (flat sheet without arrow)
+        let nucleic_regions = find_nucleic_ribbon_regions(frames);
+        let mut no_arrow_settings = settings.clone();
+        no_arrow_settings.fancy_sheets = false;
+        for &(start, end) in &nucleic_regions {
+            generate_explicit_sheet(&mut vertices, &mut indices, frames, start, end, &no_arrow_settings);
+        }
     }
 
-    // Cap the ends (skip if the end frame is a sheet — explicit sheets have their own caps)
+    // Cap the ends (skip if the end frame is a flat ribbon — explicit sheets have their own caps)
     if frames.len() >= 2 {
-        let first_is_sheet = frames[0].ss_type == SecondaryStructure::Sheet && !settings.uniform_tube;
+        let first_is_sheet = frames[0].ss_type.is_flat_ribbon() && !settings.uniform_tube;
         let last_idx = frames.len() - 1;
-        let last_is_sheet = frames[last_idx].ss_type == SecondaryStructure::Sheet && !settings.uniform_tube;
+        let last_is_sheet = frames[last_idx].ss_type.is_flat_ribbon() && !settings.uniform_tube;
 
         if !first_is_sheet {
             cap_tube_end(&mut vertices, &mut indices, &frames[0], settings, true, false);
@@ -736,7 +744,7 @@ fn profile_for_ss(ss_type: SecondaryStructure, settings: &CartoonGeometrySetting
         } else {
             Profile::rectangle(settings.helix_height, settings.helix_width, settings.quality)
         }
-    } else if ss_type == SecondaryStructure::Sheet {
+    } else if ss_type == SecondaryStructure::Sheet || ss_type == SecondaryStructure::NucleicRibbon {
         Profile::flat_rectangle(settings.sheet_height, settings.sheet_width)
     } else {
         Profile::circle(settings.loop_radius, settings.quality)
@@ -1490,6 +1498,11 @@ pub fn find_sheet_termini(frames: &[FrameWithMetadata]) -> Vec<(usize, usize)> {
 /// Find helix region indices in a sequence of frames
 pub fn find_helix_regions(frames: &[FrameWithMetadata]) -> Vec<(usize, usize)> {
     find_ss_regions(frames, is_helix)
+}
+
+/// Find nucleic acid ribbon region indices in a sequence of frames
+pub fn find_nucleic_ribbon_regions(frames: &[FrameWithMetadata]) -> Vec<(usize, usize)> {
+    find_ss_regions(frames, |ss| ss == SecondaryStructure::NucleicRibbon)
 }
 
 /// Generate edge tube geometry for dumbbell helices (PyMOL-style)

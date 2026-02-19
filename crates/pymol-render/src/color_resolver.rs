@@ -152,6 +152,10 @@ impl<'a> ColorResolver<'a> {
                 // Sheet: yellow (PyMOL default)
                 Color::from_rgb8(255, 255, 0)
             }
+            SecondaryStructure::NucleicRibbon => {
+                // Nucleic acid ribbon: magenta
+                Color::from_rgb8(255, 0, 255)
+            }
             SecondaryStructure::Loop | SecondaryStructure::Turn | SecondaryStructure::Bend => {
                 // Loop/coil: green (PyMOL default)
                 Color::from_rgb8(0, 255, 0)
@@ -169,8 +173,13 @@ impl<'a> ColorResolver<'a> {
         let color_idx = atom.repr.colors.cartoon_or_base();
         let color = match color_idx {
             -1 => {
-                // Default: green for cartoon (when explicitly "by element" or default)
-                Color::new(0.0, 1.0, 0.0)
+                if atom.state.flags.contains(pymol_mol::AtomFlags::NUCLEIC) {
+                    // Default: magenta for nucleic acid cartoon
+                    Color::new(1.0, 0.0, 1.0)
+                } else {
+                    // Default: green for protein cartoon
+                    Color::new(0.0, 1.0, 0.0)
+                }
             }
             _ => self.resolve_color_index_value(color_idx, atom),
         };

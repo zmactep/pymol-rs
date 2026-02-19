@@ -26,6 +26,8 @@ pub enum SecondaryStructure {
     Turn = 5,
     /// Bend
     Bend = 6,
+    /// Nucleic acid ribbon (flat band, no arrowhead)
+    NucleicRibbon = 7,
 }
 
 impl SecondaryStructure {
@@ -60,6 +62,7 @@ impl SecondaryStructure {
             SecondaryStructure::HelixPi => 'I',
             SecondaryStructure::Turn => 'T',
             SecondaryStructure::Bend => 'B',
+            SecondaryStructure::NucleicRibbon => 'N',
         }
     }
 
@@ -73,6 +76,7 @@ impl SecondaryStructure {
             SecondaryStructure::HelixPi => "I ",
             SecondaryStructure::Turn => "T ",
             SecondaryStructure::Bend => "B ",
+            SecondaryStructure::NucleicRibbon => "N ",
         }
     }
 
@@ -93,12 +97,27 @@ impl SecondaryStructure {
         *self == SecondaryStructure::Sheet
     }
 
+    /// Check if this is a nucleic acid ribbon
+    #[inline]
+    pub fn is_nucleic_ribbon(&self) -> bool {
+        *self == SecondaryStructure::NucleicRibbon
+    }
+
     /// Check if this is a loop or coil
     #[inline]
     pub fn is_loop(&self) -> bool {
         matches!(
             self,
             SecondaryStructure::Loop | SecondaryStructure::Turn | SecondaryStructure::Bend
+        )
+    }
+
+    /// Check if this is a flat ribbon type (sheet or nucleic ribbon)
+    #[inline]
+    pub fn is_flat_ribbon(&self) -> bool {
+        matches!(
+            self,
+            SecondaryStructure::Sheet | SecondaryStructure::NucleicRibbon
         )
     }
 
@@ -118,6 +137,7 @@ impl SecondaryStructure {
             SecondaryStructure::HelixPi => "Pi Helix",
             SecondaryStructure::Turn => "Turn",
             SecondaryStructure::Bend => "Bend",
+            SecondaryStructure::NucleicRibbon => "Nucleic Ribbon",
         }
     }
 }

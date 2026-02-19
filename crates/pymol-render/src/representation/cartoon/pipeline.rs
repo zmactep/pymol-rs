@@ -82,6 +82,8 @@ pub enum CartoonType {
     Rect,
     Arrow,
     Dumbbell,
+    /// Nucleic acid flat ribbon (same geometry as Rect but no arrow terminus)
+    NucleicRect,
 }
 
 /// Map from SS type + settings to CartoonType
@@ -101,6 +103,9 @@ fn cartoon_type_for(ss: SecondaryStructure, settings: &CartoonGeometrySettings) 
         } else {
             CartoonType::Rect
         }
+    } else if ss == SecondaryStructure::NucleicRibbon {
+        // Nucleic ribbon: flat rectangle without arrow terminus
+        CartoonType::NucleicRect
     } else {
         CartoonType::Loop
     }
@@ -560,13 +565,13 @@ fn smooth_loops(
     }
 }
 
-/// Find contiguous sheet runs. Returns (first, last) index pairs.
+/// Find contiguous sheet/nucleic-ribbon runs. Returns (first, last) index pairs.
 fn find_sheet_runs(gps: &[GuidePoint]) -> Vec<(usize, usize)> {
     let mut runs = Vec::new();
     let mut first: Option<usize> = None;
 
     for (a, gp) in gps.iter().enumerate() {
-        if gp.ss_type == SecondaryStructure::Sheet {
+        if gp.ss_type.is_flat_ribbon() {
             if first.is_none() {
                 first = Some(a);
             }
@@ -583,13 +588,13 @@ fn find_sheet_runs(gps: &[GuidePoint]) -> Vec<(usize, usize)> {
     runs
 }
 
-/// Find contiguous loop runs (not helix, not sheet). Returns (first, last) index pairs.
+/// Find contiguous loop runs (not helix, not sheet, not nucleic ribbon). Returns (first, last) index pairs.
 fn find_loop_runs(gps: &[GuidePoint]) -> Vec<(usize, usize)> {
     let mut runs = Vec::new();
     let mut first: Option<usize> = None;
 
     for (a, gp) in gps.iter().enumerate() {
-        let is_loop = !is_helix(gp.ss_type) && gp.ss_type != SecondaryStructure::Sheet;
+        let is_loop = !is_helix(gp.ss_type) && !gp.ss_type.is_flat_ribbon();
         if is_loop {
             if first.is_none() {
                 first = Some(a);
@@ -885,6 +890,20 @@ fn extrude_run(
                 }
             }
         }
+        CartoonType::NucleicRect => {
+            // Nucleic acid flat ribbon — same as sheet body but NO arrow terminus.
+            // Render the entire run as one explicit sheet with fancy_sheets disabled.
+            let mut no_arrow_geom = geom.clone();
+            no_arrow_geom.fancy_sheets = false;
+            generate_explicit_sheet(
+                all_vertices,
+                all_indices,
+                &frames,
+                0,
+                frames.len() - 1,
+                &no_arrow_geom,
+            );
+        }
         CartoonType::Dumbbell => {
             // Dumbbell helix: flat ribbon + edge tubes
             // Rotated dumbbell: wide along binormal, face normals along ±normal (radial)
@@ -982,11 +1001,17 @@ fn extrude_run(
     }
 }
 
-/// Map CartoonType back to SecondaryStructure for frame metadata
+/// Map CartoonType back to SecondaryStructure for frame metadata.
+///
+/// Note: for NucleicRibbon, the source SS type is preserved by passing it
+/// through the guide points, not through this mapping. This mapping is only
+/// used when creating FrameWithMetadata from extrude points, where the
+/// original SS information has already been mapped to CartoonType.
 fn car_type_to_ss(car: CartoonType) -> SecondaryStructure {
     match car {
         CartoonType::Oval | CartoonType::Dumbbell => SecondaryStructure::Helix,
         CartoonType::Rect | CartoonType::Arrow => SecondaryStructure::Sheet,
+        CartoonType::NucleicRect => SecondaryStructure::NucleicRibbon,
         CartoonType::Loop => SecondaryStructure::Loop,
     }
 }

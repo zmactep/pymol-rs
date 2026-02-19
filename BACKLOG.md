@@ -35,18 +35,17 @@ ChimeraX умеет делить большие GRO-системы на логи
 
 ---
 
-### Cartoon для нуклеиновых кислот (DNA/RNA)
-Сейчас `extract_backbone_segments` пропускает нуклеиновые кислоты (`if !residue.is_protein() { continue; }`). На структуре 6YOV (нуклеосома) DNA-цепи в cartoon-режиме не видны вообще.
+### Cartoon для нуклеиновых кислот (DNA/RNA) — ✅ Backbone ribbon done
+Реализован **flat ribbon** (ChimeraX-стиль) для нуклеиновых кислот:
+- `extract_nucleic_segments()` в `backbone.rs` — guide atom C4', orientation C4'→C1'
+- Новый `SecondaryStructure::NucleicRibbon` — flat rectangle без arrowhead
+- Интегрирован в `CartoonRep::build()` и `build_cartoon_geometry()` (RibbonRep)
+- Flattening/smoothing pipeline обрабатывает NucleicRibbon как sheet (без стрелок)
 
-**Что нужно:**
-1. **`extract_nucleic_segments()`** в `backbone.rs` — аналог `extract_backbone_segments`, но для нуклеотидов. Guide atom: C4' (уже имеет флаг GUIDE в `classify_atoms`). Orientation: C4'→C1'. SS: всегда `Loop`.
-2. **Интеграция** в `CartoonRep::build()` и `build_cartoon_geometry()` (RibbonRep).
-3. Backbone рендерится как **гладкий тюб** через существующий pipeline (Loop-тюб уже реализован для белков).
-4. **(Опционально, follow-up)** Геометрия оснований: плоские прямоугольники от C1' к центру кольца основания (N9 для пуринов, N1 для пиримидинов).
-
-**Тест:** `_tests/6yov.cif`, DNA-цепи должны отображаться как гладкий тюб рядом с белковым cartoon.
-
-Детальный промпт для Claude Code: `NUCLEIC_CARTOON_PROMPT.md`
+**Осталось (follow-up):**
+- Геометрия оснований (base sticks/ladders): плоские прямоугольники от C1' к центру кольца основания (N9 для пуринов, N1 для пиримидинов)
+- Style A — PyMOL tube mode (`cartoon_nucleic_acid_mode = 4`): round tube через backbone
+- Настройка `cartoon_nucleic_acid_mode` для переключения стилей
 
 ---
 

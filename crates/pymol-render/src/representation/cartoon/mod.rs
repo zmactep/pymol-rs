@@ -42,7 +42,8 @@ use pymol_mol::{CoordSet, ObjectMolecule};
 use pymol_settings::SettingResolver;
 
 use self::backbone::{
-    apply_pymol_smoothing, extract_backbone_segments, smooth_orientations, CartoonSmoothSettings,
+    apply_pymol_smoothing, extract_backbone_segments, extract_nucleic_segments,
+    smooth_orientations, CartoonSmoothSettings,
 };
 use self::frame::generate_frames;
 use self::geometry::{find_sheet_termini, generate_cartoon_mesh, CartoonGeometrySettings};
@@ -75,6 +76,8 @@ pub fn build_cartoon_geometry(
 
     let mut segments =
         extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, rep_mask);
+    let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, rep_mask);
+    segments.extend(nucleic);
 
     for segment in &mut segments {
         if segment.len() < 2 {
@@ -243,6 +246,8 @@ impl Representation for CartoonRep {
         // Use the new PyMOL-compatible pipeline
         let mut segments =
             extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON);
+        let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON);
+        segments.extend(nucleic);
 
         let mut vertices = Vec::new();
         let mut indices = Vec::new();

@@ -211,6 +211,121 @@ pub fn extract_backbone_segments(
     segments
 }
 
+/// Extract nucleic acid backbone segments from a molecule
+///
+/// Analogous to `extract_backbone_segments` but for nucleic acid residues.
+/// Uses C4' as the guide atom (like CA for proteins) and C4'→C1' as the
+/// orientation vector (pointing toward the base, defines the ribbon plane).
+///
+/// All nucleic residues are assigned `SecondaryStructure::NucleicRibbon`,
+/// which renders as a flat ribbon without arrowheads.
+pub fn extract_nucleic_segments(
+    molecule: &ObjectMolecule,
+    coord_set: &CoordSet,
+    colors: &crate::color_resolver::ColorResolver,
+    gap_cutoff: i32,
+    rep_mask: RepMask,
+) -> Vec<BackboneSegment> {
+    let mut segments = Vec::new();
+
+    for chain in molecule.chains() {
+        let mut current_segment = BackboneSegment::new(chain.id());
+        let mut prev_resv: Option<i32> = None;
+
+        for residue in chain.residues() {
+            // Only process nucleic acid residues
+            if !residue.is_nucleic() {
+                continue;
+            }
+
+            // Find C4' (guide atom for nucleic acids), fallback to C4*
+            let (c4_idx, c4_atom) = match residue
+                .find_by_name("C4'")
+                .or_else(|| residue.find_by_name("C4*"))
+            {
+                Some(found) => found,
+                None => continue,
+            };
+
+            // Check if the specified representation is visible for this atom
+            if !c4_atom.repr.visible_reps.is_visible(rep_mask) {
+                continue;
+            }
+
+            // Get C4' coordinates
+            let c4_pos = match coord_set.get_atom_coord(c4_idx) {
+                Some(pos) => pos,
+                None => continue,
+            };
+
+            // Check for gap (chain break)
+            if let Some(prev) = prev_resv {
+                let gap = (residue.resv() - prev).abs();
+                if gap > gap_cutoff {
+                    if !current_segment.is_empty() {
+                        segments.push(current_segment);
+                    }
+                    current_segment = BackboneSegment::new(chain.id());
+                }
+            }
+
+            // Orientation vector: C4' → C1' (points toward base)
+            let orientation = find_nucleic_orientation_vector(&residue, coord_set, c4_pos);
+
+            // Resolve color
+            let color = if rep_mask == RepMask::RIBBON {
+                colors.resolve_ribbon(c4_atom, molecule)
+            } else {
+                colors.resolve_cartoon(c4_atom, molecule)
+            };
+
+            let guide_point = GuidePoint::new(
+                c4_pos,
+                orientation,
+                color,
+                SecondaryStructure::NucleicRibbon,
+                c4_idx,
+                residue.resv(),
+            );
+
+            current_segment.push(guide_point);
+            prev_resv = Some(residue.resv());
+        }
+
+        if !current_segment.is_empty() {
+            segments.push(current_segment);
+        }
+    }
+
+    segments
+}
+
+/// Find the orientation vector for a nucleic acid residue
+///
+/// Uses C4' → C1' direction, which points from the sugar backbone toward
+/// the base. This defines the ribbon plane for nucleic acid cartoon.
+fn find_nucleic_orientation_vector(
+    residue: &pymol_mol::ResidueView,
+    coord_set: &CoordSet,
+    c4_pos: Vec3,
+) -> Vec3 {
+    // Try C1' first, then C1* (old PDB notation)
+    for name in &["C1'", "C1*"] {
+        if let Some((idx, _)) = residue.find_by_name(name) {
+            if let Some(pos) = coord_set.get_atom_coord(idx) {
+                let dir = pos - c4_pos;
+                let len_sq = dir.magnitude_squared();
+                if len_sq > 1e-6 {
+                    return dir / len_sq.sqrt();
+                }
+            }
+        }
+    }
+
+    // Default orientation if C1' not found
+    Vec3::new(0.0, 1.0, 0.0)
+}
+
 /// Find the orientation vector for a residue
 ///
 /// The orientation is typically the CA -> O direction, which defines the
@@ -339,7 +454,7 @@ fn flatten_sheets(segment: &mut BackboneSegment, flat_cycles: u32) {
     let runs = detect_ss_runs(segment);
 
     for (first, last, ss_type) in runs {
-        if ss_type != SecondaryStructure::Sheet {
+        if !ss_type.is_flat_ribbon() {
             continue;
         }
 
@@ -457,8 +572,8 @@ fn smooth_loops(segment: &mut BackboneSegment, smooth_first: u32, smooth_last: u
     let runs = detect_ss_runs(segment);
 
     for (first, last, ss_type) in runs {
-        // Only process loop/coil regions (not helices or sheets)
-        if is_helix(ss_type) || ss_type == SecondaryStructure::Sheet {
+        // Only process loop/coil regions (not helices, sheets, or nucleic ribbons)
+        if is_helix(ss_type) || ss_type.is_flat_ribbon() {
             continue;
         }
 
@@ -914,6 +1029,43 @@ mod tests {
             let dot = first_orient.dot(gp.orientation);
             assert!(dot > 0.0, "Orientations should not be flipped after refinement");
         }
+    }
+
+    #[test]
+    fn test_extract_nucleic_segments_empty_on_protein() {
+        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_mol::{Atom, CoordSet, Element, ObjectMolecule};
+
+        // Build a minimal protein molecule (one ALA residue)
+        let mut mol = ObjectMolecule::new("protein_only");
+        let mut coords = Vec::new();
+        for (name, element, coord) in &[
+            ("N", Element::Nitrogen, (0.0, 0.0, 0.0)),
+            ("CA", Element::Carbon, (1.45, 0.0, 0.0)),
+            ("C", Element::Carbon, (2.0, 1.4, 0.0)),
+            ("O", Element::Oxygen, (1.4, 2.4, 0.0)),
+        ] {
+            let mut atom = Atom::new(*name, *element);
+            atom.set_residue("ALA", 1, "A");
+            atom.repr.visible_reps.set_visible(pymol_mol::RepMask::CARTOON);
+            mol.add_atom(atom);
+            coords.push(Vec3::new(coord.0, coord.1, coord.2));
+        }
+        mol.add_coord_set(CoordSet::from_vec3(&coords));
+        mol.classify_atoms();
+
+        let coord_set = mol.get_coord_set(0).unwrap();
+        let named_colors = NamedColors::new();
+        let element_colors = ElementColors::new();
+        let chain_colors = ChainColors;
+        let color_resolver = crate::color_resolver::ColorResolver::new(
+            &named_colors, &element_colors, &chain_colors,
+        );
+
+        let segments = extract_nucleic_segments(
+            &mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON,
+        );
+        assert!(segments.is_empty(), "Protein molecule should yield zero nucleic segments");
     }
 
     #[test]
