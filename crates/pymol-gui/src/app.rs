@@ -1503,6 +1503,22 @@ impl App {
                     view.clip_back = (view.clip_back + back).max(view.clip_front + 0.01);
                     self.needs_redraw = true;
                 }
+                CameraDelta::SlabScale(raw_delta) => {
+                    let mws = self
+                        .state
+                        .settings
+                        .get_float(pymol_settings::id::mouse_wheel_scale);
+                    let scale = 1.0 + 0.04 * mws * raw_delta;
+
+                    let view = self.state.camera.view_mut();
+                    let avg = (view.clip_front + view.clip_back) * 0.5;
+                    let half_width = (view.clip_back - avg).max(0.1);
+                    let new_half = (half_width * scale).max(0.1);
+
+                    view.clip_front = (avg - new_half).max(0.01);
+                    view.clip_back = (avg + new_half).max(view.clip_front + 0.1);
+                    self.needs_redraw = true;
+                }
             }
         }
     }

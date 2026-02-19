@@ -17,6 +17,8 @@ pub enum CameraDelta {
     Zoom(f32),
     /// Clipping plane adjustment
     Clip { front: f32, back: f32 },
+    /// Slab scale factor (raw scroll delta; consumer applies mouse_wheel_scale)
+    SlabScale(f32),
 }
 
 /// Mouse button indices
@@ -172,9 +174,13 @@ impl InputState {
         let mut deltas = Vec::new();
         let (dx, dy) = self.mouse_delta;
 
-        // Handle scroll for zoom
+        // Handle scroll: zoom while dragging, slab scale otherwise
         if self.scroll_delta.abs() > 0.001 {
-            deltas.push(CameraDelta::Zoom(self.scroll_delta * self.zoom_sensitivity));
+            if self.any_button_pressed() {
+                deltas.push(CameraDelta::Zoom(self.scroll_delta * self.zoom_sensitivity));
+            } else {
+                deltas.push(CameraDelta::SlabScale(self.scroll_delta));
+            }
         }
 
         // Handle mouse drag
@@ -306,18 +312,39 @@ mod tests {
     }
 
     #[test]
-    fn test_camera_deltas_scroll_zoom() {
+    fn test_camera_deltas_scroll_slab_scale() {
         let mut state = InputState::new();
 
+        // Scroll without any button pressed → SlabScale
         state.handle_scroll(MouseScrollDelta::LineDelta(0.0, 1.0));
 
         let deltas = state.take_camera_deltas();
         assert_eq!(deltas.len(), 1);
 
-        if let CameraDelta::Zoom(z) = &deltas[0] {
-            assert!(*z > 0.0);
+        if let CameraDelta::SlabScale(s) = &deltas[0] {
+            assert!(*s > 0.0);
         } else {
-            panic!("Expected Zoom delta");
+            panic!("Expected SlabScale delta, got {:?}", deltas[0]);
         }
+    }
+
+    #[test]
+    fn test_camera_deltas_scroll_while_dragging_zooms() {
+        let mut state = InputState::new();
+
+        // Press left button, then scroll → should produce Zoom
+        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
+        state.handle_scroll(MouseScrollDelta::LineDelta(0.0, 1.0));
+
+        let deltas = state.take_camera_deltas();
+        let has_zoom = deltas.iter().any(|d| matches!(d, CameraDelta::Zoom(_)));
+        let has_slab = deltas
+            .iter()
+            .any(|d| matches!(d, CameraDelta::SlabScale(_)));
+        assert!(has_zoom, "Scroll while dragging should produce Zoom");
+        assert!(
+            !has_slab,
+            "Scroll while dragging should not produce SlabScale"
+        );
     }
 }

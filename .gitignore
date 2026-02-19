@@ -1,5 +1,6 @@
 __pycache__
 _tests
+_plans
 *.so
 pymol-open-source
 ngl
@@ -8,3 +9,4 @@ target
 CLAUDE.md
 .claude
 .env
+BACKLOG.md
