@@ -570,7 +570,13 @@ where
 
         // Apply transformation to selected atoms
         if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&name) {
-            transform_fn(mol_obj.molecule_mut(), &atoms, state);
+            // Resolve state=-1 (current state) to the object's display state
+            let resolved_state = if state == -1 {
+                mol_obj.display_state() as i64 + 1 // convert 0-indexed to 1-indexed
+            } else {
+                state
+            };
+            transform_fn(mol_obj.molecule_mut(), &atoms, resolved_state);
             total_atoms += atoms.len();
             affected_objects += 1;
         }
@@ -637,7 +643,7 @@ fn apply_translation_to_atoms(
             }
         }
         -1 => {
-            // Current state (use state 0 as current)
+            // Fallback: resolved to display_state in apply_selection_transform
             mol.translate_atoms(0, atoms, delta.clone());
         }
         s if s > 0 => {
@@ -671,7 +677,7 @@ fn apply_ttt_to_atoms(
             }
         }
         -1 => {
-            // Current state
+            // Fallback: resolved to display_state in apply_selection_transform
             mol.transform_ttt_atoms(0, atoms, ttt);
         }
         s if s > 0 => {
@@ -703,6 +709,7 @@ fn apply_matrix_to_atoms(
             }
         }
         -1 => {
+            // Fallback: resolved to display_state in apply_selection_transform
             mol.transform_atoms(0, atoms, matrix);
         }
         s if s > 0 => {

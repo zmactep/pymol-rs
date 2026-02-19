@@ -1,7 +1,7 @@
 ## Backlog
 
 ### Bugs
-- [ ] **Multistate Transformation Bug**: The `translate` and `rotate` commands currently only affect state 0 (the first state) of an object. They need to respect the `state` argument or the current global state to allow transforming specific conformations in a trajectory/ensemble.
+- [x] **Multistate Transformation Bug**: The `translate` and `rotate` commands currently only affect state 0 (the first state) of an object. They need to respect the `state` argument or the current global state to allow transforming specific conformations in a trajectory/ensemble.
 - [ ] **Reinitialize Does Not Reset Settings**: `reinitialize` currently preserves some settings (e.g., background color) instead of resetting everything to defaults. It should fully reset all settings, representations, objects, and state to a clean initial configuration.
 
 ### Features
