@@ -77,12 +77,13 @@ impl<R: Read> PdbReader<R> {
                 "ATOM  " | "HETATM" => {
                     if let Ok((_, record)) = parse_atom_record(line) {
                         let coord = Vec3::new(record.x, record.y, record.z);
-                        if in_model && current_model > 0 {
-                            // Multi-model: store coordinates for this model
+                        if in_model && current_model > 1 {
+                            // Multi-model: store coordinates for models 2+ as extra coord sets
                             if let Some((_, model_coords)) = models.last_mut() {
                                 model_coords.push(coord);
                             }
                         } else {
+                            // Model 1 (or no MODEL records) — primary atom topology
                             atoms.push(record);
                             coords.push(coord);
                         }
