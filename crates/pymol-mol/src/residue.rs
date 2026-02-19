@@ -327,6 +327,21 @@ pub fn residue_to_char(resn: &str) -> char {
         .unwrap_or('?')
 }
 
+/// The 20 canonical amino acids only.
+/// Does NOT include protonation variants, selenoMet, caps, or any modification.
+pub const STANDARD_AMINO_ACIDS: &[&str] = &[
+    "ALA", "ARG", "ASN", "ASP", "CYS",
+    "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO",
+    "SER", "THR", "TRP", "TYR", "VAL",
+];
+
+/// Returns `true` only for the 20 canonical amino acids.
+/// Protonation variants (HIP, CYX), selenoMet, modified AAs, etc. return `false`.
+pub fn is_standard_amino_acid(resn: &str) -> bool {
+    STANDARD_AMINO_ACIDS.contains(&resn)
+}
+
 /// Standard amino acid residue names (3-letter codes)
 pub const AMINO_ACIDS: &[&str] = &[
     "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
@@ -340,6 +355,25 @@ pub const AMINO_ACIDS: &[&str] = &[
     // Charged variants
     "ARGP", "ASPM", "GLUM", "LYSP",
 ];
+
+/// Standard unmodified DNA and RNA nucleotides.
+/// Modified bases (PSU, 5MC, 8OG, etc.) are NOT included.
+pub const STANDARD_NUCLEOTIDES: &[&str] = &[
+    // Standard DNA
+    "DA", "DC", "DG", "DT", "DI",
+    // Standard RNA
+    "A", "C", "G", "U", "I",
+    // Ambiguous / generic
+    "N", "DN",
+    // 3-letter alternative names used in some older PDB entries
+    "ADE", "CYT", "GUA", "THY", "URA",
+];
+
+/// Returns `true` only for standard unmodified nucleotides.
+/// Modified bases (PSU, 5MC, 8OG, OMG, etc.) return `false`.
+pub fn is_standard_nucleotide(resn: &str) -> bool {
+    STANDARD_NUCLEOTIDES.contains(&resn)
+}
 
 /// Standard nucleotide residue names
 pub const NUCLEOTIDES: &[&str] = &[
@@ -702,5 +736,27 @@ mod tests {
         assert_eq!(classify_residue("NA"), ResidueCategory::Ion);
         assert_eq!(classify_residue("POPC"), ResidueCategory::Lipid);
         assert_eq!(classify_residue("UNK"), ResidueCategory::Other);
+    }
+
+    #[test]
+    fn test_is_standard_amino_acid() {
+        assert!(is_standard_amino_acid("ALA"));
+        assert!(is_standard_amino_acid("HIS"));
+        assert!(!is_standard_amino_acid("HIP"));   // protonation variant
+        assert!(!is_standard_amino_acid("CYX"));   // disulfide cysteine
+        assert!(!is_standard_amino_acid("MSE"));   // selenoMet
+        assert!(!is_standard_amino_acid("SEP"));   // phosphoSer
+        assert!(!is_standard_amino_acid("ACE"));   // cap
+        assert!(!is_standard_amino_acid("HOH"));
+    }
+
+    #[test]
+    fn test_is_standard_nucleotide() {
+        assert!(is_standard_nucleotide("DA"));
+        assert!(is_standard_nucleotide("A"));
+        assert!(is_standard_nucleotide("GUA"));
+        assert!(!is_standard_nucleotide("PSU"));   // pseudouridine
+        assert!(!is_standard_nucleotide("5MC"));   // 5-methylcytosine
+        assert!(!is_standard_nucleotide("8OG"));   // 8-oxoguanine
     }
 }

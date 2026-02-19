@@ -8,7 +8,10 @@ use std::ops::Range;
 
 use egui::{Color32, RichText, Ui};
 use pymol_color::NamedColors;
-use pymol_mol::{is_capping_group, is_ion, is_water, residue_to_char, ObjectMolecule};
+use pymol_mol::{
+    is_capping_group, is_ion, is_standard_amino_acid, is_standard_nucleotide, is_water,
+    nucleotide_to_char, residue_to_char, three_to_one, ObjectMolecule,
+};
 use pymol_scene::{Object, ObjectRegistry};
 
 /// Compress a sorted list of residue numbers into range notation.
@@ -41,6 +44,37 @@ fn compress_resi_list(values: &[i32]) -> String {
     parts.join("+")
 }
 
+/// Pale magenta — standard DNA/RNA nucleotides
+const NUCLEOTIDE_COLOR: Color32 = Color32::from_rgb(205, 150, 205);
+
+/// Orange — non-canonical AAs, AA variants (HIP/CYX/MSE/…), modified bases, caps
+const NONCANONICAL_COLOR: Color32 = Color32::from_rgb(230, 160, 60);
+
+/// Dim gray — non-polymer HETATM ligands
+const LIGAND_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
+
+/// Semantic classification of a residue for sequence viewer coloring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResidueKind {
+    /// One of the 20 standard amino acids — PyMOL atom color
+    AminoAcidCanonical,
+    /// Known AA variant (HIP, CYX, MSE, SEP, ACE, NME, …) or unknown protein residue
+    /// — single letter if parent known, brackets if truly unknown; pale yellow
+    AminoAcidNonCanonical,
+    /// Standard unmodified nucleotide — pale magenta
+    NucleotideCanonical,
+    /// Modified or unknown nucleotide — pale yellow
+    NucleotideNonCanonical,
+    /// Non-polymer HETATM: ligand, lipid, cofactor — gray
+    Ligand,
+}
+
+impl ResidueKind {
+    pub fn is_polymer(self) -> bool {
+        !matches!(self, ResidueKind::Ligand)
+    }
+}
+
 /// Single residue entry in the sequence viewer
 #[derive(Debug, Clone)]
 pub struct SeqResidue {
@@ -55,8 +89,8 @@ pub struct SeqResidue {
     pub atom_range: Range<usize>,
     /// Base color index of the CA atom (or first atom), for display coloring
     pub color_index: i32,
-    /// True for protein/nucleic polymer residues; false for ligands/lipids
-    pub is_polymer: bool,
+    /// Drives color and font size in the sequence viewer
+    pub kind: ResidueKind,
 }
 
 /// Sequence data for one chain
@@ -402,7 +436,6 @@ fn render_chain_sequence(
 
     let painter = ui.painter_at(seq_rect);
     let seq_font = egui::FontId::new(12.0, egui::FontFamily::Monospace);
-    let seq_font_bold = egui::FontId::new(12.0, egui::FontFamily::Monospace);
     let ligand_font = egui::FontId::new(10.0, egui::FontFamily::Monospace);
 
     // Helper: convert pointer x position to residue index using cumulative offsets
@@ -462,38 +495,41 @@ fn render_chain_sequence(
 
         let x = seq_rect.min.x + cw * x_offsets[res_idx] as f32;
 
-        if is_highlighted || is_in_drag {
-            painter.text(
-                egui::pos2(x, seq_rect.min.y),
-                egui::Align2::LEFT_TOP,
-                &residue.display_label,
-                seq_font_bold.clone(),
-                Color32::from_rgb(255, 80, 80),
-            );
-        } else if residue.is_polymer {
-            // Use smaller font for bracketed non-canonical residues (e.g. [ACE], [SEP])
-            let font = if residue.char_width == 1 {
-                seq_font.clone()
-            } else {
-                ligand_font.clone()
-            };
-            painter.text(
-                egui::pos2(x, seq_rect.min.y),
-                egui::Align2::LEFT_TOP,
-                &residue.display_label,
-                font,
-                resolve_residue_color(residue, named_colors),
-            );
+        // Font: 12pt for single-character, 10pt for bracket notation
+        let font = if residue.char_width == 1 {
+            seq_font.clone()
         } else {
-            // Non-polymer (ligand/lipid): dimmed, smaller font
-            painter.text(
-                egui::pos2(x, seq_rect.min.y + 1.0),
-                egui::Align2::LEFT_TOP,
-                &residue.display_label,
-                ligand_font.clone(),
-                Color32::from_rgb(140, 140, 140),
-            );
-        }
+            ligand_font.clone()
+        };
+
+        let color = if is_highlighted || is_in_drag {
+            Color32::from_rgb(255, 80, 80)
+        } else {
+            match residue.kind {
+                ResidueKind::AminoAcidCanonical => {
+                    resolve_residue_color(residue, named_colors)
+                }
+                ResidueKind::NucleotideCanonical => NUCLEOTIDE_COLOR,
+                ResidueKind::AminoAcidNonCanonical
+                | ResidueKind::NucleotideNonCanonical => NONCANONICAL_COLOR,
+                ResidueKind::Ligand => LIGAND_COLOR,
+            }
+        };
+
+        // Bracket labels get a 1px vertical nudge for visual alignment at smaller font size
+        let y = if residue.char_width == 1 {
+            seq_rect.min.y
+        } else {
+            seq_rect.min.y + 1.0
+        };
+
+        painter.text(
+            egui::pos2(x, y),
+            egui::Align2::LEFT_TOP,
+            &residue.display_label,
+            font,
+            color,
+        );
     }
 
     // --- Interaction logic ---
@@ -588,15 +624,22 @@ fn render_chain_sequence(
         }
     }
 
-    // Tooltip on hover (when not dragging)
+    // Tooltip on hover (when not dragging) — shown above the sequence row
     if drag_start.is_none() {
         if let Some(pos) = response.hover_pos() {
             let res_idx = pointer_to_res_idx(pos);
             let residue = &chain.residues[res_idx];
-            response.on_hover_text(format!(
-                "{}.{} {}",
-                chain.chain_id, residue.resn, residue.resv
-            ));
+            let tooltip_text = format!("{}.{} {}", chain.chain_id, residue.resn, residue.resv);
+            egui::Tooltip::always_open(
+                ui.ctx().clone(),
+                ui.layer_id(),
+                response.id.with("seq_tip"),
+                egui::pos2(pos.x, seq_rect.min.y),
+            )
+            .show(|ui| {
+                ui.set_max_width(f32::INFINITY);
+                ui.label(&tooltip_text);
+            });
         }
     }
 }
@@ -617,29 +660,39 @@ fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
         for residue_view in chain_view.residues() {
             let resn = residue_view.resn();
 
-            // Determine display label
-            let (display_label, is_polymer) = if is_water(resn) || is_ion(resn) {
-                // Solvent and ions — always skip
+            let (display_label, kind) = if is_water(resn) || is_ion(resn) {
                 continue;
             } else if is_capping_group(resn) {
-                // ACE, NME, etc. — bracket notation, styled as polymer (part of chain)
-                (format!("[{}]", resn), true)
-            } else if residue_view.is_protein() || residue_view.is_nucleic() {
-                let ch = residue_to_char(resn);
-                if ch == '?' {
-                    // Non-canonical with no 1-letter mapping → bracket notation
-                    // but still classified as polymer (same chain coloring)
-                    (format!("[{}]", resn), true)
+                // ACE, NME — attached to polymer, no parent letter
+                (format!("[{}]", resn), ResidueKind::AminoAcidNonCanonical)
+            } else if residue_view.is_protein() {
+                if is_standard_amino_acid(resn) {
+                    let ch = three_to_one(resn).expect("standard AA must have 1-letter code");
+                    (ch.to_string(), ResidueKind::AminoAcidCanonical)
+                } else if let Some(ch) = three_to_one(resn) {
+                    // Known variant: HID/HIE/HIP → 'H', CYX → 'C', MSE → 'M', etc.
+                    (ch.to_string(), ResidueKind::AminoAcidNonCanonical)
                 } else {
-                    // Standard or known-modified polymer residue — single letter
-                    (ch.to_string(), true)
+                    // Truly unknown modified residue with no mapping
+                    (format!("[{}]", resn), ResidueKind::AminoAcidNonCanonical)
+                }
+            } else if residue_view.is_nucleic() {
+                if is_standard_nucleotide(resn) {
+                    let ch = nucleotide_to_char(resn).expect("standard nucleotide must have 1-letter code");
+                    (ch.to_string(), ResidueKind::NucleotideCanonical)
+                } else if let Some(ch) = nucleotide_to_char(resn) {
+                    // Modified base with known mapping (lowercase)
+                    (ch.to_string(), ResidueKind::NucleotideNonCanonical)
+                } else {
+                    // Unknown modified base
+                    (format!("[{}]", resn), ResidueKind::NucleotideNonCanonical)
                 }
             } else {
-                // Ligand, lipid, unknown HETATM — bracket notation, non-polymer styling
-                (format!("[{}]", resn), false)
+                // Non-polymer: ligand, lipid, unknown HETATM
+                (format!("[{}]", resn), ResidueKind::Ligand)
             };
 
-            let display_char = if is_polymer {
+            let display_char = if kind.is_polymer() {
                 residue_to_char(resn)
             } else {
                 '?'
@@ -666,7 +719,7 @@ fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
                 char_width,
                 atom_range: residue_view.atom_range.clone(),
                 color_index,
-                is_polymer,
+                kind,
             };
 
             let chain_id = chain_view.id().to_string();
