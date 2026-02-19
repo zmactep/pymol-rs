@@ -42,6 +42,8 @@ pub struct InputState {
     mouse_delta: (f32, f32),
     /// Accumulated scroll delta since last update
     scroll_delta: f32,
+    /// Accumulated pinch-zoom delta since last update
+    pinch_zoom_delta: f32,
     /// Current modifier keys
     modifiers: ModifiersState,
     /// Rotation sensitivity (radians per pixel)
@@ -62,6 +64,7 @@ impl Default for InputState {
             prev_mouse_pos: (0.0, 0.0),
             mouse_delta: (0.0, 0.0),
             scroll_delta: 0.0,
+            pinch_zoom_delta: 0.0,
             modifiers: ModifiersState::empty(),
             rotate_sensitivity: 0.005,
             translate_sensitivity: 0.02,
@@ -116,6 +119,11 @@ impl InputState {
             MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 100.0,
         };
         self.scroll_delta += scroll;
+    }
+
+    /// Handle trackpad pinch-zoom gesture
+    pub fn handle_pinch_zoom(&mut self, delta: f64) {
+        self.pinch_zoom_delta += delta as f32;
     }
 
     /// Handle modifier key changes
@@ -173,6 +181,11 @@ impl InputState {
     pub fn take_camera_deltas(&mut self) -> Vec<CameraDelta> {
         let mut deltas = Vec::new();
         let (dx, dy) = self.mouse_delta;
+
+        // Handle pinch-zoom gesture (trackpad)
+        if self.pinch_zoom_delta.abs() > 0.001 {
+            deltas.push(CameraDelta::Zoom(self.pinch_zoom_delta * 5.0));
+        }
 
         // Handle scroll: zoom while dragging, slab scale otherwise
         if self.scroll_delta.abs() > 0.001 {
@@ -237,6 +250,7 @@ impl InputState {
         // Reset accumulated deltas
         self.mouse_delta = (0.0, 0.0);
         self.scroll_delta = 0.0;
+        self.pinch_zoom_delta = 0.0;
 
         deltas
     }
@@ -246,6 +260,7 @@ impl InputState {
         self.mouse_buttons = [false; 3];
         self.mouse_delta = (0.0, 0.0);
         self.scroll_delta = 0.0;
+        self.pinch_zoom_delta = 0.0;
         self.modifiers = ModifiersState::empty();
     }
 

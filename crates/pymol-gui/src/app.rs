@@ -1620,6 +1620,9 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { delta, .. } => {
                 self.input.handle_scroll(*delta);
             }
+            WindowEvent::PinchGesture { delta, .. } => {
+                self.input.handle_pinch_zoom(*delta);
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.input.handle_modifiers(modifiers.state());
             }
@@ -1743,6 +1746,14 @@ impl ApplicationHandler for App {
             WindowEvent::MouseWheel { .. } => {
                 // Input already handled above
                 // Use viewport_rect.contains() directly instead of the removed viewport_hovered field
+                let mouse_pos = self.input.mouse_position();
+                if self.view.is_over_viewport(mouse_pos) && !egui_wants_input {
+                    self.needs_redraw = true;
+                }
+                self.request_redraw();
+            }
+
+            WindowEvent::PinchGesture { .. } => {
                 let mouse_pos = self.input.mouse_position();
                 if self.view.is_over_viewport(mouse_pos) && !egui_wants_input {
                     self.needs_redraw = true;
