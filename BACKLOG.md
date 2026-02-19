@@ -1,19 +1,89 @@
-## Backlog
+# BACKLOG — pymol-rs
 
-### Bugs
-- [x] **Multistate Transformation Bug**: The `translate` and `rotate` commands currently only affect state 0 (the first state) of an object. They need to respect the `state` argument or the current global state to allow transforming specific conformations in a trajectory/ensemble.
-- [x] **Reinitialize Does Not Reset Settings**: `reinitialize` currently preserves some settings (e.g., background color) instead of resetting everything to defaults. It should fully reset all settings, representations, objects, and state to a clean initial configuration.
+## 🐛 Bugs
 
-### Features
-- [ ] **GROMACS .gro Support**: Implement a parser for `.gro` coordinate files (GROMACS format). This should handle atom names, residues, and box vectors if present.
-- [ ] **MMTF Format Support (Read + Write)**: Implement full support for MMTF (Macromolecular Transmission Format) in `pymol-io`. Both reading and writing, since MMTF is a compact binary format useful for fast loading and efficient storage/transfer of large structures.
-- [ ] **Mouse/Touchpad UX Improvements**: Align mouse behavior with PyMOL standard:
-    - **Scroll + Click (Drag)**: Zoom (Z-translation of camera).
-    - **Scroll (Wheel/Touchpad) only**: Adjust Slab/Clipping planes (move the front/back clipping planes).
-- [ ] **Selection UX Logic**: Revisit selection behavior, especially in Sequence Viewer.
-    - **Additive by Default**: Clicking residues should *add* to the current selection (like Ctrl/Cmd+Click currently does), rather than replace it.
-    - **Review needed**: This deviates from PyMOL standard (click = replace, shift+click = range, ctrl+click = add). We need to decide if this should be a global setting (`mouse_selection_mode`) or specific to the sequence viewer.
-- [ ] **Interactive 3D Picking**: Implement full mouse interaction for 3D objects.
-    - **Picking Modes**: Support `picking_mode` setting (atom, CA, residue, chain, molecule, object).
-    - **Hover Highlight**: Temporarily highlight the entity under the mouse cursor before clicking.
-    - **Click Behavior**: Add the hovered entity to the current selection `sele` (respecting `mouse_selection_mode`).
+_Нет открытых багов_
+
+---
+
+## ⚡ Performance
+
+### GRO: медленная загрузка больших систем
+**Файл:** `_tests/gro/md_membrane.gro` (38 MB, 577 341 атом) грузится несколько минут.
+
+**Причина:** `generate_bonds_for_state` — O(n²) брутфорс по всем парам атомов.
+Для 577К атомов это ~1.66×10¹¹ сравнений.
+
+**Варианты решения:**
+- Пространственная сетка (cell-list / uniform grid) — O(n), стандарт для MD-тулов
+- Для крупных систем (>~50K атомов) bond generation часто бессмысленна: молекулы известны из топологии, а воду/ионы связывать не нужно. Можно ввести threshold и пропускать генерацию связей для таких систем.
+- Альтернатива: residue-template bond inference (PDB-стиль) вместо distance-based для известных остатков
+
+---
+
+## ✨ Features
+
+### GRO: разбивка на цепи (ChimeraX-style)
+ChimeraX умеет делить большие GRO-системы на логические цепи. Сейчас у нас всё — одна молекула.
+
+**Подход:**
+- Детектировать разрыв цепи по убыванию `resnum` (GROMACS wraps at 99999 → новая молекула)
+- Словарь известных растворителей (`SOL`, `WAT`, `HOH`, `TIP3`, `TIP4P`, ...) → группировать в отдельную solvent-цепь
+- Словарь ионов (`NA`, `CL`, `MG`, `CA`, `K`, ...) → отдельная цепь
+- Словарь липидов (`POPC`, `POPE`, `DPPC`, `CHOLESTEROL`, ...) → membrane-цепь
+- Остальное — белок/нуклеиновые кислоты, делятся по backbone connectivity gaps
+
+---
+
+### MMTF Format Support (Read + Write)
+Полная поддержка MMTF (Macromolecular Transmission Format) в `pymol-io`.
+Чтение и запись — бинарный компактный формат, полезен для быстрой загрузки и передачи больших структур.
+
+---
+
+### Mouse / Touchpad UX
+Привести поведение мыши к PyMOL-стандарту:
+- **Scroll + Drag** → Zoom (Z-трансляция камеры)
+- **Scroll only (колёсико / тачпад)** → Slab/Clipping planes (перемещение фронтального и заднего клиппинга)
+
+---
+
+### Selection UX Logic
+Пересмотреть логику выделения, особенно в Sequence Viewer.
+- **Текущее состояние**: клик добавляет к выделению (Ctrl/Cmd-click по умолчанию)
+- **PyMOL-стандарт**: клик = замена, Shift+click = диапазон, Ctrl+click = добавление
+- **Решить**: глобальная настройка `mouse_selection_mode` или только для Sequence Viewer?
+
+---
+
+### Interactive 3D Picking
+Полноценное мышиное взаимодействие с 3D-объектами:
+- **Picking modes**: поддержка `picking_mode` (atom, CA, residue, chain, molecule, object)
+- **Hover highlight**: подсветка сущности под курсором до клика
+- **Click behavior**: добавление в текущий `sele` (с учётом `mouse_selection_mode`)
+
+---
+
+## 🔧 Рефакторинг
+
+### Дублирование `SessionAdapter` / `ViewerAdapter`
+После PSE-работы в проекте два почти идентичных адаптера `ViewerLike`:
+- `pymol-scene/src/session_adapter.rs` — `SessionAdapter`
+- `pymol-gui/src/viewer_adapter.rs` — `ViewerAdapter`
+
+~80% реализации `ViewerLike` одинаковы. Разница: `ViewerAdapter` дополнительно держит `TaskRunner` и умеет делать async fetch.
+
+**Варианты:**
+- Вынести базовую реализацию в `SessionAdapter` (pymol-scene), `ViewerAdapter` делегирует к нему
+- Макрос `impl_viewer_like_base!(self.state)` для делегирования общих методов
+- Трейт-extension или blanket impl для `&mut Session`
+
+---
+
+## 📝 Известные ограничения / Не проверено
+
+- Большие PSE файлы (`epitopes.pse` — 41 объект, 14.5 MB)
+- Camera restoration / качество auto-centering
+- Per-representation colors (cartoon vs stick colors отдельно)
+- Custom colors из PSE session (поле `colors list`)
+- Object-level color (header[3] = 2060287 для 1fsd — не маппится)
