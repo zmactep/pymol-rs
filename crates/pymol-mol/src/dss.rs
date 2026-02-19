@@ -484,7 +484,7 @@ fn detect_hydrogen_bonds(
         .collect();
 
     // Build spatial grid indexed by O atom positions (acceptors)
-    let mut grid = SpatialGrid::new(cutoff);
+    let mut grid = SpatialGrid::with_capacity(cutoff, o_positions.len());
     for (a0, o_pos) in o_positions.iter().enumerate() {
         if let Some(pos) = o_pos {
             grid.insert(*pos, a0);

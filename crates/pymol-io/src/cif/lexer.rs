@@ -12,22 +12,22 @@ use nom::{
     IResult,
 };
 
-/// CIF token types
+/// CIF token types — value variants borrow from the input string
 #[derive(Debug, Clone, PartialEq)]
-pub enum Token {
-    /// data_ block header
+pub enum Token<'a> {
+    /// data_ block header — rare, keep owned
     DataBlock(String),
     /// loop_ keyword
     Loop,
-    /// _category.item data name
+    /// _category.item data name (includes leading `_`) — one per column header, keep owned
     DataName(String),
-    /// Unquoted value
-    Value(String),
-    /// Single-quoted string 'value'
-    SingleQuoted(String),
-    /// Double-quoted string "value"
-    DoubleQuoted(String),
-    /// Semicolon-delimited text block
+    /// Unquoted value — zero-copy borrow from input
+    Value(&'a str),
+    /// Single-quoted string — zero-copy borrow from input (inner content, no quotes)
+    SingleQuoted(&'a str),
+    /// Double-quoted string — zero-copy borrow from input (inner content, no quotes)
+    DoubleQuoted(&'a str),
+    /// Semicolon-delimited text block — still owned (newline stripping required)
     TextField(String),
     /// Missing value (.)
     Missing,
@@ -37,14 +37,12 @@ pub enum Token {
     Eof,
 }
 
-impl Token {
-    /// Get the string value of a token (for value tokens)
-    #[allow(dead_code)]
+impl<'a> Token<'a> {
+    /// Extract string value — zero-copy for Value/SingleQuoted/DoubleQuoted
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Token::Value(s) | Token::SingleQuoted(s) | Token::DoubleQuoted(s) | Token::TextField(s) => {
-                Some(s)
-            }
+            Token::Value(s) | Token::SingleQuoted(s) | Token::DoubleQuoted(s) => Some(s),
+            Token::TextField(s) | Token::DataBlock(s) | Token::DataName(s) => Some(s),
             _ => None,
         }
     }
@@ -66,46 +64,46 @@ fn skip_ws_comments(input: &str) -> IResult<&str, ()> {
 }
 
 /// Parse a data_ block header
-fn parse_data_block(input: &str) -> IResult<&str, Token> {
+fn parse_data_block(input: &str) -> IResult<&str, Token<'_>> {
     let (input, _) = tag("data_")(input)?;
     let (input, name) = take_while(|c: char| !c.is_whitespace())(input)?;
     Ok((input, Token::DataBlock(name.to_string())))
 }
 
 /// Parse loop_ keyword
-fn parse_loop(input: &str) -> IResult<&str, Token> {
+fn parse_loop(input: &str) -> IResult<&str, Token<'_>> {
     let (input, _) = tag("loop_")(input)?;
     Ok((input, Token::Loop))
 }
 
 /// Parse a data name (_category.item)
-fn parse_data_name(input: &str) -> IResult<&str, Token> {
+fn parse_data_name(input: &str) -> IResult<&str, Token<'_>> {
     let (input, _) = char('_')(input)?;
     let (input, name) = take_while1(|c: char| !c.is_whitespace())(input)?;
     Ok((input, Token::DataName(format!("_{}", name))))
 }
 
 /// Parse a single-quoted string
-fn parse_single_quoted(input: &str) -> IResult<&str, Token> {
+fn parse_single_quoted(input: &str) -> IResult<&str, Token<'_>> {
     let (input, _) = char('\'')(input)?;
     let (input, content) = take_while(|c| c != '\'')(input)?;
     let (input, _) = char('\'')(input)?;
-    Ok((input, Token::SingleQuoted(content.to_string())))
+    Ok((input, Token::SingleQuoted(content)))
 }
 
 /// Parse a double-quoted string
-fn parse_double_quoted(input: &str) -> IResult<&str, Token> {
+fn parse_double_quoted(input: &str) -> IResult<&str, Token<'_>> {
     let (input, _) = char('"')(input)?;
     let (input, content) = take_while(|c| c != '"')(input)?;
     let (input, _) = char('"')(input)?;
-    Ok((input, Token::DoubleQuoted(content.to_string())))
+    Ok((input, Token::DoubleQuoted(content)))
 }
 
 /// Parse a semicolon-delimited text field
-fn parse_text_field(input: &str) -> IResult<&str, Token> {
+fn parse_text_field(input: &str) -> IResult<&str, Token<'_>> {
     // Text fields start with ; at beginning of line and end with ; at beginning of line
     let (input, _) = char(';')(input)?;
-    
+
     // Find the closing semicolon (at start of a line)
     let mut end_pos = 0;
     let mut found = false;
@@ -118,51 +116,21 @@ fn parse_text_field(input: &str) -> IResult<&str, Token> {
             }
         }
     }
-    
+
     if !found {
         // If no closing ; found, take until end
         return Ok(("", Token::TextField(input.to_string())));
     }
-    
+
     let content = &input[..end_pos];
     let rest = &input[end_pos + 2..]; // Skip \n;
     Ok((rest, Token::TextField(content.to_string())))
 }
 
-/// Parse missing value (.)
-#[allow(dead_code)]
-fn parse_missing(input: &str) -> IResult<&str, Token> {
-    let (input, _) = char('.')(input)?;
-    // Make sure it's not followed by more characters
-    if input.is_empty() || input.starts_with(char::is_whitespace) {
-        Ok((input, Token::Missing))
-    } else {
-        // It's part of a value
-        Err(nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::Char,
-        )))
-    }
-}
-
-/// Parse unknown value (?)
-#[allow(dead_code)]
-fn parse_unknown(input: &str) -> IResult<&str, Token> {
-    let (input, _) = char('?')(input)?;
-    if input.is_empty() || input.starts_with(char::is_whitespace) {
-        Ok((input, Token::Unknown))
-    } else {
-        Err(nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::Char,
-        )))
-    }
-}
-
 /// Parse an unquoted value
-fn parse_unquoted_value(input: &str) -> IResult<&str, Token> {
+fn parse_unquoted_value(input: &str) -> IResult<&str, Token<'_>> {
     let (input, value) = take_while1(|c: char| !c.is_whitespace() && c != '#')(input)?;
-    
+
     // Check for special values
     if value == "." {
         return Ok((input, Token::Missing));
@@ -170,19 +138,19 @@ fn parse_unquoted_value(input: &str) -> IResult<&str, Token> {
     if value == "?" {
         return Ok((input, Token::Unknown));
     }
-    
-    Ok((input, Token::Value(value.to_string())))
+
+    Ok((input, Token::Value(value)))
 }
 
 /// Parse a single token
-pub fn parse_token(input: &str) -> IResult<&str, Token> {
+pub fn parse_token<'a>(input: &'a str) -> IResult<&'a str, Token<'a>> {
     // Skip whitespace and comments first
     let (input, _) = skip_ws_comments(input)?;
-    
+
     if input.is_empty() {
         return Ok((input, Token::Eof));
     }
-    
+
     alt((
         parse_data_block,
         parse_loop,
@@ -195,10 +163,10 @@ pub fn parse_token(input: &str) -> IResult<&str, Token> {
 }
 
 /// Tokenize a CIF file
-pub fn tokenize(input: &str) -> Vec<Token> {
+pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
     let mut tokens = Vec::new();
     let mut remaining = input;
-    
+
     loop {
         match parse_token(remaining) {
             Ok((_rest, Token::Eof)) => {
@@ -220,7 +188,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             }
         }
     }
-    
+
     tokens
 }
 
@@ -249,18 +217,20 @@ mod tests {
 
     #[test]
     fn test_parse_quoted() {
-        let (_, token) = parse_single_quoted("'hello world'").unwrap();
-        assert_eq!(token, Token::SingleQuoted("hello world".to_string()));
+        let input1 = "'hello world'";
+        let (_, token) = parse_single_quoted(input1).unwrap();
+        assert_eq!(token, Token::SingleQuoted("hello world"));
 
-        let (_, token) = parse_double_quoted("\"hello world\"").unwrap();
-        assert_eq!(token, Token::DoubleQuoted("hello world".to_string()));
+        let input2 = "\"hello world\"";
+        let (_, token) = parse_double_quoted(input2).unwrap();
+        assert_eq!(token, Token::DoubleQuoted("hello world"));
     }
 
     #[test]
     fn test_tokenize() {
         let cif = "data_TEST\n_cell.length_a 10.0\nloop_\n_atom_site.id\n1\n2\n";
         let tokens = tokenize(cif);
-        
+
         assert!(matches!(tokens[0], Token::DataBlock(_)));
         assert!(matches!(tokens[1], Token::DataName(_)));
         assert!(matches!(tokens[2], Token::Value(_)));

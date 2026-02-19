@@ -2,8 +2,8 @@
 //!
 //! Used by bond generation, H-bond detection, and other distance-based algorithms.
 
+use ahash::AHashMap;
 use lin_alg::f32::Vec3;
-use std::collections::HashMap;
 
 /// Simple spatial hash grid for efficient neighbor queries
 ///
@@ -12,14 +12,14 @@ use std::collections::HashMap;
 /// of cells around the query point, guaranteeing all points within `cell_size`
 /// distance are found.
 pub(crate) struct SpatialGrid {
-    cells: HashMap<(i32, i32, i32), Vec<usize>>,
+    cells: AHashMap<(i32, i32, i32), Vec<usize>>,
     cell_size: f32,
 }
 
 impl SpatialGrid {
-    pub fn new(cell_size: f32) -> Self {
+    pub fn with_capacity(cell_size: f32, expected_atoms: usize) -> Self {
         Self {
-            cells: HashMap::new(),
+            cells: AHashMap::with_capacity(expected_atoms),
             cell_size,
         }
     }

@@ -7,7 +7,7 @@ use std::io::{BufReader, Read};
 use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{Atom, AtomIndex, AtomResidue, CoordSet, Element, ObjectMolecule, SecondaryStructure};
+use pymol_mol::{Atom, AtomResidue, CoordSet, Element, ObjectMolecule, SecondaryStructure};
 
 use crate::error::{IoError, IoResult};
 use crate::traits::MoleculeReader;
@@ -54,9 +54,9 @@ impl SsCategory {
 /// from either loop rows or single-item data.
 fn parse_ss_record(
     category: SsCategory,
-    fields: &HashMap<String, String>,
+    fields: &HashMap<&str, &str>,
 ) -> Option<SecondaryStructureRange> {
-    let get_field = |name: &str| fields.get(name).map(|s| s.as_str());
+    let get_field = |name: &str| fields.get(name).copied();
 
     // Determine SS type based on category
     let ss_type = match category {
@@ -103,6 +103,64 @@ fn parse_ss_record(
         start_seq,
         end_seq,
     })
+}
+
+/// Pre-resolved column indices for _atom_site loop — avoids per-atom HashMap lookups
+#[derive(Default)]
+struct AtomSiteColumns {
+    type_symbol: Option<usize>,
+    label_atom_id: Option<usize>,
+    auth_atom_id: Option<usize>,
+    label_comp_id: Option<usize>,
+    auth_comp_id: Option<usize>,
+    label_asym_id: Option<usize>,
+    auth_asym_id: Option<usize>,
+    label_seq_id: Option<usize>,
+    auth_seq_id: Option<usize>,
+    pdbx_pdb_ins_code: Option<usize>,
+    label_alt_id: Option<usize>,
+    b_iso_or_equiv: Option<usize>,
+    occupancy: Option<usize>,
+    group_pdb: Option<usize>,
+    pdbx_formal_charge: Option<usize>,
+    id: Option<usize>,
+    cartn_x: Option<usize>,
+    cartn_y: Option<usize>,
+    cartn_z: Option<usize>,
+    pdbx_pdb_model_num: Option<usize>,
+}
+
+impl AtomSiteColumns {
+    /// Build column index struct from the loop column names
+    fn from_columns(columns: &[String]) -> Self {
+        let mut cols = AtomSiteColumns::default();
+        for (i, name) in columns.iter().enumerate() {
+            match name.as_str() {
+                "_atom_site.type_symbol" => cols.type_symbol = Some(i),
+                "_atom_site.label_atom_id" => cols.label_atom_id = Some(i),
+                "_atom_site.auth_atom_id" => cols.auth_atom_id = Some(i),
+                "_atom_site.label_comp_id" => cols.label_comp_id = Some(i),
+                "_atom_site.auth_comp_id" => cols.auth_comp_id = Some(i),
+                "_atom_site.label_asym_id" => cols.label_asym_id = Some(i),
+                "_atom_site.auth_asym_id" => cols.auth_asym_id = Some(i),
+                "_atom_site.label_seq_id" => cols.label_seq_id = Some(i),
+                "_atom_site.auth_seq_id" => cols.auth_seq_id = Some(i),
+                "_atom_site.pdbx_PDB_ins_code" => cols.pdbx_pdb_ins_code = Some(i),
+                "_atom_site.label_alt_id" => cols.label_alt_id = Some(i),
+                "_atom_site.B_iso_or_equiv" => cols.b_iso_or_equiv = Some(i),
+                "_atom_site.occupancy" => cols.occupancy = Some(i),
+                "_atom_site.group_PDB" => cols.group_pdb = Some(i),
+                "_atom_site.pdbx_formal_charge" => cols.pdbx_formal_charge = Some(i),
+                "_atom_site.id" => cols.id = Some(i),
+                "_atom_site.Cartn_x" => cols.cartn_x = Some(i),
+                "_atom_site.Cartn_y" => cols.cartn_y = Some(i),
+                "_atom_site.Cartn_z" => cols.cartn_z = Some(i),
+                "_atom_site.pdbx_PDB_model_num" => cols.pdbx_pdb_model_num = Some(i),
+                _ => {}
+            }
+        }
+        cols
+    }
 }
 
 /// mmCIF file reader
@@ -171,11 +229,11 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
             }
             Token::DataName(name) if name.starts_with("_entry.") => {
                 pos += 1;
-                if let Some(Token::Value(val) | Token::SingleQuoted(val) | Token::DoubleQuoted(val)) =
-                    tokens.get(pos)
-                {
-                    if mol.title.is_empty() {
-                        mol.title = val.clone();
+                if let Some(token) = tokens.get(pos) {
+                    if let Some(val) = token.as_str() {
+                        if mol.title.is_empty() && !matches!(token, Token::DataBlock(_) | Token::DataName(_)) {
+                            mol.title = val.to_string();
+                        }
                     }
                     pos += 1;
                 }
@@ -264,6 +322,15 @@ fn parse_loop(
     Ok(pos)
 }
 
+/// Extract a `&str` from a value token (zero-copy)
+fn token_value_str<'a>(token: &'a Token<'a>) -> Option<&'a str> {
+    match token {
+        Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) => Some(v),
+        Token::TextField(v) => Some(v.as_str()),
+        _ => None,
+    }
+}
+
 /// Parse _atom_site loop
 fn parse_atom_site_loop(
     tokens: &[Token],
@@ -271,19 +338,26 @@ fn parse_atom_site_loop(
     columns: &[String],
     mol: &mut ObjectMolecule,
 ) -> IoResult<usize> {
-    // Map column names to indices
-    let col_idx: HashMap<&str, usize> = columns
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (s.as_str(), i))
-        .collect();
+    // Pre-resolve column indices — O(1) lookups per field instead of HashMap
+    let cols = AtomSiteColumns::from_columns(columns);
 
     let n_cols = columns.len();
     let mut coords: Vec<Vec3> = Vec::new();
     let mut models: HashMap<i32, Vec<Vec3>> = HashMap::new();
 
-    // Cache for sharing AtomResidue instances among atoms of the same residue
-    let mut residue_cache: HashMap<AtomResidue, Arc<AtomResidue>> = HashMap::new();
+    // Cache for sharing AtomResidue instances — keyed by borrowed (&str, &str, i32, char)
+    // to avoid allocating Strings for cache lookups (only allocate on cache miss)
+    let mut residue_cache: HashMap<(&str, &str, i32, char), Arc<AtomResidue>> = HashMap::new();
+
+    // Row buffer — allocated once and reused for every atom (zero-copy borrows)
+    let mut row: Vec<Option<&str>> = vec![None; n_cols];
+
+    // Helper: get column value by pre-resolved index
+    macro_rules! col {
+        ($idx:expr) => {
+            $idx.and_then(|i| row[i])
+        };
+    }
 
     // Parse rows
     loop {
@@ -296,120 +370,129 @@ fn parse_atom_site_loop(
             _ => {}
         }
 
-        // Read one row
-        let mut row: Vec<Option<String>> = Vec::with_capacity(n_cols);
+        // Reset row
+        for cell in &mut row {
+            *cell = None;
+        }
+
+        // Read one row — zero-copy borrows from tokens
+        let mut n_read = 0;
         for _ in 0..n_cols {
             if pos >= tokens.len() {
                 break;
             }
             match &tokens[pos] {
-                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) | Token::TextField(v) => {
-                    row.push(Some(v.clone()));
+                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) => {
+                    row[n_read] = Some(v);
+                }
+                Token::TextField(v) => {
+                    row[n_read] = Some(v.as_str());
                 }
                 Token::Missing | Token::Unknown => {
-                    row.push(None);
+                    row[n_read] = None;
                 }
                 Token::Loop | Token::DataName(_) | Token::DataBlock(_) | Token::Eof => {
                     break;
                 }
             }
+            n_read += 1;
             pos += 1;
         }
 
-        if row.len() < n_cols {
+        if n_read < n_cols {
             // Incomplete row - end of loop
             break;
         }
 
-        // Parse atom from row
-        let get_col = |name: &str| -> Option<&str> {
-            col_idx.get(name).and_then(|&i| row.get(i).and_then(|v| v.as_deref()))
-        };
-
         // Get element (prefer type_symbol over label_atom_id)
-        let element_str = get_col("_atom_site.type_symbol")
-            .or_else(|| get_col("_atom_site.label_atom_id"))
+        let element_str = col!(cols.type_symbol)
+            .or_else(|| col!(cols.label_atom_id))
             .unwrap_or("X");
         let element = Element::from_symbol(element_str).unwrap_or(Element::Unknown);
 
         // Get atom name (prefer auth_atom_id over label_atom_id)
-        let atom_name = get_col("_atom_site.auth_atom_id")
-            .or_else(|| get_col("_atom_site.label_atom_id"))
+        let atom_name = col!(cols.auth_atom_id)
+            .or_else(|| col!(cols.label_atom_id))
             .unwrap_or("X");
 
         let mut atom = Atom::new(atom_name, element);
 
-        // Residue info (prefer auth over label)
-        let resn = get_col("_atom_site.auth_comp_id")
-            .or_else(|| get_col("_atom_site.label_comp_id"))
-            .unwrap_or("")
-            .to_string();
+        // Residue info — zero-copy borrows; only allocate on cache miss
+        let resn_str = col!(cols.auth_comp_id)
+            .or_else(|| col!(cols.label_comp_id))
+            .unwrap_or("");
 
-        let resv = get_col("_atom_site.auth_seq_id")
-            .or_else(|| get_col("_atom_site.label_seq_id"))
+        let resv: i32 = col!(cols.auth_seq_id)
+            .or_else(|| col!(cols.label_seq_id))
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
-        let chain = get_col("_atom_site.auth_asym_id")
-            .or_else(|| get_col("_atom_site.label_asym_id"))
-            .unwrap_or("")
-            .to_string();
+        let chain_str = col!(cols.auth_asym_id)
+            .or_else(|| col!(cols.label_asym_id))
+            .unwrap_or("");
 
-        // Insertion code
-        let inscode = get_col("_atom_site.pdbx_PDB_ins_code")
+        let inscode = col!(cols.pdbx_pdb_ins_code)
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
-        // Create or reuse shared AtomResidue
-        let residue_data = AtomResidue::from_parts(chain, resn, resv, inscode, "");
+        // Create or reuse shared AtomResidue — borrowed key avoids String allocation on cache hit
+        let cache_key = (chain_str, resn_str, resv, inscode);
         atom.residue = residue_cache
-            .entry(residue_data.clone())
-            .or_insert_with(|| Arc::new(residue_data))
+            .entry(cache_key)
+            .or_insert_with(|| {
+                Arc::new(AtomResidue::from_parts(
+                    chain_str.to_string(),
+                    resn_str.to_string(),
+                    resv,
+                    inscode,
+                    "",
+                ))
+            })
             .clone();
 
         // Alt loc
-        atom.alt = get_col("_atom_site.label_alt_id")
+        atom.alt = col!(cols.label_alt_id)
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
         // B-factor
-        atom.b_factor = get_col("_atom_site.B_iso_or_equiv")
+        atom.b_factor = col!(cols.b_iso_or_equiv)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
 
         // Occupancy
-        atom.occupancy = get_col("_atom_site.occupancy")
+        atom.occupancy = col!(cols.occupancy)
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.0);
 
         // HETATM flag
-        atom.state.hetatm = get_col("_atom_site.group_PDB")
+        atom.state.hetatm = col!(cols.group_pdb)
             .map(|s| s == "HETATM")
             .unwrap_or(false);
 
         // Formal charge
-        atom.formal_charge = get_col("_atom_site.pdbx_formal_charge")
+        atom.formal_charge = col!(cols.pdbx_formal_charge)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
         // Serial number
-        atom.id = get_col("_atom_site.id")
+        atom.id = col!(cols.id)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
         // Coordinates
-        let x: f32 = get_col("_atom_site.Cartn_x")
+        let x: f32 = col!(cols.cartn_x)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
-        let y: f32 = get_col("_atom_site.Cartn_y")
+        let y: f32 = col!(cols.cartn_y)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
-        let z: f32 = get_col("_atom_site.Cartn_z")
+        let z: f32 = col!(cols.cartn_z)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
 
         // Model number
-        let model_num: i32 = get_col("_atom_site.pdbx_PDB_model_num")
+        let model_num: i32 = col!(cols.pdbx_pdb_model_num)
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
 
@@ -457,17 +540,19 @@ fn parse_cell(tokens: &[Token], mut pos: usize, mol: &mut ObjectMolecule) -> IoR
             Token::DataName(name) if name.starts_with("_cell.") => {
                 let field = &name[6..];
                 pos += 1;
-                if let Some(Token::Value(val)) = tokens.get(pos) {
-                    match field {
-                        "length_a" => a = val.parse().unwrap_or(1.0),
-                        "length_b" => b = val.parse().unwrap_or(1.0),
-                        "length_c" => c = val.parse().unwrap_or(1.0),
-                        "angle_alpha" => alpha = val.parse().unwrap_or(90.0),
-                        "angle_beta" => beta = val.parse().unwrap_or(90.0),
-                        "angle_gamma" => gamma = val.parse().unwrap_or(90.0),
-                        _ => {}
+                if let Some(token) = tokens.get(pos) {
+                    if let Some(val) = token_value_str(token) {
+                        match field {
+                            "length_a" => a = val.parse().unwrap_or(1.0),
+                            "length_b" => b = val.parse().unwrap_or(1.0),
+                            "length_c" => c = val.parse().unwrap_or(1.0),
+                            "angle_alpha" => alpha = val.parse().unwrap_or(90.0),
+                            "angle_beta" => beta = val.parse().unwrap_or(90.0),
+                            "angle_gamma" => gamma = val.parse().unwrap_or(90.0),
+                            _ => {}
+                        }
+                        pos += 1;
                     }
-                    pos += 1;
                 }
             }
             _ => break,
@@ -496,12 +581,15 @@ fn parse_ss_loop(
     let prefix = category.prefix();
 
     // Map column indices to short field names (without prefix)
-    let col_to_field: Vec<Option<String>> = columns
+    let col_to_field: Vec<Option<&str>> = columns
         .iter()
-        .map(|col| col.strip_prefix(prefix).map(|s| s.to_string()))
+        .map(|col| col.strip_prefix(prefix))
         .collect();
 
     let n_cols = columns.len();
+
+    // Row buffer — allocated once and reused
+    let mut row: Vec<Option<&str>> = vec![None; n_cols];
 
     loop {
         if pos >= tokens.len() {
@@ -512,35 +600,44 @@ fn parse_ss_loop(
             _ => {}
         }
 
-        // Read one row
-        let mut row: Vec<Option<String>> = Vec::with_capacity(n_cols);
+        // Reset row
+        for cell in &mut row {
+            *cell = None;
+        }
+
+        // Read one row — zero-copy
+        let mut col = 0;
         for _ in 0..n_cols {
             if pos >= tokens.len() {
                 break;
             }
             match &tokens[pos] {
-                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) | Token::TextField(v) => {
-                    row.push(Some(v.clone()));
+                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) => {
+                    row[col] = Some(v);
+                }
+                Token::TextField(v) => {
+                    row[col] = Some(v.as_str());
                 }
                 Token::Missing | Token::Unknown => {
-                    row.push(None);
+                    row[col] = None;
                 }
                 Token::Loop | Token::DataName(_) | Token::DataBlock(_) | Token::Eof => {
                     break;
                 }
             }
+            col += 1;
             pos += 1;
         }
 
-        if row.len() < n_cols {
+        if col < n_cols {
             break;
         }
 
-        // Build field map from row values
-        let mut fields: HashMap<String, String> = HashMap::new();
+        // Build field map from row values (zero-copy borrows)
+        let mut fields: HashMap<&str, &str> = HashMap::new();
         for (i, field_name) in col_to_field.iter().enumerate() {
-            if let (Some(name), Some(Some(value))) = (field_name, row.get(i)) {
-                fields.insert(name.clone(), value.clone());
+            if let (Some(name), Some(value)) = (field_name, row[i]) {
+                fields.insert(name, value);
             }
         }
 
@@ -564,7 +661,7 @@ fn parse_ss_single(
     ss_ranges: &mut Vec<SecondaryStructureRange>,
 ) -> usize {
     let prefix = category.prefix();
-    let mut fields: HashMap<String, String> = HashMap::new();
+    let mut fields: HashMap<&str, &str> = HashMap::new();
 
     // Collect consecutive data items with matching prefix
     while pos < tokens.len() {
@@ -573,19 +670,12 @@ fn parse_ss_single(
                 pos += 1;
                 // Read the value token
                 if pos < tokens.len() {
-                    match &tokens[pos] {
-                        Token::Value(v)
-                        | Token::SingleQuoted(v)
-                        | Token::DoubleQuoted(v)
-                        | Token::TextField(v) => {
-                            fields.insert(field.to_string(), v.clone());
-                            pos += 1;
-                        }
-                        Token::Missing | Token::Unknown => {
-                            // Skip missing/unknown values
-                            pos += 1;
-                        }
-                        _ => {}
+                    if let Some(val) = token_value_str(&tokens[pos]) {
+                        fields.insert(field, val);
+                        pos += 1;
+                    } else if matches!(&tokens[pos], Token::Missing | Token::Unknown) {
+                        // Skip missing/unknown values
+                        pos += 1;
                     }
                 }
                 continue;
@@ -605,34 +695,27 @@ fn parse_ss_single(
 }
 
 /// Apply secondary structure annotations to atoms in the molecule
+///
+/// Uses a HashMap keyed by (chain, resv) for O(ranges × avg_span + atoms) instead of
+/// the naive O(ranges × atoms) nested loop.
 fn apply_secondary_structure(mol: &mut ObjectMolecule, ss_ranges: &[SecondaryStructureRange]) {
     if ss_ranges.is_empty() {
         return;
     }
 
-    // Collect atom indices that match each SS range
-    let mut updates: Vec<(AtomIndex, SecondaryStructure)> = Vec::new();
-
+    // Build lookup: (chain, resv) → SS type
+    let mut ss_map: HashMap<(&str, i32), SecondaryStructure> = HashMap::new();
     for range in ss_ranges {
-        for (idx, atom) in mol.atoms_indexed() {
-            // Match by chain and residue number
-            // Try auth_chain first if available, otherwise use chain
-            let chain_match = if let Some(ref auth_chain) = range.auth_chain {
-                atom.residue.chain == *auth_chain
-            } else {
-                atom.residue.chain == range.chain
-            };
-
-            if chain_match && atom.residue.resv >= range.start_seq && atom.residue.resv <= range.end_seq {
-                updates.push((idx, range.ss_type));
-            }
+        let chain = range.auth_chain.as_deref().unwrap_or(&range.chain);
+        for resv in range.start_seq..=range.end_seq {
+            ss_map.insert((chain, resv), range.ss_type);
         }
     }
 
-    // Apply updates
-    for (idx, ss_type) in updates {
-        if let Some(atom) = mol.get_atom_mut(idx) {
-            atom.ss_type = ss_type;
+    // Single pass over atoms
+    for atom in mol.atoms_mut() {
+        if let Some(&ss) = ss_map.get(&(atom.residue.chain.as_str(), atom.residue.resv)) {
+            atom.ss_type = ss;
         }
     }
 }

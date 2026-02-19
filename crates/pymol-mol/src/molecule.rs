@@ -462,7 +462,7 @@ impl ObjectMolecule {
         let max_cutoff = 2.0 * max_vdw * tolerance;
 
         // Build spatial hash grid — O(n)
-        let mut grid = SpatialGrid::new(max_cutoff);
+        let mut grid = SpatialGrid::with_capacity(max_cutoff, n_atoms);
         for (i, ad) in atom_data.iter().enumerate() {
             grid.insert(ad.coord, i);
         }
