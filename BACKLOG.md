@@ -35,6 +35,21 @@ ChimeraX умеет делить большие GRO-системы на логи
 
 ---
 
+### Cartoon для нуклеиновых кислот (DNA/RNA)
+Сейчас `extract_backbone_segments` пропускает нуклеиновые кислоты (`if !residue.is_protein() { continue; }`). На структуре 6YOV (нуклеосома) DNA-цепи в cartoon-режиме не видны вообще.
+
+**Что нужно:**
+1. **`extract_nucleic_segments()`** в `backbone.rs` — аналог `extract_backbone_segments`, но для нуклеотидов. Guide atom: C4' (уже имеет флаг GUIDE в `classify_atoms`). Orientation: C4'→C1'. SS: всегда `Loop`.
+2. **Интеграция** в `CartoonRep::build()` и `build_cartoon_geometry()` (RibbonRep).
+3. Backbone рендерится как **гладкий тюб** через существующий pipeline (Loop-тюб уже реализован для белков).
+4. **(Опционально, follow-up)** Геометрия оснований: плоские прямоугольники от C1' к центру кольца основания (N9 для пуринов, N1 для пиримидинов).
+
+**Тест:** `_tests/6yov.cif`, DNA-цепи должны отображаться как гладкий тюб рядом с белковым cartoon.
+
+Детальный промпт для Claude Code: `NUCLEIC_CARTOON_PROMPT.md`
+
+---
+
 ### MMTF Format Support (Read + Write)
 Полная поддержка MMTF (Macromolecular Transmission Format) в `pymol-io`.
 Чтение и запись — бинарный компактный формат, полезен для быстрой загрузки и передачи больших структур.
