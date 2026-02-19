@@ -20,6 +20,8 @@ pub struct CartoonSmoothSettings {
     pub smooth_cycles: u32,
     /// Number of sheet flattening cycles (cartoon_flat_cycles)
     pub flat_cycles: u32,
+    /// Whether to smooth loop regions (cartoon_smooth_loops, default false)
+    pub smooth_loops: bool,
     /// First window size for loop smoothing (cartoon_smooth_first)
     pub smooth_first: u32,
     /// Last window size for loop smoothing (cartoon_smooth_last)
@@ -33,6 +35,7 @@ impl Default for CartoonSmoothSettings {
         Self {
             smooth_cycles: 2,
             flat_cycles: 4,
+            smooth_loops: false,
             smooth_first: 1,
             smooth_last: 1,
             refine_normals: true,
@@ -420,8 +423,10 @@ pub fn apply_pymol_smoothing(segment: &mut BackboneSegment, settings: &CartoonSm
     // 2. Flatten sheets (RepCartoonFlattenSheets)
     flatten_sheets(segment, settings.flat_cycles);
 
-    // 3. Smooth loops (RepCartoonSmoothLoops)
-    smooth_loops(segment, settings.smooth_first, settings.smooth_last, settings.smooth_cycles);
+    // 3. Smooth loops (RepCartoonSmoothLoops) — gated by cartoon_smooth_loops setting
+    if settings.smooth_loops {
+        smooth_loops(segment, settings.smooth_first, settings.smooth_last, settings.smooth_cycles);
+    }
 
     // 4. Refine normals (RepCartoonRefineNormals)
     if settings.refine_normals {

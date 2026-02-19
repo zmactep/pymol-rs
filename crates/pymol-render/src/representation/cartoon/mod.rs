@@ -202,6 +202,7 @@ impl Representation for CartoonRep {
         const CARTOON_SMOOTH_LAST: u16 = 258;
         const CARTOON_REFINE_NORMALS: u16 = 112;
         const CARTOON_ROUND_HELICES: u16 = 111;
+        const CARTOON_SMOOTH_LOOPS: u16 = 114;
         const CARTOON_REFINE: u16 = 123;
 
         let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
@@ -238,6 +239,9 @@ impl Representation for CartoonRep {
             refine: settings
                 .get_int_if_defined(CARTOON_REFINE)
                 .unwrap_or(5) as u32,
+            smooth_loops: settings
+                .get_bool_if_defined(CARTOON_SMOOTH_LOOPS)
+                .unwrap_or(false),
         };
 
         let geom_settings =

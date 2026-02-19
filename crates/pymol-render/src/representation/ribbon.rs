@@ -119,6 +119,7 @@ impl Representation for RibbonRep {
         const CARTOON_FLAT_CYCLES: u16 = 260;
         const CARTOON_SMOOTH_FIRST: u16 = 257;
         const CARTOON_SMOOTH_LAST: u16 = 258;
+        const CARTOON_SMOOTH_LOOPS: u16 = 114;
         const CARTOON_REFINE_NORMALS: u16 = 112;
 
         let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
@@ -131,6 +132,7 @@ impl Representation for RibbonRep {
         let smooth_settings = CartoonSmoothSettings {
             smooth_cycles: settings.get_int_if_defined(CARTOON_SMOOTH_CYCLES).unwrap_or(2) as u32,
             flat_cycles: settings.get_int_if_defined(CARTOON_FLAT_CYCLES).unwrap_or(4) as u32,
+            smooth_loops: settings.get_bool_if_defined(CARTOON_SMOOTH_LOOPS).unwrap_or(false),
             smooth_first: settings.get_int_if_defined(CARTOON_SMOOTH_FIRST).unwrap_or(1) as u32,
             smooth_last: settings.get_int_if_defined(CARTOON_SMOOTH_LAST).unwrap_or(1) as u32,
             refine_normals: settings.get_bool_if_defined(CARTOON_REFINE_NORMALS).unwrap_or(true),

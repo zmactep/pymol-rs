@@ -50,6 +50,8 @@ pub struct PipelineSettings {
     pub round_helices: bool,
     /// Position refinement cycles after each interpolation (cartoon_refine, default 5)
     pub refine: u32,
+    /// Whether to smooth loop regions (cartoon_smooth_loops, default false)
+    pub smooth_loops: bool,
 }
 
 impl Default for PipelineSettings {
@@ -66,6 +68,7 @@ impl Default for PipelineSettings {
             refine_normals: true,
             round_helices: true,
             refine: 5,
+            smooth_loops: false,
         }
     }
 }
@@ -1214,7 +1217,9 @@ pub fn generate_segment_cartoon(
 
     // Phase 5: flatten sheets, smooth loops
     flatten_sheets(gps, settings.flat_cycles);
-    smooth_loops(gps, settings.smooth_first, settings.smooth_last, settings.smooth_cycles);
+    if settings.smooth_loops {
+        smooth_loops(gps, settings.smooth_first, settings.smooth_last, settings.smooth_cycles);
+    }
 
     // Recompute after position changes
     let (dl, nv) = compute_differences_and_normals(gps);
