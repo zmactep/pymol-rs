@@ -7,14 +7,14 @@
 use std::path::Path;
 
 use pymol_color::NamedColors;
-use pymol_render::{ColorResolver, RenderContext};
+use pymol_render::RenderContext;
 use pymol_settings::GlobalSettings;
 
 use crate::camera::Camera;
 use crate::capture::capture_png_to_file;
 use crate::movie::Movie;
 use crate::object::ObjectRegistry;
-use crate::raytrace::{raytrace_scene, raytrace_to_file, RaytraceInput};
+use crate::raytrace::{raytrace_scene, raytrace_to_file};
 use crate::scene::{SceneManager, SceneStoreMask};
 use crate::selection::SelectionManager;
 use crate::session::Session;
@@ -34,6 +34,8 @@ pub struct SessionAdapter<'a> {
     pub default_size: (u32, u32),
     /// Redraw flag — set to true when a re-render is needed
     pub needs_redraw: &'a mut bool,
+    /// Optional callback for async fetch (GUI sets this; headless leaves None)
+    pub async_fetch_fn: Option<Box<dyn Fn(&str, &str, u8) -> bool + 'a>>,
 }
 
 impl<'a> ViewerLike for SessionAdapter<'a> {
@@ -76,6 +78,18 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     }
 
     // =========================================================================
+    // Async fetch
+    // =========================================================================
+
+    fn request_async_fetch(&mut self, code: &str, name: &str, format: u8) -> bool {
+        if let Some(ref f) = self.async_fetch_fn {
+            f(code, name, format)
+        } else {
+            false
+        }
+    }
+
+    // =========================================================================
     // GPU-specific overrides
     // =========================================================================
 
@@ -111,25 +125,9 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
         height: Option<u32>,
         antialias: u32,
     ) -> Result<Vec<u8>, String> {
-        self.prepare_representations_for_raytrace()?;
-
-        let context = self.render_context.ok_or_else(|| {
-            "No render context available".to_string()
-        })?;
-
-        let mut input = RaytraceInput {
-            device: context.device(),
-            queue: context.queue(),
-            camera: &mut self.session.camera,
-            registry: &self.session.registry,
-            settings: &self.session.settings,
-            named_colors: &self.session.named_colors,
-            element_colors: &self.session.element_colors,
-            chain_colors: &self.session.chain_colors,
-            clear_color: self.session.clear_color,
-            default_size: self.default_size,
-        };
-
+        let context = self.render_context.ok_or("No render context available")?;
+        self.session.prepare_render_all(context);
+        let mut input = self.session.raytrace_input(context, self.default_size);
         raytrace_scene(&mut input, width, height, antialias)
             .map(|(data, _, _)| data)
             .map_err(|e| e.to_string())
@@ -142,25 +140,9 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
         height: Option<u32>,
         antialias: u32,
     ) -> Result<(u32, u32), String> {
-        self.prepare_representations_for_raytrace()?;
-
-        let context = self.render_context.ok_or_else(|| {
-            "No render context available".to_string()
-        })?;
-
-        let mut input = RaytraceInput {
-            device: context.device(),
-            queue: context.queue(),
-            camera: &mut self.session.camera,
-            registry: &self.session.registry,
-            settings: &self.session.settings,
-            named_colors: &self.session.named_colors,
-            element_colors: &self.session.element_colors,
-            chain_colors: &self.session.chain_colors,
-            clear_color: self.session.clear_color,
-            default_size: self.default_size,
-        };
-
+        let context = self.render_context.ok_or("No render context available")?;
+        self.session.prepare_render_all(context);
+        let mut input = self.session.raytrace_input(context, self.default_size);
         raytrace_to_file(&mut input, path, width, height, antialias)
             .map_err(|e| e.to_string())
     }
@@ -220,25 +202,3 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     }
 }
 
-impl<'a> SessionAdapter<'a> {
-    /// Ensure all representations are built before raytracing.
-    fn prepare_representations_for_raytrace(&mut self) -> Result<(), String> {
-        let context = self.render_context.ok_or_else(|| {
-            "No render context available".to_string()
-        })?;
-
-        let names: Vec<String> = self.session.registry.names().map(|s| s.to_string()).collect();
-        for name in &names {
-            let color_resolver = ColorResolver::new(
-                &self.session.named_colors,
-                &self.session.element_colors,
-                &self.session.chain_colors,
-            );
-            if let Some(mol_obj) = self.session.registry.get_molecule_mut(name) {
-                mol_obj.prepare_render(context, &color_resolver, &self.session.settings);
-            }
-        }
-
-        Ok(())
-    }
-}

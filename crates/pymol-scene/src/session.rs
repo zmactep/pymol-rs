@@ -8,12 +8,14 @@
 //! `pymol-render::RenderContext`).
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
+use pymol_render::{ColorResolver, RenderContext};
 use pymol_settings::GlobalSettings;
 use serde::{Deserialize, Serialize};
 
 use crate::camera::Camera;
 use crate::movie::Movie;
 use crate::object::{ObjectRegistry, ObjectRegistrySnapshot};
+use crate::raytrace::RaytraceInput;
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
 use crate::view::ViewManager;
@@ -130,6 +132,42 @@ impl Default for Session {
 }
 
 impl Session {
+    /// Ensure all molecule representations are built (needed before raytrace
+    /// when the render loop hasn't run yet, e.g. in headless/script mode).
+    pub fn prepare_render_all(&mut self, context: &RenderContext) {
+        let names: Vec<String> = self.registry.names().map(|s| s.to_string()).collect();
+        for name in &names {
+            let color_resolver = ColorResolver::new(
+                &self.named_colors,
+                &self.element_colors,
+                &self.chain_colors,
+            );
+            if let Some(mol_obj) = self.registry.get_molecule_mut(name) {
+                mol_obj.prepare_render(context, &color_resolver, &self.settings);
+            }
+        }
+    }
+
+    /// Build a [`RaytraceInput`] borrowing from this session.
+    pub fn raytrace_input<'a>(
+        &'a mut self,
+        context: &'a RenderContext,
+        default_size: (u32, u32),
+    ) -> RaytraceInput<'a> {
+        RaytraceInput {
+            device: context.device(),
+            queue: context.queue(),
+            camera: &mut self.camera,
+            registry: &self.registry,
+            settings: &self.settings,
+            named_colors: &self.named_colors,
+            element_colors: &self.element_colors,
+            chain_colors: &self.chain_colors,
+            clear_color: self.clear_color,
+            default_size,
+        }
+    }
+
     /// Create a new session with default values.
     pub fn new() -> Self {
         Self {

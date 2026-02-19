@@ -1,7 +1,7 @@
 //! Raytracing support for scene rendering
 //!
 //! This module provides the unified raytracing functionality used by both
-//! the standalone Viewer and the GUI's ViewerAdapter.
+//! the `SessionAdapter`.
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_raytracer::{

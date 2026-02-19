@@ -34,7 +34,7 @@ use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
 use crate::ui::sequence::SequenceAction;
 use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel, SequencePanel};
-use crate::viewer_adapter::ViewerAdapter;
+use pymol_scene::SessionAdapter;
 
 /// Type alias for key action callbacks
 pub type KeyAction = Arc<dyn Fn(&mut App) + Send + Sync>;
@@ -904,7 +904,7 @@ impl App {
         Some((clipped_primitives, full_output.textures_delta))
     }
 
-    /// Execute a command using the CommandExecutor with ViewerAdapter
+    /// Execute a command using the CommandExecutor with SessionAdapter
     ///
     /// This method is IPC-aware - if the command is an external command
     /// registered via IPC, it will send a callback request to the client.
@@ -1006,13 +1006,25 @@ impl App {
             .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))
             .unwrap_or((1024, 768));
 
-        // Create a ViewerAdapter that wraps our state
-        let mut adapter = ViewerAdapter {
-            state: &mut self.state,
-            task_runner: &self.task_runner,
+        // Create a SessionAdapter that wraps our state
+        let task_runner = &self.task_runner;
+        let mut adapter = SessionAdapter {
+            session: &mut self.state,
             render_context: self.view.render_context.as_ref(),
             default_size,
             needs_redraw: &mut self.needs_redraw,
+            async_fetch_fn: Some(Box::new(|code: &str, name: &str, format: u8| {
+                let fmt = match format {
+                    1 => pymol_io::FetchFormat::Pdb,
+                    _ => pymol_io::FetchFormat::Cif,
+                };
+                task_runner.spawn(crate::fetch::FetchTask::new(
+                    code.to_string(),
+                    name.to_string(),
+                    fmt,
+                ));
+                true
+            })),
         };
 
         // Temporarily take the executor out to avoid a borrow conflict

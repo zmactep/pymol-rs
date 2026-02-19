@@ -17,7 +17,7 @@ use crate::uniform::compute_reflect_scale;
 /// Capture the current scene to a PNG file
 ///
 /// This is the single source of truth for PNG capture logic, used by both
-/// the `Viewer` and GUI's `ViewerAdapter`.
+/// the `SessionAdapter`.
 ///
 /// # Arguments
 ///
