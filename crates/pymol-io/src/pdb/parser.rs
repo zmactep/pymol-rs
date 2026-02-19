@@ -647,4 +647,41 @@ END
         assert_eq!(mol.atom_count(), 4);
         assert_eq!(mol.state_count(), 1);
     }
+
+    /// Regression test: multi-model PDB files were previously returning
+    /// EmptyFile because MODEL 1 atoms were silently dropped.
+    /// The condition `current_model > 0` routed model-1 atoms to
+    /// `models.last_mut()` which was None (nothing pushed yet),
+    /// leaving `atom_records` empty → EmptyFile error.
+    #[test]
+    fn test_read_multimodel_pdb() {
+        let pdb = r#"MODEL        1
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.458   0.000   0.000  1.00 20.00           C
+ENDMDL
+MODEL        2
+ATOM      1  N   ALA A   1       0.100   0.100   0.100  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.558   0.100   0.100  1.00 20.00           C
+ENDMDL
+MODEL        3
+ATOM      1  N   ALA A   1       0.200   0.200   0.200  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.658   0.200   0.200  1.00 20.00           C
+ENDMDL
+"#;
+
+        let mut reader = PdbReader::new(pdb.as_bytes());
+        let mol = reader.read().unwrap();
+
+        // All 3 models must be loaded; previously model 1 was silently dropped → EmptyFile
+        assert_eq!(mol.atom_count(), 2);
+        assert_eq!(mol.state_count(), 3);
+
+        // Model 1 coords (state 0)
+        let coord0 = mol.get_coord(pymol_mol::AtomIndex::from(0usize), 0).unwrap();
+        assert!((coord0.x - 0.000).abs() < 0.001);
+
+        // Model 3 coords (state 2) — different position
+        let coord2 = mol.get_coord(pymol_mol::AtomIndex::from(0usize), 2).unwrap();
+        assert!((coord2.x - 0.200).abs() < 0.001);
+    }
 }
