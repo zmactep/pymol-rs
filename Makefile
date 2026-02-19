@@ -80,6 +80,7 @@ app: release icon
 	    -e 's/@BUNDLE_ID@/$(BUNDLE_ID)/g' \
 	    -e 's/@VERSION@/$(VERSION)/g' \
 	    $(PLIST_TPL) > $(APP_DIR)/Contents/Info.plist
+	@rm $(ICNS)
 	@echo "✓ $(APP_DIR)"
 
 # Code-sign (requires Apple Developer certificate)
@@ -95,11 +96,12 @@ sign: app
 # Notarize with Apple
 notarize: sign
 	@echo "── Notarizing $(APP_NAME).app ──"
-	@test -f $(ENV_FILE) || { echo "ERROR: $(ENV_FILE) not found"; exit 1; }
-	. ./$(ENV_FILE) && \
-	  test -n "$$PYMOL_RS_APPLE_EMAIL"    || { echo "ERROR: PYMOL_RS_APPLE_EMAIL not set in $(ENV_FILE)"; exit 1; } && \
-	  test -n "$$PYMOL_RS_APPLE_TEAMID"   || { echo "ERROR: PYMOL_RS_APPLE_TEAMID not set in $(ENV_FILE)"; exit 1; } && \
-	  test -n "$$PYMOL_RS_APPLE_APP_PASS" || { echo "ERROR: PYMOL_RS_APPLE_APP_PASS not set in $(ENV_FILE)"; exit 1; } && \
+	@test -f $(ENV_FILE) || { echo "⚠ Notarization skipped: $(ENV_FILE) not found"; exit 0; }
+	@. ./$(ENV_FILE) && \
+	  test -n "$$PYMOL_RS_APPLE_EMAIL" && \
+	  test -n "$$PYMOL_RS_APPLE_TEAMID" && \
+	  test -n "$$PYMOL_RS_APPLE_APP_PASS" || { echo "⚠ Notarization skipped: missing credentials in $(ENV_FILE)"; exit 0; }
+	@. ./$(ENV_FILE) && \
 	  ditto -c -k --keepParent $(APP_DIR) target/app/$(APP_NAME).zip && \
 	  xcrun notarytool submit target/app/$(APP_NAME).zip \
 	      --apple-id "$$PYMOL_RS_APPLE_EMAIL" \
@@ -107,16 +109,20 @@ notarize: sign
 	      --password "$$PYMOL_RS_APPLE_APP_PASS" \
 	      --wait && \
 	  xcrun stapler staple $(APP_DIR) && \
-	  rm target/app/$(APP_NAME).zip
-	@echo "✓ Notarized & stapled"
+	  echo "✓ Notarized & stapled" || \
+	  echo "⚠ Notarization failed — continuing without it"
+	@rm -f target/app/$(APP_NAME).zip
 
 # Create distributable DMG
-dmg: notarize
+dmg: sign
+	$(MAKE) notarize
 	@echo "── Creating DMG ──"
+	@ln -sf /Applications target/app/Applications
 	hdiutil create -volname "$(APP_NAME)" \
 	    -srcfolder target/app \
 	    -ov -format UDZO \
 	    target/$(APP_NAME).dmg
+	@rm -f target/app/Applications
 	@echo "✓ target/$(APP_NAME).dmg"
 
 # ── Help ───────────────────────────────────────────────────────────
