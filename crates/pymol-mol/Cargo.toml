@@ -15,3 +15,7 @@ bitflags = { workspace = true }
 ahash = { workspace = true }
 smallvec = { workspace = true }
 serde = { workspace = true }
+phf = { workspace = true }
+
+[dev-dependencies]
+rmp-serde = { workspace = true }

@@ -4,6 +4,7 @@
 //! Since PyMOL stores residue/chain information inline in atoms rather than
 //! as separate structures, this module provides view types for convenient access.
 
+use phf::{phf_map, phf_set};
 use serde::{Deserialize, Serialize};
 
 use crate::atom::Atom;
@@ -273,6 +274,9 @@ pub fn three_to_one(resn: &str) -> Option<char> {
         "OCS" | "CSO" | "CSS" | "CSD" | "CME" | "SCH" | "SMC" | "CSX" => Some('C'),
         "NEP" => Some('H'),
         "HSD" | "HSE" | "HSP" => Some('H'),
+        // Charged variants (force-field specific)
+        "ARGP" => Some('R'), "ASPM" => Some('D'),
+        "GLUM" => Some('E'), "LYSP" => Some('K'),
         "ASH" => Some('D'),
         "GLH" => Some('E'),
         "LYN" => Some('K'),
@@ -327,91 +331,66 @@ pub fn residue_to_char(resn: &str) -> char {
         .unwrap_or('?')
 }
 
-/// The 20 canonical amino acids only.
-/// Does NOT include protonation variants, selenoMet, caps, or any modification.
-pub const STANDARD_AMINO_ACIDS: &[&str] = &[
-    "ALA", "ARG", "ASN", "ASP", "CYS",
-    "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO",
-    "SER", "THR", "TRP", "TYR", "VAL",
-];
+// ============================================================================
+// Residue Classification Sets (compile-time perfect hash)
+// ============================================================================
+//
+// AMINO_ACIDS and NUCLEOTIDES are phf::Map<&str, bool> where:
+//   true  = standard (canonical 20 AAs / unmodified nucleotides)
+//   false = variant  (protonation states, modifications, etc.)
+//
+// Invariants:
+//   is_standard_amino_acid(x)  ⟹  is_amino_acid(x)
+//   is_standard_nucleotide(x)  ⟹  is_nucleotide(x)
+//   is_amino_acid(x)           ⟹  three_to_one(x).is_some()
+//   is_nucleotide(x)           ⟹  nucleotide_to_char(x).is_some()
 
-/// Returns `true` only for the 20 canonical amino acids.
-/// Protonation variants (HIP, CYX), selenoMet, modified AAs, etc. return `false`.
-pub fn is_standard_amino_acid(resn: &str) -> bool {
-    STANDARD_AMINO_ACIDS.contains(&resn)
-}
+/// Amino acids: canonical (true) + variants (false).
+/// Single source of truth — replaces separate STANDARD_AMINO_ACIDS and AMINO_ACIDS sets.
+static AMINO_ACIDS: phf::Map<&str, bool> = phf_map! {
+    // 20 canonical (standard = true)
+    "ALA" => true, "ARG" => true, "ASN" => true, "ASP" => true, "CYS" => true,
+    "GLN" => true, "GLU" => true, "GLY" => true, "HIS" => true, "ILE" => true,
+    "LEU" => true, "LYS" => true, "MET" => true, "PHE" => true, "PRO" => true,
+    "SER" => true, "THR" => true, "TRP" => true, "TYR" => true, "VAL" => true,
+    // Histidine protonation variants (false)
+    "HID" => false, "HIE" => false, "HIP" => false,
+    "HSP" => false, "HSD" => false, "HSE" => false,
+    // Cysteine variants (false)
+    "CYX" => false,
+    // Non-standard but common (false)
+    "MSE" => false, "SEC" => false, "PYL" => false,
+    // Charged variants (false)
+    "ARGP" => false, "ASPM" => false, "GLUM" => false, "LYSP" => false,
+};
 
-/// Standard amino acid residue names (3-letter codes)
-pub const AMINO_ACIDS: &[&str] = &[
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-    // Histidine protonation variants
-    "HID", "HIE", "HIP", "HSP", "HSD", "HSE",
-    // Cysteine variants
-    "CYX",
-    // Non-standard but common
-    "MSE", "SEC", "PYL",
-    // Charged variants
-    "ARGP", "ASPM", "GLUM", "LYSP",
-];
+/// Nucleotides: standard (true) + modified (false).
+/// Single source of truth — replaces separate STANDARD_NUCLEOTIDES and NUCLEOTIDES sets.
+static NUCLEOTIDES: phf::Map<&str, bool> = phf_map! {
+    // Standard DNA (true)
+    "DA" => true, "DC" => true, "DG" => true, "DT" => true, "DI" => true,
+    // Standard RNA (true)
+    "A" => true, "C" => true, "G" => true, "U" => true, "I" => true,
+    // Generic (true)
+    "N" => true, "DN" => true,
+    // Alternative 3-letter names (true)
+    "ADE" => true, "CYT" => true, "GUA" => true, "THY" => true, "URA" => true,
+    // Common modified RNA (false)
+    "PSU" => false, "5MC" => false, "OMC" => false, "OMG" => false,
+    "M2G" => false, "5MU" => false, "7MG" => false, "2MG" => false,
+    "H2U" => false, "YYG" => false, "1MA" => false, "4SU" => false,
+    "5BU" => false, "BRU" => false, "CBR" => false,
+    // Modified DNA (false)
+    "5CM" => false, "8OG" => false,
+};
 
-/// Standard unmodified DNA and RNA nucleotides.
-/// Modified bases (PSU, 5MC, 8OG, etc.) are NOT included.
-pub const STANDARD_NUCLEOTIDES: &[&str] = &[
-    // Standard DNA
-    "DA", "DC", "DG", "DT", "DI",
-    // Standard RNA
-    "A", "C", "G", "U", "I",
-    // Ambiguous / generic
-    "N", "DN",
-    // 3-letter alternative names used in some older PDB entries
-    "ADE", "CYT", "GUA", "THY", "URA",
-];
+/// Common water residue names.
+static WATER_NAMES: phf::Set<&str> = phf_set! {
+    "HOH", "WAT", "H2O", "DOD", "TIP", "TIP3", "SPC", "SOL",
+};
 
-/// Returns `true` only for standard unmodified nucleotides.
-/// Modified bases (PSU, 5MC, 8OG, OMG, etc.) return `false`.
-pub fn is_standard_nucleotide(resn: &str) -> bool {
-    STANDARD_NUCLEOTIDES.contains(&resn)
-}
-
-/// Standard nucleotide residue names
-pub const NUCLEOTIDES: &[&str] = &[
-    // Standard DNA
-    "DA", "DC", "DG", "DT", "DI",
-    // Standard RNA
-    "A", "C", "G", "U", "I",
-    // Generic
-    "N", "DN",
-    // Alternative 3-letter names
-    "ADE", "CYT", "GUA", "THY", "URA",
-    // Common modified RNA (PDB/RCSB)
-    "PSU", "5MC", "OMC", "OMG", "M2G", "5MU", "7MG", "2MG", "H2U",
-    "YYG", "1MA", "4SU", "5BU", "BRU", "CBR",
-    // Modified DNA
-    "5CM", "8OG",
-];
-
-/// Check if a residue name is a standard amino acid
-pub fn is_amino_acid(resn: &str) -> bool {
-    AMINO_ACIDS.contains(&resn)
-}
-
-/// Check if a residue name is a nucleotide
-pub fn is_nucleotide(resn: &str) -> bool {
-    NUCLEOTIDES.contains(&resn)
-}
-
-/// Common water residue names
-pub const WATER_NAMES: &[&str] = &["HOH", "WAT", "H2O", "DOD", "TIP", "TIP3", "SPC", "SOL"];
-
-/// Check if a residue name is water
-pub fn is_water(resn: &str) -> bool {
-    WATER_NAMES.contains(&resn)
-}
-
-/// Common ion residue names (GROMACS / CHARMM / AMBER / OPLS conventions)
-pub const ION_NAMES: &[&str] = &[
+/// Common ion residue names (GROMACS / CHARMM / AMBER / OPLS conventions).
+static ION_NAMES: phf::Set<&str> = phf_set! {
     // Monatomic cations
     "NA", "NA+", "K", "K+", "CA2", "MG2",
     "ZN", "ZN2", "FE", "FE2", "CU", "CU2",
@@ -421,15 +400,10 @@ pub const ION_NAMES: &[&str] = &[
     "CL", "CL-", "BR", "I-",
     // CHARMM / OPLS force field variants
     "SOD", "POT", "CLA", "CAL",
-];
+};
 
-/// Check if a residue name is a known ion
-pub fn is_ion(resn: &str) -> bool {
-    ION_NAMES.contains(&resn)
-}
-
-/// Common lipid residue names (CHARMM36 / AMBER / Slipids / Martini conventions)
-pub const LIPID_NAMES: &[&str] = &[
+/// Common lipid residue names (CHARMM36 / AMBER / Slipids / Martini conventions).
+static LIPID_NAMES: phf::Set<&str> = phf_set! {
     // Phosphatidylcholines
     "POPC", "DPPC", "DMPC", "DSPC", "DOPC", "DLPC", "DAPC", "DEPC",
     // Phosphatidylethanolamines
@@ -442,31 +416,60 @@ pub const LIPID_NAMES: &[&str] = &[
     "CHOL", "CHL1", "CLR",
     // Ceramides / Cardiolipin
     "CER", "CERA", "CDL1", "CDL2",
-];
+};
 
-/// Check if a residue name is a known lipid
-pub fn is_lipid(resn: &str) -> bool {
-    LIPID_NAMES.contains(&resn)
+/// N/C-terminal capping groups.
+static CAPPING_GROUPS: phf::Set<&str> = phf_set! {
+    "ACE", "NME", "NHH", "FOR", "NH2",
+};
+
+// ============================================================================
+// Classification Functions
+// ============================================================================
+
+/// Returns `true` only for the 20 canonical amino acids.
+pub fn is_standard_amino_acid(resn: &str) -> bool {
+    AMINO_ACIDS.get(resn) == Some(&true)
 }
 
-/// N/C-terminal capping groups that are chemically adjacent to the polymer
-/// but have no standard 1-letter code. Always display in bracket notation.
-pub const CAPPING_GROUPS: &[&str] = &[
-    "ACE", // acetyl cap (N-terminus)
-    "NME", // N-methylamide cap (C-terminus)
-    "NHH", // amino cap (rare)
-    "FOR", // formyl cap
-    "NH2", // amide cap (C-terminus)
-];
+/// Check if a residue name is an amino acid (canonical + variants).
+pub fn is_amino_acid(resn: &str) -> bool {
+    AMINO_ACIDS.contains_key(resn)
+}
 
-/// Check if a residue name is a capping group
+/// Returns `true` only for standard unmodified nucleotides.
+pub fn is_standard_nucleotide(resn: &str) -> bool {
+    NUCLEOTIDES.get(resn) == Some(&true)
+}
+
+/// Check if a residue name is a nucleotide (standard + modified).
+pub fn is_nucleotide(resn: &str) -> bool {
+    NUCLEOTIDES.contains_key(resn)
+}
+
+/// Check if a residue name is water.
+pub fn is_water(resn: &str) -> bool {
+    WATER_NAMES.contains(resn)
+}
+
+/// Check if a residue name is a known ion.
+pub fn is_ion(resn: &str) -> bool {
+    ION_NAMES.contains(resn)
+}
+
+/// Check if a residue name is a known lipid.
+pub fn is_lipid(resn: &str) -> bool {
+    LIPID_NAMES.contains(resn)
+}
+
+/// Check if a residue name is a capping group.
 pub fn is_capping_group(resn: &str) -> bool {
-    CAPPING_GROUPS.contains(&resn)
+    CAPPING_GROUPS.contains(resn)
 }
 
 /// Residue category for chain assignment
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResidueCategory {
+pub enum ResidueCategory {
     Protein,
     Nucleic,
     Solvent,
@@ -476,7 +479,7 @@ pub(crate) enum ResidueCategory {
 }
 
 /// Classify a residue by its name into a category
-pub(crate) fn classify_residue(resn: &str) -> ResidueCategory {
+pub fn classify_residue(resn: &str) -> ResidueCategory {
     if is_amino_acid(resn) {
         ResidueCategory::Protein
     } else if is_nucleotide(resn) {
@@ -583,7 +586,7 @@ mod tests {
     #[test]
     fn test_atoms_same_residue_shared() {
         let atoms = make_test_atoms();
-        // Atoms 0 and 1 share the same Rc<AtomResidue>
+        // Atoms 0 and 1 share the same Arc<AtomResidue>
         assert!(Arc::ptr_eq(&atoms[0].residue, &atoms[1].residue));
         assert!(atoms_same_residue(&atoms[0], &atoms[1]));
     }

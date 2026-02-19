@@ -40,6 +40,8 @@
 // Module declarations
 mod atom;
 mod bond;
+mod bonding;
+mod chains;
 mod coordset;
 pub mod dss;
 mod element;
@@ -65,16 +67,15 @@ pub use flags::{AtomFlags, AtomGeometry, Chirality, Stereo};
 pub use index::{AtomIndex, BondIndex, CoordIndex, StateIndex, INVALID_INDEX};
 pub use molecule::{MoleculeBuilder, ObjectMolecule};
 pub use residue::{
-    atoms_same_chain, atoms_same_residue, atoms_same_segment, is_amino_acid, is_ion, is_lipid,
-    is_capping_group, is_nucleotide, is_standard_amino_acid, is_standard_nucleotide, is_water,
-    nucleotide_to_char, residue_to_char, three_to_one, ChainIterator, ChainView, ResidueIterator,
-    ResidueKey, ResidueView, AMINO_ACIDS, CAPPING_GROUPS, ION_NAMES, LIPID_NAMES, NUCLEOTIDES,
-    STANDARD_AMINO_ACIDS, STANDARD_NUCLEOTIDES, WATER_NAMES,
+    atoms_same_chain, atoms_same_residue, atoms_same_segment, classify_residue, is_amino_acid,
+    is_capping_group, is_ion, is_lipid, is_nucleotide, is_standard_amino_acid,
+    is_standard_nucleotide, is_water, nucleotide_to_char, residue_to_char, three_to_one,
+    ChainIterator, ChainView, ResidueCategory, ResidueIterator, ResidueKey, ResidueView,
 };
 pub use secondary::SecondaryStructure;
 
 // Re-export DSS types
-pub use dss::{assign_secondary_structure, DssSettings, PhiPsi};
+pub use dss::{assign_secondary_structure, DssSettings};
 
 /// Re-export commonly used types for convenience
 pub mod prelude {

@@ -52,3 +52,61 @@ impl SpatialGrid {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_insert_and_query() {
+        let mut grid = SpatialGrid::with_capacity(2.0, 10);
+        grid.insert(Vec3::new(0.0, 0.0, 0.0), 0);
+        grid.insert(Vec3::new(1.0, 0.0, 0.0), 1);
+        grid.insert(Vec3::new(0.0, 1.0, 0.0), 2);
+
+        let mut neighbors = Vec::new();
+        grid.query_neighbors(Vec3::new(0.5, 0.5, 0.0), &mut neighbors);
+        neighbors.sort();
+
+        assert_eq!(neighbors, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_query_no_neighbors() {
+        let mut grid = SpatialGrid::with_capacity(1.0, 10);
+        grid.insert(Vec3::new(0.0, 0.0, 0.0), 0);
+
+        let mut neighbors = Vec::new();
+        // Query far away — outside 3x3x3 neighborhood
+        grid.query_neighbors(Vec3::new(100.0, 100.0, 100.0), &mut neighbors);
+
+        assert!(neighbors.is_empty());
+    }
+
+    #[test]
+    fn test_all_atoms_same_cell() {
+        let mut grid = SpatialGrid::with_capacity(10.0, 5);
+        for i in 0..5 {
+            grid.insert(Vec3::new(0.1 * i as f32, 0.0, 0.0), i);
+        }
+
+        let mut neighbors = Vec::new();
+        grid.query_neighbors(Vec3::new(0.0, 0.0, 0.0), &mut neighbors);
+        neighbors.sort();
+
+        assert_eq!(neighbors, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_negative_coordinates() {
+        let mut grid = SpatialGrid::with_capacity(2.0, 4);
+        grid.insert(Vec3::new(-1.0, -1.0, -1.0), 0);
+        grid.insert(Vec3::new(1.0, 1.0, 1.0), 1);
+
+        let mut neighbors = Vec::new();
+        grid.query_neighbors(Vec3::new(0.0, 0.0, 0.0), &mut neighbors);
+        neighbors.sort();
+
+        assert_eq!(neighbors, vec![0, 1]);
+    }
+}

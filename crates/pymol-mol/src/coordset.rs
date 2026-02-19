@@ -225,15 +225,7 @@ impl CoordSet {
         self.n_index == 0
     }
 
-    /// Get the number of atoms in the parent molecule
-    /// (size of the atom-to-coordinate mapping)
-    #[inline]
-    pub fn atom_capacity(&self) -> usize {
-        match &self.mapping {
-            CoordMapping::Dense => self.n_index,
-            CoordMapping::Sparse { atm_to_idx, .. } => atm_to_idx.len(),
-        }
-    }
+
 
     /// Get coordinates by coordinate index
     #[inline]
@@ -322,19 +314,6 @@ impl CoordSet {
         }
     }
 
-    /// Get the atom index for a coordinate index
-    #[inline]
-    pub fn coord_to_atom(&self, coord: CoordIndex) -> Option<AtomIndex> {
-        let coord_idx = coord.as_usize();
-        if coord_idx >= self.n_index {
-            return None;
-        }
-        match &self.mapping {
-            CoordMapping::Dense => Some(AtomIndex(coord_idx as u32)),
-            CoordMapping::Sparse { idx_to_atm, .. } => idx_to_atm.get(coord_idx).copied(),
-        }
-    }
-
     /// Get the coordinate index for an atom index
     #[inline]
     pub fn atom_to_coord(&self, atom: AtomIndex) -> Option<CoordIndex> {
@@ -359,42 +338,6 @@ impl CoordSet {
                 }
             }
         }
-    }
-
-    /// Get a reference to the coordinate data for a coordinate index as a fixed-size array
-    #[inline]
-    pub fn coord_ptr(&self, idx: CoordIndex) -> Option<&[f32; 3]> {
-        let i = idx.as_usize();
-        if i >= self.n_index {
-            return None;
-        }
-        let base = i * 3;
-        // Safe conversion: get slice and convert to array reference
-        self.coords.get(base..base + 3)?.try_into().ok()
-    }
-
-    /// Get a mutable reference to the coordinate data as a fixed-size array
-    #[inline]
-    pub fn coord_ptr_mut(&mut self, idx: CoordIndex) -> Option<&mut [f32; 3]> {
-        let i = idx.as_usize();
-        if i >= self.n_index {
-            return None;
-        }
-        let base = i * 3;
-        // Safe conversion: get mutable slice and convert to array reference
-        self.coords.get_mut(base..base + 3)?.try_into().ok()
-    }
-
-    /// Get the raw coordinate slice
-    #[inline]
-    pub fn coords_raw(&self) -> &[f32] {
-        &self.coords
-    }
-
-    /// Get the raw coordinate slice mutably
-    #[inline]
-    pub fn coords_raw_mut(&mut self) -> &mut [f32] {
-        &mut self.coords
     }
 
     /// Iterate over all coordinates
@@ -520,19 +463,6 @@ impl CoordSet {
         self.translate(-center);
     }
 
-    /// Translate specific coordinates by indices
-    pub fn translate_indices(&mut self, indices: &[CoordIndex], delta: Vec3) {
-        for &idx in indices {
-            let i = idx.as_usize();
-            if i < self.n_index {
-                let base = i * 3;
-                self.coords[base] += delta.x;
-                self.coords[base + 1] += delta.y;
-                self.coords[base + 2] += delta.z;
-            }
-        }
-    }
-
     /// Translate specific atoms by atom indices
     pub fn translate_atoms(&mut self, atoms: &[AtomIndex], delta: Vec3) {
         for &atom in atoms {
@@ -557,12 +487,6 @@ impl CoordSet {
         self.transform(&matrix);
     }
 
-    /// Rotate specific coordinates by indices
-    pub fn rotate_indices(&mut self, indices: &[CoordIndex], axis: Vec3, angle: f32, origin: Vec3) {
-        let matrix = rotation_matrix(axis, angle, origin);
-        self.transform_indices(indices, &matrix);
-    }
-
     /// Rotate specific atoms by atom indices
     pub fn rotate_atoms(&mut self, atoms: &[AtomIndex], axis: Vec3, angle: f32, origin: Vec3) {
         let matrix = rotation_matrix(axis, angle, origin);
@@ -581,16 +505,6 @@ impl CoordSet {
     pub fn transform(&mut self, matrix: &Mat4) {
         for i in 0..self.n_index {
             apply_mat4(&mut self.coords, i * 3, matrix);
-        }
-    }
-
-    /// Apply a 4x4 homogeneous transformation matrix to specific coordinates
-    pub fn transform_indices(&mut self, indices: &[CoordIndex], matrix: &Mat4) {
-        for &idx in indices {
-            let i = idx.as_usize();
-            if i < self.n_index {
-                apply_mat4(&mut self.coords, i * 3, matrix);
-            }
         }
     }
 
@@ -949,21 +863,6 @@ mod tests {
         let sym = Symmetry::new("P 21 21 21", [10.0, 20.0, 30.0], [90.0, 90.0, 90.0]);
         assert_eq!(sym.space_group, "P 21 21 21");
         assert_eq!(sym.cell_lengths, [10.0, 20.0, 30.0]);
-    }
-
-    #[test]
-    fn test_translate_indices() {
-        let mut cs = CoordSet::from_vec3(&[
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.0, 1.0, 1.0),
-            Vec3::new(2.0, 2.0, 2.0),
-        ]);
-
-        cs.translate_indices(&[CoordIndex(0), CoordIndex(2)], Vec3::new(1.0, 0.0, 0.0));
-
-        assert_eq!(cs.get_coord(CoordIndex(0)), Some(Vec3::new(1.0, 0.0, 0.0)));
-        assert_eq!(cs.get_coord(CoordIndex(1)), Some(Vec3::new(1.0, 1.0, 1.0))); // unchanged
-        assert_eq!(cs.get_coord(CoordIndex(2)), Some(Vec3::new(3.0, 2.0, 2.0)));
     }
 
     #[test]

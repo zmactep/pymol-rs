@@ -14,7 +14,7 @@ use bitflags::bitflags;
 use lin_alg::f32::Vec3;
 
 use crate::spatial::SpatialGrid;
-use std::f32::consts::PI;
+
 
 use crate::coordset::CoordSet;
 use crate::index::AtomIndex;
@@ -84,7 +84,7 @@ impl Default for DssSettings {
 ///
 /// # Returns
 /// Dihedral angle in radians, range [-PI, PI]
-pub fn dihedral_angle(v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3) -> f32 {
+fn dihedral_angle(v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3) -> f32 {
     let d21 = v2 - v1;
     let d01 = v0 - v1;
     let d32 = v3 - v2;
@@ -124,16 +124,6 @@ fn angle_between(v1: Vec3, v2: Vec3) -> f32 {
 
     let cos_angle = v1.dot(v2) / (len1 * len2);
     cos_angle.clamp(-1.0, 1.0).acos()
-}
-
-#[inline]
-pub fn rad_to_deg(rad: f32) -> f32 {
-    rad * 180.0 / PI
-}
-
-#[inline]
-pub fn deg_to_rad(deg: f32) -> f32 {
-    deg * PI / 180.0
 }
 
 // ============================================================================
@@ -224,12 +214,6 @@ impl Default for ResidueData {
             don: Vec::new(),
         }
     }
-}
-
-pub fn calculate_phi_psi(c_prev: Vec3, n: Vec3, ca: Vec3, c: Vec3, n_next: Vec3) -> PhiPsi {
-    let phi = rad_to_deg(dihedral_angle(c_prev, n, ca, c));
-    let psi = rad_to_deg(dihedral_angle(n, ca, c, n_next));
-    PhiPsi { phi, psi }
 }
 
 // ============================================================================
@@ -438,7 +422,8 @@ fn detect_hydrogen_bonds(
             }
             let n_idx = res[i].n_idx?;
             let n_pos = coord_set.get_atom_coord(n_idx)?;
-            let bonded = molecule.bonded_atoms(n_idx);
+            let bonded: smallvec::SmallVec<[AtomIndex; 4]> =
+                molecule.bonded_atoms_iter(n_idx).collect();
             if bonded.is_empty() {
                 return None;
             }
@@ -530,7 +515,7 @@ fn detect_hydrogen_bonds(
                 } else if cos_angle <= 0.0 {
                     90.0
                 } else {
-                    (cos_angle.acos() * 180.0 / PI) as f64
+                    cos_angle.acos().to_degrees() as f64
                 };
 
                 if angle > HBOND_MAX_ANGLE as f64 {
@@ -607,10 +592,10 @@ fn calculate_all_phi_psi(res: &mut [ResidueData], coord_set: &CoordSet) {
             (c_prev, n_curr, ca_curr, c_curr)
         {
             // We can compute phi even without n_next
-            let phi = rad_to_deg(dihedral_angle(c_prev, n_curr, ca_curr, c_curr));
+            let phi = dihedral_angle(c_prev, n_curr, ca_curr, c_curr).to_degrees();
 
             if let Some(n_next) = n_next {
-                let psi = rad_to_deg(dihedral_angle(n_curr, ca_curr, c_curr, n_next));
+                let psi = dihedral_angle(n_curr, ca_curr, c_curr, n_next).to_degrees();
                 res[i].phi_psi = Some(PhiPsi { phi, psi });
                 res[i].flags |= SsFlags::GOT_PHI_PSI;
             }
@@ -1092,7 +1077,7 @@ fn validate_assignments(res: &mut [ResidueData]) {
 fn apply_ss_assignments(molecule: &mut ObjectMolecule, res: &[ResidueData]) -> usize {
     let mut updated_count = 0;
 
-    let mut ss_map = std::collections::HashMap::new();
+    let mut ss_map = ahash::AHashMap::new();
     for r in res {
         if !r.real {
             continue;
@@ -1138,7 +1123,7 @@ mod tests {
         let v2 = Vec3::new(2.0, 0.0, 0.0);
         let v3 = Vec3::new(3.0, 0.0, 0.0);
 
-        let angle = rad_to_deg(dihedral_angle(v0, v1, v2, v3));
+        let angle = dihedral_angle(v0, v1, v2, v3).to_degrees();
         assert!(angle.abs() < 10.0 || (angle.abs() - 180.0).abs() < 10.0);
     }
 
@@ -1149,7 +1134,7 @@ mod tests {
         let v2 = Vec3::new(1.0, 0.0, 0.0);
         let v3 = Vec3::new(1.0, 0.0, 1.0);
 
-        let angle = rad_to_deg(dihedral_angle(v0, v1, v2, v3));
+        let angle = dihedral_angle(v0, v1, v2, v3).to_degrees();
         assert!((angle.abs() - 90.0).abs() < 1.0);
     }
 

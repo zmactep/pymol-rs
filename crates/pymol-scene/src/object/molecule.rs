@@ -133,7 +133,8 @@ impl MoleculeObject {
     ///
     /// Unlike `new()`, this preserves all atom-level state (visible_reps, colors, etc.)
     /// exactly as stored in the molecule.
-    pub fn from_raw(molecule: ObjectMolecule) -> Self {
+    pub fn from_raw(mut molecule: ObjectMolecule) -> Self {
+        molecule.rebuild_atom_bonds();
         Self {
             molecule,
             state: ObjectState::default(),

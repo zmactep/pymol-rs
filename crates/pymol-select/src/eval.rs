@@ -3,7 +3,7 @@
 //! Evaluates parsed selection expressions against molecules in a context.
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{Atom, AtomFlags, AtomIndex, SecondaryStructure};
+use pymol_mol::{three_to_one, Atom, AtomFlags, AtomIndex, SecondaryStructure};
 
 use crate::ast::{CompareOp, MacroSpec, PropertyValue, SelectionExpr};
 use crate::context::EvalContext;
@@ -362,23 +362,11 @@ fn eval_model(ctx: &EvalContext, pattern: &Pattern) -> EvalResult<SelectionResul
 fn eval_pepseq(ctx: &EvalContext, pattern: &Pattern) -> EvalResult<SelectionResult> {
     let mut result = SelectionResult::new(ctx.total_atoms());
 
-    // Map 3-letter codes to 1-letter codes
-    let aa_map: &[(&str, char)] = &[
-        ("ALA", 'A'), ("ARG", 'R'), ("ASN", 'N'), ("ASP", 'D'),
-        ("CYS", 'C'), ("GLN", 'Q'), ("GLU", 'E'), ("GLY", 'G'),
-        ("HIS", 'H'), ("ILE", 'I'), ("LEU", 'L'), ("LYS", 'K'),
-        ("MET", 'M'), ("PHE", 'F'), ("PRO", 'P'), ("SER", 'S'),
-        ("THR", 'T'), ("TRP", 'W'), ("TYR", 'Y'), ("VAL", 'V'),
-    ];
-
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
-            for (resn, code) in aa_map {
-                if atom.residue.resn.eq_ignore_ascii_case(resn) {
-                    if pattern.matches(&code.to_string(), false) {
-                        result.set_index(offset + local_idx);
-                    }
-                    break;
+            if let Some(code) = three_to_one(&atom.residue.resn) {
+                if pattern.matches(&code.to_string(), false) {
+                    result.set_index(offset + local_idx);
                 }
             }
         }

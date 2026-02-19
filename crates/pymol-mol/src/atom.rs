@@ -165,12 +165,6 @@ impl AtomColors {
         }
     }
 
-    /// Check if a color value is set (not the sentinel value)
-    #[inline]
-    pub fn is_color_set(color: i32) -> bool {
-        color != COLOR_UNSET
-    }
-
     /// Get the effective color for cartoon representation
     #[inline]
     pub fn cartoon_or_base(&self) -> i32 {
@@ -584,26 +578,6 @@ impl Atom {
         ));
     }
 
-    /// Set the residue from a shared AtomResidue
-    pub fn set_residue_shared(&mut self, residue: Arc<AtomResidue>) {
-        self.residue = residue;
-    }
-
-    /// Get a short description of the atom (for debugging)
-    pub fn short_desc(&self) -> String {
-        format!(
-            "{}/{}{}{}/{}",
-            self.residue.chain,
-            self.residue.resn,
-            self.residue.resv,
-            if self.residue.inscode != ' ' {
-                self.residue.inscode.to_string()
-            } else {
-                String::new()
-            },
-            self.name
-        )
-    }
 }
 
 impl std::fmt::Display for Atom {
