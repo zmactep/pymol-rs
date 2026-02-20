@@ -4,6 +4,7 @@
 
 pub mod command;
 pub mod completion;
+pub mod drag_drop_overlay;
 pub mod movie;
 pub mod notification;
 pub mod objects;
@@ -12,6 +13,7 @@ pub mod sequence;
 
 pub use command::CommandLinePanel;
 pub use completion::{generate_completions, CompletionResult};
+pub use drag_drop_overlay::DragDropOverlay;
 pub use movie::{MovieAction, MoviePanel};
 pub use notification::NotificationOverlay;
 pub use objects::ObjectListPanel;

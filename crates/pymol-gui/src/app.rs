@@ -33,7 +33,10 @@ use crate::view::AppView;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
 use crate::ui::sequence::SequenceAction;
-use crate::ui::{CommandLinePanel, NotificationOverlay, ObjectListPanel, OutputPanel, SequencePanel};
+use crate::ui::{
+    CommandLinePanel, DragDropOverlay, NotificationOverlay, ObjectListPanel, OutputPanel,
+    SequencePanel,
+};
 use pymol_scene::SessionAdapter;
 
 /// Type alias for key action callbacks
@@ -120,6 +123,9 @@ pub struct App {
     // =========================================================================
     /// File path to load after GPU initialization
     pending_load_file: Option<String>,
+    /// File currently being dragged over the window (for hover UI hint).
+    /// None when no drag is in progress.
+    drag_hover_path: Option<std::path::PathBuf>,
 
     // =========================================================================
     // Application Lifecycle
@@ -194,6 +200,7 @@ impl App {
             external_commands: ExternalCommandRegistry::new(),
             headless,
             pending_load_file: None,
+            drag_hover_path: None,
             quit_requested: false,
         };
 
@@ -839,6 +846,10 @@ impl App {
                     NotificationOverlay::show(ctx, &pending_messages);
                 }
 
+                // Show drag-and-drop hint when a file is being dragged over the window
+                if let Some(ref path) = self.drag_hover_path {
+                    DragDropOverlay::show(ctx, path);
+                }
 
             })
         };
@@ -1772,6 +1783,33 @@ impl ApplicationHandler for App {
                 // Only handle key bindings if egui didn't consume the event
                 if !egui_wants_input {
                     self.handle_key(event);
+                }
+                self.request_redraw();
+            }
+
+            // File dragged over window — show drop hint
+            WindowEvent::HoveredFile(path) => {
+                self.drag_hover_path = Some(path);
+                self.request_redraw();
+            }
+
+            // Drag cancelled without dropping
+            WindowEvent::HoveredFileCancelled => {
+                self.drag_hover_path = None;
+                self.request_redraw();
+            }
+
+            // File dropped — load it
+            WindowEvent::DroppedFile(path) => {
+                self.drag_hover_path = None;
+                let path_str = path.to_string_lossy();
+                log::info!("Drag-and-drop: loading \"{}\"", path_str);
+                match self.execute_command(&format!("load \"{}\"", path_str)) {
+                    Ok(_) => {}
+                    Err(e) => self.output.print_error(format!(
+                        "Failed to load \"{}\": {}",
+                        path_str, e
+                    )),
                 }
                 self.request_redraw();
             }
