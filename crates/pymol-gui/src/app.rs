@@ -1016,7 +1016,8 @@ impl App {
             async_fetch_fn: Some(Box::new(|code: &str, name: &str, format: u8| {
                 let fmt = match format {
                     1 => pymol_io::FetchFormat::Pdb,
-                    _ => pymol_io::FetchFormat::Cif,
+                    0 => pymol_io::FetchFormat::Cif,
+                    _ => pymol_io::FetchFormat::Bcif,
                 };
                 task_runner.spawn(crate::fetch::FetchTask::new(
                     code.to_string(),
@@ -1301,7 +1302,7 @@ impl App {
                     let expr = match pymol_select::parse(sel_expr) {
                         Ok(e) => e,
                         Err(e) => {
-                            log::warn!("Failed to parse selection '{}': {:?}", sel_name, e);
+                            log::debug!("Failed to parse selection '{}': {:?}", sel_name, e);
                             continue;
                         }
                     };
@@ -1320,7 +1321,7 @@ impl App {
                             };
                         }
                         Err(e) => {
-                            log::warn!("Failed to evaluate selection '{}' for '{}': {:?}", sel_name, mol_name, e);
+                            log::debug!("Failed to evaluate selection '{}' for '{}': {:?}", sel_name, mol_name, e);
                         }
                     }
                 }

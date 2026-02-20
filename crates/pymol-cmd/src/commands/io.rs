@@ -102,11 +102,18 @@ EXAMPLES
             .or_else(|| args.get_named_str("object"))
             .map(|s| s.to_string())
             .unwrap_or_else(|| {
-                Path::new(filename)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("obj")
-                    .to_string()
+                let p = Path::new(filename);
+                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("obj");
+                // Strip double extension for .gz files (e.g. "1AOI.cif.gz" → "1AOI")
+                if p.extension().and_then(|s| s.to_str()) == Some("gz") {
+                    Path::new(stem)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(stem)
+                        .to_string()
+                } else {
+                    stem.to_string()
+                }
             });
 
         // Get state (optional, 0 = append)
@@ -697,13 +704,14 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .unwrap_or(code);
 
-        // Parse the type argument (default: cif)
+        // Parse the type argument (default: bcif)
         let format = args
             .get_str(2)
             .or_else(|| args.get_named_str("type"))
             .map(|s| match s.to_lowercase().as_str() {
                 "pdb" => pymol_io::FetchFormat::Pdb,
                 "cif" | "mmcif" => pymol_io::FetchFormat::Cif,
+                "bcif" | "binarycif" => pymol_io::FetchFormat::Bcif,
                 _ => pymol_io::FetchFormat::default(),
             })
             .unwrap_or_default();
@@ -712,6 +720,7 @@ EXAMPLES
         let format_code = match format {
             pymol_io::FetchFormat::Pdb => 1u8,
             pymol_io::FetchFormat::Cif => 0u8,
+            pymol_io::FetchFormat::Bcif => 2u8,
         };
 
         // Try async path first (GUI supports this)

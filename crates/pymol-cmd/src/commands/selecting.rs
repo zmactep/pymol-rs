@@ -88,49 +88,47 @@ pub fn select_with_context(
         }
     }
 
-    if molecules.is_empty() {
-        // No molecules, return empty result
-        return Ok((0, Vec::new()));
+    // Parse the selection expression upfront (validates syntax even with no molecules)
+    let parsed_expr = pymol_select::parse(selection)
+        .map_err(|e| CmdError::invalid_arg("selection", format!("parse error: {:?}", e)))?;
+
+    // Validate all name references in the expression against known selections/objects
+    let known_selections = viewer.selection_names();
+    for name in parsed_expr.selection_references() {
+        let is_known = known_selections.iter().any(|s| s == name)
+            || object_names.iter().any(|s| s == name);
+        if !is_known {
+            return Err(CmdError::invalid_arg(
+                "selection",
+                format!("'{}' is not a known selection or object name", name),
+            ));
+        }
     }
 
-    // Get the stored named selections
-    let selection_names = viewer.selection_names();
+    if molecules.is_empty() {
+        return Ok((0, Vec::new()));
+    }
 
     let mut total_count = 0;
     let mut results: Vec<(String, SelectionResult)> = Vec::new();
 
-    // Parse the selection expression once (shared across all objects)
-    let parsed_expr = pymol_select::parse(selection)
-        .map_err(|e| CmdError::invalid_arg("selection", format!("parse error: {:?}", e)))?;
-
-    // For each molecule, evaluate the selection in a context that includes named selections
-    // and object names as implicit selections
     for (obj_name, mol) in &molecules {
-        // Build context for this single molecule
         let mut ctx = EvalContext::single(mol);
 
         // Add all object names as implicit selections.
         // For the current object → all atoms selected; for others → empty selection.
-        // This allows "select x, objA and resi 1-10" to work correctly:
-        // when evaluating against objA, "objA" selects all atoms;
-        // when evaluating against objB, "objA" selects nothing (0 atoms).
+        // This allows "select x, objA and resi 1-10" to work correctly.
         for (other_name, _) in &molecules {
             if *other_name == *obj_name {
-                // Current object: select all atoms
-                let all = SelectionResult::all(mol.atom_count());
-                ctx.add_selection(other_name.to_string(), all);
+                ctx.add_selection(other_name.to_string(), SelectionResult::all(mol.atom_count()));
             } else {
-                // Other object: empty selection (0 atoms in this context)
-                let empty = SelectionResult::none(mol.atom_count());
-                ctx.add_selection(other_name.to_string(), empty);
+                ctx.add_selection(other_name.to_string(), SelectionResult::none(mol.atom_count()));
             }
         }
 
         // Pre-evaluate and add named selections to the context
-        // (these override object names if there's a conflict)
-        for sel_name in &selection_names {
+        for sel_name in &known_selections {
             if let Some(sel_expr) = viewer.get_selection(sel_name) {
-                // Parse and evaluate the named selection expression
                 if let Ok(expr) = pymol_select::parse(sel_expr) {
                     if let Ok(result) = pymol_select::evaluate(&expr, &ctx) {
                         ctx.add_selection(sel_name.clone(), result);
@@ -139,16 +137,13 @@ pub fn select_with_context(
             }
         }
 
-        // Now evaluate the target selection with named selections available
         match pymol_select::evaluate(&parsed_expr, &ctx) {
             Ok(result) => {
-                let count = result.count();
-                total_count += count;
+                total_count += result.count();
                 results.push((obj_name.to_string(), result));
             }
             Err(e) => {
                 log::debug!("Selection evaluation error for {}: {:?}", obj_name, e);
-                // Continue with other molecules, don't fail completely
             }
         }
     }

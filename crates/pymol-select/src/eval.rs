@@ -1148,4 +1148,24 @@ mod tests {
         assert_eq!(last_result.count(), 1);
         assert!(last_result.contains(AtomIndex(8)));
     }
+
+    #[test]
+    fn test_unknown_name_in_compound_expr() {
+        let mol = create_test_molecule();
+        let mut ctx = EvalContext::single(&mol);
+        ctx.add_selection("obj1".to_string(), SelectionResult::all(mol.atom_count()));
+
+        let expr = crate::parse("chain A or blabla").unwrap();
+        assert!(evaluate(&expr, &ctx).is_err());
+    }
+
+    #[test]
+    fn test_unknown_name_standalone() {
+        let mol = create_test_molecule();
+        let mut ctx = EvalContext::single(&mol);
+        ctx.add_selection("obj1".to_string(), SelectionResult::all(mol.atom_count()));
+
+        let expr = crate::parse("blabla").unwrap();
+        assert!(evaluate(&expr, &ctx).is_err());
+    }
 }

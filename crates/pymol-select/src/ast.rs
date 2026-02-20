@@ -431,6 +431,51 @@ impl SelectionExpr {
         SelectionExpr::Not(Box::new(self))
     }
 
+    /// Collect all `Selection(name)` references in this expression tree.
+    pub fn selection_references(&self) -> Vec<&str> {
+        let mut refs = Vec::new();
+        self.collect_selection_refs(&mut refs);
+        refs
+    }
+
+    fn collect_selection_refs<'a>(&'a self, out: &mut Vec<&'a str>) {
+        match self {
+            SelectionExpr::Selection(name) => out.push(name),
+            SelectionExpr::And(l, r)
+            | SelectionExpr::Or(l, r)
+            | SelectionExpr::Like(l, r)
+            | SelectionExpr::In(l, r)
+            | SelectionExpr::Within(_, l, r)
+            | SelectionExpr::Beyond(_, l, r)
+            | SelectionExpr::NearTo(_, l, r) => {
+                l.collect_selection_refs(out);
+                r.collect_selection_refs(out);
+            }
+            SelectionExpr::Not(inner)
+            | SelectionExpr::ByRes(inner)
+            | SelectionExpr::ByChain(inner)
+            | SelectionExpr::ByObject(inner)
+            | SelectionExpr::ByMolecule(inner)
+            | SelectionExpr::BySegment(inner)
+            | SelectionExpr::ByFragment(inner)
+            | SelectionExpr::ByCAlpha(inner)
+            | SelectionExpr::ByRing(inner)
+            | SelectionExpr::ByCell(inner)
+            | SelectionExpr::Neighbor(inner)
+            | SelectionExpr::BoundTo(inner)
+            | SelectionExpr::First(inner)
+            | SelectionExpr::Last(inner)
+            | SelectionExpr::Around(_, inner)
+            | SelectionExpr::Expand(_, inner)
+            | SelectionExpr::Extend(_, inner)
+            | SelectionExpr::Gap(_, inner) => {
+                inner.collect_selection_refs(out);
+            }
+            // All other variants (keywords, properties, etc.) have no sub-expressions
+            _ => {}
+        }
+    }
+
     /// Check if this is a simple expression (no children)
     pub fn is_simple(&self) -> bool {
         matches!(

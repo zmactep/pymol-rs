@@ -19,6 +19,8 @@ thiserror = { workspace = true }
 flate2 = { workspace = true }
 memmap2 = { workspace = true }
 lin_alg = { workspace = true }
+serde = { workspace = true }
+rmp-serde = { workspace = true }
 
 # Optional fetch dependencies
 ureq = { version = "3", optional = true }

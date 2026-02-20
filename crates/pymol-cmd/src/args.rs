@@ -213,9 +213,13 @@ impl ParsedCommand {
         self.args.len()
     }
 
-    /// Get a positional argument by index (0-based)
+    /// Get a positional argument by index (0-based, skips named arguments)
     pub fn get_arg(&self, index: usize) -> Option<&ArgValue> {
-        self.args.get(index).map(|(_, v)| v)
+        self.args
+            .iter()
+            .filter(|(name, _)| name.is_none())
+            .nth(index)
+            .map(|(_, v)| v)
     }
 
     /// Get a named argument by name

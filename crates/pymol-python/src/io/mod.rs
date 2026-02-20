@@ -171,19 +171,20 @@ pub fn detect_format(path: &str) -> PyFileFormat {
 ///
 /// Args:
 ///     pdb_id: 4-letter PDB ID (e.g., "1crn", "4hhb")
-///     format: Download format ("pdb" or "cif", default: "cif")
+///     format: Download format ("pdb", "cif", or "bcif", default: "bcif")
 ///
 /// Returns:
 ///     ObjectMolecule containing the fetched structure
 #[pyfunction]
-#[pyo3(signature = (pdb_id, format="cif"))]
+#[pyo3(signature = (pdb_id, format="bcif"))]
 pub fn fetch(pdb_id: &str, format: &str) -> PyResult<PyObjectMolecule> {
     let fetch_format = match format.to_lowercase().as_str() {
         "pdb" => pymol_io::FetchFormat::Pdb,
         "cif" | "mmcif" => pymol_io::FetchFormat::Cif,
+        "bcif" | "binarycif" => pymol_io::FetchFormat::Bcif,
         _ => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "Unknown fetch format: '{}'. Use 'pdb' or 'cif'.",
+                "Unknown fetch format: '{}'. Use 'pdb', 'cif', or 'bcif'.",
                 format
             )))
         }

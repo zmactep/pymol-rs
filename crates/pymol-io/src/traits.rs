@@ -20,6 +20,8 @@ pub enum FileFormat {
     Mol2,
     /// Macromolecular Crystallographic Information File
     Cif,
+    /// BinaryCIF format
+    Bcif,
     /// XYZ coordinate format
     Xyz,
     /// GROMACS GRO format
@@ -33,10 +35,10 @@ impl FileFormat {
     pub fn from_extension(ext: &str) -> Self {
         match ext.to_lowercase().as_str() {
             "pdb" | "ent" => FileFormat::Pdb,
-            "pdb.gz" | "ent.gz" => FileFormat::Pdb,
             "sdf" | "mol" | "sd" => FileFormat::Sdf,
             "mol2" | "ml2" => FileFormat::Mol2,
             "cif" | "mmcif" => FileFormat::Cif,
+            "bcif" => FileFormat::Bcif,
             "xyz" => FileFormat::Xyz,
             "gro" => FileFormat::Gro,
             _ => FileFormat::Unknown,
@@ -45,10 +47,16 @@ impl FileFormat {
 
     /// Get the file format from a path
     pub fn from_path(path: &Path) -> Self {
-        // Check for double extensions like .pdb.gz
         let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if filename.ends_with(".pdb.gz") || filename.ends_with(".ent.gz") {
-            return FileFormat::Pdb;
+
+        // Strip .gz suffix and detect from the inner extension
+        if filename.to_lowercase().ends_with(".gz") {
+            let stem = &filename[..filename.len() - 3];
+            return Path::new(stem)
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(FileFormat::from_extension)
+                .unwrap_or(FileFormat::Unknown);
         }
 
         path.extension()
@@ -64,6 +72,7 @@ impl FileFormat {
             FileFormat::Sdf => "sdf",
             FileFormat::Mol2 => "mol2",
             FileFormat::Cif => "cif",
+            FileFormat::Bcif => "bcif",
             FileFormat::Xyz => "xyz",
             FileFormat::Gro => "gro",
             FileFormat::Unknown => "",
@@ -77,6 +86,7 @@ impl FileFormat {
             FileFormat::Sdf => "SDF/MOL",
             FileFormat::Mol2 => "MOL2",
             FileFormat::Cif => "mmCIF",
+            FileFormat::Bcif => "BinaryCIF",
             FileFormat::Xyz => "XYZ",
             FileFormat::Gro => "GRO",
             FileFormat::Unknown => "Unknown",
@@ -225,6 +235,7 @@ pub fn create_reader<R: Read + 'static>(
         FileFormat::Mol2 => Ok(Box::new(crate::mol2::Mol2Reader::new(reader))),
         FileFormat::Xyz => Ok(Box::new(crate::xyz::XyzReader::new(reader))),
         FileFormat::Cif => Ok(Box::new(crate::cif::CifReader::new(reader))),
+        FileFormat::Bcif => Ok(Box::new(crate::bcif::BcifReader::new(reader))),
         FileFormat::Gro => Ok(Box::new(crate::gro::GroReader::new(reader))),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
@@ -241,6 +252,7 @@ pub fn create_writer<W: Write + 'static>(
         FileFormat::Mol2 => Ok(Box::new(crate::mol2::Mol2Writer::new(writer))),
         FileFormat::Xyz => Ok(Box::new(crate::xyz::XyzWriter::new(writer))),
         FileFormat::Cif => Ok(Box::new(crate::cif::CifWriter::new(writer))),
+        FileFormat::Bcif => Err(IoError::Unsupported("BinaryCIF writing not supported".to_string())),
         FileFormat::Gro => Err(IoError::UnknownFormat("GRO writing not supported".to_string())),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }

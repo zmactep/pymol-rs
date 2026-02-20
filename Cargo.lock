@@ -2478,6 +2478,8 @@ dependencies = [
  "nom",
  "pymol-mol",
  "reqwest",
+ "rmp-serde",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

@@ -2,6 +2,7 @@
 //!
 //! Provides reading and writing of Macromolecular Crystallographic Information File format.
 
+pub(crate) mod common;
 mod lexer;
 mod parser;
 mod writer;

@@ -15,7 +15,7 @@
 //! # fn main() -> pymol_io::IoResult<()> {
 //! use pymol_io::fetch::{fetch, FetchFormat};
 //!
-//! // Fetch structure in mmCIF format (default)
+//! // Fetch structure in BinaryCIF format (default)
 //! let mol = fetch("1ubq", FetchFormat::default())?;
 //!
 //! // Fetch in PDB format
@@ -45,8 +45,11 @@ use crate::compress::gzip_reader;
 use crate::error::{IoError, IoResult};
 use pymol_mol::ObjectMolecule;
 
-/// RCSB PDB base URL for file downloads
+/// RCSB PDB base URL for text file downloads (PDB, mmCIF)
 const RCSB_BASE_URL: &str = "https://files.rcsb.org/download";
+
+/// RCSB models API base URL for BinaryCIF downloads
+const RCSB_MODELS_URL: &str = "https://models.rcsb.org";
 
 /// User-Agent header for HTTP requests
 const USER_AGENT: &str = concat!("pymol-rs/", env!("CARGO_PKG_VERSION"));
@@ -60,13 +63,19 @@ pub enum FetchFormat {
     /// large structures (>99,999 atoms or >9,999 residues).
     Pdb,
 
-    /// mmCIF format (.cif) - default
+    /// mmCIF format (.cif)
     ///
     /// Macromolecular Crystallographic Information File format.
-    /// Recommended for modern use as it handles large structures and
-    /// contains more complete information than PDB format.
-    #[default]
+    /// Handles large structures and contains more complete information
+    /// than PDB format.
     Cif,
+
+    /// BinaryCIF format (.bcif) - default
+    ///
+    /// Binary encoding of mmCIF using MessagePack. Smallest file size
+    /// and fastest parsing. The primary format served by RCSB PDB.
+    #[default]
+    Bcif,
 }
 
 impl FetchFormat {
@@ -75,6 +84,7 @@ impl FetchFormat {
         match self {
             FetchFormat::Pdb => "pdb",
             FetchFormat::Cif => "cif",
+            FetchFormat::Bcif => "bcif",
         }
     }
 
@@ -83,6 +93,7 @@ impl FetchFormat {
         match self {
             FetchFormat::Pdb => "PDB",
             FetchFormat::Cif => "mmCIF",
+            FetchFormat::Bcif => "BinaryCIF",
         }
     }
 }
@@ -130,9 +141,13 @@ pub fn validate_pdb_id(pdb_id: &str) -> IoResult<()> {
 pub fn build_rcsb_url(pdb_id: &str, format: FetchFormat) -> String {
     // RCSB uses lowercase PDB IDs in URLs
     let pdb_id_lower = pdb_id.to_lowercase();
+    let url = match format {
+        FetchFormat::Bcif => RCSB_MODELS_URL,
+        _ => RCSB_BASE_URL
+    };
     format!(
         "{}/{}.{}.gz",
-        RCSB_BASE_URL,
+        url,
         pdb_id_lower,
         format.extension()
     )
@@ -140,12 +155,11 @@ pub fn build_rcsb_url(pdb_id: &str, format: FetchFormat) -> String {
 
 /// Parse the fetched content based on format
 fn parse_content(content: &[u8], format: FetchFormat) -> IoResult<ObjectMolecule> {
-    // Decompress gzip content
     let decoder = gzip_reader(Cursor::new(content));
-
     match format {
         FetchFormat::Pdb => crate::pdb::read_pdb_from(decoder),
         FetchFormat::Cif => crate::cif::read_cif_from(decoder),
+        FetchFormat::Bcif => crate::bcif::read_bcif_from(decoder)
     }
 }
 
@@ -322,23 +336,29 @@ mod tests {
             build_rcsb_url("4hhb", FetchFormat::Cif),
             "https://files.rcsb.org/download/4hhb.cif.gz"
         );
+        assert_eq!(
+            build_rcsb_url("1UBQ", FetchFormat::Bcif),
+            "https://models.rcsb.org/1ubq.bcif.gz"
+        );
     }
 
     #[test]
     fn test_fetch_format_extension() {
         assert_eq!(FetchFormat::Pdb.extension(), "pdb");
         assert_eq!(FetchFormat::Cif.extension(), "cif");
+        assert_eq!(FetchFormat::Bcif.extension(), "bcif");
     }
 
     #[test]
     fn test_fetch_format_name() {
         assert_eq!(FetchFormat::Pdb.name(), "PDB");
         assert_eq!(FetchFormat::Cif.name(), "mmCIF");
+        assert_eq!(FetchFormat::Bcif.name(), "BinaryCIF");
     }
 
     #[test]
     fn test_fetch_format_default() {
-        assert_eq!(FetchFormat::default(), FetchFormat::Cif);
+        assert_eq!(FetchFormat::default(), FetchFormat::Bcif);
     }
 
     // Integration tests - require network access
@@ -358,6 +378,15 @@ mod tests {
     #[ignore = "requires network access"]
     fn test_fetch_cif_format() {
         let mol = fetch("1ubq", FetchFormat::Cif).expect("Failed to fetch 1ubq in mmCIF format");
+        // Ubiquitin has 76 residues, ~600 atoms
+        assert!(mol.atom_count() > 500, "Expected >500 atoms, got {}", mol.atom_count());
+    }
+
+    #[cfg(feature = "fetch")]
+    #[test]
+    #[ignore = "requires network access"]
+    fn test_fetch_bcif_format() {
+        let mol = fetch("1ubq", FetchFormat::Bcif).expect("Failed to fetch 1ubq in bCIF format");
         // Ubiquitin has 76 residues, ~600 atoms
         assert!(mol.atom_count() > 500, "Expected >500 atoms, got {}", mol.atom_count());
     }
@@ -407,6 +436,16 @@ mod tests {
         let mol = fetch_async("1ubq", FetchFormat::Cif)
             .await
             .expect("Failed to fetch 1ubq in mmCIF format");
+        assert!(mol.atom_count() > 500, "Expected >500 atoms, got {}", mol.atom_count());
+    }
+
+    #[cfg(feature = "fetch-async")]
+    #[tokio::test]
+    #[ignore = "requires network access"]
+    async fn test_fetch_async_bcif_format() {
+        let mol = fetch_async("1ubq", FetchFormat::Bcif)
+            .await
+            .expect("Failed to fetch 1ubq in bCIF format");
         assert!(mol.atom_count() > 500, "Expected >500 atoms, got {}", mol.atom_count());
     }
 
