@@ -92,6 +92,89 @@ impl WireSurfaceRep {
         self.vertices.clear();
         self.vertex_count = 0;
     }
+
+    /// Generate wireframe line vertices from atoms using marching cubes.
+    fn generate_wire_vertices(
+        atoms: &[SurfaceAtom],
+        atom_colors: &[AtomColor],
+        surface_type: SurfaceType,
+        probe_radius: f32,
+        quality: i32,
+    ) -> Vec<LineVertex> {
+        if atoms.is_empty() {
+            return Vec::new();
+        }
+
+        let padding = probe_radius + 2.0;
+        let (min, max) = distance_field::compute_bounds_with_radii(atoms, padding);
+
+        let box_size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+
+        let mut spacing = Self::quality_to_spacing(quality);
+
+        let max_grid_points: f32 = match quality {
+            4 => 1_000_000.0,
+            3 => 700_000.0,
+            2 => 500_000.0,
+            1 => 350_000.0,
+            0 => 250_000.0,
+            -1 => 175_000.0,
+            -2 => 125_000.0,
+            -3 => 80_000.0,
+            _ => 50_000.0,
+        };
+
+        let max_dim = box_size[0].max(box_size[1]).max(box_size[2]);
+        let min_spacing_for_limit = max_dim / max_grid_points.cbrt();
+        if spacing < min_spacing_for_limit {
+            spacing = min_spacing_for_limit;
+        }
+        spacing = spacing.max(0.5);
+
+        let mut sdf_grid = Grid3D::from_bounds(min, max, spacing, 0.0);
+
+        distance_field::compute_distance_field(
+            &mut sdf_grid,
+            atoms,
+            surface_type,
+            probe_radius,
+        );
+
+        let result = marching_cubes::extract_isosurface_smooth(&sdf_grid, 0.0);
+
+        if result.positions.is_empty() {
+            return Vec::new();
+        }
+
+        let result = marching_cubes::weld_vertices(&result, spacing * 0.5);
+
+        let vertex_colors = coloring::color_vertices(&result.positions, atom_colors);
+
+        let mut edges: HashSet<(u32, u32)> = HashSet::new();
+        for tri in result.indices.chunks(3) {
+            if tri.len() < 3 {
+                continue;
+            }
+            let (a, b, c) = (tri[0], tri[1], tri[2]);
+            edges.insert((a.min(b), a.max(b)));
+            edges.insert((b.min(c), b.max(c)));
+            edges.insert((c.min(a), c.max(a)));
+        }
+
+        let mut vertices = Vec::with_capacity(edges.len() * 2);
+        for (i0, i1) in edges {
+            vertices.push(LineVertex {
+                position: result.positions[i0 as usize],
+                color: vertex_colors[i0 as usize],
+            });
+            vertices.push(LineVertex {
+                position: result.positions[i1 as usize],
+                color: vertex_colors[i1 as usize],
+            });
+        }
+
+        vertices
+    }
 }
 
 impl Default for WireSurfaceRep {
@@ -119,9 +202,13 @@ impl Representation for WireSurfaceRep {
             SurfaceType::from_setting(surface_type_setting)
         };
 
+        // 807 = surface_individual_chains (bool, default false)
+        let individual_chains = settings.get_bool(807);
+
         // Collect atoms with MESH visibility
         let mut atoms: Vec<SurfaceAtom> = Vec::new();
         let mut atom_colors: Vec<AtomColor> = Vec::new();
+        let mut chain_ids: Vec<String> = Vec::new();
 
         for (atom_idx, coord) in coord_set.iter_with_atoms() {
             let atom = match molecule.get_atom(atom_idx) {
@@ -147,6 +234,10 @@ impl Representation for WireSurfaceRep {
                 position,
                 color,
             });
+
+            if individual_chains {
+                chain_ids.push(atom.residue.chain.clone());
+            }
         }
 
         if atoms.is_empty() {
@@ -154,78 +245,34 @@ impl Representation for WireSurfaceRep {
             return;
         }
 
-        // Generate molecular surface using marching cubes (same pipeline as SurfaceRep)
-        let padding = self.probe_radius + 2.0;
-        let (min, max) = distance_field::compute_bounds_with_radii(&atoms, padding);
+        if individual_chains {
+            use std::collections::BTreeMap;
 
-        let box_size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-
-        let mut spacing = Self::quality_to_spacing(self.quality);
-
-        // Limit grid size (same logic as SurfaceRep)
-        let max_grid_points: f32 = match self.quality {
-            4 => 1_000_000.0,
-            3 => 700_000.0,
-            2 => 500_000.0,
-            1 => 350_000.0,
-            0 => 250_000.0,
-            -1 => 175_000.0,
-            -2 => 125_000.0,
-            -3 => 80_000.0,
-            _ => 50_000.0,
-        };
-
-        let max_dim = box_size[0].max(box_size[1]).max(box_size[2]);
-        let min_spacing_for_limit = max_dim / max_grid_points.cbrt();
-        if spacing < min_spacing_for_limit {
-            spacing = min_spacing_for_limit;
-        }
-        spacing = spacing.max(0.5);
-
-        let mut sdf_grid = Grid3D::from_bounds(min, max, spacing, 0.0);
-
-        distance_field::compute_distance_field(
-            &mut sdf_grid,
-            &atoms,
-            self.surface_type,
-            self.probe_radius,
-        );
-
-        let result = marching_cubes::extract_isosurface_smooth(&sdf_grid, 0.0);
-
-        if result.positions.is_empty() {
-            self.dirty = false;
-            return;
-        }
-
-        let result = marching_cubes::weld_vertices(&result, spacing * 0.5);
-
-        // Color vertices based on nearest atoms
-        let vertex_colors = coloring::color_vertices(&result.positions, &atom_colors);
-
-        // Extract unique edges from triangle indices
-        let mut edges: HashSet<(u32, u32)> = HashSet::new();
-        for tri in result.indices.chunks(3) {
-            if tri.len() < 3 {
-                continue;
+            let mut groups: BTreeMap<&str, (Vec<SurfaceAtom>, Vec<AtomColor>)> = BTreeMap::new();
+            for i in 0..atoms.len() {
+                let entry = groups.entry(chain_ids[i].as_str()).or_default();
+                entry.0.push(atoms[i].clone());
+                entry.1.push(atom_colors[i].clone());
             }
-            let (a, b, c) = (tri[0], tri[1], tri[2]);
-            edges.insert((a.min(b), a.max(b)));
-            edges.insert((b.min(c), b.max(c)));
-            edges.insert((c.min(a), c.max(a)));
-        }
 
-        // Convert edges to LineVertex pairs
-        self.vertices.reserve(edges.len() * 2);
-        for (i0, i1) in edges {
-            self.vertices.push(LineVertex {
-                position: result.positions[i0 as usize],
-                color: vertex_colors[i0 as usize],
-            });
-            self.vertices.push(LineVertex {
-                position: result.positions[i1 as usize],
-                color: vertex_colors[i1 as usize],
-            });
+            for (chain_atoms, chain_colors) in groups.values() {
+                let verts = Self::generate_wire_vertices(
+                    chain_atoms,
+                    chain_colors,
+                    self.surface_type,
+                    self.probe_radius,
+                    self.quality,
+                );
+                self.vertices.extend(verts);
+            }
+        } else {
+            self.vertices = Self::generate_wire_vertices(
+                &atoms,
+                &atom_colors,
+                self.surface_type,
+                self.probe_radius,
+                self.quality,
+            );
         }
 
         self.vertex_count = self.vertices.len() as u32;

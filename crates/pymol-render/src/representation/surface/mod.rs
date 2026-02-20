@@ -216,6 +216,50 @@ impl SurfaceRep {
         self.has_transparency = false;
     }
 
+    /// Build separate surfaces per chain, then merge into one mesh.
+    fn build_per_chain(
+        &mut self,
+        atoms: &[SurfaceAtom],
+        atom_colors: &[AtomColor],
+        chain_ids: &[String],
+    ) {
+        use std::collections::BTreeMap;
+
+        self.clear();
+
+        if atoms.is_empty() {
+            self.dirty = false;
+            return;
+        }
+
+        // Group atoms by chain ID (BTreeMap for deterministic order)
+        let mut groups: BTreeMap<&str, (Vec<SurfaceAtom>, Vec<AtomColor>)> = BTreeMap::new();
+        for i in 0..atoms.len() {
+            let entry = groups.entry(chain_ids[i].as_str()).or_default();
+            entry.0.push(atoms[i].clone());
+            entry.1.push(atom_colors[i].clone());
+        }
+
+        for (chain_atoms, chain_colors) in groups.values() {
+            let index_offset = self.vertices.len() as u32;
+
+            // Build this chain's surface in a temporary rep
+            let mut temp = SurfaceRep::new();
+            temp.algorithm = self.algorithm;
+            temp.surface_type = self.surface_type;
+            temp.probe_radius = self.probe_radius;
+            temp.quality = self.quality;
+            temp.build_from_atoms(chain_atoms, chain_colors);
+
+            // Merge into our buffers with index offset
+            self.vertices.extend_from_slice(&temp.vertices);
+            self.indices.extend(temp.indices.iter().map(|&i| i + index_offset));
+        }
+
+        self.index_count = self.indices.len() as u32;
+        self.dirty = false;
+    }
+
     /// Build surface from pre-computed atoms
     pub fn build_from_atoms(
         &mut self,
@@ -463,9 +507,13 @@ impl Representation for SurfaceRep {
             SurfaceType::from_setting(surface_type_setting)
         };
 
+        // 807 = surface_individual_chains (bool, default false)
+        let individual_chains = settings.get_bool(807);
+
         // Collect atoms with SURFACE visibility
         let mut atoms: Vec<SurfaceAtom> = Vec::new();
         let mut atom_colors: Vec<AtomColor> = Vec::new();
+        let mut chain_ids: Vec<String> = Vec::new();
 
         for (atom_idx, coord) in coord_set.iter_with_atoms() {
             let atom = match molecule.get_atom(atom_idx) {
@@ -481,7 +529,7 @@ impl Representation for SurfaceRep {
             let position = [coord.x, coord.y, coord.z];
             let radius = atom.effective_vdw();
             let color = colors.resolve_surface(atom, molecule);
-            
+
             // Apply transparency to the color's alpha channel
             let color_with_alpha = [color[0], color[1], color[2], alpha];
 
@@ -492,12 +540,20 @@ impl Representation for SurfaceRep {
             });
 
             atom_colors.push(AtomColor { position, color: color_with_alpha });
+
+            if individual_chains {
+                chain_ids.push(atom.residue.chain.clone());
+            }
         }
 
-        // Build from collected atoms (this calls clear() internally)
-        self.build_from_atoms(&atoms, &atom_colors);
-        
-        // Set has_transparency AFTER build_from_atoms() since it calls clear() which resets the flag
+        if individual_chains {
+            self.build_per_chain(&atoms, &atom_colors, &chain_ids);
+        } else {
+            // Build from collected atoms (this calls clear() internally)
+            self.build_from_atoms(&atoms, &atom_colors);
+        }
+
+        // Set has_transparency AFTER building since build methods call clear() which resets the flag
         self.has_transparency = transparency > 0.0;
         
         log::debug!("Surface built with transparency={}, has_transparency={}", transparency, self.has_transparency);

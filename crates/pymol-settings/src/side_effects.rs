@@ -134,7 +134,7 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
         cartoon_loop_radius | cartoon_dumbbell_width |
         cartoon_dumbbell_length | cartoon_dumbbell_radius |
         cartoon_round_helices | cartoon_sampling |
-        cartoon_smooth_loops => vec![
+        cartoon_smooth_loops | surface_individual_chains => vec![
             SideEffectCategory::RepresentationRebuild,
         ],
 

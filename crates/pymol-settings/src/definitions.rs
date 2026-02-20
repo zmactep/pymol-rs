@@ -6,7 +6,7 @@
 use crate::setting::{Setting, SettingLevel, SettingType, SettingValue};
 
 /// Total number of settings
-pub const SETTING_COUNT: usize = 807;
+pub const SETTING_COUNT: usize = 808;
 
 // =============================================================================
 // Setting ID Constants
@@ -857,6 +857,9 @@ pub mod id {
     pub const skripkin_map_size: u16 = 804;
     pub const skripkin_bias: u16 = 805;
     pub const skripkin_intensity: u16 = 806;
+
+    // 807: Surface per-chain
+    pub const surface_individual_chains: u16 = 807;
 }
 
 // =============================================================================
@@ -1765,6 +1768,8 @@ pub static SETTINGS: &[Setting] = &[
     s_int!(804, "skripkin_map_size", Global, 128),
     s_float!(805, "skripkin_bias", Global, 0.01, 0.0, 0.1),
     s_float!(806, "skripkin_intensity", Global, 1.0, 0.0, 2.0),
+    // 807: Surface individual chains
+    s_bool!(807, "surface_individual_chains", Global, false),
 ];
 
 /// Initialize a settings store with all default values
