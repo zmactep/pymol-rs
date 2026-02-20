@@ -303,6 +303,15 @@ impl SetCommand {
                         }
                     }
                 }
+                SideEffectCategory::ColorRebuild => {
+                    // Color/transparency changed — only need color update, not geometry rebuild
+                    let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                    for obj_name in names {
+                        if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                            mol.invalidate(DirtyFlags::COLOR);
+                        }
+                    }
+                }
                 SideEffectCategory::SceneInvalidate
                 | SideEffectCategory::SceneChanged
                 | SideEffectCategory::FullRebuild => {

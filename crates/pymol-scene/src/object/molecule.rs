@@ -7,7 +7,7 @@ use lin_alg::f32::Vec3;
 use pymol_mol::{ObjectMolecule, RepMask};
 use serde::{Deserialize, Serialize};
 use pymol_render::{
-    CartoonRep, ColorResolver, DotRep, LineRep, RenderContext, Representation, RibbonRep,
+    AtomColor, CartoonRep, ColorResolver, DotRep, LineRep, RenderContext, Representation, RibbonRep,
     SelectionIndicatorRep, SphereRep, StickRep, SurfaceRep, WireSurfaceRep,
 };
 use pymol_select::SelectionResult;
@@ -486,10 +486,26 @@ impl MoleculeObject {
                 s.set_quality(quality);
                 s
             });
-            if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                surface.set_quality(quality); // Ensure quality is up to date
+            if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::REPS) {
+                // Full rebuild: geometry + color
+                surface.set_quality(quality);
                 surface.build(&self.molecule, coord_set, color_resolver, &settings);
                 surface.upload(context.device(), context.queue());
+            } else if self.dirty.intersects(DirtyFlags::COLOR) {
+                // Fast path: recolor only (skip distance field + marching cubes)
+                let transparency = settings.get_float(138).clamp(0.0, 1.0);
+                let alpha = 1.0 - transparency;
+                let atom_colors = collect_surface_atom_colors(
+                    &self.molecule, coord_set, color_resolver, alpha,
+                );
+                if surface.recolor(&atom_colors, transparency) {
+                    surface.upload(context.device(), context.queue());
+                } else {
+                    // No vertices yet — force full build
+                    surface.set_quality(quality);
+                    surface.build(&self.molecule, coord_set, color_resolver, &settings);
+                    surface.upload(context.device(), context.queue());
+                }
             }
         }
 
@@ -852,6 +868,30 @@ impl MoleculeObject {
 
         // Lines and dots skip shadow depth — they have negligible depth contribution
     }
+}
+
+/// Collect atom colors for surface recoloring without building full SurfaceAtom data.
+fn collect_surface_atom_colors(
+    molecule: &ObjectMolecule,
+    coord_set: &pymol_mol::CoordSet,
+    colors: &ColorResolver,
+    alpha: f32,
+) -> Vec<AtomColor> {
+    let mut atom_colors = Vec::new();
+    for (atom_idx, coord) in coord_set.iter_with_atoms() {
+        let atom = match molecule.get_atom(atom_idx) {
+            Some(a) => a,
+            None => continue,
+        };
+        if !atom.repr.visible_reps.is_visible(RepMask::SURFACE) {
+            continue;
+        }
+        let position = [coord.x, coord.y, coord.z];
+        let color = colors.resolve_surface(atom, molecule);
+        let color_with_alpha = [color[0], color[1], color[2], alpha];
+        atom_colors.push(AtomColor { position, color: color_with_alpha });
+    }
+    atom_colors
 }
 
 impl Object for MoleculeObject {

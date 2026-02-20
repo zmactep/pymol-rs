@@ -2,6 +2,8 @@
 //!
 //! Assigns colors to surface vertices based on the nearest atoms.
 
+use rayon::prelude::*;
+
 use super::distance_field::{create_spatial_hash, SurfaceAtom};
 use super::grid::SpatialHash;
 
@@ -44,7 +46,7 @@ pub fn color_vertices(
     let spatial_hash = create_spatial_hash(&surface_atoms);
 
     positions
-        .iter()
+        .par_iter()
         .map(|pos| {
             find_nearest_color(pos, atoms, &spatial_hash)
         })
@@ -116,7 +118,7 @@ pub fn color_vertices_smooth(
     let spatial_hash = create_spatial_hash(&surface_atoms);
 
     positions
-        .iter()
+        .par_iter()
         .map(|pos| {
             blend_nearby_colors(pos, atoms, &spatial_hash, blend_radius)
         })

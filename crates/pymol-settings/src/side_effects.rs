@@ -66,6 +66,8 @@ pub enum SideEffectCategory {
     StereoUpdate,
     /// Representations need to be rebuilt
     RepresentationRebuild,
+    /// Representation colors need updating (no geometry rebuild)
+    ColorRebuild,
     /// Full rebuild of all objects
     FullRebuild,
     /// Viewport update
@@ -124,7 +126,7 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
         ],
 
         // Representation geometry settings - need rep rebuild
-        sphere_scale | transparency | surface_quality |
+        sphere_scale | surface_quality |
         stick_radius | line_width |
         cartoon_fancy_helices | cartoon_fancy_sheets |
         cartoon_oval_width | cartoon_oval_length |
@@ -136,11 +138,12 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
             SideEffectCategory::RepresentationRebuild,
         ],
 
-        // Representation color settings - need rep rebuild
+        // Transparency and per-rep color settings — only need color update, not geometry rebuild
+        transparency |
         stick_color | line_color | cartoon_color |
         surface_color | mesh_color | sphere_color |
         ribbon_color => vec![
-            SideEffectCategory::RepresentationRebuild,
+            SideEffectCategory::ColorRebuild,
         ],
 
         // Background color settings

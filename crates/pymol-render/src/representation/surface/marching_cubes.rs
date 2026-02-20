@@ -3,6 +3,8 @@
 //! Implements the classic marching cubes algorithm to extract a triangulated
 //! surface from a 3D scalar field at a given isovalue.
 
+use rayon::prelude::*;
+
 use super::grid::Grid3D;
 
 /// Edge table for marching cubes
@@ -505,96 +507,115 @@ pub fn extract_isosurface(grid: &Grid3D, isovalue: f32) -> MarchingCubesResult {
 
 /// Extract isosurface with gradient-based normals (smoother)
 pub fn extract_isosurface_smooth(grid: &Grid3D, isovalue: f32) -> MarchingCubesResult {
+    let dims = grid.dims;
+
+    // Process z-slices in parallel — each slice produces independent vertex/index data
+    let slice_results: Vec<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>)> = (0..dims[2])
+        .into_par_iter()
+        .map(|z| {
+            let mut positions = Vec::new();
+            let mut normals = Vec::new();
+            let mut indices = Vec::new();
+
+            for y in 0..dims[1] {
+                for x in 0..dims[0] {
+                    let values = grid.cube_values(x, y, z);
+                    let cube_idx = cube_index(&values, isovalue);
+
+                    let edges = EDGE_TABLE[cube_idx];
+                    if edges == 0 {
+                        continue;
+                    }
+
+                    let positions_cube = grid.cube_positions(x, y, z);
+
+                    let corner_normals = [
+                        estimate_normal(grid, x, y, z),
+                        estimate_normal(grid, x + 1, y, z),
+                        estimate_normal(grid, x + 1, y + 1, z),
+                        estimate_normal(grid, x, y + 1, z),
+                        estimate_normal(grid, x, y, z + 1),
+                        estimate_normal(grid, x + 1, y, z + 1),
+                        estimate_normal(grid, x + 1, y + 1, z + 1),
+                        estimate_normal(grid, x, y + 1, z + 1),
+                    ];
+
+                    let mut edge_verts: [[f32; 3]; 12] = [[0.0; 3]; 12];
+                    let mut edge_normals: [[f32; 3]; 12] = [[0.0; 3]; 12];
+
+                    for edge in 0..12 {
+                        if (edges & (1 << edge)) != 0 {
+                            let [v0, v1] = EDGE_VERTICES[edge];
+                            let t = if (values[v1] - values[v0]).abs() < 1e-10 {
+                                0.5
+                            } else {
+                                ((isovalue - values[v0]) / (values[v1] - values[v0]))
+                                    .clamp(0.0, 1.0)
+                            };
+
+                            edge_verts[edge] = [
+                                positions_cube[v0][0]
+                                    + t * (positions_cube[v1][0] - positions_cube[v0][0]),
+                                positions_cube[v0][1]
+                                    + t * (positions_cube[v1][1] - positions_cube[v0][1]),
+                                positions_cube[v0][2]
+                                    + t * (positions_cube[v1][2] - positions_cube[v0][2]),
+                            ];
+
+                            edge_normals[edge] = normalize([
+                                corner_normals[v0][0]
+                                    + t * (corner_normals[v1][0] - corner_normals[v0][0]),
+                                corner_normals[v0][1]
+                                    + t * (corner_normals[v1][1] - corner_normals[v0][1]),
+                                corner_normals[v0][2]
+                                    + t * (corner_normals[v1][2] - corner_normals[v0][2]),
+                            ]);
+                        }
+                    }
+
+                    // Generate triangles with local indices (starting at 0 per slice)
+                    let tri_row = &TRI_TABLE[cube_idx];
+                    let mut i = 0;
+                    while tri_row[i] >= 0 {
+                        let base = positions.len() as u32;
+
+                        let e0 = tri_row[i] as usize;
+                        let e1 = tri_row[i + 1] as usize;
+                        let e2 = tri_row[i + 2] as usize;
+
+                        positions.push(edge_verts[e0]);
+                        positions.push(edge_verts[e1]);
+                        positions.push(edge_verts[e2]);
+
+                        normals.push(edge_normals[e0]);
+                        normals.push(edge_normals[e1]);
+                        normals.push(edge_normals[e2]);
+
+                        indices.push(base);
+                        indices.push(base + 1);
+                        indices.push(base + 2);
+
+                        i += 3;
+                    }
+                }
+            }
+
+            (positions, normals, indices)
+        })
+        .collect();
+
+    // Merge per-slice results, offsetting indices by cumulative vertex count
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut indices = Vec::new();
-    
-    let dims = grid.dims;
-    
-    // Iterate over all cells
-    for z in 0..dims[2] {
-        for y in 0..dims[1] {
-            for x in 0..dims[0] {
-                // Get corner values and positions
-                let values = grid.cube_values(x, y, z);
-                let cube_idx = cube_index(&values, isovalue);
-                
-                // Skip if all corners are inside or outside
-                let edges = EDGE_TABLE[cube_idx];
-                if edges == 0 {
-                    continue;
-                }
-                
-                let positions_cube = grid.cube_positions(x, y, z);
-                
-                // Get corner normals from gradient
-                let corner_normals = [
-                    estimate_normal(grid, x, y, z),
-                    estimate_normal(grid, x + 1, y, z),
-                    estimate_normal(grid, x + 1, y + 1, z),
-                    estimate_normal(grid, x, y + 1, z),
-                    estimate_normal(grid, x, y, z + 1),
-                    estimate_normal(grid, x + 1, y, z + 1),
-                    estimate_normal(grid, x + 1, y + 1, z + 1),
-                    estimate_normal(grid, x, y + 1, z + 1),
-                ];
-                
-                // Compute edge vertices and normals
-                let mut edge_verts: [[f32; 3]; 12] = [[0.0; 3]; 12];
-                let mut edge_normals: [[f32; 3]; 12] = [[0.0; 3]; 12];
-                
-                for edge in 0..12 {
-                    if (edges & (1 << edge)) != 0 {
-                        let [v0, v1] = EDGE_VERTICES[edge];
-                        let t = if (values[v1] - values[v0]).abs() < 1e-10 {
-                            0.5
-                        } else {
-                            ((isovalue - values[v0]) / (values[v1] - values[v0])).clamp(0.0, 1.0)
-                        };
-                        
-                        edge_verts[edge] = [
-                            positions_cube[v0][0] + t * (positions_cube[v1][0] - positions_cube[v0][0]),
-                            positions_cube[v0][1] + t * (positions_cube[v1][1] - positions_cube[v0][1]),
-                            positions_cube[v0][2] + t * (positions_cube[v1][2] - positions_cube[v0][2]),
-                        ];
-                        
-                        // Interpolate normals
-                        edge_normals[edge] = normalize([
-                            corner_normals[v0][0] + t * (corner_normals[v1][0] - corner_normals[v0][0]),
-                            corner_normals[v0][1] + t * (corner_normals[v1][1] - corner_normals[v0][1]),
-                            corner_normals[v0][2] + t * (corner_normals[v1][2] - corner_normals[v0][2]),
-                        ]);
-                    }
-                }
-                
-                // Generate triangles
-                let tri_row = &TRI_TABLE[cube_idx];
-                let mut i = 0;
-                while tri_row[i] >= 0 {
-                    let base = positions.len() as u32;
-                    
-                    let e0 = tri_row[i] as usize;
-                    let e1 = tri_row[i + 1] as usize;
-                    let e2 = tri_row[i + 2] as usize;
-                    
-                    positions.push(edge_verts[e0]);
-                    positions.push(edge_verts[e1]);
-                    positions.push(edge_verts[e2]);
-                    
-                    normals.push(edge_normals[e0]);
-                    normals.push(edge_normals[e1]);
-                    normals.push(edge_normals[e2]);
-                    
-                    indices.push(base);
-                    indices.push(base + 1);
-                    indices.push(base + 2);
-                    
-                    i += 3;
-                }
-            }
-        }
+
+    for (pos, nor, idx) in slice_results {
+        let offset = positions.len() as u32;
+        positions.extend(pos);
+        normals.extend(nor);
+        indices.extend(idx.iter().map(|i| i + offset));
     }
-    
+
     MarchingCubesResult {
         positions,
         normals,

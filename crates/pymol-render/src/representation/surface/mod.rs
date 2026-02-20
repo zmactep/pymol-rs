@@ -21,6 +21,8 @@ pub mod marching_cubes;
 pub mod sphere;
 pub mod triangulate;
 
+use rayon::prelude::*;
+
 use crate::buffer::GrowableBuffer;
 use crate::color_resolver::ColorResolver;
 use crate::representation::Representation;
@@ -32,6 +34,16 @@ use pymol_settings::SettingResolver;
 pub use coloring::AtomColor;
 pub use distance_field::{SurfaceAtom, SurfaceType};
 pub use grid::Grid3D;
+
+/// Parameters used to compute the cached SDF grid.
+/// If these match, the cached grid can be reused.
+#[derive(PartialEq, Clone)]
+struct SdfParams {
+    probe_radius: f32,
+    quality: i32,
+    surface_type: SurfaceType,
+    atom_count: usize,
+}
 
 /// Algorithm used for surface generation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -80,6 +92,10 @@ pub struct SurfaceRep {
     algorithm: SurfaceAlgorithm,
     /// Whether any vertices have transparency (alpha < 1.0)
     has_transparency: bool,
+    /// Cached SDF grid (persists across rebuilds to avoid recomputation)
+    cached_sdf: Option<Grid3D>,
+    /// Parameters that were used when cached_sdf was computed
+    cached_sdf_params: Option<SdfParams>,
 }
 
 impl SurfaceRep {
@@ -99,6 +115,8 @@ impl SurfaceRep {
             quality: 0,
             algorithm: SurfaceAlgorithm::Auto,
             has_transparency: false,
+            cached_sdf: None,
+            cached_sdf_params: None,
         }
     }
 
@@ -227,6 +245,22 @@ impl SurfaceRep {
         }
     }
 
+    /// Recolor existing vertices without rebuilding geometry.
+    /// Returns false if vertices are empty (full rebuild needed).
+    pub fn recolor(&mut self, atom_colors: &[AtomColor], transparency: f32) -> bool {
+        if self.vertices.is_empty() {
+            return false;
+        }
+        let alpha = 1.0 - transparency.clamp(0.0, 1.0);
+        let positions: Vec<[f32; 3]> = self.vertices.iter().map(|v| v.position).collect();
+        let colors = coloring::color_vertices(&positions, atom_colors);
+        self.vertices.par_iter_mut().zip(colors.par_iter()).for_each(|(v, c)| {
+            v.color = [c[0], c[1], c[2], alpha];
+        });
+        self.has_transparency = transparency > 0.0;
+        true
+    }
+
     /// Build surface using dot-based algorithm (O(n) complexity)
     fn build_dot_based(
         &mut self,
@@ -336,19 +370,32 @@ impl SurfaceRep {
         // So we use a modest minimum to prevent pathological cases
         let min_spacing = 0.5;  // Minimum 0.5Å regardless of quality
         spacing = spacing.max(min_spacing);
-        
-        let mut sdf_grid = Grid3D::from_bounds(min, max, spacing, 0.0);
 
-        // Compute distance field
-        distance_field::compute_distance_field(
-            &mut sdf_grid,
-            atoms,
-            self.surface_type,
-            self.probe_radius,
-        );
+        // Check if cached SDF grid can be reused
+        let current_params = SdfParams {
+            probe_radius: self.probe_radius,
+            quality: self.quality,
+            surface_type: self.surface_type,
+            atom_count: atoms.len(),
+        };
+
+        let sdf_grid = if self.cached_sdf_params.as_ref() == Some(&current_params) {
+            self.cached_sdf.as_ref().unwrap()
+        } else {
+            let mut grid = Grid3D::from_bounds(min, max, spacing, 0.0);
+            distance_field::compute_distance_field(
+                &mut grid,
+                atoms,
+                self.surface_type,
+                self.probe_radius,
+            );
+            self.cached_sdf = Some(grid);
+            self.cached_sdf_params = Some(current_params);
+            self.cached_sdf.as_ref().unwrap()
+        };
 
         // Extract isosurface using marching cubes
-        let result = marching_cubes::extract_isosurface_smooth(&sdf_grid, 0.0);
+        let result = marching_cubes::extract_isosurface_smooth(sdf_grid, 0.0);
 
         if result.positions.is_empty() {
             self.dirty = false;
