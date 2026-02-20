@@ -34,6 +34,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(CountStatesCommand);
     registry.register(SplitStatesCommand);
     registry.register(ExtractCommand);
+    registry.register(RemoveCommand);
 }
 
 // ============================================================================
@@ -678,6 +679,10 @@ impl Command for CountStatesCommand {
         "count_states"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -975,5 +980,249 @@ EXAMPLES
         }
 
         Ok(())
+    }
+}
+
+// ============================================================================
+// remove command
+// ============================================================================
+
+struct RemoveCommand;
+
+impl Command for RemoveCommand {
+    fn name(&self) -> &str {
+        "remove"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "remove" eliminates the atoms in a selection from their respective
+    molecular objects. If all atoms of an object are removed, the object
+    is deleted entirely.
+
+USAGE
+
+    remove selection
+
+ARGUMENTS
+
+    selection = string: atom selection expression
+
+EXAMPLES
+
+    remove resn HOH
+    remove elem H
+    remove not polymer
+    remove resi 124
+
+SEE ALSO
+
+    delete, extract
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let selection = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("selection"))
+            .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
+
+        // Evaluate selection across all objects
+        let results = evaluate_selection(ctx.viewer, selection)?;
+
+        // Collect (object_name, indices_to_remove) before mutating
+        let removals: Vec<(String, Vec<AtomIndex>)> = results
+            .into_iter()
+            .filter_map(|(obj_name, sel_result)| {
+                if sel_result.count() == 0 {
+                    return None;
+                }
+                let indices: Vec<AtomIndex> = sel_result.indices().collect();
+                Some((obj_name, indices))
+            })
+            .collect();
+
+        if removals.is_empty() {
+            if !ctx.quiet {
+                ctx.print(&format!(" No atoms selected by '{}'", selection));
+            }
+            return Ok(());
+        }
+
+        let mut total_removed = 0usize;
+        let mut objects_to_delete: Vec<String> = Vec::new();
+
+        // Apply removals
+        for (obj_name, indices) in &removals {
+            total_removed += indices.len();
+
+            if let Some(obj) = ctx.viewer.objects_mut().get_molecule_mut(obj_name) {
+                obj.molecule_mut().remove_atoms(indices);
+                obj.invalidate(DirtyFlags::ALL);
+
+                // If all atoms gone, schedule object deletion
+                if obj.molecule().atom_count() == 0 {
+                    objects_to_delete.push(obj_name.clone());
+                }
+            }
+        }
+
+        // Delete objects that lost all their atoms
+        for name in &objects_to_delete {
+            ctx.viewer.objects_mut().remove(name);
+        }
+
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            ctx.print(&format!(" Removed {} atom(s).", total_removed));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::CommandContext;
+    use crate::parser::parse_command;
+    use pymol_mol::{AtomBuilder, BondOrder, Element};
+    use pymol_scene::{MoleculeObject, Session, SessionAdapter};
+
+    /// Create a molecule with two residues: ALA (3 atoms) and HOH (1 atom)
+    fn create_test_molecule(name: &str) -> pymol_mol::ObjectMolecule {
+        let mut mol = pymol_mol::ObjectMolecule::new(name);
+
+        // ALA residue: 3 atoms (CA, CB, C)
+        let ca = AtomBuilder::new()
+            .name("CA")
+            .element(Element::Carbon)
+            .resn("ALA")
+            .resv(1)
+            .chain("A")
+            .build();
+        let cb = AtomBuilder::new()
+            .name("CB")
+            .element(Element::Carbon)
+            .resn("ALA")
+            .resv(1)
+            .chain("A")
+            .build();
+        let c = AtomBuilder::new()
+            .name("C")
+            .element(Element::Carbon)
+            .resn("ALA")
+            .resv(1)
+            .chain("A")
+            .build();
+
+        // HOH residue: 1 atom (O)
+        let o = AtomBuilder::new()
+            .name("O")
+            .element(Element::Oxygen)
+            .resn("HOH")
+            .resv(2)
+            .chain("A")
+            .build();
+
+        let i_ca = mol.add_atom(ca);
+        let i_cb = mol.add_atom(cb);
+        let i_c = mol.add_atom(c);
+        let _i_o = mol.add_atom(o);
+
+        let _ = mol.add_bond(i_ca, i_cb, BondOrder::Single);
+        let _ = mol.add_bond(i_ca, i_c, BondOrder::Single);
+
+        // Add a coordinate set
+        let cs = pymol_mol::CoordSet::from_vec3(&[
+            lin_alg::f32::Vec3::new(0.0, 0.0, 0.0),
+            lin_alg::f32::Vec3::new(1.5, 0.0, 0.0),
+            lin_alg::f32::Vec3::new(0.0, 1.5, 0.0),
+            lin_alg::f32::Vec3::new(3.0, 0.0, 0.0),
+        ]);
+        mol.add_coord_set(cs);
+        mol
+    }
+
+    fn setup_session_with(mol: pymol_mol::ObjectMolecule) -> Session {
+        let mut session = Session::new();
+        session.registry.add(MoleculeObject::new(mol));
+        session
+    }
+
+    fn run_remove(session: &mut Session, cmd_str: &str) -> CmdResult {
+        let mut needs_redraw = false;
+        let mut adapter = SessionAdapter {
+            session,
+            render_context: None,
+            default_size: (800, 600),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+        let parsed = parse_command(cmd_str).map_err(CmdError::Parse)?;
+        let viewer: &mut dyn ViewerLike = &mut adapter;
+        let mut ctx = CommandContext::new(viewer).with_quiet(true);
+        RemoveCommand.execute(&mut ctx, &parsed)
+    }
+
+    #[test]
+    fn test_remove_by_resn() {
+        let mol = create_test_molecule("test");
+        let mut session = setup_session_with(mol);
+
+        assert_eq!(
+            session.registry.get_molecule("test").unwrap().molecule().atom_count(),
+            4
+        );
+
+        run_remove(&mut session, "remove resn HOH").unwrap();
+
+        let obj = session.registry.get_molecule("test").unwrap();
+        assert_eq!(obj.molecule().atom_count(), 3);
+    }
+
+    #[test]
+    fn test_remove_all_deletes_object() {
+        let mol = create_test_molecule("test");
+        let mut session = setup_session_with(mol);
+
+        run_remove(&mut session, "remove all").unwrap();
+
+        assert!(session.registry.get_molecule("test").is_none());
+    }
+
+    #[test]
+    fn test_remove_empty_selection() {
+        let mol = create_test_molecule("test");
+        let mut session = setup_session_with(mol);
+
+        // resn GLY doesn't exist in our molecule
+        run_remove(&mut session, "remove resn GLY").unwrap();
+
+        let obj = session.registry.get_molecule("test").unwrap();
+        assert_eq!(obj.molecule().atom_count(), 4);
+    }
+
+    #[test]
+    fn test_remove_by_element() {
+        let mol = create_test_molecule("test");
+        let mut session = setup_session_with(mol);
+
+        // Remove all oxygen atoms (the HOH water)
+        run_remove(&mut session, "remove elem O").unwrap();
+
+        let obj = session.registry.get_molecule("test").unwrap();
+        assert_eq!(obj.molecule().atom_count(), 3);
     }
 }
