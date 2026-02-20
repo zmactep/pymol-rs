@@ -111,6 +111,8 @@ pub struct SeqObject {
 pub enum SequenceAction {
     /// Execute a command string (e.g., "select sele, ...")
     Execute(String),
+    /// Display a notification message in the output panel
+    Notify(String),
 }
 
 /// Persistent state for the sequence viewer
@@ -348,6 +350,7 @@ impl SequencePanel {
                                     cw,
                                     named_colors,
                                     highlighted,
+                                    &self.sequences,
                                     drag_start,
                                     drag_end,
                                     &mut actions,
@@ -383,6 +386,7 @@ fn render_chain_sequence(
     cw: f32,
     named_colors: &NamedColors,
     highlighted: &HashSet<(String, String, i32)>,
+    all_sequences: &[SeqObject],
     drag_start: &mut Option<(usize, usize, usize)>,
     drag_end: &mut Option<usize>,
     actions: &mut Vec<SequenceAction>,
@@ -642,6 +646,142 @@ fn render_chain_sequence(
             });
         }
     }
+
+    // Right-click context menu
+    response.context_menu(|ui| {
+        let has_selection = highlighted
+            .iter()
+            .any(|(obj, ch, _)| obj == object_name && ch == &chain.chain_id);
+
+        if has_selection {
+            if ui.button("Copy selected sequence").clicked() {
+                let seq = chain_highlighted_sequence(chain, object_name, highlighted);
+                if !seq.is_empty() {
+                    ui.ctx().output_mut(|o| {
+                        o.commands
+                            .push(egui::OutputCommand::CopyText(seq.clone()));
+                    });
+                    actions.push(SequenceAction::Notify(format!(
+                        "Copied {} residues from chain {}",
+                        seq.len(),
+                        chain.chain_id
+                    )));
+                }
+                ui.close();
+            }
+        }
+
+        if ui.button("Copy full chain sequence").clicked() {
+            let seq = chain_to_sequence(chain);
+            if !seq.is_empty() {
+                ui.ctx().output_mut(|o| {
+                    o.commands
+                        .push(egui::OutputCommand::CopyText(seq.clone()));
+                });
+                actions.push(SequenceAction::Notify(format!(
+                    "Copied {} residues from chain {}",
+                    seq.len(),
+                    chain.chain_id
+                )));
+            }
+            ui.close();
+        }
+
+        ui.separator();
+
+        if ui.button("Copy all chains").clicked() {
+            let (text, count) = collect_all_sequences(all_sequences);
+            if !text.is_empty() {
+                ui.ctx().output_mut(|o| {
+                    o.commands
+                        .push(egui::OutputCommand::CopyText(text));
+                });
+                actions.push(SequenceAction::Notify(format!(
+                    "Copied {} residues to clipboard",
+                    count
+                )));
+            }
+            ui.close();
+        }
+    });
+}
+
+/// Collect all polymer sequences from all objects/chains.
+/// Returns `(text, residue_count)` — single chain = plain, multiple = FASTA.
+fn collect_all_sequences(sequences: &[SeqObject]) -> (String, usize) {
+    let mut entries: Vec<(String, String)> = Vec::new();
+    let mut total = 0;
+    for seq_obj in sequences {
+        for chain in &seq_obj.chains {
+            let seq = chain_to_sequence(chain);
+            if !seq.is_empty() {
+                total += seq.len();
+                entries.push((
+                    format!("{}:{}", seq_obj.object_name, chain.chain_id),
+                    seq,
+                ));
+            }
+        }
+    }
+    if entries.is_empty() {
+        return (String::new(), 0);
+    }
+    let text = if entries.len() == 1 {
+        entries.into_iter().next().unwrap().1
+    } else {
+        format_fasta(&entries)
+    };
+    (text, total)
+}
+
+/// Extract a one-letter-per-residue sequence string from a chain, skipping ligands.
+/// Unknown polymer residues (`display_char == '?'`) become `'X'`.
+fn chain_to_sequence(chain: &SeqChain) -> String {
+    chain
+        .residues
+        .iter()
+        .filter(|r| r.kind.is_polymer())
+        .map(|r| if r.display_char == '?' { 'X' } else { r.display_char })
+        .collect()
+}
+
+/// Extract sequence of only the highlighted residues from a chain.
+fn chain_highlighted_sequence(
+    chain: &SeqChain,
+    object_name: &str,
+    highlighted: &HashSet<(String, String, i32)>,
+) -> String {
+    chain
+        .residues
+        .iter()
+        .filter(|r| r.kind.is_polymer())
+        .filter(|r| {
+            highlighted.contains(&(
+                object_name.to_string(),
+                chain.chain_id.clone(),
+                r.resv,
+            ))
+        })
+        .map(|r| if r.display_char == '?' { 'X' } else { r.display_char })
+        .collect()
+}
+
+/// Format `(header, sequence)` pairs as FASTA with 60-character line wrapping.
+fn format_fasta(entries: &[(String, String)]) -> String {
+    let mut result = String::new();
+    for (header, seq) in entries {
+        result.push('>');
+        result.push_str(header);
+        result.push('\n');
+        for chunk in seq.as_bytes().chunks(60) {
+            result.push_str(std::str::from_utf8(chunk).unwrap());
+            result.push('\n');
+        }
+    }
+    if result.ends_with('\n') {
+        result.pop();
+    }
+    result
 }
 
 /// Build sequence data for one molecule object

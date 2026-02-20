@@ -888,6 +888,9 @@ impl App {
                 SequenceAction::Execute(cmd) => {
                     let _ = self.execute_command(&cmd);
                 }
+                SequenceAction::Notify(msg) => {
+                    self.output.print_info(msg);
+                }
             }
         }
 
