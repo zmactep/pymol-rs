@@ -48,8 +48,6 @@ pub struct InputState {
     modifiers: ModifiersState,
     /// Rotation sensitivity (radians per pixel)
     pub rotate_sensitivity: f32,
-    /// Translation sensitivity (units per pixel)
-    pub translate_sensitivity: f32,
     /// Zoom sensitivity (factor per scroll unit)
     pub zoom_sensitivity: f32,
     /// Clip sensitivity (units per pixel)
@@ -67,7 +65,6 @@ impl Default for InputState {
             pinch_zoom_delta: 0.0,
             modifiers: ModifiersState::empty(),
             rotate_sensitivity: 0.005,
-            translate_sensitivity: 0.02,
             zoom_sensitivity: 0.1,
             clip_sensitivity: 0.1,
         }
@@ -156,6 +153,14 @@ impl InputState {
         self.modifiers.control_key()
     }
 
+    /// Check if ctrl or cmd (macOS) is held.
+    ///
+    /// On macOS, winit maps ⌘ to `ModifiersState::SUPER`.
+    /// We treat both as the "pan" modifier to match PyMOL's Ctrl+drag behavior.
+    pub fn ctrl_or_cmd_held(&self) -> bool {
+        self.modifiers.control_key() || self.modifiers.super_key()
+    }
+
     /// Check if alt is held
     pub fn alt_held(&self) -> bool {
         self.modifiers.alt_key()
@@ -172,12 +177,15 @@ impl InputState {
     /// camera movements. Call this once per frame.
     ///
     /// The default mapping follows PyMOL conventions:
-    /// - Left drag: Rotate (X/Y rotation)
-    /// - Middle drag: Translate (X/Y panning)
-    /// - Right drag: Zoom (Y), Clip (Shift+Y), Slab (Ctrl+Y)
-    /// - Scroll: Zoom
-    /// - Shift+Left drag: Translate (X/Y panning)
-    /// - Ctrl+Left drag: Zoom (Y), Rotate-Z (X)
+    /// - Left drag:             Rotate (X/Y rotation)
+    /// - Ctrl+Left drag:        Pan XY (matches PyMOL three_button_viewing `move`)
+    /// - Cmd+Left drag (macOS): Pan XY (⌘ maps to SUPER in winit)
+    /// - Shift+Left drag:       Pan XY
+    /// - Middle drag:           Pan XY
+    /// - Right drag:            Zoom (Y)
+    /// - Shift+Right drag:      Clip planes
+    /// - Ctrl+Right drag:       Slab (both clip planes)
+    /// - Scroll:                Slab scale (or Zoom while button held)
     pub fn take_camera_deltas(&mut self) -> Vec<CameraDelta> {
         let mut deltas = Vec::new();
         let (dx, dy) = self.mouse_delta;
@@ -200,19 +208,11 @@ impl InputState {
         if dx.abs() > 0.001 || dy.abs() > 0.001 {
             if self.mouse_buttons[LEFT] {
                 if self.modifiers.shift_key() {
-                    // Shift+Left: Pan
-                    deltas.push(CameraDelta::Translate(Vec3::new(
-                        dx * self.translate_sensitivity,
-                        -dy * self.translate_sensitivity,
-                        0.0,
-                    )));
-                } else if self.modifiers.control_key() {
-                    // Ctrl+Left: Zoom (Y) + Rotate-Z (X)
-                    deltas.push(CameraDelta::Zoom(dy * self.zoom_sensitivity * 0.1));
-                    deltas.push(CameraDelta::Rotate {
-                        x: 0.0,
-                        y: dx * self.rotate_sensitivity,
-                    });
+                    // Shift+Left: Pan (negate: moving origin opposite to drag direction)
+                    deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
+                } else if self.ctrl_or_cmd_held() {
+                    // Ctrl+Left / Cmd+Left (macOS): Pan XY — matches PyMOL three_button_viewing
+                    deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
                 } else {
                     // Left: Rotate
                     deltas.push(CameraDelta::Rotate {
@@ -222,11 +222,7 @@ impl InputState {
                 }
             } else if self.mouse_buttons[MIDDLE] {
                 // Middle: Pan
-                deltas.push(CameraDelta::Translate(Vec3::new(
-                    dx * self.translate_sensitivity,
-                    -dy * self.translate_sensitivity,
-                    0.0,
-                )));
+                deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
             } else if self.mouse_buttons[RIGHT] {
                 if self.modifiers.shift_key() {
                     // Shift+Right: Clip planes
@@ -360,6 +356,64 @@ mod tests {
         assert!(
             !has_slab,
             "Scroll while dragging should not produce SlabScale"
+        );
+    }
+
+    #[test]
+    fn test_ctrl_left_drag_pans() {
+        let mut state = InputState::new();
+
+        // Simulate Ctrl+Left drag
+        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
+        state.handle_modifiers(ModifiersState::CONTROL);
+        state.handle_mouse_motion((100.0, 100.0));
+        state.handle_mouse_motion((110.0, 105.0)); // dx=10, dy=5
+
+        let deltas = state.take_camera_deltas();
+
+        assert_eq!(deltas.len(), 1, "Ctrl+Left drag should produce exactly one delta");
+        match &deltas[0] {
+            CameraDelta::Translate(v) => {
+                assert!((v.x - (-10.0)).abs() < 0.001, "Raw pixel dx=10 negated for origin shift");
+                assert!((v.y - 5.0).abs() < 0.001, "Raw pixel dy=5 negated for origin shift");
+                assert!((v.z).abs() < 0.001, "No Z component");
+            }
+            other => panic!("Expected Translate, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_ctrl_left_drag_does_not_rotate() {
+        let mut state = InputState::new();
+
+        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
+        state.handle_modifiers(ModifiersState::CONTROL);
+        state.handle_mouse_motion((100.0, 100.0));
+        state.handle_mouse_motion((120.0, 120.0));
+
+        let deltas = state.take_camera_deltas();
+
+        let has_rotate = deltas.iter().any(|d| matches!(d, CameraDelta::Rotate { .. }));
+        let has_zoom = deltas.iter().any(|d| matches!(d, CameraDelta::Zoom(_)));
+        assert!(!has_rotate, "Ctrl+Left drag must not rotate");
+        assert!(!has_zoom, "Ctrl+Left drag must not zoom");
+    }
+
+    #[test]
+    fn test_super_left_drag_pans_on_macos() {
+        // On macOS, winit reports ⌘ as SUPER, not CONTROL
+        let mut state = InputState::new();
+
+        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
+        state.handle_modifiers(ModifiersState::SUPER);
+        state.handle_mouse_motion((100.0, 100.0));
+        state.handle_mouse_motion((110.0, 105.0));
+
+        let deltas = state.take_camera_deltas();
+
+        assert!(
+            deltas.iter().any(|d| matches!(d, CameraDelta::Translate(_))),
+            "Cmd+Left (SUPER) should pan on macOS"
         );
     }
 }

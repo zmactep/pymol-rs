@@ -1503,7 +1503,9 @@ impl App {
                     self.needs_redraw = true;
                 }
                 CameraDelta::Translate(v) => {
-                    self.state.camera.translate(v);
+                    let vh = self.view.viewport_rect.map(|r| r.height()).unwrap_or(768.0);
+                    let scale = self.state.camera.screen_vertex_scale(vh);
+                    self.state.camera.translate(v * scale);
                     self.needs_redraw = true;
                 }
                 CameraDelta::Zoom(factor) => {

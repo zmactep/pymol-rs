@@ -397,6 +397,15 @@ impl Camera {
         self.view.fov = (self.view.fov + delta).clamp(1.0, 179.0);
     }
 
+    /// Compute world-space units per pixel at the origin depth.
+    ///
+    /// Matches PyMOL's `SceneGetScreenVertexScale`: depth * 2*tan(fov/2) / viewport_height.
+    pub fn screen_vertex_scale(&self, viewport_height: f32) -> f32 {
+        let depth = self.view.position.z;
+        let fov_rad = self.view.fov.to_radians();
+        depth * 2.0 * (fov_rad / 2.0).tan() / viewport_height
+    }
+
     /// Center the camera on a point
     pub fn center_on(&mut self, point: Vec3) {
         self.animation = None;
