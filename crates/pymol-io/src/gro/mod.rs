@@ -3,8 +3,10 @@
 //! Provides reading of GRO coordinate format files.
 
 mod parser;
+mod writer;
 
 pub use parser::GroReader;
+pub use writer::GroWriter;
 
 use std::io::Read;
 use std::path::Path;

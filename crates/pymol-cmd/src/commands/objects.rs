@@ -312,7 +312,7 @@ EXAMPLES
 ///
 /// If `source_state` is `None`, all states are copied. If `Some(i)` (0-indexed),
 /// only that single state is copied into the new object.
-fn extract_molecule(
+pub(crate) fn extract_molecule(
     src: &ObjectMolecule,
     selection: &pymol_select::SelectionResult,
     name: &str,

@@ -3,7 +3,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-use pymol_io::{read_file, write_file, FileFormat};
+use pymol_io::{read_file, FileFormat};
 use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_mol::ObjectMolecule;
 use pymol_scene::MoleculeObject;
@@ -12,6 +12,9 @@ use pymol_settings::id as setting_id;
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
+
+use super::objects::extract_molecule;
+use super::selecting::evaluate_selection;
 
 /// Expand shell-style paths: ~ to home directory, $VAR to environment variables
 pub fn expand_path(path: &str) -> PathBuf {
@@ -275,20 +278,20 @@ EXAMPLES
             .or_else(|| args.get_named_str("filename"))
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
-        let _selection = args
+        let selection = args
             .get_str(1)
             .or_else(|| args.get_named_str("selection"))
             .unwrap_or("all");
 
-        let _state = args
+        let state_arg = args
             .get_int(2)
             .or_else(|| args.get_named_int("state"))
             .unwrap_or(-1);
 
         let path = expand_path(filename);
-
-        // Check for session file formats
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+        // Session formats — handled before anything else
         match ext.as_str() {
             "prs" => {
                 use pymol_session::save_prs;
@@ -300,23 +303,69 @@ EXAMPLES
             "pse" => {
                 return Err(CmdError::execution("PSE format is read-only. Use .prs for saving sessions."));
             }
+            "bcif" => {
+                return Err(CmdError::execution(
+                    "BinaryCIF writing is not supported. Save as .cif instead.",
+                ));
+            }
             _ => {}
         }
 
-        // For now, save the first molecule object
-        // TODO: Implement proper selection support
+        let format = FileFormat::from_extension(&ext);
+        if format == FileFormat::Unknown {
+            return Err(CmdError::execution(format!(
+                "Unknown file format: .{} (supported: pdb, cif, mol2, sdf, xyz, gro, prs)",
+                ext
+            )));
+        }
 
-        // Find first molecule to save
-        let mol = ctx
-            .viewer
-            .objects()
-            .names()
-            .find_map(|name| ctx.viewer.objects().get_molecule(name))
-            .ok_or_else(|| CmdError::execution("No molecule objects to save"))?;
+        // Evaluate selection across all objects
+        let results = evaluate_selection(ctx.viewer, selection)?;
+        let matches: Vec<(String, _)> = results
+            .into_iter()
+            .filter(|(_, sel)| sel.count() > 0)
+            .collect();
 
-        write_file(&path, mol.molecule()).map_err(|e| CmdError::FileFormat(e.to_string()))?;
+        if matches.is_empty() {
+            return Err(CmdError::Selection(format!(
+                "No atoms match '{}'",
+                selection
+            )));
+        }
 
-        ctx.print(&format!(" Saved \"{}\"", filename));
+        // Resolve state index (PyMOL: -1/0 = current, 1-based otherwise)
+        let state_idx: Option<usize> = match state_arg {
+            n if n <= 0 => None,
+            n => Some((n - 1) as usize),
+        };
+
+        // Build filtered molecules
+        let filtered: Vec<ObjectMolecule> = matches
+            .iter()
+            .filter_map(|(name, sel)| {
+                let mol_obj = ctx.viewer.objects().get_molecule(name)?;
+                Some(extract_molecule(mol_obj.molecule(), sel, name, state_idx))
+            })
+            .filter(|m| m.atom_count() > 0)
+            .collect();
+
+        if filtered.is_empty() {
+            return Err(CmdError::execution(
+                "No atoms to save after applying selection",
+            ));
+        }
+
+        // Write
+        let total_atoms: usize = filtered.iter().map(|m| m.atom_count()).sum();
+        pymol_io::write_all(&path, &filtered)
+            .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+
+        ctx.print(&format!(
+            " Saved {} atoms to \"{}\" ({} format)",
+            total_atoms,
+            filename,
+            format.name()
+        ));
 
         Ok(())
     }

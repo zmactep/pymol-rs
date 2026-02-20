@@ -253,7 +253,7 @@ pub fn create_writer<W: Write + 'static>(
         FileFormat::Xyz => Ok(Box::new(crate::xyz::XyzWriter::new(writer))),
         FileFormat::Cif => Ok(Box::new(crate::cif::CifWriter::new(writer))),
         FileFormat::Bcif => Err(IoError::Unsupported("BinaryCIF writing not supported".to_string())),
-        FileFormat::Gro => Err(IoError::UnknownFormat("GRO writing not supported".to_string())),
+        FileFormat::Gro => Ok(Box::new(crate::gro::GroWriter::new(writer))),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
 }
