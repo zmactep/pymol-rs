@@ -52,7 +52,7 @@ pub use definitions::{
     SETTINGS, SETTING_COUNT,
 };
 pub use error::SettingError;
-pub use setting::{Setting, SettingLevel, SettingType, SettingValue};
+pub use setting::{Setting, SettingLevel, SettingType, SettingValue, ValueHints};
 pub use side_effects::{
     get_side_effects, FnSideEffect, SettingSideEffect, SideEffectCategory, SideEffectRegistry,
 };

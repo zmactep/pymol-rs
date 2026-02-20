@@ -144,7 +144,7 @@ impl Representation for MeshRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        _settings: &SettingResolver,
+        settings: &SettingResolver,
     ) {
         // For mesh representation, we typically don't build from molecular data
         // directly - the mesh data is usually set via set_mesh() from a surface
@@ -152,6 +152,7 @@ impl Representation for MeshRep {
         // here for atoms that have MESH visible.
 
         self.clear();
+        let mesh_color = settings.get_color(pymol_settings::id::mesh_color);
 
         // Simple icosahedron-based mesh for atoms with MESH visible
         for (atom_idx, coord) in coord_set.iter_with_atoms() {
@@ -166,7 +167,7 @@ impl Representation for MeshRep {
             }
 
             let radius = atom.effective_vdw();
-            let color = colors.resolve_mesh(atom, molecule);
+            let color = colors.resolve_rep_color(atom, atom.repr.colors.mesh, mesh_color);
             let center = [coord.x, coord.y, coord.z];
 
             // Generate a simple icosahedron mesh

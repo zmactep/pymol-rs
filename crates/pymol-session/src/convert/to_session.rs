@@ -385,14 +385,7 @@ fn convert_selection(
 // =============================================================================
 
 fn color_index_from_pse(color: i64) -> ColorIndex {
-    match color {
-        -1 => ColorIndex::ByElement,
-        -2 => ColorIndex::ByChain,
-        -3 => ColorIndex::BySS,
-        -4 => ColorIndex::ByBFactor,
-        c if c >= 0 => ColorIndex::Named(c as u32),
-        _ => ColorIndex::default(),
-    }
+    ColorIndex::from(color as i32)
 }
 
 // =============================================================================

@@ -207,7 +207,23 @@ impl App {
         // Set up default key bindings
         app.setup_default_key_bindings();
 
+        // Apply default global settings
+        app.apply_default_settings();
+
         app
+    }
+
+    /// Apply default global settings (will be loaded from config file in the future)
+    fn apply_default_settings(&mut self) {
+        use pymol_settings::{id as setting_id, SettingValue};
+
+        let colors = &self.state.named_colors;
+        if let Some((idx, _)) = colors.get_by_name("green") {
+            let _ = self.state.settings.set(setting_id::cartoon_color, SettingValue::Color(idx as i32));
+        }
+        if let Some((idx, _)) = colors.get_by_name("magenta") {
+            let _ = self.state.settings.set(setting_id::cartoon_nucleic_acid_color, SettingValue::Color(idx as i32));
+        }
     }
 
     /// Create a new application with IPC server enabled
@@ -485,13 +501,12 @@ impl App {
             let color_resolver = ColorResolver::new(
                 &self.state.named_colors,
                 &self.state.element_colors,
-                &self.state.chain_colors,
             );
             if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
                 if mol_obj.is_dirty() {
                     geometry_changed = true;
                 }
-                mol_obj.prepare_render(context, &color_resolver, &self.state.settings);
+                mol_obj.prepare_render(context, color_resolver, &self.state.settings);
 
                 if let Some((_, sel)) = selection_results.iter().find(|(n, _)| n == name) {
                     log::debug!("Setting selection indicator for '{}' with {} atoms", name, sel.count());
@@ -581,8 +596,8 @@ impl App {
             let context = self.view.render_context.as_ref().unwrap();
             let thickness = self.state.settings.get_float(pymol_settings::id::silhouette_width);
             let depth_jump = self.state.settings.get_float(pymol_settings::id::silhouette_depth_jump);
-            let color_rgb = self.state.settings.get_float3(pymol_settings::id::silhouette_color);
-            let color = [color_rgb[0], color_rgb[1], color_rgb[2], 1.0];
+            let color_int = self.state.settings.get_color(pymol_settings::id::silhouette_color);
+            let color = pymol_color::Color::from_packed_rgb(color_int).to_rgba(1.0);
             silhouette.render(
                 encoder,
                 context.queue(),

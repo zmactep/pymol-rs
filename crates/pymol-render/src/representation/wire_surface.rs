@@ -193,17 +193,16 @@ impl Representation for WireSurfaceRep {
     ) {
         self.clear();
 
-        // Read surface settings (same IDs as SurfaceRep)
-        let surface_type_setting = settings.get_int_if_defined(331).unwrap_or(0);
-        let surface_solvent = settings.get_bool_if_defined(338).unwrap_or(false);
+        let surface_type_setting = settings.get_int_if_defined(pymol_settings::id::surface_type).unwrap_or(0);
+        let surface_solvent = settings.get_bool_if_defined(pymol_settings::id::surface_solvent).unwrap_or(false);
         self.surface_type = if surface_solvent {
             SurfaceType::SolventAccessible
         } else {
             SurfaceType::from_setting(surface_type_setting)
         };
 
-        // 807 = surface_individual_chains (bool, default false)
-        let individual_chains = settings.get_bool(807);
+        let individual_chains = settings.get_bool(pymol_settings::id::surface_individual_chains);
+        let mesh_color = settings.get_color(pymol_settings::id::mesh_color);
 
         // Collect atoms with MESH visibility
         let mut atoms: Vec<SurfaceAtom> = Vec::new();
@@ -222,7 +221,7 @@ impl Representation for WireSurfaceRep {
 
             let position = [coord.x, coord.y, coord.z];
             let radius = atom.effective_vdw();
-            let color = colors.resolve_mesh(atom, molecule);
+            let color = colors.resolve_rep_color(atom, atom.repr.colors.mesh, mesh_color);
 
             atoms.push(SurfaceAtom {
                 position,

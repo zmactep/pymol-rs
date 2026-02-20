@@ -114,16 +114,13 @@ impl Representation for StickRep {
         self.cylinder_instances.clear();
         self.sphere_instances.clear();
 
-        // Get stick radius from settings if available
-        // Setting ID 21 is stick_radius, returns f32 directly
         let stick_radius = settings
-            .get_float_if_defined(21)
+            .get_float_if_defined(pymol_settings::id::stick_radius)
             .unwrap_or(self.stick_radius);
 
-        // Get valence display settings
-        // Setting ID 64 = valence (bool), ID 512 = stick_valence_scale (float)
-        let valence_enabled = settings.get_bool_if_defined(64).unwrap_or(true);
-        let stick_valence_scale = settings.get_float_if_defined(512).unwrap_or(1.0);
+        let valence_enabled = settings.get_bool_if_defined(pymol_settings::id::valence).unwrap_or(true);
+        let stick_valence_scale = settings.get_float_if_defined(pymol_settings::id::stick_valence_scale).unwrap_or(1.0);
+        let stick_color = settings.get_color(pymol_settings::id::stick_color);
 
         // For sticks, the offset needs to be based on stick_radius to prevent overlap.
         // Using stick_radius * 1.5 as base gives a compact appearance for double/triple bonds.
@@ -162,9 +159,9 @@ impl Representation for StickRep {
                 None => continue,
             };
 
-            // Get colors
-            let color1 = colors.resolve_stick(atom1, molecule);
-            let color2 = colors.resolve_stick(atom2, molecule);
+            // Get colors (3-level fallback: per-atom → settings → base)
+            let color1 = colors.resolve_rep_color(atom1, atom1.repr.colors.stick, stick_color);
+            let color2 = colors.resolve_rep_color(atom2, atom2.repr.colors.stick, stick_color);
 
             // Use smaller radius for multiple bonds (like PyMOL)
             let radius = if bond.order.is_multiple() && valence_enabled {
@@ -285,7 +282,7 @@ impl Representation for StickRep {
 mod tests {
     use super::*;
     use lin_alg::f32::Vec3;
-    use pymol_color::{ChainColors, ElementColors, NamedColors};
+    use pymol_color::{ElementColors, NamedColors};
     use pymol_mol::{Atom, BondOrder, Element};
     use pymol_settings::GlobalSettings;
 
@@ -324,10 +321,9 @@ mod tests {
     }
 
     fn build_stick_rep(mol: &ObjectMolecule, coord_set: &CoordSet) -> StickRep {
-        static CHAIN_COLORS: ChainColors = ChainColors;
         let named = NamedColors::default();
         let elements = ElementColors::default();
-        let colors = ColorResolver::new(&named, &elements, &CHAIN_COLORS);
+        let colors = ColorResolver::new(&named, &elements);
 
         let global_settings = GlobalSettings::new();
         let settings = SettingResolver::global(&global_settings);

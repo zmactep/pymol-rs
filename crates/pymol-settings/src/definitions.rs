@@ -891,49 +891,56 @@ pub fn setting_names() -> Vec<&'static str> {
 // Helper macros for defining settings
 macro_rules! s_blank {
     ($id:expr, $name:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Blank, level: SettingLevel::Unused, default: SettingValue::Int(0), min: None, max: None }
+        Setting { id: $id, name: $name, setting_type: SettingType::Blank, level: SettingLevel::Unused, default: SettingValue::Int(0), min: None, max: None, value_hints: &[] }
     };
 }
 
 macro_rules! s_bool {
     ($id:expr, $name:expr, $level:expr, $default:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Bool, level: $level, default: SettingValue::Bool($default), min: Some(0.0), max: Some(1.0) }
+        Setting { id: $id, name: $name, setting_type: SettingType::Bool, level: $level, default: SettingValue::Bool($default), min: Some(0.0), max: Some(1.0), value_hints: &[] }
     };
 }
 
 macro_rules! s_int {
     ($id:expr, $name:expr, $level:expr, $default:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Int, level: $level, default: SettingValue::Int($default), min: None, max: None }
+        Setting { id: $id, name: $name, setting_type: SettingType::Int, level: $level, default: SettingValue::Int($default), min: None, max: None, value_hints: &[] }
     };
     ($id:expr, $name:expr, $level:expr, $default:expr, $min:expr, $max:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Int, level: $level, default: SettingValue::Int($default), min: Some($min as f32), max: Some($max as f32) }
+        Setting { id: $id, name: $name, setting_type: SettingType::Int, level: $level, default: SettingValue::Int($default), min: Some($min as f32), max: Some($max as f32), value_hints: &[] }
+    };
+}
+
+/// Integer setting with named value variants (e.g., shading_mode: "classic" = 0, "skripkin" = 1).
+macro_rules! s_int_enum {
+    ($id:expr, $name:expr, $level:expr, $default:expr, $min:expr, $max:expr, $hints:expr) => {
+        Setting { id: $id, name: $name, setting_type: SettingType::Int, level: $level, default: SettingValue::Int($default), min: Some($min as f32), max: Some($max as f32), value_hints: $hints }
     };
 }
 
 macro_rules! s_float {
     ($id:expr, $name:expr, $level:expr, $default:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Float, level: $level, default: SettingValue::Float($default), min: None, max: None }
+        Setting { id: $id, name: $name, setting_type: SettingType::Float, level: $level, default: SettingValue::Float($default), min: None, max: None, value_hints: &[] }
     };
     ($id:expr, $name:expr, $level:expr, $default:expr, $min:expr, $max:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Float, level: $level, default: SettingValue::Float($default), min: Some($min), max: Some($max) }
+        Setting { id: $id, name: $name, setting_type: SettingType::Float, level: $level, default: SettingValue::Float($default), min: Some($min), max: Some($max), value_hints: &[] }
     };
 }
 
 macro_rules! s_float3 {
     ($id:expr, $name:expr, $level:expr, $x:expr, $y:expr, $z:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Float3, level: $level, default: SettingValue::Float3([$x, $y, $z]), min: None, max: None }
+        Setting { id: $id, name: $name, setting_type: SettingType::Float3, level: $level, default: SettingValue::Float3([$x, $y, $z]), min: None, max: None, value_hints: &[] }
     };
 }
 
 macro_rules! s_color {
     ($id:expr, $name:expr, $level:expr, $default:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::Color, level: $level, default: SettingValue::Color($default), min: None, max: None }
+        Setting { id: $id, name: $name, setting_type: SettingType::Color, level: $level, default: SettingValue::Color($default), min: None, max: None, value_hints: &[] }
     };
 }
 
 macro_rules! s_string {
     ($id:expr, $name:expr, $level:expr) => {
-        Setting { id: $id, name: $name, setting_type: SettingType::String, level: $level, default: SettingValue::Int(0), min: None, max: None }
+        Setting { id: $id, name: $name, setting_type: SettingType::String, level: $level, default: SettingValue::Int(0), min: None, max: None, value_hints: &[] }
     };
 }
 
@@ -1759,11 +1766,11 @@ pub static SETTINGS: &[Setting] = &[
     // 798-801: Silhouette settings
     s_bool!(798, "silhouettes", Global, false),
     s_float!(799, "silhouette_width", Global, 4.0, 0.5, 10.0),
-    s_float3!(800, "silhouette_color", Global, 0.0, 0.0, 0.0),
+    s_color!(800, "silhouette_color", ObjectState, -1),
     s_float!(801, "silhouette_depth_jump", Global, 0.03, 0.001, 0.5),
     // 802-806: Shading mode & multi-directional shadow AO
     // shading_mode: 0 = classic (PyMOL default lighting), 1 = skripkin (ambient + AO shadows)
-    s_int!(802, "shading_mode", Global, 0, 0, 1),
+    s_int_enum!(802, "shading_mode", Global, 0, 0, 1, &[("classic", SettingValue::Int(0)), ("skripkin", SettingValue::Int(1))]),
     s_int!(803, "skripkin_directions", Global, 64),
     s_int!(804, "skripkin_map_size", Global, 128),
     s_float!(805, "skripkin_bias", Global, 0.01, 0.0, 0.1),

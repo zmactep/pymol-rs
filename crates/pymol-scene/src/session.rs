@@ -140,10 +140,9 @@ impl Session {
             let color_resolver = ColorResolver::new(
                 &self.named_colors,
                 &self.element_colors,
-                &self.chain_colors,
             );
             if let Some(mol_obj) = self.registry.get_molecule_mut(name) {
-                mol_obj.prepare_render(context, &color_resolver, &self.settings);
+                mol_obj.prepare_render(context, color_resolver, &self.settings);
             }
         }
     }

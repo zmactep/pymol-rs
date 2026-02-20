@@ -25,9 +25,24 @@ impl Color {
         }
     }
 
-    /// Create a color from a hex string (e.g., "#FF0000" or "FF0000")
+    /// Create a color from a packed 0x00RRGGBB integer
+    pub fn from_packed_rgb(packed: i32) -> Self {
+        Self::from_rgb8(
+            ((packed >> 16) & 0xFF) as u8,
+            ((packed >> 8) & 0xFF) as u8,
+            (packed & 0xFF) as u8,
+        )
+    }
+
+    /// Convert to a packed 0x00RRGGBB integer
+    pub fn to_packed_rgb(&self) -> i32 {
+        let [r, g, b] = self.to_rgb8();
+        ((r as i32) << 16) | ((g as i32) << 8) | (b as i32)
+    }
+
+    /// Create a color from a hex string (e.g., "#FF0000", "0xFF0000", or "FF0000")
     pub fn from_hex(hex: &str) -> Option<Self> {
-        let hex = hex.trim_start_matches('#');
+        let hex = hex.trim_start_matches('#').trim_start_matches("0x");
         if hex.len() != 6 {
             return None;
         }
@@ -117,8 +132,50 @@ pub enum ColorIndex {
     Atomic,
 }
 
+impl ColorIndex {
+    /// Parse a color scheme name alias into a `ColorIndex`.
+    ///
+    /// Recognizes common PyMOL scheme names like "atomic", "chain", "ss", "b_factor", etc.
+    pub fn from_scheme_name(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "atomic" | "cpk" | "element" | "by_element" => Some(ColorIndex::ByElement),
+            "chain" | "by_chain" | "chainbow" => Some(ColorIndex::ByChain),
+            "ss" | "secondary_structure" | "by_ss" | "dssp" => Some(ColorIndex::BySS),
+            "b" | "b_factor" | "bfactor" | "by_b" => Some(ColorIndex::ByBFactor),
+            _ => None,
+        }
+    }
+}
+
 impl Default for ColorIndex {
     fn default() -> Self {
         ColorIndex::Named(0) // White
+    }
+}
+
+impl From<ColorIndex> for i32 {
+    fn from(index: ColorIndex) -> i32 {
+        match index {
+            ColorIndex::Named(idx) => idx as i32,
+            ColorIndex::ByElement | ColorIndex::Atomic => -1,
+            ColorIndex::ByChain => -2,
+            ColorIndex::BySS => -3,
+            ColorIndex::ByBFactor => -4,
+            ColorIndex::ByResidueType => -5,
+        }
+    }
+}
+
+impl From<i32> for ColorIndex {
+    fn from(value: i32) -> Self {
+        match value {
+            -1 => ColorIndex::ByElement,
+            -2 => ColorIndex::ByChain,
+            -3 => ColorIndex::BySS,
+            -4 => ColorIndex::ByBFactor,
+            -5 => ColorIndex::ByResidueType,
+            c if c >= 0 => ColorIndex::Named(c as u32),
+            _ => ColorIndex::default(),
+        }
     }
 }

@@ -496,19 +496,19 @@ impl Representation for SurfaceRep {
         // Get transparency and convert to alpha
         // PyMOL uses transparency (0=opaque, 1=invisible), we need alpha (1=opaque, 0=invisible)
         // Use get_float() which always returns a value (set value or default of 0.0)
-        let transparency = settings.get_float(138).clamp(0.0, 1.0);
+        let transparency = settings.get_float(pymol_settings::id::transparency).clamp(0.0, 1.0);
         let alpha = 1.0 - transparency;
-        
-        let surface_type_setting = settings.get_int_if_defined(331).unwrap_or(0);
-        let surface_solvent = settings.get_bool_if_defined(338).unwrap_or(false);
+
+        let surface_type_setting = settings.get_int_if_defined(pymol_settings::id::surface_type).unwrap_or(0);
+        let surface_solvent = settings.get_bool_if_defined(pymol_settings::id::surface_solvent).unwrap_or(false);
         self.surface_type = if surface_solvent {
             SurfaceType::SolventAccessible
         } else {
             SurfaceType::from_setting(surface_type_setting)
         };
 
-        // 807 = surface_individual_chains (bool, default false)
-        let individual_chains = settings.get_bool(807);
+        let individual_chains = settings.get_bool(pymol_settings::id::surface_individual_chains);
+        let surface_color = settings.get_color(pymol_settings::id::surface_color);
 
         // Collect atoms with SURFACE visibility
         let mut atoms: Vec<SurfaceAtom> = Vec::new();
@@ -528,7 +528,7 @@ impl Representation for SurfaceRep {
 
             let position = [coord.x, coord.y, coord.z];
             let radius = atom.effective_vdw();
-            let color = colors.resolve_surface(atom, molecule);
+            let color = colors.resolve_rep_color(atom, atom.repr.colors.surface, surface_color);
 
             // Apply transparency to the color's alpha channel
             let color_with_alpha = [color[0], color[1], color[2], alpha];

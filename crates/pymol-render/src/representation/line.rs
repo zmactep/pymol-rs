@@ -66,10 +66,9 @@ impl Representation for LineRep {
     ) {
         self.vertices.clear();
 
-        // Get valence display settings
-        // Setting ID 64 = valence (bool), ID 135 = valence_size (float)
-        let valence_enabled = settings.get_bool_if_defined(64).unwrap_or(true);
-        let valence_size = settings.get_float_if_defined(135).unwrap_or(0.06);
+        let valence_enabled = settings.get_bool_if_defined(pymol_settings::id::valence).unwrap_or(true);
+        let valence_size = settings.get_float_if_defined(pymol_settings::id::valence_size).unwrap_or(0.06);
+        let line_color = settings.get_color(pymol_settings::id::line_color);
 
         // Scale valence_size for visible line separation.
         // The raw valence_size (default 0.06 Å) is too small for lines.
@@ -109,9 +108,9 @@ impl Representation for LineRep {
                 None => continue,
             };
 
-            // Get colors
-            let color1 = colors.resolve_line(atom1, molecule);
-            let color2 = colors.resolve_line(atom2, molecule);
+            // Get colors (3-level fallback: per-atom → settings → base)
+            let color1 = colors.resolve_rep_color(atom1, atom1.repr.colors.line, line_color);
+            let color2 = colors.resolve_rep_color(atom2, atom2.repr.colors.line, line_color);
 
             // Get offsets for multiple bonds (or single offset of 0.0 for single bonds)
             let offsets = if valence_enabled {

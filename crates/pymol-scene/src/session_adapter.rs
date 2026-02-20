@@ -113,7 +113,6 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
             &self.session.settings,
             &self.session.named_colors,
             &self.session.element_colors,
-            &self.session.chain_colors,
             self.session.clear_color,
             self.default_size,
         ).map_err(|e| e.to_string())

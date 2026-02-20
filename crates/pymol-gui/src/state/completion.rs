@@ -73,8 +73,8 @@ impl CompletionState {
         if let Some(suggestion) = self.suggestions.get(self.selected).cloned() {
             input.truncate(self.start_pos);
             input.push_str(&suggestion);
-            // Add space after command completion (not for paths ending in /)
-            if !suggestion.ends_with('/') && !suggestion.contains('/') {
+            // Add space after command name completion only (not for arguments or paths)
+            if self.start_pos == 0 && !suggestion.ends_with('/') && !suggestion.contains('/') {
                 input.push(' ');
             }
             self.reset();

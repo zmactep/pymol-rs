@@ -259,6 +259,14 @@ impl From<&str> for SettingValue {
     }
 }
 
+/// Named value variants for settings with a fixed set of allowed values.
+/// Each pair is (display_name, setting_value).
+pub type ValueHints = &'static [(&'static str, SettingValue)];
+
+fn empty_hints() -> ValueHints {
+    &[]
+}
+
 /// Metadata for a setting definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Setting {
@@ -276,6 +284,10 @@ pub struct Setting {
     pub min: Option<f32>,
     /// Maximum value (for numeric types)
     pub max: Option<f32>,
+    /// Named string aliases for integer values (e.g., "classic" = 0, "skripkin" = 1).
+    /// Empty slice for settings without named variants.
+    #[serde(skip, default = "empty_hints")]
+    pub value_hints: ValueHints,
 }
 
 impl Setting {
@@ -289,6 +301,7 @@ impl Setting {
             default: SettingValue::Int(0),
             min: None,
             max: None,
+            value_hints: &[],
         }
     }
 
@@ -307,6 +320,7 @@ impl Setting {
             default: SettingValue::Bool(default),
             min: Some(0.0),
             max: Some(1.0),
+            value_hints: &[],
         }
     }
 
@@ -333,6 +347,7 @@ impl Setting {
                 Some(v) => Some(v as f32),
                 None => None,
             },
+            value_hints: &[],
         }
     }
 
@@ -353,6 +368,7 @@ impl Setting {
             default: SettingValue::Float(default),
             min,
             max,
+            value_hints: &[],
         }
     }
 
@@ -371,6 +387,7 @@ impl Setting {
             default: SettingValue::Float3(default),
             min: None,
             max: None,
+            value_hints: &[],
         }
     }
 
@@ -389,6 +406,7 @@ impl Setting {
             default: SettingValue::Color(default),
             min: None,
             max: None,
+            value_hints: &[],
         }
     }
 
@@ -410,6 +428,7 @@ impl Setting {
             default: SettingValue::Int(0), // Placeholder, actual default handled specially
             min: None,
             max: None,
+            value_hints: &[],
         }
     }
 
@@ -428,6 +447,7 @@ impl Setting {
             default: SettingValue::String(default.to_string()),
             min: None,
             max: None,
+            value_hints: &[],
         }
     }
 
@@ -450,6 +470,33 @@ impl Setting {
             (Some(min), Some(max)) if min != max => value.clamp(min, max),
             _ => value,
         }
+    }
+
+    /// Whether this setting has named value variants.
+    pub fn has_value_hints(&self) -> bool {
+        !self.value_hints.is_empty()
+    }
+
+    /// Look up a setting value from a string alias (case-insensitive).
+    pub fn resolve_hint(&self, name: &str) -> Option<&'static SettingValue> {
+        let name_lower = name.to_lowercase();
+        self.value_hints
+            .iter()
+            .find(|(n, _)| n.to_lowercase() == name_lower)
+            .map(|(_, v)| v)
+    }
+
+    /// Look up a display name from a setting value.
+    pub fn hint_name(&self, value: &SettingValue) -> Option<&'static str> {
+        self.value_hints
+            .iter()
+            .find(|(_, v)| v == value)
+            .map(|(n, _)| *n)
+    }
+
+    /// Get all hint names (for autocomplete).
+    pub fn hint_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.value_hints.iter().map(|(n, _)| *n)
     }
 }
 

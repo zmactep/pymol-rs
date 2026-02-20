@@ -2,8 +2,8 @@
 //!
 //! Resolves `ColorIndex` values from atoms to final RGBA colors.
 
-use pymol_color::{ChainColors, Color, ColorRamp, ElementColors, NamedColors};
-use pymol_mol::{Atom, ObjectMolecule};
+use pymol_color::{ChainColors, Color, ColorIndex, ColorRamp, ElementColors, NamedColors};
+use pymol_mol::Atom;
 use std::collections::HashMap;
 
 /// Resolves color indices to final RGBA values
@@ -16,9 +16,6 @@ pub struct ColorResolver<'a> {
     named_colors: &'a NamedColors,
     /// Element-based colors (CPK)
     element_colors: &'a ElementColors,
-    /// Chain-based colors
-    #[allow(dead_code)]
-    chain_colors: &'a ChainColors,
     /// Color ramps for continuous coloring
     color_ramps: HashMap<String, &'a ColorRamp>,
     /// Default transparency (alpha)
@@ -32,12 +29,10 @@ impl<'a> ColorResolver<'a> {
     pub fn new(
         named_colors: &'a NamedColors,
         element_colors: &'a ElementColors,
-        chain_colors: &'a ChainColors,
     ) -> Self {
         Self {
             named_colors,
             element_colors,
-            chain_colors,
             color_ramps: HashMap::new(),
             default_alpha: 1.0,
             b_factor_range: (0.0, 100.0),
@@ -67,7 +62,7 @@ impl<'a> ColorResolver<'a> {
     /// Uses the atom's `color` field to determine the coloring scheme:
     /// - Negative values indicate special schemes (by element, chain, etc.)
     /// - Non-negative values are indices into the named color table
-    pub fn resolve_atom(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
+    pub fn resolve_atom(&self, atom: &Atom) -> [f32; 4] {
         let color = self.resolve_color_index(atom);
         color.to_rgba(self.default_alpha)
     }
@@ -88,38 +83,19 @@ impl<'a> ColorResolver<'a> {
     /// Takes an explicit color index rather than reading from atom.colors.base,
     /// allowing per-representation colors to override the atom color.
     fn resolve_color_index_value(&self, color_idx: i32, atom: &Atom) -> Color {
-        // Interpret the color index:
-        // - Positive: index into named color table
-        // - -1: color by element
-        // - Other negatives: various special schemes
-
-        match color_idx {
-            -1 => {
-                // Color by element (CPK)
+        match ColorIndex::from(color_idx) {
+            ColorIndex::ByElement | ColorIndex::Atomic => {
                 self.element_colors.get(atom.element as u8)
             }
-            -2 => {
-                // Color by chain
-                self.resolve_by_chain(atom)
-            }
-            -3 => {
-                // Color by secondary structure
-                self.resolve_by_secondary_structure(atom)
-            }
-            -4 => {
-                // Color by B-factor
-                self.resolve_by_b_factor(atom)
-            }
-            idx if idx >= 0 => {
-                // Named color index
+            ColorIndex::ByChain => self.resolve_by_chain(atom),
+            ColorIndex::BySS => self.resolve_by_secondary_structure(atom),
+            ColorIndex::ByBFactor => self.resolve_by_b_factor(atom),
+            ColorIndex::Named(idx) => {
                 self.named_colors
-                    .get_by_index(idx as u32)
+                    .get_by_index(idx)
                     .unwrap_or(Color::WHITE)
             }
-            _ => {
-                // Unknown scheme, default to element color
-                self.element_colors.get(atom.element as u8)
-            }
+            _ => self.element_colors.get(atom.element as u8),
         }
     }
 
@@ -131,113 +107,39 @@ impl<'a> ColorResolver<'a> {
 
     /// Resolve color by secondary structure
     fn resolve_by_secondary_structure(&self, atom: &Atom) -> Color {
-        Self::ss_color(atom.ss_type)
-    }
-
-    /// Get color for a secondary structure type (static helper)
-    ///
-    /// Uses PyMOL's default colors from util.cbss():
-    /// - Helix: red
-    /// - Sheet: yellow
-    /// - Loop: green
-    fn ss_color(ss_type: pymol_mol::SecondaryStructure) -> Color {
-        use pymol_mol::SecondaryStructure;
-
-        match ss_type {
-            SecondaryStructure::Helix | SecondaryStructure::Helix310 | SecondaryStructure::HelixPi => {
-                // Helix: red (PyMOL default)
-                Color::from_rgb8(255, 0, 0)
-            }
-            SecondaryStructure::Sheet => {
-                // Sheet: yellow (PyMOL default)
-                Color::from_rgb8(255, 255, 0)
-            }
-            SecondaryStructure::NucleicRibbon => {
-                // Nucleic acid ribbon: magenta
-                Color::from_rgb8(255, 0, 255)
-            }
-            SecondaryStructure::Loop | SecondaryStructure::Turn | SecondaryStructure::Bend => {
-                // Loop/coil: green (PyMOL default)
-                Color::from_rgb8(0, 255, 0)
-            }
-        }
+        pymol_color::ss_color(atom.ss_type as u8)
     }
 
     /// Resolve color for cartoon representation
     ///
     /// Uses colors.cartoon if set, otherwise falls back to colors.base.
-    /// When colors.cartoon is None and colors.base is -1 (by element),
-    /// uses green as the default cartoon color.
-    pub fn resolve_cartoon(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        // Use cartoon color if set, otherwise fall back to base color
+    pub fn resolve_cartoon(&self, atom: &Atom) -> [f32; 4] {
         let color_idx = atom.repr.colors.cartoon_or_base();
-        let color = match color_idx {
-            -1 => {
-                if atom.state.flags.contains(pymol_mol::AtomFlags::NUCLEIC) {
-                    // Default: magenta for nucleic acid cartoon
-                    Color::new(1.0, 0.0, 1.0)
-                } else {
-                    // Default: green for protein cartoon
-                    Color::new(0.0, 1.0, 0.0)
-                }
-            }
-            _ => self.resolve_color_index_value(color_idx, atom),
+        let color = self.resolve_color_index_value(color_idx, atom);
+        color.to_rgba(self.default_alpha)
+    }
+
+    /// Generic rep-color resolution with 3-level fallback:
+    /// 1. Per-atom rep color (if != COLOR_UNSET)
+    /// 2. Settings default from SettingResolver (if >= 0)
+    /// 3. Atom's base color
+    ///
+    /// A `default_color` of -1 means "no settings-level override, use atom color".
+    pub fn resolve_rep_color(&self, atom: &Atom, per_atom_color: i32, default_color: i32) -> [f32; 4] {
+        let color_idx = if per_atom_color != pymol_mol::COLOR_UNSET {
+            per_atom_color
+        } else if default_color >= 0 {
+            default_color
+        } else {
+            atom.repr.colors.base
         };
-        color.to_rgba(self.default_alpha)
-    }
-
-    /// Resolve color for ribbon representation
-    ///
-    /// Uses colors.ribbon if set, otherwise falls back to colors.base.
-    pub fn resolve_ribbon(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.repr.colors.ribbon_or_base();
         let color = self.resolve_color_index_value(color_idx, atom);
         color.to_rgba(self.default_alpha)
     }
 
-    /// Resolve color for stick representation
-    ///
-    /// Uses colors.stick if set, otherwise falls back to colors.base.
-    pub fn resolve_stick(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.repr.colors.stick_or_base();
-        let color = self.resolve_color_index_value(color_idx, atom);
-        color.to_rgba(self.default_alpha)
-    }
-
-    /// Resolve color for line representation
-    ///
-    /// Uses colors.line if set, otherwise falls back to colors.base.
-    pub fn resolve_line(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.repr.colors.line_or_base();
-        let color = self.resolve_color_index_value(color_idx, atom);
-        color.to_rgba(self.default_alpha)
-    }
-
-    /// Resolve color for sphere representation
-    ///
-    /// Uses colors.sphere if set, otherwise falls back to colors.base.
-    pub fn resolve_sphere(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.repr.colors.sphere_or_base();
-        let color = self.resolve_color_index_value(color_idx, atom);
-        color.to_rgba(self.default_alpha)
-    }
-
-    /// Resolve color for surface representation
-    ///
-    /// Uses colors.surface if set, otherwise falls back to colors.base.
-    pub fn resolve_surface(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.repr.colors.surface_or_base();
-        let color = self.resolve_color_index_value(color_idx, atom);
-        color.to_rgba(self.default_alpha)
-    }
-
-    /// Resolve color for mesh representation
-    ///
-    /// Uses colors.mesh if set, otherwise falls back to colors.base.
-    pub fn resolve_mesh(&self, atom: &Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
-        let color_idx = atom.repr.colors.mesh_or_base();
-        let color = self.resolve_color_index_value(color_idx, atom);
-        color.to_rgba(self.default_alpha)
+    /// Resolve color for cartoon with an object-level default override
+    pub fn resolve_cartoon_with_default(&self, atom: &Atom, default_color: i32) -> [f32; 4] {
+        self.resolve_rep_color(atom, atom.repr.colors.cartoon, default_color)
     }
 
     /// Resolve color by B-factor using the blue-white-red ramp
@@ -283,10 +185,6 @@ impl<'a> ColorResolver<'a> {
         self.element_colors.get(atomic_number)
     }
 
-    /// Get the chain color for a chain ID
-    pub fn get_chain_color(&self, chain: &str) -> Color {
-        ChainColors::get(chain)
-    }
 }
 
 #[cfg(test)]
@@ -294,22 +192,18 @@ mod tests {
     use super::*;
     use pymol_mol::Element;
 
-    // ChainColors is a unit struct with static methods, no need to instantiate
-    static CHAIN_COLORS: ChainColors = ChainColors;
-
     #[test]
     fn test_element_coloring() {
         let named = NamedColors::default();
         let elements = ElementColors::default();
-        let resolver = ColorResolver::new(&named, &elements, &CHAIN_COLORS);
+        let resolver = ColorResolver::new(&named, &elements);
 
         // Create a carbon atom
         let mut atom = Atom::default();
         atom.element = Element::Carbon;
         atom.repr.colors.base = -1; // By element
 
-        let molecule = ObjectMolecule::new("test");
-        let color = resolver.resolve_atom(&atom, &molecule);
+        let color = resolver.resolve_atom(&atom);
 
         // Carbon should be dark gray
         assert!(color[0] > 0.4 && color[0] < 0.7);
@@ -322,19 +216,53 @@ mod tests {
     fn test_chain_coloring() {
         let named = NamedColors::default();
         let elements = ElementColors::default();
-        let resolver = ColorResolver::new(&named, &elements, &CHAIN_COLORS);
+        let resolver = ColorResolver::new(&named, &elements);
 
         let mut atom = Atom::default();
         atom.set_residue("ALA", 1, "A");
         atom.repr.colors.base = -2; // By chain
 
-        let molecule = ObjectMolecule::new("test");
-        let color_a = resolver.resolve_atom(&atom, &molecule);
+        let color_a = resolver.resolve_atom(&atom);
 
         atom.set_residue("ALA", 1, "B");
-        let color_b = resolver.resolve_atom(&atom, &molecule);
+        let color_b = resolver.resolve_atom(&atom);
 
         // Different chains should have different colors
         assert!(color_a[0] != color_b[0] || color_a[1] != color_b[1] || color_a[2] != color_b[2]);
+    }
+
+    #[test]
+    fn test_cartoon_with_default_priority() {
+        use pymol_mol::COLOR_UNSET;
+
+        let named = NamedColors::default();
+        let elements = ElementColors::default();
+        let resolver = ColorResolver::new(&named, &elements);
+
+        let mut atom = Atom::default();
+        atom.element = Element::Carbon;
+        atom.repr.colors.base = -1; // By element
+
+        // Priority 3: no override, no per-atom cartoon → uses base color (by element)
+        let color = resolver.resolve_cartoon_with_default(&atom, -1);
+        // Carbon element color (gray)
+        assert!(color[0] > 0.4 && color[0] < 0.7, "Should be element color");
+
+        // Priority 2: object-level default overrides base
+        // Named color index 2 = red in default NamedColors
+        let color = resolver.resolve_cartoon_with_default(&atom, 2);
+        assert!(color[0] > 0.9, "Object default should override to red");
+        assert!(color[1] < 0.1);
+
+        // Priority 1: per-atom cartoon color overrides object default
+        atom.repr.colors.cartoon = 3; // green
+        let color = resolver.resolve_cartoon_with_default(&atom, 2);
+        assert!(color[1] > 0.9, "Per-atom cartoon should override to green");
+        assert!(color[0] < 0.1);
+
+        // Reset: COLOR_UNSET means "not set", falls through to object default
+        atom.repr.colors.cartoon = COLOR_UNSET;
+        let color = resolver.resolve_cartoon_with_default(&atom, 2);
+        assert!(color[0] > 0.9, "COLOR_UNSET should fall through to object default");
     }
 }

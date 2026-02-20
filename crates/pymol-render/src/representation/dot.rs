@@ -118,13 +118,11 @@ impl Representation for DotRep {
     ) {
         self.instances.clear();
 
-        // Get settings
-        // Setting ID 77 is dot_width, Setting ID 2 is dot_density
         let dot_width = settings
-            .get_float_if_defined(77)
+            .get_float_if_defined(pymol_settings::id::dot_width)
             .unwrap_or(self.dot_width);
         let dot_density = settings
-            .get_int_if_defined(2)
+            .get_int_if_defined(pymol_settings::id::dot_density)
             .unwrap_or(self.dot_density);
 
         // Calculate number of dots based on density
@@ -153,7 +151,7 @@ impl Representation for DotRep {
             let radius = atom.effective_vdw();
 
             // Get color
-            let color = colors.resolve_atom(atom, molecule);
+            let color = colors.resolve_atom(atom);
 
             // Generate dots on surface
             let center = [coord.x, coord.y, coord.z];

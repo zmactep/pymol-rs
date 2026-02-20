@@ -70,13 +70,15 @@ pub fn build_cartoon_geometry(
     subdivisions: u32,
     gap_cutoff: i32,
     rep_mask: pymol_mol::RepMask,
+    cartoon_default: i32,
+    nucleic_default: i32,
 ) -> (Vec<MeshVertex>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
     let mut segments =
-        extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, rep_mask);
-    let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, rep_mask);
+        extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, rep_mask, cartoon_default);
+    let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, rep_mask, nucleic_default);
     segments.extend(nucleic);
 
     for segment in &mut segments {
@@ -190,26 +192,13 @@ impl Representation for CartoonRep {
         self.vertices.clear();
         self.indices.clear();
 
-        // Get settings - PyMOL setting IDs (from pymol-settings/src/definitions.rs)
-        const CARTOON_GAP_CUTOFF: u16 = 750;
-        const CARTOON_SAMPLING: u16 = 91;
-        const CARTOON_POWER: u16 = 94;
-        const CARTOON_POWER_B: u16 = 95;
-        const CARTOON_THROW: u16 = 122;
-        const CARTOON_SMOOTH_CYCLES: u16 = 259;
-        const CARTOON_FLAT_CYCLES: u16 = 260;
-        const CARTOON_SMOOTH_FIRST: u16 = 257;
-        const CARTOON_SMOOTH_LAST: u16 = 258;
-        const CARTOON_REFINE_NORMALS: u16 = 112;
-        const CARTOON_ROUND_HELICES: u16 = 111;
-        const CARTOON_SMOOTH_LOOPS: u16 = 114;
-        const CARTOON_REFINE: u16 = 123;
+        use pymol_settings::id;
 
-        let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
-        let sampling = settings.get_int_if_defined(CARTOON_SAMPLING).unwrap_or(7);
-        let power = settings.get_float_if_defined(CARTOON_POWER).unwrap_or(2.0);
-        let power_b = settings.get_float_if_defined(CARTOON_POWER_B).unwrap_or(0.52);
-        let throw = settings.get_float_if_defined(CARTOON_THROW).unwrap_or(1.35);
+        let gap_cutoff = settings.get_int_if_defined(id::cartoon_gap_cutoff).unwrap_or(10);
+        let sampling = settings.get_int_if_defined(id::cartoon_sampling).unwrap_or(7);
+        let power = settings.get_float_if_defined(id::cartoon_power).unwrap_or(2.0);
+        let power_b = settings.get_float_if_defined(id::cartoon_power_b).unwrap_or(0.52);
+        let throw = settings.get_float_if_defined(id::cartoon_throw).unwrap_or(1.35);
 
         let subdivisions = if sampling < 0 { 7u32 } else { (sampling as u32).max(7) };
 
@@ -219,38 +208,44 @@ impl Representation for CartoonRep {
             power_b,
             throw_factor: throw,
             flat_cycles: settings
-                .get_int_if_defined(CARTOON_FLAT_CYCLES)
+                .get_int_if_defined(id::cartoon_flat_cycles)
                 .unwrap_or(4) as u32,
             smooth_first: settings
-                .get_int_if_defined(CARTOON_SMOOTH_FIRST)
+                .get_int_if_defined(id::cartoon_smooth_first)
                 .unwrap_or(1) as u32,
             smooth_last: settings
-                .get_int_if_defined(CARTOON_SMOOTH_LAST)
+                .get_int_if_defined(id::cartoon_smooth_last)
                 .unwrap_or(1) as u32,
             smooth_cycles: settings
-                .get_int_if_defined(CARTOON_SMOOTH_CYCLES)
+                .get_int_if_defined(id::cartoon_smooth_cycles)
                 .unwrap_or(2) as u32,
             refine_normals: settings
-                .get_bool_if_defined(CARTOON_REFINE_NORMALS)
+                .get_bool_if_defined(id::cartoon_refine_normals)
                 .unwrap_or(true),
             round_helices: settings
-                .get_bool_if_defined(CARTOON_ROUND_HELICES)
+                .get_bool_if_defined(id::cartoon_round_helices)
                 .unwrap_or(true),
             refine: settings
-                .get_int_if_defined(CARTOON_REFINE)
+                .get_int_if_defined(id::cartoon_refine)
                 .unwrap_or(5) as u32,
             smooth_loops: settings
-                .get_bool_if_defined(CARTOON_SMOOTH_LOOPS)
+                .get_bool_if_defined(id::cartoon_smooth_loops)
                 .unwrap_or(false),
         };
 
         let geom_settings =
             CartoonGeometrySettings::from_resolver(settings).with_subdivisions(subdivisions);
 
+        // Resolve object-level cartoon color defaults from settings
+        // PyMOL priority: nucleic_acid_color == -1 means "use cartoon_color"
+        let cartoon_color = settings.get_color(id::cartoon_color);
+        let nucleic_acid_color = settings.get_color(id::cartoon_nucleic_acid_color);
+        let effective_nucleic_color = if nucleic_acid_color < 0 { cartoon_color } else { nucleic_acid_color };
+
         // Use the new PyMOL-compatible pipeline
         let mut segments =
-            extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON);
-        let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON);
+            extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON, cartoon_color);
+        let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON, effective_nucleic_color);
         segments.extend(nucleic);
 
         let mut vertices = Vec::new();
@@ -372,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_backbone_extraction() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
 
         let mol = create_test_peptide();
         let coord_set = mol.get_coord_set(0).unwrap();
@@ -380,10 +375,9 @@ mod tests {
         // Create color tables
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
-        let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
+        let color_resolver = ColorResolver::new(&named_colors, &element_colors);
 
-        let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON);
+        let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON, -1);
 
         assert!(!segments.is_empty(), "Should have at least one segment");
         assert_eq!(segments[0].len(), 3, "Should have 3 guide points (3 residues)");
@@ -429,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_cartoon_build_simple_peptide() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
 
         let mol = create_test_peptide();
         let coord_set = mol.get_coord_set(0).unwrap();
@@ -439,8 +433,7 @@ mod tests {
         // Create color tables
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
-        let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
+        let color_resolver = ColorResolver::new(&named_colors, &element_colors);
 
         let mut cartoon = CartoonRep::new();
         cartoon.build(&mol, coord_set, &color_resolver, &settings_resolver);
@@ -452,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_cartoon_with_secondary_structure() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
 
         // Create a peptide with secondary structure assigned
         let mut mol = ObjectMolecule::new("ss_peptide");
@@ -519,11 +512,10 @@ mod tests {
 
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
-        let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
+        let color_resolver = ColorResolver::new(&named_colors, &element_colors);
 
         // Extract backbone segments
-        let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON);
+        let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON, -1);
         assert!(!segments.is_empty(), "Should have backbone segments");
         assert_eq!(segments[0].len(), 6, "Should have 6 guide points");
 
@@ -540,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_cartoon_from_pdb_file() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
         use std::path::Path;
 
         // Try to load a real PDB file
@@ -605,11 +597,10 @@ mod tests {
 
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
-        let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
+        let color_resolver = ColorResolver::new(&named_colors, &element_colors);
 
         // Extract backbone segments
-        let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON);
+        let segments = extract_backbone_segments(&mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON, -1);
         eprintln!("Backbone segments: {}", segments.len());
         for (i, seg) in segments.iter().enumerate() {
             eprintln!("  Segment {}: {} guide points, chain={}", i, seg.len(), seg.chain_id);

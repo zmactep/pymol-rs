@@ -1,6 +1,6 @@
 //! Display commands: show, hide, enable, disable, color, bg_color
 
-use pymol_mol::{RepMask, COLOR_UNSET};
+use pymol_mol::RepMask;
 use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
 
@@ -648,33 +648,14 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .unwrap_or("all");
 
-        // Check for special color schemes first (these use negative indices)
-        // -1: by element (atomic/CPK)
-        // -2: by chain
-        // -3: by secondary structure
-        // -4: by B-factor
-        let color_index: i32 = match color_name.to_lowercase().as_str() {
-            "atomic" | "cpk" | "element" | "by_element" => -1,
-            "chain" | "by_chain" | "chainbow" => -2,
-            "ss" | "secondary_structure" | "by_ss" | "dssp" => -3,
-            "b" | "b_factor" | "bfactor" | "by_b" => -4,
-            _ => {
-                // Look up as a named color
-                ctx.viewer
-                    .color_index(color_name)
-                    .map(|idx| idx as i32)
-                    .ok_or_else(|| CmdError::invalid_arg("color", format!("unknown color: {}", color_name)))?
-            }
+        let color_index: i32 = if let Some(ci) = pymol_color::ColorIndex::from_scheme_name(color_name) {
+            i32::from(ci)
+        } else {
+            ctx.viewer
+                .color_index(color_name)
+                .map(|idx| idx as i32)
+                .ok_or_else(|| CmdError::invalid_arg("color", format!("unknown color: {}", color_name)))?
         };
-
-        // Check if the selection targets a specific non-cartoon/ribbon representation
-        // If so, we should preserve cartoon/ribbon colors when changing atom.color
-        let selection_lower = selection.to_lowercase();
-        let preserve_cartoon_color = selection_lower.contains("rep ")
-            && !selection_lower.contains("rep cartoon")
-            && !selection_lower.contains("rep cart")
-            && !selection_lower.contains("rep ribbon")
-            && !selection_lower.contains("rep ribb");
 
         // Evaluate selection with named selection support
         let selection_results = evaluate_selection(ctx.viewer, selection)?;
@@ -690,17 +671,14 @@ EXAMPLES
                     let mol_mut = mol_obj.molecule_mut();
                     for idx in selected.indices() {
                         if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            // If preserving cartoon/ribbon colors and the atom has these reps visible,
-                            // save the current color to the rep-specific field before changing colors.base
-                            if preserve_cartoon_color {
-                                if atom.repr.colors.cartoon == COLOR_UNSET && atom.repr.visible_reps.is_visible(RepMask::CARTOON) {
-                                    atom.repr.colors.cartoon = atom.repr.colors.base;
-                                }
-                                if atom.repr.colors.ribbon == COLOR_UNSET && atom.repr.visible_reps.is_visible(RepMask::RIBBON) {
-                                    atom.repr.colors.ribbon = atom.repr.colors.base;
-                                }
-                            }
                             atom.repr.colors.base = color_index;
+                            atom.repr.colors.cartoon = color_index;
+                            atom.repr.colors.ribbon = color_index;
+                            atom.repr.colors.stick = color_index;
+                            atom.repr.colors.line = color_index;
+                            atom.repr.colors.sphere = color_index;
+                            atom.repr.colors.surface = color_index;
+                            atom.repr.colors.mesh = color_index;
                         }
                     }
                     total_colored += count;
@@ -792,42 +770,19 @@ EXAMPLES
             .or_else(|| args.get_named_str("color"))
             .ok_or_else(|| CmdError::MissingArgument("color".to_string()))?;
 
-        // Parse color name to RGB
-        let (r, g, b) = match color_name.to_lowercase().as_str() {
-            "white" => (1.0, 1.0, 1.0),
-            "black" => (0.0, 0.0, 0.0),
-            "gray" | "grey" => (0.5, 0.5, 0.5),
-            "red" => (1.0, 0.0, 0.0),
-            "green" => (0.0, 1.0, 0.0),
-            "blue" => (0.0, 0.0, 1.0),
-            "yellow" => (1.0, 1.0, 0.0),
-            "cyan" => (0.0, 1.0, 1.0),
-            "magenta" => (1.0, 0.0, 1.0),
-            "orange" => (1.0, 0.5, 0.0),
-            _ => {
-                // Try to parse as hex color
-                if color_name.starts_with("0x") || color_name.starts_with('#') {
-                    let hex = color_name.trim_start_matches("0x").trim_start_matches('#');
-                    if hex.len() == 6 {
-                        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0) as f32 / 255.0;
-                        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0) as f32 / 255.0;
-                        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0) as f32 / 255.0;
-                        (r, g, b)
-                    } else {
-                        return Err(CmdError::invalid_arg(
-                            "color",
-                            format!("invalid hex color: {}", color_name),
-                        ));
-                    }
-                } else {
-                    return Err(CmdError::invalid_arg(
-                        "color",
-                        format!("unknown color: {}", color_name),
-                    ));
-                }
-            }
+        // Resolve color: named colors registry, then hex
+        let color = if let Some((_, color)) = ctx.viewer.named_colors().get_by_name(color_name) {
+            color
+        } else if let Some(color) = pymol_color::Color::from_hex(color_name) {
+            color
+        } else {
+            return Err(CmdError::invalid_arg(
+                "color",
+                format!("unknown color: {}", color_name),
+            ));
         };
 
+        let [r, g, b] = color.to_array();
         ctx.viewer.set_background_color(r, g, b);
 
         if !ctx.quiet {

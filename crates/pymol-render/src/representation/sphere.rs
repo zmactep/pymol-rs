@@ -88,11 +88,10 @@ impl Representation for SphereRep {
     ) {
         self.instances.clear();
 
-        // Get sphere scale from settings if available
-        // Setting ID 155 is sphere_scale, returns f32 directly
         let sphere_scale = settings
-            .get_float_if_defined(155)
+            .get_float_if_defined(pymol_settings::id::sphere_scale)
             .unwrap_or(self.sphere_scale);
+        let sphere_color = settings.get_color(pymol_settings::id::sphere_color);
 
         // Iterate over atoms
         for (atom_idx, coord) in coord_set.iter_with_atoms() {
@@ -110,8 +109,8 @@ impl Representation for SphereRep {
             let scale = atom.repr.sphere_scale.unwrap_or(sphere_scale);
             let radius = atom.effective_vdw() * scale;
 
-            // Get color
-            let color = colors.resolve_sphere(atom, molecule);
+            // Get color (3-level fallback: per-atom → settings → base)
+            let color = colors.resolve_rep_color(atom, atom.repr.colors.sphere, sphere_color);
 
             // Add sphere instance
             self.instances.push(SphereVertex {

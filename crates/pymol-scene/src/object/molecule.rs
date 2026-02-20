@@ -402,7 +402,7 @@ impl MoleculeObject {
     pub fn prepare_render(
         &mut self,
         context: &RenderContext,
-        color_resolver: &ColorResolver,
+        color_resolver: ColorResolver,
         global_settings: &GlobalSettings,
     ) {
         if self.dirty.is_empty() {
@@ -428,7 +428,7 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::SPHERES) {
             let spheres = self.representations.spheres.get_or_insert_with(SphereRep::new);
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                spheres.build(&self.molecule, coord_set, color_resolver, &settings);
+                spheres.build(&self.molecule, coord_set, &color_resolver, &settings);
                 spheres.upload(context.device(), context.queue());
             }
         }
@@ -437,7 +437,7 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::STICKS) {
             let sticks = self.representations.sticks.get_or_insert_with(StickRep::new);
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                sticks.build(&self.molecule, coord_set, color_resolver, &settings);
+                sticks.build(&self.molecule, coord_set, &color_resolver, &settings);
                 sticks.upload(context.device(), context.queue());
             }
         }
@@ -446,7 +446,7 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::LINES) {
             let lines = self.representations.lines.get_or_insert_with(LineRep::new);
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                lines.build(&self.molecule, coord_set, color_resolver, &settings);
+                lines.build(&self.molecule, coord_set, &color_resolver, &settings);
                 lines.upload(context.device(), context.queue());
             }
         }
@@ -455,7 +455,7 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::DOTS) {
             let dots = self.representations.dots.get_or_insert_with(DotRep::new);
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                dots.build(&self.molecule, coord_set, color_resolver, &settings);
+                dots.build(&self.molecule, coord_set, &color_resolver, &settings);
                 dots.upload(context.device(), context.queue());
             }
         }
@@ -464,7 +464,7 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::CARTOON) {
             let cartoon = self.representations.cartoon.get_or_insert_with(CartoonRep::new);
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                cartoon.build(&self.molecule, coord_set, color_resolver, &settings);
+                cartoon.build(&self.molecule, coord_set, &color_resolver, &settings);
                 cartoon.upload(context.device(), context.queue());
             }
         }
@@ -473,7 +473,7 @@ impl MoleculeObject {
         if vis.is_visible(RepMask::RIBBON) {
             let ribbon = self.representations.ribbon.get_or_insert_with(RibbonRep::new);
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
-                ribbon.build(&self.molecule, coord_set, color_resolver, &settings);
+                ribbon.build(&self.molecule, coord_set, &color_resolver, &settings);
                 ribbon.upload(context.device(), context.queue());
             }
         }
@@ -489,21 +489,22 @@ impl MoleculeObject {
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::REPS) {
                 // Full rebuild: geometry + color
                 surface.set_quality(quality);
-                surface.build(&self.molecule, coord_set, color_resolver, &settings);
+                surface.build(&self.molecule, coord_set, &color_resolver, &settings);
                 surface.upload(context.device(), context.queue());
             } else if self.dirty.intersects(DirtyFlags::COLOR) {
                 // Fast path: recolor only (skip distance field + marching cubes)
                 let transparency = settings.get_float(138).clamp(0.0, 1.0);
                 let alpha = 1.0 - transparency;
+                let surface_color = settings.get_color(pymol_settings::id::surface_color);
                 let atom_colors = collect_surface_atom_colors(
-                    &self.molecule, coord_set, color_resolver, alpha,
+                    &self.molecule, coord_set, &color_resolver, alpha, surface_color,
                 );
                 if surface.recolor(&atom_colors, transparency) {
                     surface.upload(context.device(), context.queue());
                 } else {
                     // No vertices yet — force full build
                     surface.set_quality(quality);
-                    surface.build(&self.molecule, coord_set, color_resolver, &settings);
+                    surface.build(&self.molecule, coord_set, &color_resolver, &settings);
                     surface.upload(context.device(), context.queue());
                 }
             }
@@ -519,7 +520,7 @@ impl MoleculeObject {
             });
             if self.dirty.intersects(DirtyFlags::COORDS | DirtyFlags::COLOR | DirtyFlags::REPS) {
                 mesh.set_quality(quality);
-                mesh.build(&self.molecule, coord_set, color_resolver, &settings);
+                mesh.build(&self.molecule, coord_set, &color_resolver, &settings);
                 mesh.upload(context.device(), context.queue());
             }
         }
@@ -876,6 +877,7 @@ fn collect_surface_atom_colors(
     coord_set: &pymol_mol::CoordSet,
     colors: &ColorResolver,
     alpha: f32,
+    surface_color: i32,
 ) -> Vec<AtomColor> {
     let mut atom_colors = Vec::new();
     for (atom_idx, coord) in coord_set.iter_with_atoms() {
@@ -887,7 +889,7 @@ fn collect_surface_atom_colors(
             continue;
         }
         let position = [coord.x, coord.y, coord.z];
-        let color = colors.resolve_surface(atom, molecule);
+        let color = colors.resolve_rep_color(atom, atom.repr.colors.surface, surface_color);
         let color_with_alpha = [color[0], color[1], color[2], alpha];
         atom_colors.push(AtomColor { position, color: color_with_alpha });
     }

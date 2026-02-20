@@ -137,6 +137,7 @@ pub fn extract_backbone_segments(
     colors: &crate::color_resolver::ColorResolver,
     gap_cutoff: i32,
     rep_mask: RepMask,
+    default_color: i32,
 ) -> Vec<BackboneSegment> {
     let mut segments = Vec::new();
 
@@ -185,10 +186,11 @@ pub fn extract_backbone_segments(
             let orientation = find_orientation_vector(&residue, coord_set, ca_pos);
 
             // Resolve color based on representation type
+            // Both use 3-level fallback: per-atom → settings default → base color
             let color = if rep_mask == RepMask::RIBBON {
-                colors.resolve_ribbon(ca_atom, molecule)
+                colors.resolve_rep_color(ca_atom, ca_atom.repr.colors.ribbon, default_color)
             } else {
-                colors.resolve_cartoon(ca_atom, molecule)
+                colors.resolve_cartoon_with_default(ca_atom, default_color)
             };
 
             // Create guide point
@@ -228,6 +230,7 @@ pub fn extract_nucleic_segments(
     colors: &crate::color_resolver::ColorResolver,
     gap_cutoff: i32,
     rep_mask: RepMask,
+    default_color: i32,
 ) -> Vec<BackboneSegment> {
     let mut segments = Vec::new();
 
@@ -275,11 +278,11 @@ pub fn extract_nucleic_segments(
             // Orientation vector: C4' → C1' (points toward base)
             let orientation = find_nucleic_orientation_vector(&residue, coord_set, c4_pos);
 
-            // Resolve color
+            // Resolve color (3-level fallback: per-atom → settings default → base)
             let color = if rep_mask == RepMask::RIBBON {
-                colors.resolve_ribbon(c4_atom, molecule)
+                colors.resolve_rep_color(c4_atom, c4_atom.repr.colors.ribbon, default_color)
             } else {
-                colors.resolve_cartoon(c4_atom, molecule)
+                colors.resolve_cartoon_with_default(c4_atom, default_color)
             };
 
             let guide_point = GuidePoint::new(
@@ -1038,7 +1041,7 @@ mod tests {
 
     #[test]
     fn test_extract_nucleic_segments_empty_on_protein() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
         use pymol_mol::{Atom, CoordSet, Element, ObjectMolecule};
 
         // Build a minimal protein molecule (one ALA residue)
@@ -1062,13 +1065,12 @@ mod tests {
         let coord_set = mol.get_coord_set(0).unwrap();
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
         let color_resolver = crate::color_resolver::ColorResolver::new(
-            &named_colors, &element_colors, &chain_colors,
+            &named_colors, &element_colors,
         );
 
         let segments = extract_nucleic_segments(
-            &mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON,
+            &mol, coord_set, &color_resolver, 10, pymol_mol::RepMask::CARTOON, -1,
         );
         assert!(segments.is_empty(), "Protein molecule should yield zero nucleic segments");
     }

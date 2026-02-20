@@ -140,7 +140,7 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
 
         // Transparency and per-rep color settings — only need color update, not geometry rebuild
         transparency |
-        stick_color | line_color | cartoon_color |
+        stick_color | line_color | cartoon_color | cartoon_nucleic_acid_color |
         surface_color | mesh_color | sphere_color |
         ribbon_color => vec![
             SideEffectCategory::ColorRebuild,

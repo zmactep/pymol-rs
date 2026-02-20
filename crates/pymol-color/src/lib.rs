@@ -14,7 +14,7 @@ mod error;
 pub use color::{Color, ColorIndex};
 pub use named::NamedColors;
 pub use ramp::{ColorRamp, RampType};
-pub use scheme::{ChainColors, ColorScheme, ElementColors};
+pub use scheme::{ChainColors, ColorScheme, ElementColors, ss_color};
 pub use error::ColorError;
 
 /// Re-export commonly used types

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use pymol_color::{ChainColors, ElementColors, NamedColors};
+use pymol_color::{ElementColors, NamedColors};
 use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
 use pymol_settings::GlobalSettings;
 
@@ -30,7 +30,6 @@ use crate::uniform::compute_reflect_scale;
 /// * `settings` - Global settings for lighting, fog, etc.
 /// * `named_colors` - Named color definitions
 /// * `element_colors` - Element color definitions
-/// * `chain_colors` - Chain color definitions
 /// * `clear_color` - Background color RGB
 /// * `default_size` - Fallback size when width/height not specified
 ///
@@ -41,7 +40,7 @@ use crate::uniform::compute_reflect_scale;
 ///     Path::new("screenshot.png"),
 ///     Some(1920), Some(1080),
 ///     &context, &mut camera, &mut registry,
-///     &settings, &named_colors, &element_colors, &chain_colors,
+///     &settings, &named_colors, &element_colors,
 ///     [0.0, 0.0, 0.0], (1024, 768),
 /// )?;
 /// ```
@@ -55,7 +54,6 @@ pub fn capture_png_to_file(
     settings: &GlobalSettings,
     named_colors: &NamedColors,
     element_colors: &ElementColors,
-    chain_colors: &ChainColors,
     clear_color: [f32; 3],
     default_size: (u32, u32),
 ) -> Result<(), ViewerError> {
@@ -213,9 +211,9 @@ pub fn capture_png_to_file(
     // Prepare molecules for rendering
     let names: Vec<_> = registry.names().map(|s| s.to_string()).collect();
     for name in &names {
-        let color_resolver = ColorResolver::new(named_colors, element_colors, chain_colors);
+        let color_resolver = ColorResolver::new(named_colors, element_colors);
         if let Some(mol_obj) = registry.get_molecule_mut(name) {
-            mol_obj.prepare_render(context, &color_resolver, settings);
+            mol_obj.prepare_render(context, color_resolver, settings);
         }
     }
 

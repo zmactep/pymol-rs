@@ -237,9 +237,13 @@ fn complete_setting_value(
     // Look up setting type
     if let Some(id) = pymol_settings::get_setting_id(setting_name) {
         if let Some(setting) = pymol_settings::get_setting(id) {
+            // Settings with named value variants (e.g., shading_mode: classic/skripkin)
+            if setting.has_value_hints() {
+                let hints: Vec<&str> = setting.hint_names().collect();
+                return complete_from_static(prefix, prefix_start, &hints);
+            }
             let values: &[&str] = match setting.setting_type {
                 pymol_settings::SettingType::Bool => &["on", "off"],
-                pymol_settings::SettingType::Int if id == pymol_settings::id::shading_mode => &["classic", "skripkin"],
                 _ => return CompletionResult::empty(prefix_start),
             };
             return complete_from_static(prefix, prefix_start, values);

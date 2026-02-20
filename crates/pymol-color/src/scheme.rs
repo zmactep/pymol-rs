@@ -185,6 +185,22 @@ impl ChainColors {
     }
 }
 
+/// Default color for a secondary structure type.
+///
+/// Takes the `repr(u8)` discriminant from `SecondaryStructure`:
+/// - 0 (Loop), 5 (Turn), 6 (Bend) → green
+/// - 1 (Helix), 3 (Helix310), 4 (HelixPi) → red
+/// - 2 (Sheet) → yellow
+/// - 7 (NucleicRibbon) → magenta
+pub fn ss_color(ss_type: u8) -> Color {
+    match ss_type {
+        1 | 3 | 4 => Color::RED,
+        2 => Color::YELLOW,
+        7 => Color::MAGENTA,
+        _ => Color::GREEN,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

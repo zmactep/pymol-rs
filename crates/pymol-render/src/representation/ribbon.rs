@@ -106,36 +106,22 @@ impl Representation for RibbonRep {
         colors: &ColorResolver,
         settings: &SettingResolver,
     ) {
-        // Ribbon-specific setting IDs
-        const RIBBON_SAMPLING: u16 = 19;
-        const RIBBON_POWER: u16 = 17;
-        const RIBBON_POWER_B: u16 = 18;
-        const RIBBON_THROW: u16 = 121;
-        const RIBBON_RADIUS: u16 = 20;
+        use pymol_settings::id;
 
-        // Smoothing settings shared with cartoon
-        const CARTOON_GAP_CUTOFF: u16 = 750;
-        const CARTOON_SMOOTH_CYCLES: u16 = 259;
-        const CARTOON_FLAT_CYCLES: u16 = 260;
-        const CARTOON_SMOOTH_FIRST: u16 = 257;
-        const CARTOON_SMOOTH_LAST: u16 = 258;
-        const CARTOON_SMOOTH_LOOPS: u16 = 114;
-        const CARTOON_REFINE_NORMALS: u16 = 112;
-
-        let gap_cutoff = settings.get_int_if_defined(CARTOON_GAP_CUTOFF).unwrap_or(10);
-        let sampling = settings.get_int_if_defined(RIBBON_SAMPLING).unwrap_or(1);
-        let power = settings.get_float_if_defined(RIBBON_POWER).unwrap_or(2.0);
-        let power_b = settings.get_float_if_defined(RIBBON_POWER_B).unwrap_or(0.5);
-        let throw = settings.get_float_if_defined(RIBBON_THROW).unwrap_or(1.35);
-        let ribbon_radius = settings.get_float_if_defined(RIBBON_RADIUS).unwrap_or(0.2);
+        let gap_cutoff = settings.get_int_if_defined(id::cartoon_gap_cutoff).unwrap_or(10);
+        let sampling = settings.get_int_if_defined(id::ribbon_sampling).unwrap_or(1);
+        let power = settings.get_float_if_defined(id::ribbon_power).unwrap_or(2.0);
+        let power_b = settings.get_float_if_defined(id::ribbon_power_b).unwrap_or(0.5);
+        let throw = settings.get_float_if_defined(id::ribbon_throw).unwrap_or(1.35);
+        let ribbon_radius = settings.get_float_if_defined(id::ribbon_radius).unwrap_or(0.2);
 
         let smooth_settings = CartoonSmoothSettings {
-            smooth_cycles: settings.get_int_if_defined(CARTOON_SMOOTH_CYCLES).unwrap_or(2) as u32,
-            flat_cycles: settings.get_int_if_defined(CARTOON_FLAT_CYCLES).unwrap_or(4) as u32,
-            smooth_loops: settings.get_bool_if_defined(CARTOON_SMOOTH_LOOPS).unwrap_or(false),
-            smooth_first: settings.get_int_if_defined(CARTOON_SMOOTH_FIRST).unwrap_or(1) as u32,
-            smooth_last: settings.get_int_if_defined(CARTOON_SMOOTH_LAST).unwrap_or(1) as u32,
-            refine_normals: settings.get_bool_if_defined(CARTOON_REFINE_NORMALS).unwrap_or(true),
+            smooth_cycles: settings.get_int_if_defined(id::cartoon_smooth_cycles).unwrap_or(2) as u32,
+            flat_cycles: settings.get_int_if_defined(id::cartoon_flat_cycles).unwrap_or(4) as u32,
+            smooth_loops: settings.get_bool_if_defined(id::cartoon_smooth_loops).unwrap_or(false),
+            smooth_first: settings.get_int_if_defined(id::cartoon_smooth_first).unwrap_or(1) as u32,
+            smooth_last: settings.get_int_if_defined(id::cartoon_smooth_last).unwrap_or(1) as u32,
+            refine_normals: settings.get_bool_if_defined(id::cartoon_refine_normals).unwrap_or(true),
         };
 
         let subdivisions = if sampling < 0 { 10u32 } else { (sampling as u32).max(7) };
@@ -167,6 +153,8 @@ impl Representation for RibbonRep {
             uniform_tube: true,
         };
 
+        // Read ribbon_color from settings for fallback when per-atom ribbon color is unset
+        let ribbon_color = settings.get_color(id::ribbon_color);
         let (vertices, indices) = build_cartoon_geometry(
             molecule,
             coord_set,
@@ -177,6 +165,8 @@ impl Representation for RibbonRep {
             subdivisions,
             gap_cutoff,
             pymol_mol::RepMask::RIBBON,
+            ribbon_color,
+            ribbon_color,
         );
 
         self.vertices = vertices;
@@ -277,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_ribbon_build_simple_peptide() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
 
         let mol = create_test_peptide();
         let coord_set = mol.get_coord_set(0).unwrap();
@@ -287,8 +277,7 @@ mod tests {
         // Create color tables
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
-        let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
+        let color_resolver = ColorResolver::new(&named_colors, &element_colors);
 
         let mut ribbon = RibbonRep::new();
         ribbon.build(&mol, coord_set, &color_resolver, &settings_resolver);
@@ -300,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_ribbon_with_secondary_structure() {
-        use pymol_color::{ChainColors, ElementColors, NamedColors};
+        use pymol_color::{ElementColors, NamedColors};
 
         // Create a peptide with secondary structure assigned
         let mut mol = ObjectMolecule::new("ss_peptide");
@@ -367,8 +356,7 @@ mod tests {
 
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
-        let chain_colors = ChainColors;
-        let color_resolver = ColorResolver::new(&named_colors, &element_colors, &chain_colors);
+        let color_resolver = ColorResolver::new(&named_colors, &element_colors);
 
         // Build ribbon
         let mut ribbon = RibbonRep::new();
