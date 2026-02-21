@@ -65,7 +65,7 @@ make release && make run
 
 ## What works
 
-**Formats:** PDB · mmCIF · MOL2 · SDF/MOL · XYZ · GRO (+ gzip)
+**Formats:** PDB · mmCIF · bCIF · MOL2 · SDF/MOL · XYZ · GRO (+ gzip)
 
 **Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots
 
