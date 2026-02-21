@@ -11,7 +11,7 @@ mod ramp;
 mod scheme;
 mod error;
 
-pub use color::{Color, ColorIndex};
+pub use color::{Color, ColorIndex, SCHEME_NAMES};
 pub use named::NamedColors;
 pub use ramp::{ColorRamp, RampType};
 pub use scheme::{ChainColors, ColorScheme, ElementColors, ss_color};

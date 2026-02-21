@@ -132,6 +132,10 @@ pub enum ColorIndex {
     Atomic,
 }
 
+/// Primary color scheme names for autocompletion (one per variant).
+/// Keep in sync with [`ColorIndex::from_scheme_name`].
+pub const SCHEME_NAMES: &[&str] = &["atomic", "chain", "ss", "b"];
+
 impl ColorIndex {
     /// Parse a color scheme name alias into a `ColorIndex`.
     ///

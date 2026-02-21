@@ -84,10 +84,8 @@ pub fn generate_completions(
                         ArgHint::Path => complete_path(text_before_cursor, cursor_pos),
                         ArgHint::Setting => complete_from_list(prefix, prefix_start, ctx.setting_names),
                         ArgHint::Color => {
-                            // Include color scheme keywords too
-                            let schemes: &[&str] = &["atomic", "chain", "ss", "b"];
                             let mut suggestions = filter_prefix(prefix, ctx.color_names.iter().map(|s| s.as_str()));
-                            suggestions.extend(filter_prefix(prefix, schemes.iter().copied()));
+                            suggestions.extend(filter_prefix(prefix, pymol_color::SCHEME_NAMES.iter().copied()));
                             suggestions.sort();
                             CompletionResult { start_pos: prefix_start, suggestions }
                         }
@@ -222,7 +220,7 @@ fn complete_setting_value(
     text: &str,
     prefix: &str,
     prefix_start: usize,
-    _ctx: &CompletionContext,
+    ctx: &CompletionContext,
 ) -> CompletionResult {
     // Extract setting name from arg 0
     let segments = split_by_commas(text);
@@ -242,11 +240,18 @@ fn complete_setting_value(
                 let hints: Vec<&str> = setting.hint_names().collect();
                 return complete_from_static(prefix, prefix_start, &hints);
             }
-            let values: &[&str] = match setting.setting_type {
-                pymol_settings::SettingType::Bool => &["on", "off"],
+            match setting.setting_type {
+                pymol_settings::SettingType::Bool => {
+                    return complete_from_static(prefix, prefix_start, &["on", "off"]);
+                }
+                pymol_settings::SettingType::Color => {
+                    let mut suggestions = filter_prefix(prefix, ctx.color_names.iter().map(|s| s.as_str()));
+                    suggestions.extend(filter_prefix(prefix, pymol_color::SCHEME_NAMES.iter().copied()));
+                    suggestions.sort();
+                    return CompletionResult { start_pos: prefix_start, suggestions };
+                }
                 _ => return CompletionResult::empty(prefix_start),
             };
-            return complete_from_static(prefix, prefix_start, values);
         }
     }
 

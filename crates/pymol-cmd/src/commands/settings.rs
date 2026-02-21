@@ -361,7 +361,7 @@ impl Command for SetCommand {
     }
 
     fn arg_hints(&self) -> &[ArgHint] {
-        &[ArgHint::Setting]
+        &[ArgHint::Setting, ArgHint::None, ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -560,7 +560,7 @@ impl Command for GetCommand {
     }
 
     fn arg_hints(&self) -> &[ArgHint] {
-        &[ArgHint::Setting]
+        &[ArgHint::Setting, ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -682,7 +682,7 @@ impl Command for UnsetCommand {
     }
 
     fn arg_hints(&self) -> &[ArgHint] {
-        &[ArgHint::Setting]
+        &[ArgHint::Setting, ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
