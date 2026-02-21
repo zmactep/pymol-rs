@@ -2555,6 +2555,8 @@ dependencies = [
  "nom",
  "pymol-mol",
  "reqwest",
+ "rmp-serde",
+ "serde",
  "thiserror 2.0.18",
  "ureq",
 ]
