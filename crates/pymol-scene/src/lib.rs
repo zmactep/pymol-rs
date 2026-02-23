@@ -42,14 +42,14 @@ mod viewer_trait;
 mod window;
 
 // Re-export main types
-pub use camera::{Camera, CameraAnimation, Projection, SceneView};
+pub use camera::{Camera, CameraAnimation, Projection, SceneView, normalize_matrix};
 pub use capture::capture_png_to_file;
 pub use error::{SceneError, SceneResult, ViewerError, WindowError};
 pub use input::{CameraDelta, InputState};
 pub use keybindings::{KeyBinding, KeyBindings, KeyCode};
 pub use movie::{LoopMode, Movie, MovieFrame, ObjectKeyframe, PlaybackState, PlayDirection};
 pub use object::{DirtyFlags, Label, LabelAnchor, LabelObject, MoleculeObject, MoleculeObjectSnapshot, Object, ObjectRegistry, ObjectRegistrySnapshot, ObjectState, ObjectType};
-pub use pick::{PickHit, Picker};
+pub use pick::{expand_pick_to_selection, pick_expression_for_hit, PickHit, Picker};
 pub use scene::{Scene, SceneAtomData, SceneManager, SceneObjectData, ScenePerAtomData, SceneStoreMask};
 pub use selection::{SelectionEntry, SelectionManager};
 pub use session::Session;

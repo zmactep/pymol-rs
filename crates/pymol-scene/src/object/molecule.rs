@@ -46,6 +46,8 @@ struct RepresentationCache {
     mesh: Option<WireSurfaceRep>,
     /// Selection indicator representation (rendered last, on top of everything)
     selection_indicator: Option<SelectionIndicatorRep>,
+    /// Hover indicator representation (pale yellow, rendered on top)
+    hover_indicator: Option<SelectionIndicatorRep>,
 }
 
 impl Default for RepresentationCache {
@@ -60,6 +62,7 @@ impl Default for RepresentationCache {
             surface: None,
             mesh: None,
             selection_indicator: None,
+            hover_indicator: None,
         }
     }
 }
@@ -76,6 +79,7 @@ impl RepresentationCache {
         self.surface = None;
         self.mesh = None;
         self.selection_indicator = None;
+        self.hover_indicator = None;
     }
 }
 
@@ -388,6 +392,39 @@ impl MoleculeObject {
             .unwrap_or(false)
     }
 
+    /// Set the hover indicator for this molecule
+    ///
+    /// Renders pale yellow indicators at the hovered atom positions.
+    pub fn set_hover_indicator(
+        &mut self,
+        selection: &SelectionResult,
+        context: &RenderContext,
+        size: f32,
+    ) {
+        let coord_set = match self.molecule.get_coord_set(self.display_state) {
+            Some(cs) => cs,
+            None => return,
+        };
+
+        let indicator = self
+            .representations
+            .hover_indicator
+            .get_or_insert_with(SelectionIndicatorRep::new);
+
+        // Pale yellow with slight transparency
+        indicator.set_color([1.0, 1.0, 0.5, 0.7]);
+        indicator.set_size(size * 10.0);
+        indicator.build_for_selection(&self.molecule, coord_set, selection);
+        indicator.upload(context.device(), context.queue());
+    }
+
+    /// Clear the hover indicator for this molecule
+    pub fn clear_hover_indicator(&mut self) {
+        if let Some(ref mut indicator) = self.representations.hover_indicator {
+            indicator.clear();
+        }
+    }
+
     /// Get per-object settings (create if needed)
     pub fn get_or_create_settings(&mut self) -> &mut GlobalSettings {
         if self.settings.is_none() {
@@ -689,6 +726,22 @@ impl MoleculeObject {
                     "Rendering selection indicator with {} instances",
                     indicator.instance_count()
                 );
+                let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
+                render_pass.set_pipeline(&pipeline);
+                render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
+                render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
+                render_pass.set_index_buffer(
+                    context.quad_index_buffer().slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
+                indicator.render(render_pass);
+            }
+        }
+
+        // Hover indicator (rendered last, on top of everything including selection)
+        if let Some(ref indicator) = self.representations.hover_indicator {
+            if !indicator.is_empty() {
                 let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);

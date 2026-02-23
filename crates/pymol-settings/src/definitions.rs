@@ -1311,7 +1311,8 @@ pub static SETTINGS: &[Setting] = &[
     s_bool!(351, "active_selections", Global, true),
     s_float!(352, "ray_transparency_contrast", Global, 1.0),
     s_bool!(353, "seq_view", Object, false),
-    s_int!(354, "mouse_selection_mode", Global, 1),
+    // mouse_selection_mode: 0 = atoms, 1 = residues, 2 = chains, 3 = segments, 4 = objects, 5 = molecules, 6 = C-alphas
+    s_int_enum!(354, "mouse_selection_mode", Global, 1, 0, 6, &[("atoms", SettingValue::Int(0)), ("residues", SettingValue::Int(1)), ("chains", SettingValue::Int(2)), ("segments", SettingValue::Int(3)), ("objects", SettingValue::Int(4)), ("molecules", SettingValue::Int(5)), ("c_alphas", SettingValue::Int(6))]),
     s_int!(355, "seq_view_label_spacing", Object, 5),
     s_int!(356, "seq_view_label_start", Object, 1),
     s_int!(357, "seq_view_format", Object, 0),

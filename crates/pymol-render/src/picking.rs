@@ -229,76 +229,57 @@ impl Ray {
         Self { origin, direction }
     }
 
-    /// Create a ray from screen coordinates and view/projection matrices
+    /// Create a picking ray from screen coordinates.
+    ///
+    /// Extracts FOV parameters from the projection matrix and constructs
+    /// the ray direction in view space, then transforms to world space
+    /// via the inverse view matrix. This mirrors the GPU raytracer's
+    /// `generate_ray()` and avoids inverting the projection matrix
+    /// (which `lin_alg` cannot do for perspective matrices where M[3][3]=0).
     ///
     /// # Arguments
-    /// * `x`, `y` - Screen coordinates (pixels)
-    /// * `width`, `height` - Screen dimensions
-    /// * `view_inv` - Inverse view matrix
-    /// * `proj_inv` - Inverse projection matrix
+    /// * `screen_x`, `screen_y` - Viewport-relative pixel coordinates
+    /// * `viewport_w`, `viewport_h` - Viewport dimensions in pixels
+    /// * `proj_data` - Projection matrix (column-major flat `[f32; 16]`)
+    /// * `view_inv_data` - Inverse view matrix (column-major flat `[f32; 16]`)
     pub fn from_screen(
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        view_inv: &[[f32; 4]; 4],
-        proj_inv: &[[f32; 4]; 4],
+        screen_x: f32,
+        screen_y: f32,
+        viewport_w: f32,
+        viewport_h: f32,
+        proj_data: &[f32; 16],
+        view_inv_data: &[f32; 16],
     ) -> Self {
-        // Convert screen coords to NDC (-1 to 1)
-        let ndc_x = (2.0 * x / width) - 1.0;
-        let ndc_y = 1.0 - (2.0 * y / height); // Flip Y
+        // Pixel → NDC  (x,y in [-1, 1])
+        let ndc_x = (2.0 * screen_x / viewport_w) - 1.0;
+        let ndc_y = 1.0 - (2.0 * screen_y / viewport_h);
 
-        // Near and far points in NDC
-        let near_ndc = [ndc_x, ndc_y, -1.0, 1.0];
-        let far_ndc = [ndc_x, ndc_y, 1.0, 1.0];
+        // Extract FOV from projection matrix (column-major: data[col*4+row])
+        //   proj[0][0] = data[0] = f / aspect
+        //   proj[1][1] = data[5] = f = 1 / tan(fov/2)
+        let tan_half_fov = 1.0 / proj_data[5];
+        let aspect = proj_data[5] / proj_data[0];
 
-        // Transform through inverse projection
-        let near_clip = Self::mat4_mul_vec4(proj_inv, near_ndc);
-        let far_clip = Self::mat4_mul_vec4(proj_inv, far_ndc);
+        // Ray direction in view space (camera looks down −Z)
+        let dx = ndc_x * aspect * tan_half_fov;
+        let dy = ndc_y * tan_half_fov;
+        let dz = -1.0_f32;
+        let len = (dx * dx + dy * dy + dz * dz).sqrt();
+        let dir_view = [dx / len, dy / len, dz / len];
 
-        // Perspective divide
-        let near_view = [
-            near_clip[0] / near_clip[3],
-            near_clip[1] / near_clip[3],
-            near_clip[2] / near_clip[3],
-        ];
-        let far_view = [
-            far_clip[0] / far_clip[3],
-            far_clip[1] / far_clip[3],
-            far_clip[2] / far_clip[3],
-        ];
+        let vi = view_inv_data;
 
-        // Transform to world space
-        let near_world = Self::mat4_mul_point(view_inv, near_view);
-        let far_world = Self::mat4_mul_point(view_inv, far_view);
+        // Origin = view_inv × (0,0,0,1) = translation column
+        let origin = [vi[12], vi[13], vi[14]];
 
-        // Ray direction
+        // Direction = view_inv × (dir_view, 0) — w=0 for direction vectors
         let direction = [
-            far_world[0] - near_world[0],
-            far_world[1] - near_world[1],
-            far_world[2] - near_world[2],
+            vi[0] * dir_view[0] + vi[4] * dir_view[1] + vi[8]  * dir_view[2],
+            vi[1] * dir_view[0] + vi[5] * dir_view[1] + vi[9]  * dir_view[2],
+            vi[2] * dir_view[0] + vi[6] * dir_view[1] + vi[10] * dir_view[2],
         ];
 
-        Self::new(near_world, direction)
-    }
-
-    fn mat4_mul_vec4(m: &[[f32; 4]; 4], v: [f32; 4]) -> [f32; 4] {
-        [
-            m[0][0] * v[0] + m[1][0] * v[1] + m[2][0] * v[2] + m[3][0] * v[3],
-            m[0][1] * v[0] + m[1][1] * v[1] + m[2][1] * v[2] + m[3][1] * v[3],
-            m[0][2] * v[0] + m[1][2] * v[1] + m[2][2] * v[2] + m[3][2] * v[3],
-            m[0][3] * v[0] + m[1][3] * v[1] + m[2][3] * v[2] + m[3][3] * v[3],
-        ]
-    }
-
-    fn mat4_mul_point(m: &[[f32; 4]; 4], p: [f32; 3]) -> [f32; 3] {
-        let w = m[0][3] * p[0] + m[1][3] * p[1] + m[2][3] * p[2] + m[3][3];
-        let inv_w = if w.abs() > 1e-6 { 1.0 / w } else { 1.0 };
-        [
-            (m[0][0] * p[0] + m[1][0] * p[1] + m[2][0] * p[2] + m[3][0]) * inv_w,
-            (m[0][1] * p[0] + m[1][1] * p[1] + m[2][1] * p[2] + m[3][1]) * inv_w,
-            (m[0][2] * p[0] + m[1][2] * p[1] + m[2][2] * p[2] + m[3][2]) * inv_w,
-        ]
+        Self::new(origin, direction)
     }
 
     /// Test intersection with a sphere

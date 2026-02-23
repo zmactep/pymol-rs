@@ -804,6 +804,20 @@ fn orthonormalize_rotation(m: &mut Mat4) {
     m.data[10] = z.z;
 }
 
+/// Normalize a matrix inverse in place.
+///
+/// `lin_alg`'s `Mat4::inverse()` can return a scaled result where the
+/// homogeneous element `data[15]` is not 1.0.  Dividing every element
+/// by `data[15]` restores proper affine-transform semantics.
+pub fn normalize_matrix(m: &mut Mat4) {
+    let w = m.data[15];
+    if w.abs() > 1e-6 && (w - 1.0).abs() > 1e-6 {
+        for v in &mut m.data {
+            *v /= w;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

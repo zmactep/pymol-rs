@@ -11,6 +11,7 @@ use pymol_raytracer::{
 use pymol_render::MeshVertex;
 use pymol_settings::GlobalSettings;
 
+use crate::camera::normalize_matrix;
 use crate::object::{MoleculeObject, Object, ObjectRegistry};
 use crate::uniform::compute_reflect_scale;
 use crate::Camera;
@@ -28,24 +29,6 @@ pub enum RaytraceError {
     RaytraceFailed(String),
     #[error("Image save failed: {0}")]
     ImageSaveFailed(String),
-}
-
-/// Normalize a matrix by dividing by data[15] if needed.
-///
-/// lin_alg's inverse can produce scaled results where the homogeneous
-/// coordinate (w) is not 1.0. This function normalizes the matrix to
-/// ensure proper affine transform properties.
-fn normalize_inverse_matrix(mat: lin_alg::f32::Mat4) -> lin_alg::f32::Mat4 {
-    let w = mat.data[15];
-    if w.abs() > 1e-6 && (w - 1.0).abs() > 1e-6 {
-        let mut normalized = mat.clone();
-        for i in 0..16 {
-            normalized.data[i] /= w;
-        }
-        normalized
-    } else {
-        mat
-    }
 }
 
 /// Input parameters for raytracing a scene
@@ -235,21 +218,21 @@ pub fn raytrace_scene(
     let proj_matrix = matrix_to_array(input.camera.projection_matrix());
 
     // Get and normalize inverse matrices
-    let view_inv = input.camera.view_matrix().inverse().unwrap_or(lin_alg::f32::Mat4::new_identity());
-    let view_inv_normalized = normalize_inverse_matrix(view_inv);
+    let mut view_inv = input.camera.view_matrix().inverse().unwrap_or(lin_alg::f32::Mat4::new_identity());
+    normalize_matrix(&mut view_inv);
 
     // Extract camera position from normalized inverse view matrix
     let camera_pos = lin_alg::f32::Vec3::new(
-        view_inv_normalized.data[12],
-        view_inv_normalized.data[13],
-        view_inv_normalized.data[14],
+        view_inv.data[12],
+        view_inv.data[13],
+        view_inv.data[14],
     );
 
-    let view_inv_matrix = matrix_to_array(view_inv_normalized);
+    let view_inv_matrix = matrix_to_array(view_inv);
 
-    let proj_inv = input.camera.projection_matrix().inverse().unwrap_or(lin_alg::f32::Mat4::new_identity());
-    let proj_inv_normalized = normalize_inverse_matrix(proj_inv);
-    let proj_inv_matrix = matrix_to_array(proj_inv_normalized);
+    let mut proj_inv = input.camera.projection_matrix().inverse().unwrap_or(lin_alg::f32::Mat4::new_identity());
+    normalize_matrix(&mut proj_inv);
+    let proj_inv_matrix = matrix_to_array(proj_inv);
 
     // Restore camera aspect
     input.camera.set_aspect(original_aspect);

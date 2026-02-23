@@ -10,8 +10,10 @@ use pymol_cmd::{CmdError, CommandExecutor, MessageKind, ParsedCommand, parse_com
 use pymol_mol::RepMask;
 use pymol_render::ColorResolver;
 use pymol_scene::{MoleculeObject, Object};
+use pymol_scene::{expand_pick_to_selection, normalize_matrix, pick_expression_for_hit, PickHit, Picker};
 use pymol_select::{EvalContext, SelectionResult};
 use pymol_scene::{CameraDelta, KeyBinding, KeyBindings, InputState, setup_uniforms};
+use pymol_render::picking::Ray;
 // Re-export SelectionEntry for use in UI
 pub use pymol_scene::SelectionEntry;
 use winit::application::ApplicationHandler;
@@ -81,6 +83,16 @@ pub struct App {
     // =========================================================================
     /// Input handler (from pymol-scene, handles mouse with proper sensitivity)
     input: InputState,
+
+    // =========================================================================
+    // Picking / Hover
+    // =========================================================================
+    /// CPU ray-casting picker for hover detection
+    picker: Picker,
+    /// Current hover hit (atom under cursor)
+    hover_hit: Option<PickHit>,
+    /// Mouse position at left button press (for click vs drag detection)
+    click_start_pos: Option<(f32, f32)>,
 
     // =========================================================================
     // Frame Timing
@@ -191,6 +203,9 @@ impl App {
             sequence_panel: SequencePanel::new(),
             shading: ShadingManager::new(),
             input: InputState::new(),
+            picker: Picker::new(),
+            hover_hit: None,
+            click_start_pos: None,
             last_frame: Instant::now(),
             needs_redraw: true,
             frame_count: 0,
@@ -494,6 +509,10 @@ impl App {
     fn prepare_molecules(&mut self, names: &[String]) {
         let selection_results = self.evaluate_visible_selections(names);
         let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
+        let mouse_selection_mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
+
+        // Snapshot hover hit to avoid borrow issues
+        let hover_hit = self.hover_hit.clone();
 
         let mut geometry_changed = false;
         let context = self.view.render_context.as_ref().unwrap();
@@ -508,11 +527,24 @@ impl App {
                 }
                 mol_obj.prepare_render(context, color_resolver, &self.state.settings);
 
+                // Selection indicator
                 if let Some((_, sel)) = selection_results.iter().find(|(n, _)| n == name) {
                     log::debug!("Setting selection indicator for '{}' with {} atoms", name, sel.count());
                     mol_obj.set_selection_indicator_with_size(sel, context, Some(selection_width));
                 } else {
                     mol_obj.clear_selection_indicator();
+                }
+
+                // Hover indicator
+                if let Some(ref hit) = hover_hit {
+                    if hit.object_name == *name {
+                        let sel = expand_pick_to_selection(hit, mouse_selection_mode, mol_obj.molecule());
+                        mol_obj.set_hover_indicator(&sel, context, selection_width);
+                    } else {
+                        mol_obj.clear_hover_indicator();
+                    }
+                } else {
+                    mol_obj.clear_hover_indicator();
                 }
             }
         }
@@ -1567,6 +1599,91 @@ impl App {
         }
     }
 
+    /// Ray-cast at a screen position and return the closest hit.
+    ///
+    /// Converts screen coordinates to a picking ray via the camera matrices,
+    /// then tests against all enabled objects in the registry.
+    fn pick_at(&mut self, screen_pos: (f32, f32)) -> Option<PickHit> {
+        let vp = *self.view.viewport_rect.as_ref()?;
+        let vp_x = screen_pos.0 - vp.min.x;
+        let vp_y = screen_pos.1 - vp.min.y;
+
+        let view_mat = self.state.camera.view_matrix();
+        let mut view_inv = view_mat
+            .inverse()
+            .unwrap_or(lin_alg::f32::Mat4::new_identity());
+        normalize_matrix(&mut view_inv);
+
+        let ray = Ray::from_screen(
+            vp_x, vp_y,
+            vp.width(), vp.height(),
+            &self.state.camera.projection_matrix().data,
+            &view_inv.data,
+        );
+
+        self.picker.pick_ray(&ray, &self.state.registry)
+    }
+
+    /// Process hover picking — detect atom under cursor and update hover indicator.
+    ///
+    /// Called once per frame when the cursor moves over the viewport.
+    /// Skipped while dragging (any mouse button held) to avoid interference with camera control.
+    fn process_hover(&mut self) {
+        if self.input.any_button_pressed() {
+            return;
+        }
+
+        let mouse_pos = self.input.mouse_position();
+        if !self.view.is_over_viewport(mouse_pos) {
+            if self.hover_hit.is_some() {
+                self.hover_hit = None;
+                self.needs_redraw = true;
+            }
+            return;
+        }
+
+        let new_hit = self.pick_at(mouse_pos);
+
+        let changed = match (&self.hover_hit, &new_hit) {
+            (None, None) => false,
+            (Some(_), None) | (None, Some(_)) => true,
+            (Some(a), Some(b)) => {
+                a.object_name != b.object_name || a.atom_index != b.atom_index
+            }
+        };
+
+        if changed {
+            self.hover_hit = new_hit;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Process a mouse click for atom/object selection.
+    ///
+    /// If a molecule atom is hit, generates a `select sele, <expr>` command
+    /// (extending `sele` if it already exists). If nothing is hit and `sele`
+    /// exists, removes it via `deselect sele`.
+    fn process_click(&mut self) {
+        let mouse_pos = self.input.mouse_position();
+        let hit = self.pick_at(mouse_pos);
+        let mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
+
+        if let Some(ref hit) = hit {
+            if let Some(mol_obj) = self.state.registry.get_molecule(&hit.object_name) {
+                if let Some(expr) = pick_expression_for_hit(hit, mode, mol_obj.molecule()) {
+                    let cmd = if self.state.selections.contains("sele") {
+                        format!("select sele, sele or ({expr})")
+                    } else {
+                        format!("select sele, {expr}")
+                    };
+                    let _ = self.execute_command(&cmd);
+                }
+            }
+        } else if self.state.selections.contains("sele") {
+            let _ = self.execute_command("deselect sele");
+        }
+    }
+
     /// Handle keyboard input
     fn handle_key(&mut self, event: KeyEvent) {
         if event.state != ElementState::Pressed {
@@ -1697,6 +1814,9 @@ impl ApplicationHandler for App {
                 // Process input and update camera (only if egui doesn't want input)
                 self.process_input();
 
+                // Detect atom under cursor for hover highlight
+                self.process_hover();
+
                 // Update movie (before camera animation)
                 let movie_frame_changed = self.state.movie.update();
                 if movie_frame_changed {
@@ -1760,8 +1880,25 @@ impl ApplicationHandler for App {
                 }
             }
 
-            WindowEvent::MouseInput { .. } => {
-                // Input already handled above, just request redraw
+            WindowEvent::MouseInput { state, button, .. } => {
+                // Click detection for picking (use viewport check, not egui_wants_input,
+                // because egui reports press events as consumed even over the 3D viewport)
+                if button == winit::event::MouseButton::Left {
+                    let mouse_pos = self.input.mouse_position();
+                    if state == ElementState::Pressed {
+                        if self.view.is_over_viewport(mouse_pos) {
+                            self.click_start_pos = Some(mouse_pos);
+                        }
+                    } else if state == ElementState::Released {
+                        if let Some(start) = self.click_start_pos.take() {
+                            let dx = (mouse_pos.0 - start.0).abs();
+                            let dy = (mouse_pos.1 - start.1).abs();
+                            if dx + dy < 5.0 {
+                                self.process_click();
+                            }
+                        }
+                    }
+                }
                 self.request_redraw();
             }
 
@@ -1769,8 +1906,8 @@ impl ApplicationHandler for App {
                 // Input already handled above
                 // Always request redraw on cursor move so egui hover states update
                 self.request_redraw();
-                // Mark 3D scene as needing redraw only when dragging
-                if self.input.any_button_pressed() {
+                // Mark 3D scene as needing redraw when dragging or hovering over viewport
+                if self.input.any_button_pressed() || self.view.is_over_viewport(self.input.mouse_position()) {
                     self.needs_redraw = true;
                 }
             }
