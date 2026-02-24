@@ -353,7 +353,7 @@ impl RenderContext {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: Some(depth_stencil_state(key.depth_write)),
+            depth_stencil: Some(depth_stencil_state(key.depth_write, wgpu::CompareFunction::Less)),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -400,7 +400,7 @@ impl RenderContext {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: Some(depth_stencil_state(key.depth_write)),
+            depth_stencil: Some(depth_stencil_state(key.depth_write, wgpu::CompareFunction::Less)),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -447,7 +447,7 @@ impl RenderContext {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: Some(depth_stencil_state(key.depth_write)),
+            depth_stencil: Some(depth_stencil_state(key.depth_write, wgpu::CompareFunction::Less)),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -505,7 +505,9 @@ impl RenderContext {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: Some(depth_stencil_state(key.depth_write)),
+            // LessEqual so the hover indicator can draw over the selection indicator
+            // at the same depth (both are dot billboards at identical atom positions)
+            depth_stencil: Some(depth_stencil_state(key.depth_write, wgpu::CompareFunction::LessEqual)),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,

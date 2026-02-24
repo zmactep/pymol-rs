@@ -13,6 +13,7 @@ use pymol_mol::{
     nucleotide_to_char, residue_to_char, three_to_one, ObjectMolecule,
 };
 use pymol_scene::{Object, ObjectRegistry};
+use pymol_select::build_sele_command;
 
 /// Compress a sorted list of residue numbers into range notation.
 /// E.g., `[74, 75, 76, 77, 80, 85, 86, 87]` → `"74-77+80+85-87"`
@@ -107,12 +108,22 @@ pub struct SeqObject {
     pub chains: Vec<SeqChain>,
 }
 
+/// Reference to a specific residue in a loaded object
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ResidueRef {
+    pub object_name: String,
+    pub chain_id: String,
+    pub resv: i32,
+}
+
 /// Action produced by the sequence panel
 pub enum SequenceAction {
     /// Execute a command string (e.g., "select sele, ...")
     Execute(String),
     /// Display a notification message in the output panel
     Notify(String),
+    /// Hover over a residue, or None when leaving
+    Hover(Option<ResidueRef>),
 }
 
 /// Persistent state for the sequence viewer
@@ -125,12 +136,14 @@ pub struct SequencePanel {
     cached_enabled_count: usize,
     /// Registry generation when cache was last built
     cached_generation: u64,
-    /// Currently highlighted residues from 3D selection: (object_name, chain_id, resv)
-    highlighted: HashSet<(String, String, i32)>,
+    /// Currently highlighted residues from 3D selection
+    highlighted: HashSet<ResidueRef>,
     /// Active drag start: (object_index, chain_index, start_residue_index)
     drag_start: Option<(usize, usize, usize)>,
     /// Current drag end residue index (updated each frame while dragging)
     drag_end: Option<usize>,
+    /// Current sequence hover state for change detection
+    current_hover: Option<ResidueRef>,
 }
 
 impl Default for SequencePanel {
@@ -149,11 +162,12 @@ impl SequencePanel {
             highlighted: HashSet::new(),
             drag_start: None,
             drag_end: None,
+            current_hover: None,
         }
     }
 
     /// Update the highlighted residues from the current 3D selection.
-    pub fn update_highlights(&mut self, highlighted: HashSet<(String, String, i32)>) {
+    pub fn update_highlights(&mut self, highlighted: HashSet<ResidueRef>) {
         self.highlighted = highlighted;
     }
 
@@ -217,6 +231,7 @@ impl SequencePanel {
         ui: &mut Ui,
         registry: &ObjectRegistry,
         named_colors: &NamedColors,
+        has_sele: bool,
     ) -> Vec<SequenceAction> {
         if self.needs_rebuild(registry) {
             self.rebuild_cache(registry);
@@ -258,6 +273,9 @@ impl SequencePanel {
             .iter()
             .map(|seq_obj| seq_obj.chains.len() as f32 * (ruler_height + row_height))
             .collect();
+
+        // Track which residue the mouse hovers over (across all chain rows)
+        let mut hover_out: Option<ResidueRef> = None;
 
         // Outer vertical scroll — keeps all three columns in sync when the
         // total chain height exceeds the panel (e.g. nucleosome with 12+ chains).
@@ -354,6 +372,8 @@ impl SequencePanel {
                                     drag_start,
                                     drag_end,
                                     &mut actions,
+                                    has_sele,
+                                    &mut hover_out,
                                 );
                             }
                             ui.add_space(spacing);
@@ -362,6 +382,12 @@ impl SequencePanel {
                 });
         });
             });
+
+        // Emit hover action only when the hovered residue changes
+        if hover_out != self.current_hover {
+            actions.push(SequenceAction::Hover(hover_out.clone()));
+            self.current_hover = hover_out;
+        }
 
         actions
     }
@@ -385,11 +411,13 @@ fn render_chain_sequence(
     chain_idx: usize,
     cw: f32,
     named_colors: &NamedColors,
-    highlighted: &HashSet<(String, String, i32)>,
+    highlighted: &HashSet<ResidueRef>,
     all_sequences: &[SeqObject],
     drag_start: &mut Option<(usize, usize, usize)>,
     drag_end: &mut Option<usize>,
     actions: &mut Vec<SequenceAction>,
+    has_sele: bool,
+    hover_out: &mut Option<ResidueRef>,
 ) {
     let n = chain.residues.len();
     if n == 0 {
@@ -442,6 +470,9 @@ fn render_chain_sequence(
     let seq_font = egui::FontId::new(12.0, egui::FontFamily::Monospace);
     let ligand_font = egui::FontId::new(10.0, egui::FontFamily::Monospace);
 
+    // Ctrl/Cmd held = exclusion mode (remove from selection instead of adding)
+    let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+
     // Helper: convert pointer x position to residue index using cumulative offsets
     let pointer_to_res_idx = |pos: egui::Pos2| -> usize {
         let rel_x = pos.x - seq_rect.min.x;
@@ -478,26 +509,53 @@ fn render_chain_sequence(
             egui::pos2(x_start, seq_rect.min.y),
             egui::pos2(x_end, seq_rect.max.y),
         );
-        painter.rect_filled(
-            highlight_rect,
-            0.0,
-            Color32::from_rgba_premultiplied(255, 180, 200, 80),
-        );
+        let drag_color = if ctrl_held {
+            Color32::from_rgba_premultiplied(255, 100, 50, 80)
+        } else {
+            Color32::from_rgba_premultiplied(255, 180, 200, 80)
+        };
+        painter.rect_filled(highlight_rect, 0.0, drag_color);
     }
+
+    // Detect hovered residue (when not dragging) for Ctrl+hover visual feedback
+    let hover_res_idx = if drag_start.is_none() && ctrl_held {
+        response.hover_pos().map(|pos| pointer_to_res_idx(pos))
+    } else {
+        None
+    };
+
+    // Pre-filter highlighted residues for this chain to avoid per-residue String allocation
+    let highlighted_resvs: HashSet<i32> = highlighted
+        .iter()
+        .filter(|r| r.object_name == object_name && r.chain_id == chain.chain_id)
+        .map(|r| r.resv)
+        .collect();
 
     // Paint residue labels
     for (res_idx, residue) in chain.residues.iter().enumerate() {
-        let is_highlighted = highlighted.contains(&(
-            object_name.to_string(),
-            chain.chain_id.clone(),
-            residue.resv,
-        ));
+        let is_highlighted = highlighted_resvs.contains(&residue.resv);
 
         let is_in_drag = drag_range
             .as_ref()
             .is_some_and(|range| range.contains(&res_idx));
 
+        let is_ctrl_hovered = hover_res_idx == Some(res_idx);
+
         let x = seq_rect.min.x + cw * x_offsets[res_idx] as f32;
+
+        // Ctrl+hover background: orange-red rect behind hovered residue
+        if is_ctrl_hovered {
+            let w = cw * residue.char_width as f32;
+            let hover_rect = egui::Rect::from_min_size(
+                egui::pos2(x, seq_rect.min.y),
+                egui::vec2(w, seq_rect.height()),
+            );
+            painter.rect_filled(
+                hover_rect,
+                0.0,
+                Color32::from_rgba_premultiplied(255, 80, 30, 120),
+            );
+        }
 
         // Font: 12pt for single-character, 10pt for bracket notation
         let font = if residue.char_width == 1 {
@@ -506,8 +564,10 @@ fn render_chain_sequence(
             ligand_font.clone()
         };
 
-        let color = if is_highlighted || is_in_drag {
-            Color32::from_rgb(255, 80, 80)
+        let color = if is_ctrl_hovered {
+            Color32::WHITE
+        } else if is_highlighted || is_in_drag {
+            Color32::from_rgb(255, 119, 255)
         } else {
             match residue.kind {
                 ResidueKind::AminoAcidCanonical => {
@@ -573,17 +633,8 @@ fn render_chain_sequence(
                         chain.chain_id,
                         compress_resi_list(&resv_values)
                     );
-                    let modifiers = ui.input(|i| i.modifiers);
-                    if modifiers.command || modifiers.ctrl {
-                        actions.push(SequenceAction::Execute(format!(
-                            "select sele, sele or ({})",
-                            expr
-                        )));
-                    } else {
-                        actions.push(SequenceAction::Execute(format!(
-                            "select sele, {}",
-                            expr
-                        )));
+                    if let Some(cmd) = build_sele_command(&expr, ctrl_held, has_sele) {
+                        actions.push(SequenceAction::Execute(cmd));
                     }
                 }
                 *drag_start = None;
@@ -592,7 +643,7 @@ fn render_chain_sequence(
         }
     }
 
-    // Click (no drag): select single residue
+    // Click (no drag): select or exclude single residue
     if response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let res_idx = pointer_to_res_idx(pos);
@@ -601,34 +652,14 @@ fn render_chain_sequence(
                 "model {} and chain {} and resi {}",
                 object_name, chain.chain_id, residue.resv
             );
-            let modifiers = ui.input(|i| i.modifiers);
-            if modifiers.command || modifiers.ctrl {
-                let is_highlighted = highlighted.contains(&(
-                    object_name.to_string(),
-                    chain.chain_id.clone(),
-                    residue.resv,
-                ));
-                if is_highlighted {
-                    actions.push(SequenceAction::Execute(format!(
-                        "select sele, sele and not ({})",
-                        expr
-                    )));
-                } else {
-                    actions.push(SequenceAction::Execute(format!(
-                        "select sele, sele or ({})",
-                        expr
-                    )));
-                }
-            } else {
-                actions.push(SequenceAction::Execute(format!(
-                    "select sele, {}",
-                    expr
-                )));
+            if let Some(cmd) = build_sele_command(&expr, ctrl_held, has_sele) {
+                actions.push(SequenceAction::Execute(cmd));
             }
         }
     }
 
     // Tooltip on hover (when not dragging) — shown above the sequence row
+    // Also signals hover to the 3D viewport for highlighting
     if drag_start.is_none() {
         if let Some(pos) = response.hover_pos() {
             let res_idx = pointer_to_res_idx(pos);
@@ -644,18 +675,23 @@ fn render_chain_sequence(
                 ui.set_max_width(f32::INFINITY);
                 ui.label(&tooltip_text);
             });
+
+            // Signal hover to the 3D viewport
+            *hover_out = Some(ResidueRef {
+                object_name: object_name.to_string(),
+                chain_id: chain.chain_id.clone(),
+                resv: residue.resv,
+            });
         }
     }
 
     // Right-click context menu
     response.context_menu(|ui| {
-        let has_selection = highlighted
-            .iter()
-            .any(|(obj, ch, _)| obj == object_name && ch == &chain.chain_id);
+        let has_selection = !highlighted_resvs.is_empty();
 
         if has_selection {
             if ui.button("Copy selected sequence").clicked() {
-                let seq = chain_highlighted_sequence(chain, object_name, highlighted);
+                let seq = chain_highlighted_sequence(chain, &highlighted_resvs);
                 if !seq.is_empty() {
                     ui.ctx().output_mut(|o| {
                         o.commands
@@ -748,20 +784,13 @@ fn chain_to_sequence(chain: &SeqChain) -> String {
 /// Extract sequence of only the highlighted residues from a chain.
 fn chain_highlighted_sequence(
     chain: &SeqChain,
-    object_name: &str,
-    highlighted: &HashSet<(String, String, i32)>,
+    highlighted_resvs: &HashSet<i32>,
 ) -> String {
     chain
         .residues
         .iter()
         .filter(|r| r.kind.is_polymer())
-        .filter(|r| {
-            highlighted.contains(&(
-                object_name.to_string(),
-                chain.chain_id.clone(),
-                r.resv,
-            ))
-        })
+        .filter(|r| highlighted_resvs.contains(&r.resv))
         .map(|r| if r.display_char == '?' { 'X' } else { r.display_char })
         .collect()
 }

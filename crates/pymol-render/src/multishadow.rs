@@ -301,7 +301,7 @@ impl ShadowPipelines {
             ),
         });
 
-        let depth_stencil = Some(depth_stencil_state(true));
+        let depth_stencil = Some(depth_stencil_state(true, wgpu::CompareFunction::Less));
 
         // Mesh depth-only pipeline
         let mesh_pipeline =

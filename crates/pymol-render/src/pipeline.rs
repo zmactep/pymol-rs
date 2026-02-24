@@ -51,11 +51,14 @@ pub fn get_blend_state(mode: BlendMode) -> Option<wgpu::BlendState> {
 }
 
 /// Common depth stencil state for 3D rendering
-pub fn depth_stencil_state(depth_write: bool) -> wgpu::DepthStencilState {
+pub fn depth_stencil_state(
+    depth_write: bool,
+    compare: wgpu::CompareFunction,
+) -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
         format: wgpu::TextureFormat::Depth32Float,
         depth_write_enabled: depth_write,
-        depth_compare: wgpu::CompareFunction::Less,
+        depth_compare: compare,
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     }

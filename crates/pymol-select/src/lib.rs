@@ -136,6 +136,20 @@ pub fn evaluate(
     eval::evaluate(expr, ctx)
 }
 
+/// Build a `select sele, ...` command that adds to, removes from,
+/// or creates the `sele` selection.
+///
+/// Returns `None` when `exclude=true` but no `sele` exists yet (nothing to exclude from).
+pub fn build_sele_command(expr: &str, exclude: bool, has_sele: bool) -> Option<String> {
+    if exclude {
+        has_sele.then(|| format!("select sele, sele and not ({expr})"))
+    } else if has_sele {
+        Some(format!("select sele, sele or ({expr})"))
+    } else {
+        Some(format!("select sele, {expr}"))
+    }
+}
+
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::ast::{CompareOp, SelectionExpr};

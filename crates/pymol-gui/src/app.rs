@@ -11,7 +11,7 @@ use pymol_mol::RepMask;
 use pymol_render::ColorResolver;
 use pymol_scene::{MoleculeObject, Object};
 use pymol_scene::{expand_pick_to_selection, normalize_matrix, pick_expression_for_hit, PickHit, Picker};
-use pymol_select::{EvalContext, SelectionResult};
+use pymol_select::{build_sele_command, EvalContext, SelectionResult};
 use pymol_scene::{CameraDelta, KeyBinding, KeyBindings, InputState, setup_uniforms};
 use pymol_render::picking::Ray;
 // Re-export SelectionEntry for use in UI
@@ -34,7 +34,7 @@ use crate::state::{CommandLineState, OutputBufferState};
 use crate::view::AppView;
 use crate::ui::command::CommandAction;
 use crate::ui::objects::ObjectAction;
-use crate::ui::sequence::SequenceAction;
+use crate::ui::sequence::{ResidueRef, SequenceAction};
 use crate::ui::{
     CommandLinePanel, DragDropOverlay, NotificationOverlay, ObjectListPanel, OutputPanel,
     SequencePanel,
@@ -91,6 +91,8 @@ pub struct App {
     picker: Picker,
     /// Current hover hit (atom under cursor)
     hover_hit: Option<PickHit>,
+    /// Current sequence viewer hover
+    sequence_hover: Option<ResidueRef>,
     /// Mouse position at left button press (for click vs drag detection)
     click_start_pos: Option<(f32, f32)>,
 
@@ -205,6 +207,7 @@ impl App {
             input: InputState::new(),
             picker: Picker::new(),
             hover_hit: None,
+            sequence_hover: None,
             click_start_pos: None,
             last_frame: Instant::now(),
             needs_redraw: true,
@@ -511,8 +514,15 @@ impl App {
         let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
         let mouse_selection_mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
 
-        // Snapshot hover hit to avoid borrow issues
+        // Snapshot hover state to avoid borrow issues
         let hover_hit = self.hover_hit.clone();
+        let sequence_hover = self.sequence_hover.clone();
+
+        // Sequence hover uses Ctrl/Cmd for exclusion mode
+        let ctrl_held = self.input.ctrl_or_cmd_held();
+
+        const COLOR_YELLOW: [f32; 4] = [1.0, 1.0, 0.5, 0.7];
+        const COLOR_RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
         let mut geometry_changed = false;
         let context = self.view.render_context.as_ref().unwrap();
@@ -528,18 +538,44 @@ impl App {
                 mol_obj.prepare_render(context, color_resolver, &self.state.settings);
 
                 // Selection indicator
-                if let Some((_, sel)) = selection_results.iter().find(|(n, _)| n == name) {
+                let sele_for_obj = selection_results.iter().find(|(n, _)| n == name).map(|(_, s)| s);
+                if let Some(sel) = sele_for_obj {
                     log::debug!("Setting selection indicator for '{}' with {} atoms", name, sel.count());
                     mol_obj.set_selection_indicator_with_size(sel, context, Some(selection_width));
                 } else {
                     mol_obj.clear_selection_indicator();
                 }
 
-                // Hover indicator
+                // Hover indicator: 3D viewport pick takes priority, then sequence hover.
                 if let Some(ref hit) = hover_hit {
                     if hit.object_name == *name {
                         let sel = expand_pick_to_selection(hit, mouse_selection_mode, mol_obj.molecule());
-                        mol_obj.set_hover_indicator(&sel, context, selection_width);
+                        // 3D viewport: red if hovered atoms overlap sele, yellow otherwise
+                        let overlaps_sele = sele_for_obj
+                            .is_some_and(|sele| sel.intersection(sele).any());
+                        let color = if overlaps_sele { COLOR_RED } else { COLOR_YELLOW };
+                        mol_obj.set_hover_indicator(&sel, context, selection_width, color);
+                    } else {
+                        mol_obj.clear_hover_indicator();
+                    }
+                } else if let Some(ref hover) = sequence_hover {
+                    if hover.object_name == *name {
+                        let mol = mol_obj.molecule();
+                        let sel = SelectionResult::from_indices(
+                            mol.atom_count(),
+                            mol.atoms_indexed().filter_map(|(idx, atom)| {
+                                if atom.residue.key.chain == hover.chain_id
+                                    && atom.residue.key.resv == hover.resv
+                                {
+                                    Some(idx)
+                                } else {
+                                    None
+                                }
+                            }),
+                        );
+                        // Sequence hover: red with Ctrl (exclusion), yellow without
+                        let color = if ctrl_held { COLOR_RED } else { COLOR_YELLOW };
+                        mol_obj.set_hover_indicator(&sel, context, selection_width, color);
                     } else {
                         mol_obj.clear_hover_indicator();
                     }
@@ -801,7 +837,8 @@ impl App {
                         .default_height(panel_height)
                         .height_range(30.0..=200.0)
                         .show(ctx, |ui| {
-                            sequence_actions = sequence_panel.show(ui, registry, named_colors);
+                            let has_sele = selections.contains("sele");
+                            sequence_actions = sequence_panel.show(ui, registry, named_colors, has_sele);
                         });
                 }
 
@@ -937,6 +974,10 @@ impl App {
                 }
                 SequenceAction::Notify(msg) => {
                     self.output.print_info(msg);
+                }
+                SequenceAction::Hover(info) => {
+                    self.sequence_hover = info;
+                    self.needs_redraw = true;
                 }
             }
         }
@@ -1429,11 +1470,11 @@ impl App {
                             result.contains_index(idx)
                         });
                         if any_selected {
-                            highlighted.insert((
-                                name.to_string(),
-                                residue.chain().to_string(),
-                                residue.resv(),
-                            ));
+                            highlighted.insert(ResidueRef {
+                                object_name: name.to_string(),
+                                chain_id: residue.chain().to_string(),
+                                resv: residue.resv(),
+                            });
                         }
                     }
                 }
@@ -1660,9 +1701,9 @@ impl App {
 
     /// Process a mouse click for atom/object selection.
     ///
-    /// If a molecule atom is hit, generates a `select sele, <expr>` command
-    /// (extending `sele` if it already exists). If nothing is hit and `sele`
-    /// exists, removes it via `deselect sele`.
+    /// Clicking on unselected atoms adds them to `sele`.
+    /// Clicking on already-selected atoms removes them from `sele`.
+    /// Clicking on empty space clears `sele`.
     fn process_click(&mut self) {
         let mouse_pos = self.input.mouse_position();
         let hit = self.pick_at(mouse_pos);
@@ -1670,18 +1711,28 @@ impl App {
 
         if let Some(ref hit) = hit {
             if let Some(mol_obj) = self.state.registry.get_molecule(&hit.object_name) {
-                if let Some(expr) = pick_expression_for_hit(hit, mode, mol_obj.molecule()) {
-                    let cmd = if self.state.selections.contains("sele") {
-                        format!("select sele, sele or ({expr})")
-                    } else {
-                        format!("select sele, {expr}")
-                    };
-                    let _ = self.execute_command(&cmd);
+                let mol = mol_obj.molecule();
+                if let Some(expr) = pick_expression_for_hit(hit, mode, mol) {
+                    // Check if hovered atoms overlap with current sele
+                    let overlaps_sele = self.state.selections.get("sele").is_some_and(|entry| {
+                        let sel = expand_pick_to_selection(hit, mode, mol);
+                        pymol_select::select(mol, &entry.expression)
+                            .map(|sele| sel.intersection(&sele).any())
+                            .unwrap_or(false)
+                    });
+
+                    let has_sele = self.state.selections.contains("sele");
+                    if let Some(cmd) = build_sele_command(&expr, overlaps_sele, has_sele) {
+                        let _ = self.execute_command(&cmd);
+                    }
                 }
             }
         } else if self.state.selections.contains("sele") {
             let _ = self.execute_command("deselect sele");
         }
+
+        // Sync selection highlights to sequence viewer immediately
+        self.sync_selection_to_sequence();
     }
 
     /// Handle keyboard input

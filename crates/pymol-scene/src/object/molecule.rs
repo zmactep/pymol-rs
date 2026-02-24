@@ -394,12 +394,13 @@ impl MoleculeObject {
 
     /// Set the hover indicator for this molecule
     ///
-    /// Renders pale yellow indicators at the hovered atom positions.
+    /// Renders indicators at the hovered atom positions with the given color.
     pub fn set_hover_indicator(
         &mut self,
         selection: &SelectionResult,
         context: &RenderContext,
         size: f32,
+        color: [f32; 4],
     ) {
         let coord_set = match self.molecule.get_coord_set(self.display_state) {
             Some(cs) => cs,
@@ -411,8 +412,7 @@ impl MoleculeObject {
             .hover_indicator
             .get_or_insert_with(SelectionIndicatorRep::new);
 
-        // Pale yellow with slight transparency
-        indicator.set_color([1.0, 1.0, 0.5, 0.7]);
+        indicator.set_color(color);
         indicator.set_size(size * 10.0);
         indicator.build_for_selection(&self.molecule, coord_set, selection);
         indicator.upload(context.device(), context.queue());
@@ -719,40 +719,14 @@ impl MoleculeObject {
             }
         }
 
-        // Selection indicator (rendered last, on top of everything)
+        // Selection indicator (rendered on top of everything)
         if let Some(ref indicator) = self.representations.selection_indicator {
-            if !indicator.is_empty() {
-                log::debug!(
-                    "Rendering selection indicator with {} instances",
-                    indicator.instance_count()
-                );
-                let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
-                render_pass.set_pipeline(&pipeline);
-                render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
-                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
-                render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
-                render_pass.set_index_buffer(
-                    context.quad_index_buffer().slice(..),
-                    wgpu::IndexFormat::Uint16,
-                );
-                indicator.render(render_pass);
-            }
+            render_dot_indicator(indicator, render_pass, context);
         }
 
-        // Hover indicator (rendered last, on top of everything including selection)
+        // Hover indicator (rendered on top of everything including selection)
         if let Some(ref indicator) = self.representations.hover_indicator {
-            if !indicator.is_empty() {
-                let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
-                render_pass.set_pipeline(&pipeline);
-                render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
-                render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
-                render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
-                render_pass.set_index_buffer(
-                    context.quad_index_buffer().slice(..),
-                    wgpu::IndexFormat::Uint16,
-                );
-                indicator.render(render_pass);
-            }
+            render_dot_indicator(indicator, render_pass, context);
         }
     }
 
@@ -922,6 +896,27 @@ impl MoleculeObject {
 
         // Lines and dots skip shadow depth — they have negligible depth contribution
     }
+}
+
+/// Render a dot-based indicator (selection or hover) using the dot pipeline.
+fn render_dot_indicator<'a>(
+    indicator: &'a SelectionIndicatorRep,
+    render_pass: &mut wgpu::RenderPass<'a>,
+    context: &'a RenderContext,
+) {
+    if indicator.is_empty() {
+        return;
+    }
+    let pipeline = context.dot_pipeline(pymol_render::pipeline::BlendMode::Opaque);
+    render_pass.set_pipeline(&pipeline);
+    render_pass.set_bind_group(0, context.uniform_bind_group(), &[]);
+    render_pass.set_bind_group(1, context.shadow_bind_group(), &[]);
+    render_pass.set_vertex_buffer(0, context.billboard_vertex_buffer().slice(..));
+    render_pass.set_index_buffer(
+        context.quad_index_buffer().slice(..),
+        wgpu::IndexFormat::Uint16,
+    );
+    indicator.render(render_pass);
 }
 
 /// Collect atom colors for surface recoloring without building full SurfaceAtom data.
