@@ -1,12 +1,14 @@
 //! Structural alignment command
 //!
-//! Implements `align source, target` with two methods:
+//! Implements `align mobile, target` with three methods:
 //! - `kabsch` (default): direct Kabsch fit on corresponding atoms
 //! - `sequence`: Needleman-Wunsch sequence alignment → Cα pairs → Kabsch fit
+//! - `ce`: Combinatorial Extension structure-based alignment
 
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_algos::{
-    global_align, superpose, AlignedPair, AlignmentScoring, SuperposeParams,
+    ce_align, CeParams,
+    global_align, superpose, AlignedPair, AlignmentScoring, SuperposeParams, SuperposeResult,
     substitution_matrix,
 };
 use pymol_mol::{residue_to_char, AtomIndex};
@@ -35,11 +37,11 @@ DESCRIPTION
 
 USAGE
 
-    align source, target [, cycles [, cutoff [, method ]]]
+    align mobile, target [, cycles [, cutoff [, method ]]]
 
 ARGUMENTS
 
-    source = string: selection for the mobile object (will be moved)
+    mobile = string: selection for the mobile object (will be moved)
 
     target = string: selection for the fixed object (stays in place)
 
@@ -47,9 +49,10 @@ ARGUMENTS
 
     cutoff = float: outlier rejection cutoff (distance/RMSD ratio) {default: 2.0}
 
-    method = kabsch or sequence: alignment method {default: kabsch}
+    method = kabsch, sequence, or ce: alignment method {default: kabsch}
         kabsch   — direct fit on matching atoms (selections must have same size)
         sequence — sequence alignment to find Cα correspondences
+        ce       — Combinatorial Extension structure-based alignment
 
     matrix = string: substitution matrix for sequence alignment {default: blosum62}
         Available: blosum62, blosum50, blosum80, pam250, identity
@@ -58,6 +61,14 @@ ARGUMENTS
 
     gap_extend = float: gap extension penalty {default: -1.0}
 
+    win_size = int: CE fragment window size {default: 8}
+
+    gap_max = int: CE maximum gap between aligned fragments {default: 30}
+
+    d0 = float: CE fragment similarity cutoff in Angstroms {default: 3.0}
+
+    d1 = float: CE fragment compatibility cutoff in Angstroms {default: 4.0}
+
 EXAMPLES
 
     align chain A, chain B
@@ -65,6 +76,8 @@ EXAMPLES
     align 1hpx, 1t46, method=sequence
     align 1hpx, 1t46, method=sequence, matrix=blosum50
     align 1hpx, 1t46, method=sequence, gap_open=-12.0, gap_extend=-2.0
+    align 1hpx, 1t46, method=ce
+    align 1hpx, 1t46, method=ce, win_size=6
 "#
     }
 
@@ -73,9 +86,9 @@ EXAMPLES
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let source_sel = args
+        let mobile_sel = args
             .get_str(0)
-            .ok_or_else(|| CmdError::MissingArgument("source selection".into()))?;
+            .ok_or_else(|| CmdError::MissingArgument("mobile selection".into()))?;
         let target_sel = args
             .get_str(1)
             .ok_or_else(|| CmdError::MissingArgument("target selection".into()))?;
@@ -119,9 +132,10 @@ EXAMPLES
                     gap_extend: args.get_named_float("gap_extend").unwrap_or(-1.0) as f32,
                 };
 
-                align_by_sequence(ctx, source_sel, target_sel, &params, &scoring)
+                align_by_sequence(ctx, mobile_sel, target_sel, &params, &scoring)
             }
-            "kabsch" | _ => align_by_kabsch(ctx, source_sel, target_sel, &params),
+            "ce" => align_by_ce(ctx, mobile_sel, target_sel, &params, args),
+            "kabsch" | _ => align_by_kabsch(ctx, mobile_sel, target_sel, &params),
         }
     }
 }
@@ -129,27 +143,27 @@ EXAMPLES
 /// Direct Kabsch alignment — selections must have equal atom count.
 fn align_by_kabsch(
     ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
-    source_sel: &str,
+    mobile_sel: &str,
     target_sel: &str,
     params: &SuperposeParams,
 ) -> CmdResult {
     // Evaluate selections
-    let source_results = evaluate_selection(ctx.viewer, source_sel)?;
+    let mobile_results = evaluate_selection(ctx.viewer, mobile_sel)?;
     let target_results = evaluate_selection(ctx.viewer, target_sel)?;
 
-    // Collect (object_name, atom_indices) for source
-    let (source_obj, source_indices) = first_molecule_selection(&source_results, source_sel)?;
+    // Collect (object_name, atom_indices) for mobile
+    let (mobile_obj, mobile_indices) = first_molecule_selection(&mobile_results, mobile_sel)?;
     let (target_obj, target_indices) = first_molecule_selection(&target_results, target_sel)?;
 
-    if source_indices.len() != target_indices.len() {
+    if mobile_indices.len() != target_indices.len() {
         return Err(CmdError::Execution(format!(
             "Selections have different atom counts: {} vs {} (use method=sequence for unequal sizes)",
-            source_indices.len(),
+            mobile_indices.len(),
             target_indices.len()
         )));
     }
 
-    let n = source_indices.len();
+    let n = mobile_indices.len();
     if n < 3 {
         return Err(CmdError::Execution(format!(
             "Need at least 3 atoms for alignment, got {}",
@@ -158,44 +172,18 @@ fn align_by_kabsch(
     }
 
     // Extract coordinates
-    let source_coords = extract_coords(ctx.viewer, &source_obj, &source_indices)?;
+    let mobile_coords = extract_coords(ctx.viewer, &mobile_obj, &mobile_indices)?;
     let target_coords = extract_coords(ctx.viewer, &target_obj, &target_indices)?;
 
     // Build 1:1 pairs
     let pairs: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect();
 
     // Superpose
-    let result = superpose(&source_coords, &target_coords, &pairs, params)
+    let result = superpose(&mobile_coords, &target_coords, &pairs, params)
         .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
 
-    // Build combined transform matrix (rotation + translation in one Mat4)
-    let transform = build_transform_mat4(&result.transform.rotation, &result.transform.translation);
-
-    // Apply to ALL atoms in source object (all states)
-    apply_transform_to_object(ctx, &source_obj, &transform)?;
-
-    ctx.viewer.request_redraw();
-
-    // Print results
-    if !ctx.quiet {
-        ctx.print(&format!(
-            " Executive: RMSD = {:8.3}, {} to {} atoms, {} cycles",
-            result.final_rmsd,
-            result.n_aligned,
-            result.n_aligned,
-            result.cycles_performed
-        ));
-        if params.cycles > 0 {
-            ctx.print(&format!(
-                "   Initial RMSD:    {:.3}",
-                result.initial_rmsd
-            ));
-            ctx.print(&format!(
-                "   Final RMSD:      {:.3} ({} atoms after rejection of {})",
-                result.final_rmsd, result.n_aligned, result.n_rejected
-            ));
-        }
-    }
+    apply_superpose_transform(ctx, &mobile_obj, &result)?;
+    print_superpose_result(ctx, &result, params, &[]);
 
     Ok(())
 }
@@ -203,57 +191,52 @@ fn align_by_kabsch(
 /// Sequence-based alignment — aligns by matching residue sequences, then fits Cα atoms.
 fn align_by_sequence(
     ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
-    source_sel: &str,
+    mobile_sel: &str,
     target_sel: &str,
     params: &SuperposeParams,
     scoring: &AlignmentScoring,
 ) -> CmdResult {
     // Evaluate selections
-    let source_results = evaluate_selection(ctx.viewer, source_sel)?;
+    let mobile_results = evaluate_selection(ctx.viewer, mobile_sel)?;
     let target_results = evaluate_selection(ctx.viewer, target_sel)?;
 
-    let (source_obj, source_indices) = first_molecule_selection(&source_results, source_sel)?;
+    let (mobile_obj, mobile_indices) = first_molecule_selection(&mobile_results, mobile_sel)?;
     let (target_obj, target_indices) = first_molecule_selection(&target_results, target_sel)?;
 
     // Extract residue sequences and Cα atom indices from selections
-    let (source_seq, source_ca) =
-        extract_residue_sequence(ctx.viewer, &source_obj, &source_indices)?;
+    let (mobile_seq, mobile_ca) =
+        extract_residue_sequence(ctx.viewer, &mobile_obj, &mobile_indices)?;
     let (target_seq, target_ca) =
         extract_residue_sequence(ctx.viewer, &target_obj, &target_indices)?;
 
-    if source_seq.is_empty() || target_seq.is_empty() {
+    if mobile_seq.is_empty() || target_seq.is_empty() {
         return Err(CmdError::Execution(
             "No protein/nucleic acid residues found in one or both selections".into(),
         ));
     }
 
     // Sequence alignment
-    let alignment = global_align(&source_seq, &target_seq, scoring);
+    let alignment = global_align(&mobile_seq, &target_seq, scoring);
 
-    // Extract matched Cα pairs
-    let mut ca_pairs: Vec<(usize, usize)> = Vec::new();
-    let mut source_ca_coords: Vec<[f32; 3]> = Vec::new();
-    let mut target_ca_coords: Vec<[f32; 3]> = Vec::new();
+    // Collect matched Cα atom indices from sequence alignment
+    let mut mobile_ca_indices: Vec<AtomIndex> = Vec::new();
+    let mut target_ca_indices: Vec<AtomIndex> = Vec::new();
 
     for pair in &alignment.pairs {
         if let AlignedPair::Match { source, target } = pair {
-            // Both residues have a position — check if both have Cα
-            if let (Some(&src_ca_idx), Some(&tgt_ca_idx)) =
-                (source_ca.get(*source), target_ca.get(*target))
+            if let (Some(&Some(src_ca_idx)), Some(&Some(tgt_ca_idx))) =
+                (mobile_ca.get(*source), target_ca.get(*target))
             {
-                if let (Some(src_ca_idx), Some(tgt_ca_idx)) = (src_ca_idx, tgt_ca_idx) {
-                    let src_coord =
-                        get_atom_coord(ctx.viewer, &source_obj, src_ca_idx)?;
-                    let tgt_coord =
-                        get_atom_coord(ctx.viewer, &target_obj, tgt_ca_idx)?;
-                    let pair_idx = source_ca_coords.len();
-                    source_ca_coords.push(src_coord);
-                    target_ca_coords.push(tgt_coord);
-                    ca_pairs.push((pair_idx, pair_idx));
-                }
+                mobile_ca_indices.push(src_ca_idx);
+                target_ca_indices.push(tgt_ca_idx);
             }
         }
     }
+
+    // Extract coordinates in batch
+    let mobile_ca_coords = extract_coords(ctx.viewer, &mobile_obj, &mobile_ca_indices)?;
+    let target_ca_coords = extract_coords(ctx.viewer, &target_obj, &target_ca_indices)?;
+    let ca_pairs: Vec<(usize, usize)> = (0..mobile_ca_coords.len()).map(|i| (i, i)).collect();
 
     if ca_pairs.len() < 3 {
         return Err(CmdError::Execution(format!(
@@ -263,47 +246,99 @@ fn align_by_sequence(
     }
 
     // Superpose using Cα pairs
-    let result = superpose(&source_ca_coords, &target_ca_coords, &ca_pairs, params)
+    let result = superpose(&mobile_ca_coords, &target_ca_coords, &ca_pairs, params)
         .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
 
-    // Build combined transform matrix
-    let transform = build_transform_mat4(&result.transform.rotation, &result.transform.translation);
-
-    // Apply to ALL atoms in source object
-    apply_transform_to_object(ctx, &source_obj, &transform)?;
-
-    ctx.viewer.request_redraw();
-
-    // Print results
-    if !ctx.quiet {
-        ctx.print(&format!(
-            " Executive: RMSD = {:8.3}, {} to {} atoms, {} cycles",
-            result.final_rmsd,
-            result.n_aligned,
-            result.n_aligned,
-            result.cycles_performed
-        ));
-        ctx.print(&format!(
+    apply_superpose_transform(ctx, &mobile_obj, &result)?;
+    print_superpose_result(ctx, &result, params, &[
+        format!(
             "   Sequence identity: {:.1}% ({} of {} residues)",
             alignment.identity * 100.0,
             alignment.n_matched,
-            source_seq.len().max(target_seq.len())
+            mobile_seq.len().max(target_seq.len())
+        ),
+        format!("   Matched Cα pairs:  {}", ca_pairs.len()),
+    ]);
+
+    Ok(())
+}
+
+/// CE structural alignment — structure-based alignment using Combinatorial Extension.
+fn align_by_ce(
+    ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
+    mobile_sel: &str,
+    target_sel: &str,
+    params: &SuperposeParams,
+    args: &ParsedCommand,
+) -> CmdResult {
+    // Evaluate selections
+    let mobile_results = evaluate_selection(ctx.viewer, mobile_sel)?;
+    let target_results = evaluate_selection(ctx.viewer, target_sel)?;
+
+    let (mobile_obj, mobile_indices) = first_molecule_selection(&mobile_results, mobile_sel)?;
+    let (target_obj, target_indices) = first_molecule_selection(&target_results, target_sel)?;
+
+    // Extract residue sequences + Cα atom indices
+    let (_, mobile_ca) =
+        extract_residue_sequence(ctx.viewer, &mobile_obj, &mobile_indices)?;
+    let (_, target_ca) =
+        extract_residue_sequence(ctx.viewer, &target_obj, &target_indices)?;
+
+    // Collect Cα atom indices for residues that have Cα atoms
+    let mobile_ca_indices: Vec<AtomIndex> = mobile_ca.iter().filter_map(|opt| *opt).collect();
+    let target_ca_indices: Vec<AtomIndex> = target_ca.iter().filter_map(|opt| *opt).collect();
+
+    let mobile_ca_coords = extract_coords(ctx.viewer, &mobile_obj, &mobile_ca_indices)?;
+    let target_ca_coords = extract_coords(ctx.viewer, &target_obj, &target_ca_indices)?;
+
+    if mobile_ca_coords.is_empty() || target_ca_coords.is_empty() {
+        return Err(CmdError::Execution(
+            "No Cα atoms found in one or both selections".into(),
         ));
-        ctx.print(&format!(
-            "   Matched Cα pairs:  {}",
-            ca_pairs.len()
-        ));
-        if params.cycles > 0 {
-            ctx.print(&format!(
-                "   Initial RMSD:    {:.3}",
-                result.initial_rmsd
-            ));
-            ctx.print(&format!(
-                "   Final RMSD:      {:.3} ({} atoms after rejection of {})",
-                result.final_rmsd, result.n_aligned, result.n_rejected
-            ));
-        }
     }
+
+    // Build CE params from named args
+    let ce_params = CeParams {
+        win_size: args.get_named_int("win_size").unwrap_or(8) as usize,
+        gap_max: args.get_named_int("gap_max").unwrap_or(30) as usize,
+        d0: args.get_named_float("d0").unwrap_or(3.0) as f32,
+        d1: args.get_named_float("d1").unwrap_or(4.0) as f32,
+        ..CeParams::default()
+    };
+
+    // Run CE alignment
+    let ce_result = ce_align(&mobile_ca_coords, &target_ca_coords, &ce_params)
+        .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+
+    if ce_result.pairs.len() < 3 {
+        return Err(CmdError::Execution(format!(
+            "CE alignment found too few matching residues ({})",
+            ce_result.pairs.len()
+        )));
+    }
+
+    // Extract aligned Cα coordinates for superposition
+    let mut aligned_mobile: Vec<[f32; 3]> = Vec::new();
+    let mut aligned_target: Vec<[f32; 3]> = Vec::new();
+    let mut superpose_pairs: Vec<(usize, usize)> = Vec::new();
+    for &(si, ti) in &ce_result.pairs {
+        let idx = aligned_mobile.len();
+        aligned_mobile.push(mobile_ca_coords[si]);
+        aligned_target.push(target_ca_coords[ti]);
+        superpose_pairs.push((idx, idx));
+    }
+
+    // Superpose with outlier rejection
+    let result = superpose(&aligned_mobile, &aligned_target, &superpose_pairs, params)
+        .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+
+    apply_superpose_transform(ctx, &mobile_obj, &result)?;
+    print_superpose_result(ctx, &result, params, &[
+        format!(
+            "   CE alignment:    {} residue pairs (Z-score: {:.1})",
+            ce_result.n_aligned, ce_result.z_score
+        ),
+    ]);
 
     Ok(())
 }
@@ -352,26 +387,6 @@ fn extract_coords(
         coords.push([v.x, v.y, v.z]);
     }
     Ok(coords)
-}
-
-/// Get a single atom coordinate.
-fn get_atom_coord(
-    viewer: &dyn ViewerLike,
-    obj_name: &str,
-    idx: AtomIndex,
-) -> CmdResult<[f32; 3]> {
-    let mol_obj = viewer
-        .objects()
-        .get_molecule(obj_name)
-        .ok_or_else(|| CmdError::Execution(format!("Object '{}' not found", obj_name)))?;
-    let mol = mol_obj.molecule();
-    let cs = mol
-        .current_coord_set()
-        .ok_or_else(|| CmdError::Execution(format!("No coordinates for '{}'", obj_name)))?;
-    let v = cs
-        .get_atom_coord(idx)
-        .ok_or_else(|| CmdError::Execution(format!("Missing coord for atom {}", idx.0)))?;
-    Ok([v.x, v.y, v.z])
 }
 
 /// Extract residue sequence and Cα atom indices for selected atoms.
@@ -425,6 +440,49 @@ fn extract_residue_sequence(
     }
 
     Ok((sequence, ca_indices))
+}
+
+/// Apply the superposition transform to the mobile object and request a redraw.
+fn apply_superpose_transform(
+    ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
+    obj_name: &str,
+    result: &SuperposeResult,
+) -> CmdResult {
+    let transform =
+        build_transform_mat4(&result.transform.rotation, &result.transform.translation);
+    apply_transform_to_object(ctx, obj_name, &transform)?;
+    ctx.viewer.request_redraw();
+    Ok(())
+}
+
+/// Print superposition results. `extra_lines` are method-specific lines
+/// printed between the summary and the initial/final RMSD.
+fn print_superpose_result(
+    ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
+    result: &SuperposeResult,
+    params: &SuperposeParams,
+    extra_lines: &[String],
+) {
+    if ctx.quiet {
+        return;
+    }
+    ctx.print(&format!(
+        " Executive: RMSD = {:8.3}, {} to {} atoms, {} cycles",
+        result.final_rmsd, result.n_aligned, result.n_aligned, result.cycles_performed
+    ));
+    for line in extra_lines {
+        ctx.print(line);
+    }
+    if params.cycles > 0 {
+        ctx.print(&format!(
+            "   Initial RMSD:    {:.3}",
+            result.initial_rmsd
+        ));
+        ctx.print(&format!(
+            "   Final RMSD:      {:.3} ({} atoms after rejection of {})",
+            result.final_rmsd, result.n_aligned, result.n_rejected
+        ));
+    }
 }
 
 /// Build a combined 4×4 transform matrix from rotation + translation.
