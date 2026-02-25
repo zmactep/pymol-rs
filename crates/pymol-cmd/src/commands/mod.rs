@@ -4,6 +4,7 @@
 
 pub mod align;
 pub mod control;
+pub mod crystal;
 pub mod display;
 pub mod io;
 pub mod movie;
@@ -50,4 +51,7 @@ pub fn register_all(registry: &mut CommandRegistry) {
 
     // Alignment commands
     align::register(registry);
+
+    // Crystal symmetry commands
+    crystal::register(registry);
 }

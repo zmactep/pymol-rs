@@ -2405,6 +2405,7 @@ name = "pymol-algos"
 version = "0.1.0"
 dependencies = [
  "lin_alg",
+ "phf",
  "thiserror 2.0.18",
 ]
 

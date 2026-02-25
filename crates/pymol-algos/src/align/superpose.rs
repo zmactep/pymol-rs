@@ -3,7 +3,7 @@
 //! Combines Kabsch with iterative outlier rejection, matching
 //! PyMOL's `align` and `super` commands.
 
-use crate::kabsch::{self, KabschResult};
+use super::kabsch::{self, KabschResult};
 use crate::AlignError;
 
 /// Parameters for iterative superposition

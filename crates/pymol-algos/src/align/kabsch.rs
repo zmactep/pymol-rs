@@ -6,7 +6,7 @@
 use lin_alg::f32::{Mat4, Vec3};
 
 use crate::AlignError;
-use crate::svd3::svd3;
+use crate::linalg::svd3::svd3;
 
 /// Result of Kabsch superposition
 #[derive(Debug, Clone)]

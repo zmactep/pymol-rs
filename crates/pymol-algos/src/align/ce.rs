@@ -7,7 +7,7 @@
 //!
 //! This is a faithful port of PyMOL's `ccealignmodule.cpp`.
 
-use crate::kabsch;
+use super::kabsch;
 use crate::AlignError;
 
 const MAX_KEPT: usize = 20;

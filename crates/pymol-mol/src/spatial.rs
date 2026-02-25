@@ -11,7 +11,7 @@ use lin_alg::f32::Vec3;
 /// points that fall within it. Neighbor queries check the 3×3×3 neighborhood
 /// of cells around the query point, guaranteeing all points within `cell_size`
 /// distance are found.
-pub(crate) struct SpatialGrid {
+pub struct SpatialGrid {
     cells: AHashMap<(i32, i32, i32), Vec<usize>>,
     cell_size: f32,
 }

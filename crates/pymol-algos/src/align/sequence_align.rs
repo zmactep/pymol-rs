@@ -3,7 +3,7 @@
 //! Standard dynamic programming alignment for matching residues between
 //! structures prior to structural superposition.
 
-use crate::substitution_matrix::{SubstitutionMatrix, BLOSUM62};
+use super::substitution_matrix::{SubstitutionMatrix, BLOSUM62};
 
 /// Scoring parameters for sequence alignment
 #[derive(Debug, Clone)]
@@ -267,7 +267,7 @@ pub fn global_align(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::substitution_matrix::IDENTITY;
+    use crate::align::substitution_matrix::IDENTITY;
 
     /// Scoring that mimics the old match=2/mismatch=-1 behavior
     fn identity_scoring() -> AlignmentScoring {

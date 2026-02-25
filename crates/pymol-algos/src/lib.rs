@@ -1,24 +1,38 @@
 //! Computational algorithms for PyMOL-RS
 //!
-//! This crate provides general computational algorithms used across pymol-rs:
-//! - Analytical 3×3 SVD decomposition
-//! - Kabsch algorithm for optimal rigid-body superposition
-//! - Needleman-Wunsch global sequence alignment
-//! - Iterative superposition with outlier rejection
-//! - Combinatorial Extension (CE) structural alignment
+//! This crate provides general computational algorithms used across pymol-rs,
+//! organized into three submodules:
+//!
+//! - [`linalg`] — Linear algebra: SVD, matrix operations
+//! - [`align`] — Structural alignment: Kabsch, sequence alignment, CE
+//! - [`symmetry`] — Crystallographic symmetry: unit cell math, space group operations
 
-mod svd3;
-mod kabsch;
-mod ce;
-mod sequence_align;
-mod superpose;
-pub mod substitution_matrix;
+pub mod linalg;
+pub mod align;
+pub mod symmetry;
 
-pub use svd3::{svd3, Svd3};
-pub use kabsch::{kabsch, rmsd, apply_transform, KabschResult};
-pub use sequence_align::{global_align, AlignedPair, AlignmentResult, AlignmentScoring};
-pub use superpose::{superpose, SuperposeParams, SuperposeResult};
-pub use ce::{ce_align, CeParams, CeResult};
+// Re-export linalg submodules at crate root for backward compatibility
+pub use linalg::svd3;
+pub use linalg::{
+    Svd3,
+    mat3x3_to_mat4, left_multiply_mat4, transform_mat4, is_identity_mat4,
+    transform_3x3, invert_3x3,
+};
+
+// Re-export alignment submodules at crate root for backward compatibility
+pub use align::substitution_matrix;
+
+// Re-export alignment types/functions at crate root
+pub use align::{
+    kabsch, rmsd, apply_transform, KabschResult,
+    global_align, AlignedPair, AlignmentResult, AlignmentScoring,
+    superpose, SuperposeParams, SuperposeResult,
+    ce_align, CeParams, CeResult,
+};
+
+// Re-export symmetry submodules at crate root for convenience
+pub use symmetry::crystal;
+pub use symmetry::space_groups;
 
 /// Errors from alignment algorithms
 #[derive(Debug, thiserror::Error)]

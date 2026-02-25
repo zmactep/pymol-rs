@@ -51,7 +51,7 @@ mod index;
 mod iterator;
 mod molecule;
 mod residue;
-mod spatial;
+pub mod spatial;
 mod secondary;
 
 // Re-export main types

@@ -115,6 +115,7 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
     let mut mol = ObjectMolecule::new("");
     let mut pos = 0;
     let mut ss_ranges: Vec<SecondaryStructureRange> = Vec::new();
+    let mut space_group: Option<String> = None;
 
     // Find data block name
     while pos < tokens.len() {
@@ -138,6 +139,9 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
             }
             Token::DataName(name) if name.starts_with("_cell.") => {
                 pos = parse_cell(tokens, pos, &mut mol)?;
+            }
+            Token::DataName(name) if name.starts_with("_symmetry.") => {
+                pos = parse_symmetry(tokens, pos, &mut space_group);
             }
             Token::DataName(name) if name.starts_with("_entry.") => {
                 pos += 1;
@@ -163,6 +167,13 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
             }
             Token::Eof => break,
             _ => pos += 1,
+        }
+    }
+
+    // Apply space group from _symmetry category if available
+    if let Some(sg) = space_group {
+        if let Some(ref mut sym) = mol.symmetry {
+            sym.space_group = sg;
         }
     }
 
@@ -478,6 +489,33 @@ fn parse_cell(tokens: &[Token], mut pos: usize, mol: &mut ObjectMolecule) -> IoR
     }
 
     Ok(pos)
+}
+
+/// Parse _symmetry data items (space group name)
+fn parse_symmetry(tokens: &[Token], mut pos: usize, space_group: &mut Option<String>) -> usize {
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::DataName(name) if name.starts_with("_symmetry.") => {
+                let field = &name["_symmetry.".len()..];
+                pos += 1;
+                if let Some(token) = tokens.get(pos) {
+                    if let Some(val) = token_value_str(token) {
+                        if field == "space_group_name_H-M" || field == "space_group_name_Hall" {
+                            if space_group.is_none() || field == "space_group_name_H-M" {
+                                let sg = val.trim().to_string();
+                                if !sg.is_empty() && sg != "?" {
+                                    *space_group = Some(sg);
+                                }
+                            }
+                        }
+                    }
+                    pos += 1;
+                }
+            }
+            _ => break,
+        }
+    }
+    pos
 }
 
 /// Parse secondary structure loop (_struct_conf or _struct_sheet_range)
