@@ -38,6 +38,12 @@ const REPRESENTATION_NAMES: &[&str] = &[
     "cgo", "everything",
 ];
 
+/// Static list of label property names for completion
+const LABEL_PROPERTY_NAMES: &[&str] = &[
+    "name", "resn", "resi", "chain", "q", "b", "segi",
+    "type", "formal_charge", "partial_charge",
+];
+
 /// Context for generating completions, holding all available name lists
 pub struct CompletionContext<'a> {
     pub command_names: &'a [&'a str],
@@ -102,6 +108,7 @@ pub fn generate_completions(
                         ArgHint::NamedSelection => {
                             complete_from_list(prefix, prefix_start, &ctx.selection_names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
                         }
+                        ArgHint::LabelProperty => complete_from_static(prefix, prefix_start, LABEL_PROPERTY_NAMES),
                         ArgHint::None => CompletionResult::empty(cursor_pos),
                     }
                 } else {

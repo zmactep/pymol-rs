@@ -37,6 +37,8 @@ pub enum ArgHint {
     Setting,
     /// Named selection only (no objects)
     NamedSelection,
+    /// Label property expression (name, resn, resi, chain, b, q, etc.)
+    LabelProperty,
 }
 
 // ============================================================================

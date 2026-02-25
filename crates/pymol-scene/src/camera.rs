@@ -573,6 +573,41 @@ impl Camera {
             self.view.clone()
         }
     }
+
+    /// Project a 3D world position to 2D screen coordinates.
+    ///
+    /// `viewport` is `(x, y, width, height)` in logical pixels.
+    /// Returns `None` if the point is behind the camera (clip.w <= 0).
+    pub fn project_to_screen(
+        &self,
+        world_pos: Vec3,
+        viewport: (f32, f32, f32, f32),
+    ) -> Option<(f32, f32)> {
+        let view = self.view_matrix();
+        let proj = self.projection_matrix();
+        let mvp = proj * view;
+
+        // Multiply mvp * [x, y, z, 1] (column-major Mat4)
+        let x = world_pos.x;
+        let y = world_pos.y;
+        let z = world_pos.z;
+        let clip_x = mvp.data[0] * x + mvp.data[4] * y + mvp.data[8] * z + mvp.data[12];
+        let clip_y = mvp.data[1] * x + mvp.data[5] * y + mvp.data[9] * z + mvp.data[13];
+        let clip_w = mvp.data[3] * x + mvp.data[7] * y + mvp.data[11] * z + mvp.data[15];
+
+        if clip_w <= 0.0 {
+            return None;
+        }
+
+        let ndc_x = clip_x / clip_w;
+        let ndc_y = clip_y / clip_w;
+
+        let (vp_x, vp_y, vp_w, vp_h) = viewport;
+        let screen_x = vp_x + (ndc_x + 1.0) * 0.5 * vp_w;
+        let screen_y = vp_y + (1.0 - ndc_y) * 0.5 * vp_h; // flip Y for screen coords
+
+        Some((screen_x, screen_y))
+    }
 }
 
 // ============================================================================

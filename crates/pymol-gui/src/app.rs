@@ -797,6 +797,7 @@ impl App {
             let command_line = &mut self.command_line;
             let ui_config = &mut self.view.ui_config;
             let registry = &self.state.registry;
+            let camera = &self.state.camera;
             let selections = &self.state.selections;
             let named_colors = &self.state.named_colors;
             let object_list_panel = &mut self.object_list_panel;
@@ -924,6 +925,39 @@ impl App {
                         }
                     });
                 viewport_rect_logical = central_response.response.rect;
+
+                // Paint atom labels as 2D overlay on the 3D viewport
+                {
+                    let vp = viewport_rect_logical;
+                    let vp_tuple = (vp.min.x, vp.min.y, vp.width(), vp.height());
+                    let painter = ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Foreground,
+                        egui::Id::new("labels_overlay"),
+                    ));
+                    let font = egui::FontId::new(14.0, egui::FontFamily::Proportional);
+                    let label_color = egui::Color32::WHITE;
+
+                    for name in registry.names() {
+                        let mol_obj = match registry.get_molecule(name) {
+                            Some(m) if m.is_enabled() => m,
+                            _ => continue,
+                        };
+
+                        for (pos, text) in mol_obj.collect_labels() {
+                            if let Some((sx, sy)) = camera.project_to_screen(pos, vp_tuple) {
+                                if vp.contains(egui::pos2(sx, sy)) {
+                                    painter.text(
+                                        egui::pos2(sx, sy),
+                                        egui::Align2::LEFT_BOTTOM,
+                                        text,
+                                        font.clone(),
+                                        label_color,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Show notification overlay when async tasks are in progress
                 if !pending_messages.is_empty() {

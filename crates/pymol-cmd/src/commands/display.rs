@@ -1,6 +1,6 @@
-//! Display commands: show, hide, enable, disable, color, bg_color
+//! Display commands: show, hide, enable, disable, color, bg_color, label
 
-use pymol_mol::RepMask;
+use pymol_mol::{Atom, RepMask};
 use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
 
@@ -30,6 +30,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(ToggleCommand);
     registry.register(ColorCommand);
     registry.register(BgColorCommand);
+    registry.register(LabelCommand);
 }
 
 /// Parse a representation name into a RepMask value
@@ -788,6 +789,207 @@ EXAMPLES
         if !ctx.quiet {
             ctx.print(&format!(" Background color set to {}", color_name));
         }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// label command
+// ============================================================================
+
+/// Label expression — what property to display as label text
+enum LabelExpression {
+    Name,
+    Resn,
+    Resi,
+    Chain,
+    /// Occupancy (PyMOL convention: q = occupancy)
+    Q,
+    /// B-factor
+    B,
+    Segi,
+    /// "ATOM" or "HETATM"
+    Type,
+    FormalCharge,
+    PartialCharge,
+    StringLiteral(String),
+}
+
+/// Parse a label expression string into a LabelExpression
+fn parse_label_expr(s: &str) -> Result<LabelExpression, CmdError> {
+    let trimmed = s.trim();
+
+    // Check for quoted string literal
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        return Ok(LabelExpression::StringLiteral(inner.to_string()));
+    }
+
+    match trimmed.to_lowercase().as_str() {
+        "name" => Ok(LabelExpression::Name),
+        "resn" => Ok(LabelExpression::Resn),
+        "resi" => Ok(LabelExpression::Resi),
+        "chain" => Ok(LabelExpression::Chain),
+        "q" => Ok(LabelExpression::Q),
+        "b" => Ok(LabelExpression::B),
+        "segi" => Ok(LabelExpression::Segi),
+        "type" => Ok(LabelExpression::Type),
+        "formal_charge" => Ok(LabelExpression::FormalCharge),
+        "partial_charge" => Ok(LabelExpression::PartialCharge),
+        // Anything else is a string literal (quotes are stripped by the command parser)
+        _ => Ok(LabelExpression::StringLiteral(trimmed.to_string())),
+    }
+}
+
+/// Evaluate a label expression for a given atom
+fn eval_label_expr(expr: &LabelExpression, atom: &Atom) -> String {
+    match expr {
+        LabelExpression::Name => atom.name.to_string(),
+        LabelExpression::Resn => atom.residue.resn.clone(),
+        LabelExpression::Resi => {
+            if atom.residue.inscode != ' ' {
+                format!("{}{}", atom.residue.resv, atom.residue.inscode)
+            } else {
+                atom.residue.resv.to_string()
+            }
+        }
+        LabelExpression::Chain => atom.residue.chain.clone(),
+        LabelExpression::Q => format!("{:.2}", atom.occupancy),
+        LabelExpression::B => format!("{:.2}", atom.b_factor),
+        LabelExpression::Segi => atom.residue.segi.clone(),
+        LabelExpression::Type => {
+            if atom.state.hetatm {
+                "HETATM".to_string()
+            } else {
+                "ATOM".to_string()
+            }
+        }
+        LabelExpression::FormalCharge => atom.formal_charge.to_string(),
+        LabelExpression::PartialCharge => format!("{:.4}", atom.partial_charge),
+        LabelExpression::StringLiteral(s) => s.clone(),
+    }
+}
+
+struct LabelCommand;
+
+impl Command for LabelCommand {
+    fn name(&self) -> &str {
+        "label"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection, ArgHint::LabelProperty]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "label" sets text labels on atoms based on a property expression.
+
+USAGE
+
+    label [ selection [, expression ]]
+
+ARGUMENTS
+
+    selection = string: atoms to label (default: all)
+    expression = string: property to display:
+        name           - atom name
+        resn           - residue name
+        resi           - residue number/identifier
+        chain          - chain identifier
+        q              - occupancy
+        b              - B-factor
+        segi           - segment identifier
+        type           - ATOM or HETATM
+        formal_charge  - formal charge
+        partial_charge - partial charge
+        "string"       - literal string
+
+    If no expression is given, labels are cleared.
+
+EXAMPLES
+
+    label all, name
+    label chain A, resn
+    label organic, resi
+    label sele, "hello"
+    label              # clear all labels
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let selection = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("selection"))
+            .unwrap_or("all");
+
+        let expr_str = args
+            .get_str(1)
+            .or_else(|| args.get_named_str("expression"));
+
+        let selection_results = evaluate_selection(ctx.viewer, selection)?;
+
+        let mut total_affected = 0usize;
+
+        if let Some(expr_str) = expr_str {
+            // Set labels
+            let expr = parse_label_expr(expr_str)?;
+
+            for (obj_name, selected) in selection_results {
+                let count = selected.count();
+                if count > 0 {
+                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                        mol_obj.state_mut().visible_reps.set_visible(RepMask::LABELS);
+                        let mol_mut = mol_obj.molecule_mut();
+                        for idx in selected.indices() {
+                            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                                atom.repr.label = eval_label_expr(&expr, atom);
+                                atom.repr.visible_reps.set_visible(RepMask::LABELS);
+                            }
+                        }
+                        mol_obj.invalidate(DirtyFlags::REPS);
+                        total_affected += count;
+                    }
+                }
+            }
+
+            if !ctx.quiet {
+                ctx.print(&format!(" Label: {} atoms labeled", total_affected));
+            }
+        } else {
+            // Clear labels
+            for (obj_name, selected) in selection_results {
+                let count = selected.count();
+                if count > 0 {
+                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                        let mol_mut = mol_obj.molecule_mut();
+                        for idx in selected.indices() {
+                            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                                atom.repr.label.clear();
+                                atom.repr.visible_reps.set_hidden(RepMask::LABELS);
+                            }
+                        }
+                        mol_obj.invalidate(DirtyFlags::REPS);
+                        total_affected += count;
+                    }
+                }
+            }
+
+            if !ctx.quiet {
+                ctx.print(&format!(" Label: {} atoms unlabeled", total_affected));
+            }
+        }
+
+        ctx.viewer.request_redraw();
 
         Ok(())
     }

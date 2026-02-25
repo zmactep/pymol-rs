@@ -896,6 +896,33 @@ impl MoleculeObject {
 
         // Lines and dots skip shadow depth — they have negligible depth contribution
     }
+
+    /// Collect label data for screen-space rendering.
+    ///
+    /// Returns (world_position, label_text) for each atom that has LABELS visible
+    /// and a non-empty label string.
+    pub fn collect_labels(&self) -> Vec<(Vec3, &str)> {
+        if !self.state.visible_reps.is_visible(RepMask::LABELS) {
+            return Vec::new();
+        }
+
+        let coord_set = match self.molecule.get_coord_set(self.display_state) {
+            Some(cs) => cs,
+            None => return Vec::new(),
+        };
+
+        let mut labels = Vec::new();
+        for (atom_idx, coord) in coord_set.iter_with_atoms() {
+            let atom = match self.molecule.get_atom(atom_idx) {
+                Some(a) => a,
+                None => continue,
+            };
+            if atom.repr.visible_reps.is_visible(RepMask::LABELS) && !atom.repr.label.is_empty() {
+                labels.push((coord, atom.repr.label.as_str()));
+            }
+        }
+        labels
+    }
 }
 
 /// Render a dot-based indicator (selection or hover) using the dot pipeline.
