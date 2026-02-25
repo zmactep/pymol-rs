@@ -7,19 +7,20 @@
 
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_algos::{
-    ce_align, CeParams,
+    ce_align, rmsd, CeParams,
     global_align, superpose, AlignedPair, AlignmentScoring, SuperposeParams, SuperposeResult,
     substitution_matrix,
 };
 use pymol_mol::{residue_to_char, AtomIndex};
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
 pub fn register(registry: &mut CommandRegistry) {
     registry.register(AlignCommand);
+    registry.register(RmsdCommand);
 }
 
 struct AlignCommand;
@@ -137,6 +138,98 @@ EXAMPLES
             "ce" => align_by_ce(ctx, mobile_sel, target_sel, &params, args),
             "kabsch" | _ => align_by_kabsch(ctx, mobile_sel, target_sel, &params),
         }
+    }
+}
+
+// ============================================================================
+// RMSD command (no superposition)
+// ============================================================================
+
+struct RmsdCommand;
+
+impl Command for RmsdCommand {
+    fn name(&self) -> &str {
+        "rmsd"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["rms_cur"]
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection, ArgHint::Selection]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "rmsd" computes the root-mean-square deviation between two selections
+    without performing any superposition (atoms stay in place).
+
+USAGE
+
+    rmsd sel1, sel2
+
+ARGUMENTS
+
+    sel1 = string: first atom selection
+
+    sel2 = string: second atom selection (must have same number of atoms)
+
+EXAMPLES
+
+    rmsd chain A, chain B
+    rmsd mol1 and name CA, mol2 and name CA
+
+SEE ALSO
+
+    align
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let sel1 = args
+            .get_str(0)
+            .ok_or_else(|| CmdError::MissingArgument("first selection".into()))?;
+        let sel2 = args
+            .get_str(1)
+            .ok_or_else(|| CmdError::MissingArgument("second selection".into()))?;
+
+        let results1 = evaluate_selection(ctx.viewer, sel1)?;
+        let results2 = evaluate_selection(ctx.viewer, sel2)?;
+
+        let (obj1, indices1) = first_molecule_selection(&results1, sel1)?;
+        let (obj2, indices2) = first_molecule_selection(&results2, sel2)?;
+
+        if indices1.len() != indices2.len() {
+            return Err(CmdError::Execution(format!(
+                "Selections have different atom counts: {} vs {}",
+                indices1.len(),
+                indices2.len()
+            )));
+        }
+
+        let n = indices1.len();
+        if n == 0 {
+            return Err(CmdError::Execution("Selections are empty".into()));
+        }
+
+        let coords1 = extract_coords(ctx.viewer, &obj1, &indices1)?;
+        let coords2 = extract_coords(ctx.viewer, &obj2, &indices2)?;
+
+        let value = rmsd(&coords1, &coords2);
+
+        ctx.print(&format!(
+            " Executive: RMSD = {:8.3}, {} atoms",
+            value, n
+        ));
+
+        Ok(())
     }
 }
 

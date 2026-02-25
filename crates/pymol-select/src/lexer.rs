@@ -239,7 +239,7 @@ fn digit_ident(input: &str) -> LexResult<'_, Token> {
     let (input, s) = recognize(tuple((
         digit1,
         take_while1(|c: char| c.is_alphabetic() || c == '\''),
-        take_while(|c: char| c.is_alphanumeric() || c == '\''),
+        take_while(|c: char| c.is_alphanumeric() || c == '_' || c == '\''),
     )))(input)?;
     Ok((input, Token::Ident(s.to_string())))
 }
