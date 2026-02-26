@@ -46,7 +46,7 @@ mod result;
 
 // Re-export main types
 pub use ast::{CompareOp, MacroSpec, SelectionExpr};
-pub use context::EvalContext;
+pub use context::{EvalContext, SelectionOptions};
 pub use error::{EvalError, ParseError, SelectError, SelectResult};
 pub use pattern::{IntSpec, Pattern, ResiItem, ResiSpec};
 pub use result::SelectionResult;

@@ -5,8 +5,8 @@ use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
-use pymol_mol::ObjectMolecule;
-use pymol_select::{EvalContext, SelectionResult};
+use pymol_select::{SelectionOptions, SelectionResult};
+use pymol_settings::id;
 
 /// Expand self-references in a selection expression.
 ///
@@ -80,14 +80,6 @@ pub fn select_with_context(
     // Gather all molecules from the registry
     let object_names: Vec<String> = viewer.objects().names().map(|s| s.to_string()).collect();
 
-    // Collect molecule references
-    let mut molecules: Vec<(&str, &ObjectMolecule)> = Vec::new();
-    for name in &object_names {
-        if let Some(mol_obj) = viewer.objects().get_molecule(name) {
-            molecules.push((name.as_str(), mol_obj.molecule()));
-        }
-    }
-
     // Parse the selection expression upfront (validates syntax even with no molecules)
     let parsed_expr = pymol_select::parse(selection)
         .map_err(|e| CmdError::invalid_arg("selection", format!("parse error: {:?}", e)))?;
@@ -105,37 +97,28 @@ pub fn select_with_context(
         }
     }
 
-    if molecules.is_empty() {
+    if object_names.is_empty() {
         return Ok((0, Vec::new()));
     }
 
     let mut total_count = 0;
     let mut results: Vec<(String, SelectionResult)> = Vec::new();
 
-    for (obj_name, mol) in &molecules {
-        let mut ctx = EvalContext::single(mol);
+    let options = SelectionOptions {
+        ignore_case: viewer.settings().get_bool(id::ignore_case),
+        ignore_case_chain: viewer.settings().get_bool(id::ignore_case_chain),
+    };
 
-        // Add all object names as implicit selections.
-        // For the current object → all atoms selected; for others → empty selection.
-        // This allows "select x, objA and resi 1-10" to work correctly.
-        for (other_name, _) in &molecules {
-            if *other_name == *obj_name {
-                ctx.add_selection(other_name.to_string(), SelectionResult::all(mol.atom_count()));
-            } else {
-                ctx.add_selection(other_name.to_string(), SelectionResult::none(mol.atom_count()));
-            }
-        }
+    for obj_name in &object_names {
+        let Some(mol_obj) = viewer.objects().get_molecule(obj_name) else {
+            continue;
+        };
+        let mol = mol_obj.molecule();
 
-        // Pre-evaluate and add named selections to the context
-        for sel_name in &known_selections {
-            if let Some(sel_expr) = viewer.get_selection(sel_name) {
-                if let Ok(expr) = pymol_select::parse(sel_expr) {
-                    if let Ok(result) = pymol_select::evaluate(&expr, &ctx) {
-                        ctx.add_selection(sel_name.clone(), result);
-                    }
-                }
-            }
-        }
+        // Build context with implicit object selections and named selections
+        let ctx = viewer.selections().build_eval_context(
+            mol, obj_name, &object_names, options,
+        );
 
         match pymol_select::evaluate(&parsed_expr, &ctx) {
             Ok(result) => {

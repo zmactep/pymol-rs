@@ -8,6 +8,27 @@ use pymol_mol::ObjectMolecule;
 
 use crate::result::SelectionResult;
 
+/// Options controlling selection matching behavior.
+///
+/// Mirrors PyMOL's `ignore_case` and `ignore_case_chain` settings.
+/// Construct from `GlobalSettings` at call sites that have access to pymol-settings.
+#[derive(Debug, Clone, Copy)]
+pub struct SelectionOptions {
+    /// Ignore case for name/resn/elem/alt etc. (PyMOL default: true)
+    pub ignore_case: bool,
+    /// Ignore case for chain/segi (PyMOL default: false)
+    pub ignore_case_chain: bool,
+}
+
+impl Default for SelectionOptions {
+    fn default() -> Self {
+        Self {
+            ignore_case: true,
+            ignore_case_chain: false,
+        }
+    }
+}
+
 /// Context for evaluating selection expressions
 ///
 /// The context provides access to:
@@ -30,6 +51,9 @@ pub struct EvalContext<'a> {
 
     /// Starting index for each molecule in the flattened atom array
     molecule_offsets: Vec<usize>,
+
+    /// Selection matching options (case sensitivity, etc.)
+    pub options: SelectionOptions,
 }
 
 impl<'a> EvalContext<'a> {
@@ -42,6 +66,7 @@ impl<'a> EvalContext<'a> {
             state: None,
             total_atoms,
             molecule_offsets: vec![0],
+            options: SelectionOptions::default(),
         }
     }
 
@@ -59,6 +84,7 @@ impl<'a> EvalContext<'a> {
             state: None,
             total_atoms,
             molecule_offsets: offsets,
+            options: SelectionOptions::default(),
         }
     }
 
@@ -70,6 +96,7 @@ impl<'a> EvalContext<'a> {
             state: None,
             total_atoms: 0,
             molecule_offsets: Vec::new(),
+            options: SelectionOptions::default(),
         }
     }
 

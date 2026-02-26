@@ -11,7 +11,7 @@ use pymol_mol::RepMask;
 use pymol_render::ColorResolver;
 use pymol_scene::{MoleculeObject, Object};
 use pymol_scene::{expand_pick_to_selection, normalize_matrix, pick_expression_for_hit, PickHit, Picker};
-use pymol_select::{build_sele_command, EvalContext, SelectionResult};
+use pymol_select::{build_sele_command, SelectionResult};
 use pymol_scene::{CameraDelta, KeyBinding, KeyBindings, InputState, setup_uniforms};
 use pymol_render::picking::Ray;
 // Re-export SelectionEntry for use in UI
@@ -494,7 +494,7 @@ impl App {
     /// Calls `prepare_render` on each molecule, updates selection indicators,
     /// and marks shadows dirty if any geometry changed.
     fn prepare_molecules(&mut self, names: &[String]) {
-        let selection_results = self.evaluate_visible_selections(names);
+        let selection_results = self.evaluate_visible_selections();
         let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
         let mouse_selection_mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
 
@@ -1484,100 +1484,16 @@ impl App {
         }
     }
 
-    /// Evaluate all visible selections for all molecules
+    /// Evaluate all visible selections for all molecules.
     ///
-    /// Returns a vector of (object_name, SelectionResult) pairs where the
-    /// SelectionResult is the union of all visible selections.
-    fn evaluate_visible_selections(
-        &self,
-        names: &[String],
-    ) -> Vec<(String, SelectionResult)> {
-        // Collect visible selection expressions
-        let visible_selections: Vec<(&str, &str)> = self.state.selections
-            .iter()
-            .filter(|(_, entry)| entry.visible)
-            .map(|(name, entry)| (name.as_str(), entry.expression.as_str()))
-            .collect();
-
-        if visible_selections.is_empty() {
-            return Vec::new();
-        }
-
-        log::debug!("Evaluating {} visible selections", visible_selections.len());
-
-        let mut results: Vec<(String, SelectionResult)> = Vec::new();
-
-        // Evaluate for each molecule
-        for mol_name in names {
-            if let Some(mol_obj) = self.state.registry.get_molecule(mol_name) {
-                let mol = mol_obj.molecule();
-
-                // Build context for this molecule with named selections
-                let mut ctx = EvalContext::single(mol);
-
-                // Add all object names as implicit selections so cross-object
-                // references resolve correctly (e.g., "select x, objA and resi 1-10")
-                let atom_count = mol.atom_count();
-                for other_name in names {
-                    if other_name == mol_name {
-                        ctx.add_selection(other_name.to_string(), SelectionResult::all(atom_count));
-                    } else {
-                        ctx.add_selection(other_name.to_string(), SelectionResult::none(atom_count));
-                    }
-                }
-
-                // Add all named selections to context (for reference resolution)
-                // These override object names if there's a conflict
-                for (sel_name, entry) in self.state.selections.iter() {
-                    if let Ok(sel_ast) = pymol_select::parse(&entry.expression) {
-                        if let Ok(sel_result) = pymol_select::evaluate(&sel_ast, &ctx) {
-                            ctx.add_selection(sel_name.clone(), sel_result);
-                        }
-                    }
-                }
-
-                // Evaluate and combine all visible selections
-                let mut combined_result: Option<SelectionResult> = None;
-
-                for (sel_name, sel_expr) in &visible_selections {
-                    let expr = match pymol_select::parse(sel_expr) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            log::debug!("Failed to parse selection '{}': {:?}", sel_name, e);
-                            continue;
-                        }
-                    };
-
-                    match pymol_select::evaluate(&expr, &ctx) {
-                        Ok(result) => {
-                            log::debug!(
-                                "Selection '{}' matched {} atoms in '{}'",
-                                sel_name,
-                                result.count(),
-                                mol_name
-                            );
-                            combined_result = match combined_result {
-                                Some(existing) => Some(existing.union(&result)),
-                                None => Some(result),
-                            };
-                        }
-                        Err(e) => {
-                            log::debug!("Failed to evaluate selection '{}' for '{}': {:?}", sel_name, mol_name, e);
-                        }
-                    }
-                }
-
-                // Add combined result if any atoms matched
-                if let Some(result) = combined_result {
-                    if result.any() {
-                        results.push((mol_name.clone(), result));
-                    }
-                }
-            }
-        }
-
-        log::debug!("Visible selections evaluation returned {} molecule results", results.len());
-        results
+    /// Delegates to `SelectionManager::evaluate_visible` which builds full
+    /// evaluation contexts (implicit object-name selections, pre-evaluated
+    /// named selections) for each molecule.
+    fn evaluate_visible_selections(&self) -> Vec<(String, SelectionResult)> {
+        self.state.selections.evaluate_visible(
+            &self.state.registry,
+            Default::default(),
+        )
     }
 
     /// Sync the current "sele" selection to the sequence panel highlights

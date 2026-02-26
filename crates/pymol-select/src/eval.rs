@@ -41,25 +41,25 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
 
         // Property selectors
         SelectionExpr::Name(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.name, false)
+            pattern.matches(&atom.name, !ctx.options.ignore_case)
         }),
         SelectionExpr::Resn(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.residue.resn, false)
+            pattern.matches(&atom.residue.resn, !ctx.options.ignore_case)
         }),
         SelectionExpr::Resi(spec) => eval_property(ctx, |atom, _| {
             spec.matches(atom.residue.resv, atom.residue.inscode)
         }),
         SelectionExpr::Chain(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.residue.chain, false)
+            pattern.matches(&atom.residue.chain, !ctx.options.ignore_case_chain)
         }),
         SelectionExpr::Segi(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.residue.segi, false)
+            pattern.matches(&atom.residue.segi, !ctx.options.ignore_case_chain)
         }),
         SelectionExpr::Elem(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(atom.element.symbol(), false)
+            pattern.matches(atom.element.symbol(), !ctx.options.ignore_case)
         }),
         SelectionExpr::Alt(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.alt.to_string(), false)
+            pattern.matches(&atom.alt.to_string(), !ctx.options.ignore_case)
         }),
         SelectionExpr::Model(pattern) => eval_model(ctx, pattern),
         SelectionExpr::Index(spec) => eval_property(ctx, |_, info| {
@@ -82,7 +82,7 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
                 SecondaryStructure::Bend => "B",
                 SecondaryStructure::NucleicRibbon => "N",
             };
-            pattern.matches(ss_str, false)
+            pattern.matches(ss_str, !ctx.options.ignore_case)
         }),
         SelectionExpr::State(spec) => eval_property(ctx, |atom, _| {
             spec.matches(atom.discrete_state)
@@ -124,35 +124,35 @@ fn eval_expr(expr: &SelectionExpr, ctx: &EvalContext) -> EvalResult<SelectionRes
             ];
             // Check if the atom has the specific representation visible
             rep_map.iter().any(|(rep_name, rep_mask)| {
-                pattern.matches(rep_name, false) && atom.repr.visible_reps.is_visible(*rep_mask)
+                pattern.matches(rep_name, !ctx.options.ignore_case) && atom.repr.visible_reps.is_visible(*rep_mask)
             })
         }),
         SelectionExpr::Color(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.repr.colors.base.to_string(), false)
+            pattern.matches(&atom.repr.colors.base.to_string(), !ctx.options.ignore_case)
         }),
         SelectionExpr::CartoonColor(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.repr.colors.cartoon_or_base().to_string(), false)
+            pattern.matches(&atom.repr.colors.cartoon_or_base().to_string(), !ctx.options.ignore_case)
         }),
         SelectionExpr::RibbonColor(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.repr.colors.ribbon_or_base().to_string(), false)
+            pattern.matches(&atom.repr.colors.ribbon_or_base().to_string(), !ctx.options.ignore_case)
         }),
         SelectionExpr::Label(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.repr.label, false)
+            pattern.matches(&atom.repr.label, !ctx.options.ignore_case)
         }),
         SelectionExpr::Custom(pattern) => eval_property(ctx, |atom, _| {
             // Custom properties would need additional support
-            pattern.matches(&atom.repr.text_type, false)
+            pattern.matches(&atom.repr.text_type, !ctx.options.ignore_case)
         }),
         SelectionExpr::TextType(pattern) => eval_property(ctx, |atom, _| {
-            pattern.matches(&atom.repr.text_type, false)
+            pattern.matches(&atom.repr.text_type, !ctx.options.ignore_case)
         }),
         SelectionExpr::NumericType(pattern) => eval_property(ctx, |atom, _| {
             // Numeric type is typically an integer
-            pattern.matches(&atom.repr.text_type, false)
+            pattern.matches(&atom.repr.text_type, !ctx.options.ignore_case)
         }),
         SelectionExpr::Stereo(pattern) => eval_property(ctx, |atom, _| {
             let stereo_str = format!("{:?}", atom.stereo);
-            pattern.matches(&stereo_str, false)
+            pattern.matches(&stereo_str, !ctx.options.ignore_case)
         }),
         SelectionExpr::PepSeq(pattern) => eval_pepseq(ctx, pattern),
 
@@ -348,7 +348,7 @@ fn eval_model(ctx: &EvalContext, pattern: &Pattern) -> EvalResult<SelectionResul
     let mut result = SelectionResult::new(ctx.total_atoms());
 
     for (mol, offset) in ctx.molecules_with_offsets() {
-        if pattern.matches(&mol.name, false) {
+        if pattern.matches(&mol.name, !ctx.options.ignore_case) {
             for local_idx in 0..mol.atom_count() {
                 result.set_index(offset + local_idx);
             }
@@ -365,7 +365,7 @@ fn eval_pepseq(ctx: &EvalContext, pattern: &Pattern) -> EvalResult<SelectionResu
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
             if let Some(code) = three_to_one(&atom.residue.resn) {
-                if pattern.matches(&code.to_string(), false) {
+                if pattern.matches(&code.to_string(), !ctx.options.ignore_case) {
                     result.set_index(offset + local_idx);
                 }
             }
@@ -407,7 +407,7 @@ fn eval_generic_property(
         "name" => {
             if let PropertyValue::String(v) = value {
                 let pattern = Pattern::Exact(v.clone());
-                eval_property(ctx, |atom, _| pattern.matches(&atom.name, false))
+                eval_property(ctx, |atom, _| pattern.matches(&atom.name, !ctx.options.ignore_case))
             } else {
                 Err(EvalError::TypeMismatch {
                     expected: "string".to_string(),
@@ -923,23 +923,23 @@ fn eval_macro(ctx: &EvalContext, spec: &MacroSpec) -> EvalResult<SelectionResult
         // Check each component
         if let Some(ref pattern) = spec.model {
             if let Some(mol) = ctx.molecule(info.mol_idx) {
-                if !pattern.matches(&mol.name, false) {
+                if !pattern.matches(&mol.name, !ctx.options.ignore_case) {
                     return false;
                 }
             }
         }
         if let Some(ref pattern) = spec.segi {
-            if !pattern.matches(&atom.residue.segi, false) {
+            if !pattern.matches(&atom.residue.segi, !ctx.options.ignore_case_chain) {
                 return false;
             }
         }
         if let Some(ref pattern) = spec.chain {
-            if !pattern.matches(&atom.residue.chain, false) {
+            if !pattern.matches(&atom.residue.chain, !ctx.options.ignore_case_chain) {
                 return false;
             }
         }
         if let Some(ref pattern) = spec.resn {
-            if !pattern.matches(&atom.residue.resn, false) {
+            if !pattern.matches(&atom.residue.resn, !ctx.options.ignore_case) {
                 return false;
             }
         }
@@ -949,12 +949,12 @@ fn eval_macro(ctx: &EvalContext, spec: &MacroSpec) -> EvalResult<SelectionResult
             }
         }
         if let Some(ref pattern) = spec.name {
-            if !pattern.matches(&atom.name, false) {
+            if !pattern.matches(&atom.name, !ctx.options.ignore_case) {
                 return false;
             }
         }
         if let Some(ref pattern) = spec.alt {
-            if !pattern.matches(&atom.alt.to_string(), false) {
+            if !pattern.matches(&atom.alt.to_string(), !ctx.options.ignore_case) {
                 return false;
             }
         }
@@ -1199,5 +1199,54 @@ mod tests {
         let expr = crate::parse("/test//A/ALA/").unwrap();
         let result = evaluate(&expr, &ctx).unwrap();
         assert_eq!(result.count(), 4); // All 4 atoms in ALA residue
+    }
+
+    /// Create a molecule with two chains differing only by case: "A" and "a"
+    fn create_mixed_case_chain_molecule() -> ObjectMolecule {
+        let mut mol = ObjectMolecule::new("test");
+
+        let chain_upper = Arc::new(AtomResidue::from_parts("A", "ALA", 1, ' ', ""));
+        let chain_lower = Arc::new(AtomResidue::from_parts("a", "GLY", 1, ' ', ""));
+
+        for (name, residue, elem) in [
+            ("N", chain_upper.clone(), Element::Nitrogen),
+            ("CA", chain_upper.clone(), Element::Carbon),
+            ("N", chain_lower.clone(), Element::Nitrogen),
+            ("CA", chain_lower.clone(), Element::Carbon),
+        ] {
+            let mut atom = Atom::new(name, elem);
+            atom.residue = residue;
+            mol.add_atom(atom);
+        }
+
+        mol
+    }
+
+    #[test]
+    fn test_chain_selection_case_sensitive_by_default() {
+        let mol = create_mixed_case_chain_molecule();
+        let ctx = EvalContext::single(&mol); // defaults: ignore_case_chain = false
+
+        // "chain A" should only match chain "A", not "a"
+        let expr = SelectionExpr::Chain(Pattern::Exact("A".to_string()));
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 2); // Only the 2 atoms in chain "A"
+
+        // "chain a" should only match chain "a", not "A"
+        let expr = SelectionExpr::Chain(Pattern::Exact("a".to_string()));
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 2); // Only the 2 atoms in chain "a"
+    }
+
+    #[test]
+    fn test_chain_selection_case_insensitive_when_setting_enabled() {
+        let mol = create_mixed_case_chain_molecule();
+        let mut ctx = EvalContext::single(&mol);
+        ctx.options.ignore_case_chain = true; // override: make chain matching case-insensitive
+
+        // "chain A" should now match both "A" and "a"
+        let expr = SelectionExpr::Chain(Pattern::Exact("A".to_string()));
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 4); // All 4 atoms
     }
 }

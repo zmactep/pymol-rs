@@ -4,7 +4,7 @@
 //! similar to PyMOL's selection system.
 
 use ahash::AHashMap;
-use pymol_select::{EvalContext, SelectionResult};
+use pymol_select::{EvalContext, SelectionOptions, SelectionResult};
 use serde::{Deserialize, Serialize};
 
 use crate::object::ObjectRegistry;
@@ -172,88 +172,108 @@ impl SelectionManager {
         self.selections.clear();
     }
 
-    /// Evaluate all visible selections for all molecules
+    /// Evaluate all visible selections for all molecules.
+    ///
+    /// Builds a full evaluation context per molecule (implicit object-name
+    /// selections + pre-evaluated named selections) and combines all visible
+    /// selection results with OR.
     ///
     /// Returns a vector of (object_name, SelectionResult) pairs where the
     /// SelectionResult is the union of all visible selections.
     pub fn evaluate_visible(
         &self,
         registry: &ObjectRegistry,
+        options: SelectionOptions,
     ) -> Vec<(String, SelectionResult)> {
-        // Collect visible selection expressions
-        let visible_selections: Vec<(&str, &str)> = self
-            .selections
-            .iter()
-            .filter(|(_, entry)| entry.visible)
-            .map(|(name, entry)| (name.as_str(), entry.expression.as_str()))
-            .collect();
-
-        if visible_selections.is_empty() {
+        let visible: Vec<(&str, &str)> = self.visible_selections().collect();
+        if visible.is_empty() {
             return Vec::new();
         }
 
+        let object_names: Vec<String> = registry.names().map(|s| s.to_string()).collect();
         let mut results: Vec<(String, SelectionResult)> = Vec::new();
 
-        // Get all molecule names
-        let names: Vec<_> = registry.names().map(|s| s.to_string()).collect();
+        for obj_name in &object_names {
+            let Some(mol_obj) = registry.get_molecule(obj_name) else {
+                continue;
+            };
+            let ctx = self.build_eval_context(mol_obj.molecule(), obj_name, &object_names, options);
 
-        // Evaluate for each molecule
-        for mol_name in &names {
-            if let Some(mol_obj) = registry.get_molecule(mol_name) {
-                let mol = mol_obj.molecule();
-
-                // Build context for this molecule with named selections
-                let mut ctx = EvalContext::single(mol);
-
-                // Add all named selections to context (for reference resolution)
-                for (sel_name, entry) in &self.selections {
-                    if let Ok(sel_ast) = pymol_select::parse(&entry.expression) {
-                        if let Ok(sel_result) = pymol_select::evaluate(&sel_ast, &ctx) {
-                            ctx.add_selection(sel_name.clone(), sel_result);
-                        }
+            // Evaluate and OR together all visible selections
+            let mut combined: Option<SelectionResult> = None;
+            for (sel_name, sel_expr) in &visible {
+                let ast = match pymol_select::parse(sel_expr) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        log::debug!("Failed to parse selection '{}': {:?}", sel_name, e);
+                        continue;
+                    }
+                };
+                match pymol_select::evaluate(&ast, &ctx) {
+                    Ok(result) => {
+                        combined = Some(match combined {
+                            Some(existing) => existing.union(&result),
+                            None => result,
+                        });
+                    }
+                    Err(e) => {
+                        log::debug!(
+                            "Failed to evaluate selection '{}' for '{}': {:?}",
+                            sel_name, obj_name, e
+                        );
                     }
                 }
+            }
 
-                // Evaluate and combine all visible selections
-                let mut combined_result: Option<SelectionResult> = None;
-
-                for (sel_name, sel_expr) in &visible_selections {
-                    let expr = match pymol_select::parse(sel_expr) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            log::debug!("Failed to parse selection '{}': {:?}", sel_name, e);
-                            continue;
-                        }
-                    };
-
-                    match pymol_select::evaluate(&expr, &ctx) {
-                        Ok(result) => {
-                            combined_result = match combined_result {
-                                Some(existing) => Some(existing.union(&result)),
-                                None => Some(result),
-                            };
-                        }
-                        Err(e) => {
-                            log::debug!(
-                                "Failed to evaluate selection '{}' for '{}': {:?}",
-                                sel_name,
-                                mol_name,
-                                e
-                            );
-                        }
-                    }
-                }
-
-                // Add combined result if any atoms matched
-                if let Some(result) = combined_result {
-                    if result.any() {
-                        results.push((mol_name.clone(), result));
-                    }
+            if let Some(result) = combined {
+                if result.any() {
+                    results.push((obj_name.clone(), result));
                 }
             }
         }
 
         results
+    }
+
+    /// Build an `EvalContext` for a single molecule within the registry.
+    ///
+    /// The context includes:
+    /// - Implicit object-name selections (all for the target, none for others)
+    /// - Pre-evaluated named selections for reference resolution
+    /// - The provided `SelectionOptions` for case-sensitivity control
+    ///
+    /// This is the shared context-building logic used by both command-level
+    /// selection evaluation and rendering-level visible selection evaluation.
+    pub fn build_eval_context<'a>(
+        &self,
+        mol: &'a pymol_mol::ObjectMolecule,
+        obj_name: &str,
+        all_object_names: &[String],
+        options: SelectionOptions,
+    ) -> EvalContext<'a> {
+        let mut ctx = EvalContext::single(mol);
+        ctx.options = options;
+
+        // Implicit object-name selections
+        let atom_count = mol.atom_count();
+        for other in all_object_names {
+            if other == obj_name {
+                ctx.add_selection(other.clone(), SelectionResult::all(atom_count));
+            } else {
+                ctx.add_selection(other.clone(), SelectionResult::none(atom_count));
+            }
+        }
+
+        // Pre-evaluate all named selections into the context
+        for (sel_name, entry) in &self.selections {
+            if let Ok(ast) = pymol_select::parse(&entry.expression) {
+                if let Ok(result) = pymol_select::evaluate(&ast, &ctx) {
+                    ctx.add_selection(sel_name.clone(), result);
+                }
+            }
+        }
+
+        ctx
     }
 }
 
