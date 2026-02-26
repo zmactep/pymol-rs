@@ -4,7 +4,7 @@
 //! using either GPU-based color coding or CPU-based ray casting.
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{AtomIndex, ObjectMolecule};
+use pymol_mol::{AtomIndex, ObjectMolecule, RepMask};
 use pymol_render::picking::{PickResult, PickingConfig, Ray};
 use pymol_select::SelectionResult;
 
@@ -109,10 +109,16 @@ impl Picker {
             if let Some(mol_obj) = registry.get_molecule(&name) {
                 let molecule = mol_obj.molecule();
                 let state_idx = mol_obj.display_state();
+                let obj_reps = mol_obj.visible_reps();
 
                 if let Some(coord_set) = molecule.get_coord_set(state_idx) {
                     for (atom_idx, coord) in coord_set.iter_with_atoms() {
                         if let Some(atom) = molecule.get_atom(atom_idx) {
+                            // Skip atoms with no visible representation
+                            if atom.repr.visible_reps.intersection(obj_reps) == RepMask::NONE {
+                                continue;
+                            }
+
                             let center = [coord.x, coord.y, coord.z];
                             let radius = atom.effective_vdw();
 
@@ -605,5 +611,22 @@ mod tests {
         assert!(pick_expression_for_hit(&hit, 0, &mol).is_none());
         // Object mode still works without an atom
         assert_eq!(pick_expression_for_hit(&hit, 4, &mol).unwrap(), "model test");
+    }
+
+    #[test]
+    fn test_invisible_atom_not_pickable() {
+        let obj_reps = RepMask::CARTOON.union(RepMask::STICKS);
+
+        // Atom with cartoon visible — pickable
+        assert!(RepMask::CARTOON.intersection(obj_reps) != RepMask::NONE);
+
+        // Atom with only lines — not pickable (lines not enabled at object level)
+        assert!(RepMask::LINES.intersection(obj_reps) == RepMask::NONE);
+
+        // Atom with no reps — not pickable
+        assert!(RepMask::NONE.intersection(obj_reps) == RepMask::NONE);
+
+        // Object with no reps — nothing pickable
+        assert!(RepMask::CARTOON.intersection(RepMask::NONE) == RepMask::NONE);
     }
 }
