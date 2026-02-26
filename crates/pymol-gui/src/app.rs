@@ -619,14 +619,20 @@ impl App {
             occlusion_query_set: None,
         });
 
-        // Restrict 3D rendering to the central viewport area.
+        // Restrict 3D rendering to the central viewport area, clamped to surface bounds.
         if let Some(vp) = &self.view.viewport_rect {
-            let vp_x = vp.min.x.max(0.0);
-            let vp_y = vp.min.y.max(0.0);
-            let vp_w = vp.width().max(1.0);
-            let vp_h = vp.height().max(1.0);
-            render_pass.set_viewport(vp_x, vp_y, vp_w, vp_h, 0.0, 1.0);
-            render_pass.set_scissor_rect(vp_x as u32, vp_y as u32, vp_w as u32, vp_h as u32);
+            let (surf_w, surf_h) = self
+                .view
+                .surface_config
+                .as_ref()
+                .map(|c| (c.width, c.height))
+                .unwrap_or((1, 1));
+            let vp_x = (vp.min.x.max(0.0) as u32).min(surf_w.saturating_sub(1));
+            let vp_y = (vp.min.y.max(0.0) as u32).min(surf_h.saturating_sub(1));
+            let vp_w = (vp.width().max(1.0) as u32).min(surf_w - vp_x);
+            let vp_h = (vp.height().max(1.0) as u32).min(surf_h - vp_y);
+            render_pass.set_viewport(vp_x as f32, vp_y as f32, vp_w as f32, vp_h as f32, 0.0, 1.0);
+            render_pass.set_scissor_rect(vp_x, vp_y, vp_w, vp_h);
         }
 
         for name in names {
@@ -818,8 +824,22 @@ impl App {
                 // Top panel - output and command line
                 egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
                     if ui_config.show_output_panel {
-                        OutputPanel::show(ui, output);
-                        ui.separator();
+                        OutputPanel::show(ui, output, ui_config.output_panel_height);
+
+                        // Draggable resize handle between output and command line
+                        let resize_id = ui.id().with("output_resize_handle");
+                        let sep_response = ui.separator();
+                        let handle_rect = sep_response.rect.expand2(egui::vec2(0.0, 2.0));
+                        let response =
+                            ui.interact(handle_rect, resize_id, egui::Sense::drag());
+                        if response.dragged() {
+                            ui_config.output_panel_height =
+                                (ui_config.output_panel_height + response.drag_delta().y)
+                                    .clamp(30.0, 600.0);
+                        }
+                        if response.hovered() || response.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                        }
                     }
 
                     match CommandLinePanel::show(ui, command_line, &completion_ctx) {
@@ -830,17 +850,78 @@ impl App {
                     }
                 });
 
-                // Bottom panel - sequence viewer
+                // Bottom panel - sequence viewer (docked or floating)
                 if ui_config.show_sequence_panel {
-                    let panel_height = sequence_panel.desired_height(registry);
-                    egui::TopBottomPanel::bottom("sequence_panel")
-                        .resizable(true)
-                        .default_height(panel_height)
-                        .height_range(30.0..=200.0)
-                        .show(ctx, |ui| {
-                            let has_sele = selections.contains("sele");
-                            sequence_actions = sequence_panel.show(ui, registry, named_colors, has_sele);
-                        });
+                    let has_sele = selections.contains("sele");
+
+                    if ui_config.sequence_panel_floating {
+                        // Floating mode: egui::Window
+                        let mut open = true;
+                        egui::Window::new("Sequence")
+                            .id(egui::Id::new("sequence_panel_window"))
+                            .open(&mut open)
+                            .default_size(ui_config.sequence_window_size)
+                            .min_size([200.0, 60.0])
+                            .resizable(true)
+                            .collapsible(true)
+                            .show(ctx, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .small_button("\u{2B07}")
+                                                .on_hover_text("Dock panel")
+                                                .clicked()
+                                            {
+                                                ui_config.sequence_panel_floating = false;
+                                                sequence_panel.clear_drag();
+                                            }
+                                        },
+                                    );
+                                });
+                                ui.separator();
+                                sequence_actions =
+                                    sequence_panel.show(ui, registry, named_colors, has_sele);
+                            });
+                        if !open {
+                            ui_config.show_sequence_panel = false;
+                        }
+                    } else {
+                        // Docked mode: TopBottomPanel at bottom
+                        let panel_height = sequence_panel.desired_height(registry);
+                        egui::TopBottomPanel::bottom("sequence_panel")
+                            .resizable(true)
+                            .default_height(panel_height)
+                            .height_range(30.0..=200.0)
+                            .show(ctx, |ui| {
+                                // Float button in top-right corner
+                                let rect = ui.max_rect();
+                                let btn_size = egui::vec2(20.0, 16.0);
+                                let btn_pos = egui::pos2(
+                                    rect.right() - btn_size.x - 4.0,
+                                    rect.top() + 2.0,
+                                );
+                                let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
+                                if ui
+                                    .put(
+                                        btn_rect,
+                                        egui::Button::new(
+                                            egui::RichText::new("\u{2197}").size(12.0),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text("Float panel")
+                                    .clicked()
+                                {
+                                    ui_config.sequence_panel_floating = true;
+                                    sequence_panel.clear_drag();
+                                }
+
+                                sequence_actions =
+                                    sequence_panel.show(ui, registry, named_colors, has_sele);
+                            });
+                    }
                 }
 
                 // Right panel - object list only
@@ -1644,7 +1725,11 @@ impl App {
         let mouse_pos = self.input.mouse_position();
         let over_viewport = self.view.is_over_viewport(mouse_pos);
 
-        if !over_viewport {
+        // Also skip camera updates when egui is using the pointer (e.g. dragging a
+        // floating window that overlaps the viewport).
+        let egui_using_pointer = self.view.egui_ctx.is_using_pointer();
+
+        if !over_viewport || egui_using_pointer {
             // Still need to consume the deltas to avoid accumulation
             self.input.take_camera_deltas();
             return;

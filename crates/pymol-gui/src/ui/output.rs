@@ -15,12 +15,9 @@ impl OutputPanel {
     /// # Arguments
     /// * `ui` - The egui UI context
     /// * `state` - The output buffer state
-    pub fn show(ui: &mut Ui, state: &OutputBufferState) {
-        // Use a reasonable default height - the actual height is controlled by the panel
-        let available_height = 150.0;
-
+    pub fn show(ui: &mut Ui, state: &OutputBufferState, max_height: f32) {
         ScrollArea::vertical()
-            .max_height(available_height)
+            .max_height(max_height)
             .auto_shrink([false, false])
             .stick_to_bottom(state.auto_scroll)
             .show(ui, |ui| {

@@ -166,6 +166,12 @@ impl SequencePanel {
         }
     }
 
+    /// Clear any active drag state (called on dock/float transition).
+    pub fn clear_drag(&mut self) {
+        self.drag_start = None;
+        self.drag_end = None;
+    }
+
     /// Update the highlighted residues from the current 3D selection.
     pub fn update_highlights(&mut self, highlighted: HashSet<ResidueRef>) {
         self.highlighted = highlighted;

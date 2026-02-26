@@ -11,6 +11,10 @@ pub struct UiConfig {
     pub show_control_panel: bool,
     /// Show the sequence viewer panel at bottom
     pub show_sequence_panel: bool,
+    /// Whether the sequence panel is floating (true) or docked at bottom (false)
+    pub sequence_panel_floating: bool,
+    /// Default size for the floating sequence window
+    pub sequence_window_size: [f32; 2],
     /// Output panel height in pixels
     pub output_panel_height: f32,
     /// Right panel width in pixels
@@ -30,6 +34,8 @@ impl UiConfig {
             show_output_panel: true,
             show_control_panel: true,
             show_sequence_panel: false,
+            sequence_panel_floating: false,
+            sequence_window_size: [600.0, 150.0],
             output_panel_height: 150.0,
             right_panel_width: 200.0,
         }
