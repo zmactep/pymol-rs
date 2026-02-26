@@ -1168,4 +1168,36 @@ mod tests {
         let expr = crate::parse("blabla").unwrap();
         assert!(evaluate(&expr, &ctx).is_err());
     }
+
+    #[test]
+    fn test_eval_macro_leading_slash() {
+        // /test///1/CA → model=test, resi=1, name=CA → 1 atom (CA in ALA resi 1)
+        let mol = create_test_molecule();
+        let ctx = EvalContext::single(&mol);
+        let expr = crate::parse("/test///1/CA").unwrap();
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 1);
+        assert!(result.contains(AtomIndex(1))); // CA in ALA (resi 1)
+    }
+
+    #[test]
+    fn test_eval_macro_no_leading_slash() {
+        // A/1/CA → chain=A, resi=1, name=CA (right-to-left)
+        let mol = create_test_molecule();
+        let ctx = EvalContext::single(&mol);
+        let expr = crate::parse("A/1/CA").unwrap();
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 1);
+        assert!(result.contains(AtomIndex(1))); // CA in chain A, resi 1
+    }
+
+    #[test]
+    fn test_eval_macro_resn() {
+        // /test//A/ALA/ → model=test, chain=A, resn=ALA → all ALA atoms in chain A
+        let mol = create_test_molecule();
+        let ctx = EvalContext::single(&mol);
+        let expr = crate::parse("/test//A/ALA/").unwrap();
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 4); // All 4 atoms in ALA residue
+    }
 }

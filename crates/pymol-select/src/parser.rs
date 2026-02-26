@@ -25,6 +25,39 @@ pub fn parse_selection(input: &str) -> Result<SelectionExpr, ParseError> {
     Ok(expr)
 }
 
+/// Binary operator recognized during expression parsing.
+#[derive(Debug, Clone, Copy)]
+enum BinOp {
+    And,
+    Or,
+    In,
+    Like,
+    AndNot,
+}
+
+impl BinOp {
+    fn precedence(self) -> u8 {
+        match self {
+            BinOp::And | BinOp::AndNot => Keyword::And.precedence(),
+            BinOp::Or => Keyword::Or.precedence(),
+            BinOp::In => Keyword::In.precedence(),
+            BinOp::Like => Keyword::Like.precedence(),
+        }
+    }
+
+    fn build(self, left: SelectionExpr, right: SelectionExpr) -> SelectionExpr {
+        match self {
+            BinOp::And => SelectionExpr::And(Box::new(left), Box::new(right)),
+            BinOp::Or => SelectionExpr::Or(Box::new(left), Box::new(right)),
+            BinOp::In => SelectionExpr::In(Box::new(left), Box::new(right)),
+            BinOp::Like => SelectionExpr::Like(Box::new(left), Box::new(right)),
+            BinOp::AndNot => {
+                SelectionExpr::And(Box::new(left), Box::new(SelectionExpr::Not(Box::new(right))))
+            }
+        }
+    }
+}
+
 /// Parse an expression with minimum precedence
 fn parse_expr(stream: &mut TokenStream, min_prec: u8) -> Result<SelectionExpr, ParseError> {
     let mut left = parse_unary(stream)?;
@@ -34,56 +67,28 @@ fn parse_expr(stream: &mut TokenStream, min_prec: u8) -> Result<SelectionExpr, P
             break;
         };
 
-        // Check for binary operators
-        let (op_kw, prec) = match &tok {
+        let op = match &tok {
             Token::Ident(s) => match lookup(s) {
-                Some(kw @ Keyword::And) => (Some(kw), kw.precedence()),
-                Some(kw @ Keyword::Or) => (Some(kw), kw.precedence()),
-                Some(kw @ Keyword::In) => (Some(kw), kw.precedence()),
-                Some(kw @ Keyword::Like) => (Some(kw), kw.precedence()),
-                _ => break, // Not a binary operator
+                Some(Keyword::And) => BinOp::And,
+                Some(Keyword::Or) => BinOp::Or,
+                Some(Keyword::In) => BinOp::In,
+                Some(Keyword::Like) => BinOp::Like,
+                _ => break,
             },
-            Token::Ampersand => (Some(Keyword::And), Keyword::And.precedence()),
-            Token::Pipe => (Some(Keyword::Or), Keyword::Or.precedence()),
-            Token::Plus => (Some(Keyword::Or), Keyword::Or.precedence()),
-            Token::Minus => {
-                // Minus is AND NOT
-                (Some(Keyword::And), Keyword::And.precedence())
-            }
-            _ => break, // Not a binary operator
+            Token::Ampersand => BinOp::And,
+            Token::Pipe => BinOp::Or,
+            Token::Plus => BinOp::Or,
+            Token::Minus => BinOp::AndNot,
+            _ => break,
         };
 
-        let Some(op_kw) = op_kw else {
-            break;
-        };
-
-        if prec < min_prec {
+        if op.precedence() < min_prec {
             break;
         }
 
-        // Consume the operator
         stream.next();
-
-        // Handle minus as AND NOT
-        let is_and_not = matches!(tok, Token::Minus);
-
-        // Parse the right side with higher precedence
-        let right = parse_expr(stream, prec + 1)?;
-
-        // Build the expression
-        left = match op_kw {
-            Keyword::And => {
-                if is_and_not {
-                    SelectionExpr::And(Box::new(left), Box::new(SelectionExpr::Not(Box::new(right))))
-                } else {
-                    SelectionExpr::And(Box::new(left), Box::new(right))
-                }
-            }
-            Keyword::Or => SelectionExpr::Or(Box::new(left), Box::new(right)),
-            Keyword::In => SelectionExpr::In(Box::new(left), Box::new(right)),
-            Keyword::Like => SelectionExpr::Like(Box::new(left), Box::new(right)),
-            _ => unreachable!(),
-        };
+        let right = parse_expr(stream, op.precedence() + 1)?;
+        left = op.build(left, right);
     }
 
     Ok(left)
@@ -293,40 +298,53 @@ fn parse_primary(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> 
                         Err(ParseError::UnexpectedToken(s.clone()))
                     }
                 };
-                // If keyword parse failed, backtrack and treat as selection/object name
-                // This handles cases where an object name shadows a keyword (e.g., "ss")
+                // If keyword parse failed, backtrack and treat as selection/object name.
+                // This handles cases where an object name shadows a keyword (e.g., "ss").
+                // Only check for immediate Slash (not full is_macro_ahead) to avoid
+                // misinterpreting e.g. `ss 1+5/CA` as a macro starting from `ss`.
                 match result {
                     Ok(expr) => Ok(expr),
                     Err(_) => {
                         stream.set_position(saved_pos);
                         stream.next();
-                        Ok(SelectionExpr::Selection(s.clone()))
+                        if matches!(stream.peek(), Some(Token::Slash)) {
+                            stream.set_position(stream.position() - 1);
+                            parse_macro(stream)
+                        } else {
+                            Ok(SelectionExpr::Selection(s.clone()))
+                        }
                     }
                 }
             } else {
-                // Treat as a selection name or model name
                 stream.next();
-                Ok(SelectionExpr::Selection(s.clone()))
+                try_macro_or_fallback(stream, SelectionExpr::Selection(s.clone()))
             }
         }
         Token::Integer(n) => {
-            // Could be a residue number in shorthand
             stream.next();
-            // Try to parse as shorthand selection
-            if let Some(Token::Slash) = stream.peek() {
-                // This is macro notation
-                stream.set_position(stream.position() - 1);
-                parse_macro(stream)
-            } else {
-                // Treat as resi shorthand
-                Ok(SelectionExpr::Resi(ResiSpec::single(n)))
-            }
+            try_macro_or_fallback(stream, SelectionExpr::Resi(ResiSpec::single(n)))
         }
         Token::Asterisk => {
             stream.next();
             Ok(SelectionExpr::All)
         }
         _ => Err(ParseError::UnexpectedToken(format!("{:?}", tok))),
+    }
+}
+
+/// After consuming one token, check if this is the start of macro notation.
+///
+/// Uses `is_macro_ahead` to scan for a `/` token. If found, backtracks one
+/// position and parses the full macro. Otherwise returns the fallback expression.
+fn try_macro_or_fallback(
+    stream: &mut TokenStream,
+    fallback: SelectionExpr,
+) -> Result<SelectionExpr, ParseError> {
+    if is_macro_ahead(stream) {
+        stream.set_position(stream.position() - 1);
+        parse_macro(stream)
+    } else {
+        Ok(fallback)
     }
 }
 
@@ -727,23 +745,7 @@ fn parse_resi_item(stream: &mut TokenStream) -> Result<ResiItem, ParseError> {
     };
 
     // Check for insertion code after integer
-    let first_ins = if first_ins.is_none() {
-        let maybe_inscode = if let Some(Token::Ident(s)) = stream.peek() {
-            if s.len() == 1 && s.chars().next().unwrap().is_alphabetic() {
-                Some(s.chars().next().unwrap())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if maybe_inscode.is_some() {
-            stream.next();
-        }
-        maybe_inscode
-    } else {
-        first_ins
-    };
+    let first_ins = first_ins.or_else(|| try_consume_inscode(stream));
 
     // Check for range (- or :)
     match stream.peek() {
@@ -764,23 +766,7 @@ fn parse_resi_item(stream: &mut TokenStream) -> Result<ResiItem, ParseError> {
             };
 
             // Check for insertion code after second integer
-            let second_ins = if second_ins.is_none() {
-                let maybe_inscode = if let Some(Token::Ident(s)) = stream.peek() {
-                    if s.len() == 1 && s.chars().next().unwrap().is_alphabetic() {
-                        Some(s.chars().next().unwrap())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                if maybe_inscode.is_some() {
-                    stream.next();
-                }
-                maybe_inscode
-            } else {
-                second_ins
-            };
+            let second_ins = second_ins.or_else(|| try_consume_inscode(stream));
 
             match (first_ins, second_ins) {
                 (Some(fi), Some(si)) => Ok(ResiItem::InsCodeRange(first_val, fi, second_val, si)),
@@ -799,6 +785,24 @@ fn parse_resi_item(stream: &mut TokenStream) -> Result<ResiItem, ParseError> {
             }
         }
     }
+}
+
+/// Try to consume a single-letter insertion code from the stream.
+///
+/// Peeks at the next token; if it's a single alphabetic `Ident`, consumes and
+/// returns the character. Otherwise returns `None` without advancing.
+fn try_consume_inscode(stream: &mut TokenStream) -> Option<char> {
+    if let Some(Token::Ident(s)) = stream.peek() {
+        if s.len() == 1 {
+            if let Some(c) = s.chars().next() {
+                if c.is_alphabetic() {
+                    stream.next();
+                    return Some(c);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Parse a residue number with optional insertion code (e.g., "100A")
@@ -823,24 +827,48 @@ fn parse_resi_with_inscode(s: &str) -> Result<(i32, Option<char>), ParseError> {
     Ok((num, ins_code))
 }
 
+/// Look ahead (without consuming) to check if a `/` appears before any non-macro token.
+/// This detects patterns like `1/CA`, `1+5/CA`, `100-200/CA` as macro notation
+/// rather than `resi 1 or 5/CA`.
+fn is_macro_ahead(stream: &mut TokenStream) -> bool {
+    let saved = stream.position();
+    let result = loop {
+        match stream.peek() {
+            Some(Token::Slash) => break true,
+            Some(Token::Integer(_) | Token::Plus | Token::Minus | Token::Colon
+                 | Token::Ident(_) | Token::Asterisk | Token::Question | Token::Backtick) => {
+                stream.next();
+            }
+            _ => break false,
+        }
+    };
+    stream.set_position(saved);
+    result
+}
+
 /// Parse slash macro notation
+///
+/// Supports two forms matching PyMOL's selection algebra:
+/// - Leading `/`: fields assigned left-to-right: `/object/segi/chain/resn_or_resi/name`
+/// - No leading `/`: fields assigned right-to-left: e.g. `A/100/CA` → chain/resi/name
+///
+/// Field 3 (resn_or_resi): digit-start → resi, otherwise → resn, backtick → resn`resi
+/// Field 4 (name): backtick → name`alt
 fn parse_macro(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> {
     let mut spec = MacroSpec::default();
 
-    // Consume leading slash if present
-    if matches!(stream.peek(), Some(Token::Slash)) {
+    // Check and consume leading slash
+    let leading_slash = matches!(stream.peek(), Some(Token::Slash));
+    if leading_slash {
         stream.next();
     }
 
-    // Parse components: model/segi/chain/resn/name
-    // Empty fields are wildcards
-
+    // Collect slash-separated components
     let mut components: Vec<Option<String>> = Vec::new();
     let mut current = String::new();
     let mut has_content = false;
 
     loop {
-        // Clone the peeked token to avoid borrow issues
         let peeked = stream.peek().cloned();
         match peeked {
             Some(Token::Slash) => {
@@ -873,8 +901,23 @@ fn parse_macro(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> {
                 current.push('*');
                 has_content = true;
             }
+            Some(Token::Minus) => {
+                stream.next();
+                current.push('-');
+                has_content = true;
+            }
+            Some(Token::Plus) => {
+                stream.next();
+                current.push('+');
+                has_content = true;
+            }
+            Some(Token::Colon) => {
+                stream.next();
+                current.push(':');
+                has_content = true;
+            }
             _ => {
-                // End of macro
+                // End of macro — push final component
                 if has_content {
                     components.push(Some(current.clone()));
                 }
@@ -883,11 +926,18 @@ fn parse_macro(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> {
         }
     }
 
-    // Assign components to spec fields based on position
-    // Format: model/segi/chain/resn/name
-    // But if started with /, first component is model
-    let mut idx = 0;
-    for component in components {
+    // Assign components to spec fields: [object, segi, chain, resn_or_resi, name]
+    // Leading `/`: left-to-right (field 0, 1, 2, ...)
+    // No leading `/`: right-to-left (last = field 4, second-to-last = field 3, ...)
+    let num_components = components.len();
+    let offset = if leading_slash {
+        0
+    } else {
+        5usize.saturating_sub(num_components)
+    };
+
+    for (i, component) in components.into_iter().enumerate() {
+        let field = offset + i;
         let pattern = component.map(|s| {
             if s.contains('*') || s.contains('?') {
                 Pattern::Wildcard(s)
@@ -896,82 +946,110 @@ fn parse_macro(stream: &mut TokenStream) -> Result<SelectionExpr, ParseError> {
             }
         });
 
-        match idx {
+        match field {
             0 => spec.model = pattern,
             1 => spec.segi = pattern,
             2 => spec.chain = pattern,
-            3 => {
-                // This could be resn or resn`resi
-                if let Some(ref p) = pattern {
-                    if let Pattern::Exact(ref s) = p {
-                        if let Some(pos) = s.find('`') {
-                            let (resn_part, resi_part) = s.split_at(pos);
-                            let resi_part = &resi_part[1..]; // Skip backtick
-                            spec.resn = if resn_part.is_empty() {
-                                None
-                            } else {
-                                Some(Pattern::Exact(resn_part.to_string()))
-                            };
-                            if let Ok((resi_num, ins_code)) = parse_resi_with_inscode(resi_part) {
-                                spec.resi = Some(ResiSpec {
-                                    items: vec![match ins_code {
-                                        Some(c) => ResiItem::InsCode(resi_num, c),
-                                        None => ResiItem::Single(resi_num),
-                                    }],
-                                });
-                            }
-                        } else {
-                            // Could be resn or resi depending on content
-                            if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-                                // Starts with digit - treat as resi
-                                if let Ok((resi_num, ins_code)) = parse_resi_with_inscode(s) {
-                                    spec.resi = Some(ResiSpec {
-                                        items: vec![match ins_code {
-                                            Some(c) => ResiItem::InsCode(resi_num, c),
-                                            None => ResiItem::Single(resi_num),
-                                        }],
-                                    });
-                                }
-                            } else {
-                                spec.resn = pattern;
-                            }
-                        }
-                    } else {
-                        spec.resn = pattern;
-                    }
-                }
-            }
-            4 => {
-                // name or name`alt
-                if let Some(ref p) = pattern {
-                    if let Pattern::Exact(ref s) = p {
-                        if let Some(pos) = s.find('`') {
-                            let (name_part, alt_part) = s.split_at(pos);
-                            let alt_part = &alt_part[1..]; // Skip backtick
-                            spec.name = if name_part.is_empty() {
-                                None
-                            } else {
-                                Some(Pattern::Exact(name_part.to_string()))
-                            };
-                            spec.alt = if alt_part.is_empty() {
-                                None
-                            } else {
-                                Some(Pattern::Exact(alt_part.to_string()))
-                            };
-                        } else {
-                            spec.name = pattern;
-                        }
-                    } else {
-                        spec.name = pattern;
-                    }
-                }
-            }
+            3 => assign_resn_resi(&mut spec, pattern)?,
+            4 => assign_name_alt(&mut spec, pattern),
             _ => {} // Ignore extra components
         }
-        idx += 1;
     }
 
     Ok(SelectionExpr::Macro(spec))
+}
+
+/// Parse a resi string that may contain ranges (e.g. "3-5", "3:5") or lists (e.g. "3+5+7")
+fn parse_resi_string(s: &str) -> Result<ResiSpec, ParseError> {
+    let mut items = Vec::new();
+    for part in s.split('+') {
+        // Find range separator: `-` (not at position 0, which is a negative sign) or `:`
+        let range_pos = part
+            .find(':')
+            .or_else(|| part.find('-').filter(|&p| p > 0));
+        if let Some(sep_pos) = range_pos {
+            // Range: "3-5", "3:5", "3A-5B"
+            let left = &part[..sep_pos];
+            let right = &part[sep_pos + 1..];
+            let (start, si) = parse_resi_with_inscode(left)?;
+            let (end, ei) = parse_resi_with_inscode(right)?;
+            items.push(match (si, ei) {
+                (Some(a), Some(b)) => ResiItem::InsCodeRange(start, a, end, b),
+                _ => ResiItem::Range(start, end),
+            });
+        } else {
+            let (num, ins) = parse_resi_with_inscode(part)?;
+            items.push(match ins {
+                Some(c) => ResiItem::InsCode(num, c),
+                None => ResiItem::Single(num),
+            });
+        }
+    }
+    if items.is_empty() {
+        Err(ParseError::InvalidResidue(s.to_string()))
+    } else {
+        Ok(ResiSpec { items })
+    }
+}
+
+/// Split a pattern on backtick into `(left_pattern, right_string)`.
+///
+/// - Wildcard patterns are returned as-is in the left slot.
+/// - Exact patterns containing `` ` `` are split: `"ALA`100"` → `(Some(Exact("ALA")), Some("100"))`.
+/// - Exact patterns without backtick are returned as-is in the left slot.
+fn split_on_backtick(pattern: &Option<Pattern>) -> (Option<Pattern>, Option<String>) {
+    let Some(ref p) = pattern else {
+        return (None, None);
+    };
+    let Pattern::Exact(ref s) = p else {
+        return (pattern.clone(), None);
+    };
+    match s.find('`') {
+        Some(pos) => {
+            let left = &s[..pos];
+            let right = &s[pos + 1..];
+            let left_pat = if left.is_empty() {
+                None
+            } else {
+                Some(Pattern::Exact(left.to_string()))
+            };
+            let right_str = if right.is_empty() {
+                None
+            } else {
+                Some(right.to_string())
+            };
+            (left_pat, right_str)
+        }
+        None => (pattern.clone(), None),
+    }
+}
+
+/// Assign field 3 of a macro spec: resn, resi, or resn`resi
+fn assign_resn_resi(spec: &mut MacroSpec, pattern: Option<Pattern>) -> Result<(), ParseError> {
+    let (left, right) = split_on_backtick(&pattern);
+    if let Some(resi_str) = right {
+        // resn`resi syntax
+        spec.resn = left;
+        spec.resi = Some(parse_resi_string(&resi_str)?);
+    } else if let Some(Pattern::Exact(ref s)) = left {
+        if s.starts_with(|c: char| c.is_ascii_digit()) {
+            spec.resi = Some(parse_resi_string(s)?);
+        } else {
+            spec.resn = left;
+        }
+    } else {
+        spec.resn = left;
+    }
+    Ok(())
+}
+
+/// Assign field 4 of a macro spec: name or name`alt
+fn assign_name_alt(spec: &mut MacroSpec, pattern: Option<Pattern>) {
+    let (left, right) = split_on_backtick(&pattern);
+    spec.name = left;
+    if let Some(alt_str) = right {
+        spec.alt = Some(Pattern::Exact(alt_str));
+    }
 }
 
 #[cfg(test)]
@@ -1102,13 +1180,192 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_macro() {
-        let expr = parse_selection("/protein//A/100/CA").unwrap();
+    fn test_parse_macro_leading_slash_with_empty_fields() {
+        // /protein///100/CA → model=protein, resi=100, name=CA
+        let expr = parse_selection("/protein///100/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.model, Some(Pattern::Exact(ref s)) if s == "protein"));
+            assert!(spec.segi.is_none());
+            assert!(spec.chain.is_none());
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(100)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro");
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_all_fields() {
+        // /protein/SEG1/A/100/CA → all 5 fields populated
+        let expr = parse_selection("/protein/SEG1/A/100/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.model, Some(Pattern::Exact(ref s)) if s == "protein"));
+            assert!(matches!(spec.segi, Some(Pattern::Exact(ref s)) if s == "SEG1"));
+            assert!(matches!(spec.chain, Some(Pattern::Exact(ref s)) if s == "A"));
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(100)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro");
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_all_empty() {
+        // ///// → all fields None
+        let expr = parse_selection("/////").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(spec.model.is_none());
+            assert!(spec.segi.is_none());
+            assert!(spec.chain.is_none());
+            assert!(spec.resn.is_none());
+            assert!(spec.resi.is_none());
+            assert!(spec.name.is_none());
+        } else {
+            panic!("Expected Macro");
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_no_leading_slash_3_fields() {
+        // A/100/CA → chain=A, resi=100, name=CA (right-to-left)
+        let expr = parse_selection("A/100/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(spec.model.is_none());
+            assert!(spec.segi.is_none());
+            assert!(matches!(spec.chain, Some(Pattern::Exact(ref s)) if s == "A"));
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(100)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_no_leading_slash_2_fields() {
+        // 100/CA → resi=100, name=CA
+        let expr = parse_selection("100/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(spec.model.is_none());
+            assert!(spec.segi.is_none());
+            assert!(spec.chain.is_none());
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(100)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_resn_non_numeric() {
+        // /protein//A/ALA/CA → resn=ALA, name=CA
+        let expr = parse_selection("/protein//A/ALA/CA").unwrap();
         if let SelectionExpr::Macro(spec) = expr {
             assert!(matches!(spec.model, Some(Pattern::Exact(ref s)) if s == "protein"));
             assert!(matches!(spec.chain, Some(Pattern::Exact(ref s)) if s == "A"));
+            assert!(matches!(spec.resn, Some(Pattern::Exact(ref s)) if s == "ALA"));
+            assert!(spec.resi.is_none());
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
         } else {
             panic!("Expected Macro");
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_resi_numeric() {
+        // /protein//A/100/CA → resi=100, name=CA
+        let expr = parse_selection("/protein//A/100/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(100)]));
+            assert!(spec.resn.is_none());
+        } else {
+            panic!("Expected Macro");
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_wildcard() {
+        // /protein//*/100/C* → chain=* (wildcard), name=C* (wildcard)
+        let expr = parse_selection("/protein//*/100/C*").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.chain, Some(Pattern::Wildcard(ref s)) if s == "*"));
+            assert!(matches!(spec.name, Some(Pattern::Wildcard(ref s)) if s == "C*"));
+        } else {
+            panic!("Expected Macro");
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_resi_range() {
+        // ////3-5/CA → resi=3-5 (range), name=CA
+        let expr = parse_selection("////3-5/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(spec.model.is_none());
+            assert!(spec.segi.is_none());
+            assert!(spec.chain.is_none());
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Range(3, 5)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_resi_list() {
+        // ///A/1+5/CA → chain=A, resi=1+5 (list), name=CA
+        let expr = parse_selection("///A/1+5/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.chain, Some(Pattern::Exact(ref s)) if s == "A"));
+            assert!(
+                matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(1), ResiItem::Single(5)])
+            );
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_resi_colon_range() {
+        // ////1:5/CA → resi=1-5 (colon range), name=CA
+        let expr = parse_selection("////1:5/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Range(1, 5)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_bare_ca() {
+        // CA → should parse as Selection("CA") (named selection reference)
+        let expr = parse_selection("CA").unwrap();
+        assert!(matches!(expr, SelectionExpr::Selection(ref s) if s == "CA"));
+    }
+
+    #[test]
+    fn test_parse_macro_1_slash_ca() {
+        // 1/CA → resi=1, name=CA (right-to-left macro)
+        let expr = parse_selection("1/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(1)]));
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_macro_1_plus_5_slash_ca() {
+        // 1+5/CA → resi=1+5, name=CA (right-to-left macro)
+        let expr = parse_selection("1+5/CA").unwrap();
+        if let SelectionExpr::Macro(spec) = expr {
+            assert!(
+                matches!(spec.resi, Some(ref r) if r.items == vec![ResiItem::Single(1), ResiItem::Single(5)])
+            );
+            assert!(matches!(spec.name, Some(Pattern::Exact(ref s)) if s == "CA"));
+        } else {
+            panic!("Expected Macro, got {:?}", expr);
         }
     }
 }

@@ -496,6 +496,16 @@ fn parse_quoted_string(input: &str) -> IResult<&str, String> {
     ))(input)
 }
 
+/// Characters that, when following a number, indicate the number is part of a
+/// larger token (identifier or selection macro notation) rather than a standalone
+/// numeric argument.
+///
+/// This list is coupled to `pymol-select`'s macro parser: any character that can
+/// appear inside a slash-macro field must be listed here so the command parser
+/// keeps the whole expression (e.g. `1/CA`, `1+5/CA`, `1:5/CA`) as a single
+/// string argument.
+const SELECTION_CONTINUATION_CHARS: &[char] = &['/', '+', '-', ':'];
+
 /// Parse a number (int or float)
 fn parse_number(input: &str) -> IResult<&str, ArgValue> {
     let (remaining, num_str) = recognize_float(input)?;
@@ -503,8 +513,14 @@ fn parse_number(input: &str) -> IResult<&str, ArgValue> {
     // Check if it's followed by a valid separator or end
     if !remaining.is_empty() {
         let next_char = remaining.chars().next().unwrap();
-        if next_char.is_alphanumeric() || next_char == '_' || next_char == '.' {
-            // Not a number, it's part of an identifier like "chain1"
+        if next_char.is_alphanumeric()
+            || next_char == '_'
+            || next_char == '.'
+            || SELECTION_CONTINUATION_CHARS.contains(&next_char)
+        {
+            // Not a standalone number — it's part of an identifier ("chain1"),
+            // selection macro notation ("1/CA", "100-200/CA"), or
+            // a selection list/range ("1+5/CA", "1-28/CA", "1:5/CA")
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 nom::error::ErrorKind::Float,
@@ -906,5 +922,30 @@ ray 1920, 1080, filename=test.png"#;
         // The set_view line should contain all values
         assert!(lines[2].contains("0.381124"));
         assert!(lines[2].contains("14.000000"));
+    }
+
+    #[test]
+    fn test_slash_macro_as_argument() {
+        // Selection macro notation should be kept as a single string argument
+        let cmd = parse_command("indicate 1/CA").unwrap();
+        assert_eq!(cmd.name, "indicate");
+        assert_eq!(cmd.get_str(0), Some("1/CA"));
+
+        let cmd = parse_command("indicate 1+5/CA").unwrap();
+        assert_eq!(cmd.name, "indicate");
+        assert_eq!(cmd.get_str(0), Some("1+5/CA"));
+
+        let cmd = parse_command("indicate 1-28/CA").unwrap();
+        assert_eq!(cmd.name, "indicate");
+        assert_eq!(cmd.get_str(0), Some("1-28/CA"));
+
+        let cmd = parse_command("indicate ////3-5/CA").unwrap();
+        assert_eq!(cmd.name, "indicate");
+        assert_eq!(cmd.get_str(0), Some("////3-5/CA"));
+
+        // Colon-range macro notation
+        let cmd = parse_command("indicate ////1:5/CA").unwrap();
+        assert_eq!(cmd.name, "indicate");
+        assert_eq!(cmd.get_str(0), Some("////1:5/CA"));
     }
 }
