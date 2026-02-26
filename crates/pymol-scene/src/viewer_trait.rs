@@ -75,6 +75,9 @@ pub trait ViewerLike {
     /// Get a reference to the full session
     fn session(&self) -> &Session;
 
+    /// Get a mutable reference to the full session
+    fn session_mut(&mut self) -> &mut Session;
+
     /// Replace the entire session (for loading .pse/.prs files)
     ///
     /// Implementors should mark all objects as dirty so representations rebuild.

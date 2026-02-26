@@ -114,6 +114,7 @@ EXAMPLES
             }
             "settings" => {
                 ctx.viewer.settings_mut().reset_all();
+                ctx.viewer.session_mut().apply_default_settings();
             }
             "objects" => {
                 ctx.viewer.objects_mut().clear();

@@ -225,23 +225,7 @@ impl App {
         // Set up default key bindings
         app.setup_default_key_bindings();
 
-        // Apply default global settings
-        app.apply_default_settings();
-
         app
-    }
-
-    /// Apply default global settings (will be loaded from config file in the future)
-    fn apply_default_settings(&mut self) {
-        use pymol_settings::{id as setting_id, SettingValue};
-
-        let colors = &self.state.named_colors;
-        if let Some((idx, _)) = colors.get_by_name("green") {
-            let _ = self.state.settings.set(setting_id::cartoon_color, SettingValue::Color(idx as i32));
-        }
-        if let Some((idx, _)) = colors.get_by_name("magenta") {
-            let _ = self.state.settings.set(setting_id::cartoon_nucleic_acid_color, SettingValue::Color(idx as i32));
-        }
     }
 
     /// Create a new application with IPC server enabled

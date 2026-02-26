@@ -169,7 +169,7 @@ impl Session {
 
     /// Create a new session with default values.
     pub fn new() -> Self {
-        Self {
+        let mut session = Self {
             registry: ObjectRegistry::new(),
             camera: Camera::new(),
             selections: SelectionManager::new(),
@@ -182,6 +182,20 @@ impl Session {
             chain_colors: ChainColors,
             clear_color: [0.0, 0.0, 0.0],
             raytraced_image: None,
+        };
+        session.apply_default_settings();
+        session
+    }
+
+    /// Apply default global settings (will be loaded from config file in the future)
+    pub fn apply_default_settings(&mut self) {
+        use pymol_settings::{id as setting_id, SettingValue};
+
+        if let Some((idx, _)) = self.named_colors.get_by_name("green") {
+            let _ = self.settings.set(setting_id::cartoon_color, SettingValue::Color(idx as i32));
+        }
+        if let Some((idx, _)) = self.named_colors.get_by_name("magenta") {
+            let _ = self.settings.set(setting_id::cartoon_nucleic_acid_color, SettingValue::Color(idx as i32));
         }
     }
 }

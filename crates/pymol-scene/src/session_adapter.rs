@@ -69,6 +69,7 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     }
 
     fn session(&self) -> &Session { self.session }
+    fn session_mut(&mut self) -> &mut Session { self.session }
 
     fn replace_session(&mut self, session: Session) {
         *self.session = session;
