@@ -48,6 +48,13 @@ impl LineRep {
     pub fn set_pipeline(&mut self, pipeline: wgpu::RenderPipeline) {
         self.pipeline = Some(pipeline);
     }
+
+    /// Set line data from pre-built vertices (for non-molecule geometry like measurements)
+    pub fn set_line_data(&mut self, vertices: Vec<LineVertex>) {
+        self.vertex_count = vertices.len() as u32;
+        self.vertices = vertices;
+        self.dirty = true;
+    }
 }
 
 impl Default for LineRep {

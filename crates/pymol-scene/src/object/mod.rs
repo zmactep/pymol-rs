@@ -10,6 +10,7 @@ mod cgo;
 mod group;
 mod label;
 mod map;
+mod measurement;
 mod molecule;
 mod surface;
 
@@ -17,6 +18,7 @@ pub use cgo::CgoObject;
 pub use group::GroupObject;
 pub use label::{Label, LabelAnchor, LabelObject};
 pub use map::MapObject;
+pub use measurement::{Measurement, MeasurementObject, MeasurementType};
 pub use molecule::{DirtyFlags, MoleculeObject};
 pub use surface::SurfaceObject;
 
@@ -49,6 +51,8 @@ pub enum ObjectType {
     Group,
     /// Measurement (distances, angles, etc.)
     Measurement,
+    /// Label (text annotations)
+    Label,
     /// Volume rendering
     Volume,
     /// Alignment object
@@ -65,6 +69,7 @@ impl std::fmt::Display for ObjectType {
             ObjectType::Cgo => write!(f, "cgo"),
             ObjectType::Group => write!(f, "group"),
             ObjectType::Measurement => write!(f, "measurement"),
+            ObjectType::Label => write!(f, "label"),
             ObjectType::Volume => write!(f, "volume"),
             ObjectType::Alignment => write!(f, "alignment"),
         }
@@ -557,6 +562,30 @@ impl ObjectRegistry {
             // Safety: we just checked the type
             let ptr = obj.as_mut() as *mut dyn Object;
             Some(unsafe { &mut *(ptr as *mut CgoObject) })
+        } else {
+            None
+        }
+    }
+
+    /// Get a measurement object by name
+    pub fn get_measurement(&self, name: &str) -> Option<&MeasurementObject> {
+        let obj = self.objects.get(name)?;
+        if obj.object_type() == ObjectType::Measurement {
+            // Safety: we just checked the type
+            let ptr = obj.as_ref() as *const dyn Object;
+            Some(unsafe { &*(ptr as *const MeasurementObject) })
+        } else {
+            None
+        }
+    }
+
+    /// Get mutable access to a measurement object by name
+    pub fn get_measurement_mut(&mut self, name: &str) -> Option<&mut MeasurementObject> {
+        let obj = self.objects.get_mut(name)?;
+        if obj.object_type() == ObjectType::Measurement {
+            // Safety: we just checked the type
+            let ptr = obj.as_mut() as *mut dyn Object;
+            Some(unsafe { &mut *(ptr as *mut MeasurementObject) })
         } else {
             None
         }

@@ -103,6 +103,28 @@ impl MeshRep {
         self.indices.push(base_idx);
         self.indices.push(base_idx + 1);
         self.indices.push(base_idx + 2);
+        self.index_count = self.indices.len() as u32;
+    }
+
+    /// Add a triangle with explicit per-vertex normals (for smooth shading).
+    pub fn add_triangle_smooth(
+        &mut self,
+        positions: [[f32; 3]; 3],
+        normals: [[f32; 3]; 3],
+        color: [f32; 4],
+    ) {
+        let base_idx = self.vertices.len() as u32;
+        for i in 0..3 {
+            self.vertices.push(MeshVertex {
+                position: positions[i],
+                normal: normals[i],
+                color,
+            });
+        }
+        self.indices.push(base_idx);
+        self.indices.push(base_idx + 1);
+        self.indices.push(base_idx + 2);
+        self.index_count = self.indices.len() as u32;
     }
 
     /// Clear the mesh

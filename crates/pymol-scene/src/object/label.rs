@@ -351,9 +351,7 @@ impl Object for LabelObject {
     }
 
     fn object_type(&self) -> ObjectType {
-        // Labels don't have a dedicated ObjectType in the enum yet
-        // Using Measurement as it's semantically closest
-        ObjectType::Measurement
+        ObjectType::Label
     }
 
     fn state(&self) -> &ObjectState {

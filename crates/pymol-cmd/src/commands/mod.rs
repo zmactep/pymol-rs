@@ -7,6 +7,7 @@ pub mod control;
 pub mod crystal;
 pub mod display;
 pub mod io;
+pub mod measuring;
 pub mod movie;
 pub mod objects;
 pub mod scene;
@@ -54,4 +55,7 @@ pub fn register_all(registry: &mut CommandRegistry) {
 
     // Crystal symmetry commands
     crystal::register(registry);
+
+    // Measurement commands (distance, angle, dihedral)
+    measuring::register(registry);
 }

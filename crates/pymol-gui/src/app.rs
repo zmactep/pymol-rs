@@ -585,6 +585,13 @@ impl App {
             }
         }
 
+        // Prepare measurement objects
+        for name in names {
+            if let Some(meas_obj) = self.state.registry.get_measurement_mut(name) {
+                meas_obj.prepare_render(context);
+            }
+        }
+
         if geometry_changed {
             self.shading.invalidate_shadows();
         }
@@ -642,6 +649,15 @@ impl App {
             if let Some(mol_obj) = self.state.registry.get_molecule(name) {
                 if mol_obj.is_enabled() {
                     mol_obj.render(&mut render_pass, context);
+                }
+            }
+        }
+
+        // Render measurement objects (dashed lines)
+        for name in names {
+            if let Some(meas_obj) = self.state.registry.get_measurement(name) {
+                if meas_obj.is_enabled() {
+                    meas_obj.render(&mut render_pass, context);
                 }
             }
         }
@@ -953,6 +969,30 @@ impl App {
                                         font.clone(),
                                         label_color,
                                     );
+                                }
+                            }
+                        }
+                    }
+
+                    // Paint measurement labels
+                    let meas_font = egui::FontId::new(13.0, egui::FontFamily::Proportional);
+                    let meas_color = egui::Color32::from_rgb(255, 255, 0);
+                    for name in registry.names() {
+                        if let Some(meas_obj) = registry.get_measurement(name) {
+                            if !meas_obj.is_enabled() {
+                                continue;
+                            }
+                            for (pos, text) in meas_obj.collect_labels() {
+                                if let Some((sx, sy)) = camera.project_to_screen(pos, vp_tuple) {
+                                    if vp.contains(egui::pos2(sx, sy)) {
+                                        painter.text(
+                                            egui::pos2(sx, sy),
+                                            egui::Align2::CENTER_CENTER,
+                                            text,
+                                            meas_font.clone(),
+                                            meas_color,
+                                        );
+                                    }
                                 }
                             }
                         }
