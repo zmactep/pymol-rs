@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/status-alpha-yellow.svg" alt="Status">
+  <img src="https://img.shields.io/badge/status-beta-blue.svg" alt="Status">
 </p>
 
 ---
@@ -30,7 +30,7 @@ PyMOL is the gold standard for molecular visualization — but it's 25 years of 
 | **Memory safety** | Manual | Guaranteed at compile time |
 | **Cross-platform** | Build scripts per OS | Single `cargo build` |
 
-> **Alpha status.** Core visualization works. Some advanced features (labels, maps, sessions) are in progress.
+> **Beta status.** Core visualization, selection language, structural alignment, sessions, and Python API are fully functional. Electron density maps and movie export are on the roadmap.
 
 ## Quick Start
 
@@ -67,7 +67,7 @@ make release && make run
 
 **Formats:** PDB · mmCIF · bCIF · MOL2 · SDF/MOL · XYZ · GRO (+ gzip)
 
-**Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots
+**Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots · Labels
 
 **Selection language** — full PyMOL-compatible syntax:
 ```
@@ -76,11 +76,19 @@ byres around 5 ligand
 polymer and not solvent
 ```
 
-**Commands** — familiar PyMOL verbs: `load`, `show`, `hide`, `color`, `select`, `zoom`, `center`, `orient`, `png`, `ray`, …
+**Commands** — familiar PyMOL verbs with tab completion: `load`, `show`, `hide`, `color`, `select`, `zoom`, `center`, `orient`, `png`, `ray`, …
+
+**Structural analysis:**
+- Alignment — Kabsch superposition & CE structural alignment
+- Measurements — distance, angle, dihedral with visual feedback
+- Crystallographic symmetry — `symexp` with all 230 space groups
+- Secondary structure — `dss` assignment from geometry
 
 **Sessions** — save and load your sessions with high-efficiency `.prs` file format or use your old PyMOL sessions with `.pse` parser.
 
-**GUI** — egui-based interface with command line, object panel, and viewport:
+**Ray tracing** — offline GPU ray tracing with BVH acceleration, shadows, and transparency.
+
+**GUI** — egui-based interface with command line, object panel, sequence viewer, mouse picking, and viewport:
 
 <p align="center">
   <img src="images/interface.png" alt="Interface" width="800">
@@ -108,7 +116,7 @@ cmd.show_gui()
 ## Architecture
 
 ```
-pymol-rs/  (12 crates)
+pymol-rs/
 ├── pymol-mol         Core data: Atom, Bond, Molecule
 ├── pymol-io          Format parsers & writers
 ├── pymol-select      Selection language (parser + evaluator)
@@ -128,10 +136,9 @@ Each crate is independently usable. Want just the selection parser? `pymol-selec
 
 ## Roadmap
 
-- [ ] Labels & measurements
-- [ ] Crystallographic symmetry mates
-- [ ] Electron density maps
-- [ ] Movie export
+- [ ] Electron density maps (isomesh / isosurface)
+- [ ] Movie export (video formats)
+- [ ] Object groups
 
 ## License
 
