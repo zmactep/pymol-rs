@@ -2,9 +2,10 @@
 //!
 //! Writes molecular structures in PDB format.
 
+use std::collections::HashMap;
 use std::io::Write;
 
-use pymol_mol::{AtomIndex, ObjectMolecule};
+use pymol_mol::{AtomIndex, ObjectMolecule, SecondaryStructure};
 
 use crate::error::{IoError, IoResult};
 use crate::traits::MoleculeWriter;
@@ -69,6 +70,191 @@ impl<W: Write> PdbWriter<W> {
                 sym.z_value
             )?;
         }
+        Ok(())
+    }
+
+    /// Write HELIX and SHEET records from per-atom secondary structure
+    fn write_secondary_structure(&mut self, mol: &ObjectMolecule) -> IoResult<()> {
+        // Collect contiguous runs of helix/sheet secondary structure per chain.
+        // We iterate atoms and detect when ss_type or chain changes to emit records.
+        struct SsRun {
+            ss: SecondaryStructure,
+            chain: String,
+            init_resn: String,
+            init_resv: i32,
+            init_icode: char,
+            end_resn: String,
+            end_resv: i32,
+            end_icode: char,
+        }
+
+        let mut runs: Vec<SsRun> = Vec::new();
+        let mut current: Option<SsRun> = None;
+
+        // Track last residue identity to avoid counting the same residue multiple times
+        let mut last_residue: Option<(String, i32, char)> = None;
+
+        for (_, atom) in mol.atoms_indexed() {
+            let residue_id = (
+                atom.residue.chain.clone(),
+                atom.residue.resv,
+                atom.residue.inscode,
+            );
+
+            // Skip duplicate atoms within the same residue
+            if let Some(ref last) = last_residue {
+                if *last == residue_id {
+                    continue;
+                }
+            }
+            last_residue = Some(residue_id);
+
+            let ss = atom.ss_type;
+            let is_regular = ss.is_helix() || ss.is_sheet();
+
+            if let Some(ref mut run) = current {
+                // Continue current run if same ss type and same chain
+                let same_type = match (run.ss, ss) {
+                    (a, b) if a == b => true,
+                    // Group all helix subtypes together for HELIX records
+                    (a, b) if a.is_helix() && b.is_helix() => false,
+                    _ => false,
+                };
+                if same_type && atom.residue.chain == run.chain {
+                    run.end_resn = atom.residue.resn.to_string();
+                    run.end_resv = atom.residue.resv;
+                    run.end_icode = atom.residue.inscode;
+                    continue;
+                }
+                // End current run
+                let finished = current.take().unwrap();
+                if finished.ss.is_helix() || finished.ss.is_sheet() {
+                    runs.push(finished);
+                }
+            }
+
+            if is_regular {
+                current = Some(SsRun {
+                    ss,
+                    chain: atom.residue.chain.to_string(),
+                    init_resn: atom.residue.resn.to_string(),
+                    init_resv: atom.residue.resv,
+                    init_icode: atom.residue.inscode,
+                    end_resn: atom.residue.resn.to_string(),
+                    end_resv: atom.residue.resv,
+                    end_icode: atom.residue.inscode,
+                });
+            }
+        }
+        // Flush last run
+        if let Some(run) = current {
+            if run.ss.is_helix() || run.ss.is_sheet() {
+                runs.push(run);
+            }
+        }
+
+        // Write HELIX records
+        let mut helix_serial = 0;
+        for run in &runs {
+            if !run.ss.is_helix() {
+                continue;
+            }
+            helix_serial += 1;
+            let helix_class = match run.ss {
+                SecondaryStructure::Helix => 1,
+                SecondaryStructure::Helix310 => 5,
+                SecondaryStructure::HelixPi => 3,
+                _ => 1,
+            };
+            let chain = if run.chain.is_empty() {
+                " "
+            } else {
+                &run.chain[..1.min(run.chain.len())]
+            };
+            // PDB HELIX format:
+            // HELIX  ser hid iResN iChn iSeq iIC  eResN eChn eSeq eIC cls
+            writeln!(
+                self.writer,
+                "HELIX  {:3} {:>3} {:3} {}{:4}{}  {:3} {}{:4}{}{:2}",
+                helix_serial,
+                helix_serial,
+                if run.init_resn.len() > 3 {
+                    &run.init_resn[..3]
+                } else {
+                    &run.init_resn
+                },
+                chain,
+                run.init_resv,
+                if run.init_icode == ' ' {
+                    ' '
+                } else {
+                    run.init_icode
+                },
+                if run.end_resn.len() > 3 {
+                    &run.end_resn[..3]
+                } else {
+                    &run.end_resn
+                },
+                chain,
+                run.end_resv,
+                if run.end_icode == ' ' {
+                    ' '
+                } else {
+                    run.end_icode
+                },
+                helix_class
+            )?;
+        }
+
+        // Write SHEET records
+        // Group sheet runs by chain to assign sheet IDs
+        let mut sheet_serial = 0;
+        for run in &runs {
+            if !run.ss.is_sheet() {
+                continue;
+            }
+            sheet_serial += 1;
+            let chain = if run.chain.is_empty() {
+                " "
+            } else {
+                &run.chain[..1.min(run.chain.len())]
+            };
+            // PDB SHEET format:
+            // SHEET  str shID nStr iResN iChn iSeq iIC  eResN eChn eSeq eIC sense
+            writeln!(
+                self.writer,
+                "SHEET  {:3} {:>3}{:2} {:3} {}{:4}{}  {:3} {}{:4}{}{:2}",
+                sheet_serial,
+                sheet_serial,
+                1, // num_strands (1 = single strand, simplified)
+                if run.init_resn.len() > 3 {
+                    &run.init_resn[..3]
+                } else {
+                    &run.init_resn
+                },
+                chain,
+                run.init_resv,
+                if run.init_icode == ' ' {
+                    ' '
+                } else {
+                    run.init_icode
+                },
+                if run.end_resn.len() > 3 {
+                    &run.end_resn[..3]
+                } else {
+                    &run.end_resn
+                },
+                chain,
+                run.end_resv,
+                if run.end_icode == ' ' {
+                    ' '
+                } else {
+                    run.end_icode
+                },
+                0 // sense (0 = first strand)
+            )?;
+        }
+
         Ok(())
     }
 
@@ -150,33 +336,45 @@ impl<W: Write> PdbWriter<W> {
         Ok(())
     }
 
-    /// Write CONECT records
-    fn write_conect(&mut self, mol: &ObjectMolecule) -> IoResult<()> {
-        // Group bonds by atom
-        let mut bonds_by_atom: std::collections::HashMap<i32, Vec<i32>> =
-            std::collections::HashMap::new();
+    /// Write CONECT records for bonds involving at least one HETATM atom
+    fn write_conect(
+        &mut self,
+        mol: &ObjectMolecule,
+        index_to_serial: &HashMap<AtomIndex, i32>,
+    ) -> IoResult<()> {
+        // Group bonds by atom serial, only including bonds where at least one
+        // atom is a HETATM (per PDB convention — standard covalent bonds are
+        // regenerated from distances by readers)
+        let mut bonds_by_serial: HashMap<i32, Vec<i32>> = HashMap::new();
 
         for (_, bond) in mol.bonds_indexed() {
-            if let (Some(atom1), Some(atom2)) =
+            let (Some(atom1), Some(atom2)) =
                 (mol.get_atom(bond.atom1), mol.get_atom(bond.atom2))
-            {
-                bonds_by_atom
-                    .entry(atom1.id)
-                    .or_default()
-                    .push(atom2.id);
-                bonds_by_atom
-                    .entry(atom2.id)
-                    .or_default()
-                    .push(atom1.id);
+            else {
+                continue;
+            };
+
+            // Only write CONECT for bonds where at least one atom is HETATM
+            if !atom1.state.hetatm && !atom2.state.hetatm {
+                continue;
             }
+
+            let (Some(&serial1), Some(&serial2)) =
+                (index_to_serial.get(&bond.atom1), index_to_serial.get(&bond.atom2))
+            else {
+                continue;
+            };
+
+            bonds_by_serial.entry(serial1).or_default().push(serial2);
+            bonds_by_serial.entry(serial2).or_default().push(serial1);
         }
 
-        // Write CONECT records
-        let mut serials: Vec<i32> = bonds_by_atom.keys().copied().collect();
+        // Write CONECT records sorted by serial
+        let mut serials: Vec<i32> = bonds_by_serial.keys().copied().collect();
         serials.sort();
 
         for serial in serials {
-            if let Some(bonded) = bonds_by_atom.get(&serial) {
+            if let Some(bonded) = bonds_by_serial.get(&serial) {
                 // Write in chunks of 4 bonded atoms per CONECT record
                 for chunk in bonded.chunks(4) {
                     write!(self.writer, "CONECT{:5}", serial)?;
@@ -202,6 +400,7 @@ impl<W: Write> PdbWriter<W> {
         // Write header records
         self.write_title(&mol.title)?;
         self.write_cryst1(mol)?;
+        self.write_secondary_structure(mol)?;
 
         let state = self.state.unwrap_or(0);
         let num_states = mol.state_count();
@@ -218,6 +417,9 @@ impl<W: Write> PdbWriter<W> {
         } else {
             vec![state.min(num_states.saturating_sub(1))]
         };
+
+        // Build atom index → serial number mapping (used for CONECT records)
+        let mut index_to_serial: HashMap<AtomIndex, i32> = HashMap::new();
 
         for (model_num, state_idx) in states_to_write.iter().enumerate() {
             if write_models {
@@ -241,6 +443,9 @@ impl<W: Write> PdbWriter<W> {
                 }
                 last_chain = atom.residue.chain.clone();
 
+                // Record the mapping from atom index to written serial number
+                index_to_serial.insert(atom_idx, serial);
+
                 self.write_atom(serial, atom, coord.x, coord.y, coord.z)?;
                 serial += 1;
             }
@@ -259,9 +464,9 @@ impl<W: Write> PdbWriter<W> {
             }
         }
 
-        // Write CONECT records (only for single model)
+        // Write CONECT records (only for single model, only HETATM-involved bonds)
         if !write_models && mol.bond_count() > 0 {
-            self.write_conect(mol)?;
+            self.write_conect(mol, &index_to_serial)?;
         }
 
         self.write_end()?;
@@ -309,7 +514,7 @@ fn format_charge(charge: i8) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pymol_mol::{Atom, CoordSet, Element};
+    use pymol_mol::{Atom, BondOrder, CoordSet, Element};
     use lin_alg::f32::Vec3;
 
     fn create_test_molecule() -> ObjectMolecule {
@@ -361,5 +566,174 @@ mod tests {
         assert!(pdb_string.contains("ATOM"));
         assert!(pdb_string.contains("ALA"));
         assert!(pdb_string.contains("END"));
+    }
+
+    #[test]
+    fn test_write_secondary_structure() {
+        let mut mol = ObjectMolecule::new("ss_test");
+
+        // Chain A: helix residues 1-3, then sheet residues 4-5
+        for resv in 1..=3 {
+            let mut atom = Atom::new("CA", Element::Carbon);
+            atom.set_residue("ALA", resv, "A");
+            atom.ss_type = SecondaryStructure::Helix;
+            mol.add_atom(atom);
+        }
+        for resv in 4..=5 {
+            let mut atom = Atom::new("CA", Element::Carbon);
+            atom.set_residue("VAL", resv, "A");
+            atom.ss_type = SecondaryStructure::Sheet;
+            mol.add_atom(atom);
+        }
+
+        let coords = CoordSet::from_vec3(&vec![Vec3::new(0.0, 0.0, 0.0); 5]);
+        mol.add_coord_set(coords);
+
+        let mut output = Vec::new();
+        {
+            let mut writer = PdbWriter::new(&mut output);
+            writer.write(&mol).unwrap();
+        }
+
+        let pdb_string = String::from_utf8(output).unwrap();
+        assert!(
+            pdb_string.contains("HELIX"),
+            "Expected HELIX record in output:\n{}",
+            pdb_string
+        );
+        assert!(
+            pdb_string.contains("SHEET"),
+            "Expected SHEET record in output:\n{}",
+            pdb_string
+        );
+
+        // HELIX should cover residues 1-3
+        let helix_line = pdb_string
+            .lines()
+            .find(|l| l.starts_with("HELIX"))
+            .unwrap();
+        assert!(helix_line.contains("ALA"));
+
+        // SHEET should cover residues 4-5
+        let sheet_line = pdb_string
+            .lines()
+            .find(|l| l.starts_with("SHEET"))
+            .unwrap();
+        assert!(sheet_line.contains("VAL"));
+    }
+
+    #[test]
+    fn test_conect_only_hetatm_bonds() {
+        let mut mol = ObjectMolecule::new("conect_test");
+
+        // Two regular ATOM atoms
+        let mut atom1 = Atom::new("N", Element::Nitrogen);
+        atom1.set_residue("ALA", 1, "A");
+        let idx1 = mol.add_atom(atom1);
+
+        let mut atom2 = Atom::new("CA", Element::Carbon);
+        atom2.set_residue("ALA", 1, "A");
+        let idx2 = mol.add_atom(atom2);
+
+        // One HETATM atom
+        let mut atom3 = Atom::new("O", Element::Oxygen);
+        atom3.set_residue("HOH", 2, "A");
+        atom3.state.hetatm = true;
+        let idx3 = mol.add_atom(atom3);
+
+        let coords =
+            CoordSet::from_vec3(&[Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.5, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0)]);
+        mol.add_coord_set(coords);
+
+        // Bond between two regular atoms (should NOT appear in CONECT)
+        let _ = mol.add_bond_unchecked(idx1, idx2, BondOrder::Single);
+        // Bond involving HETATM (should appear in CONECT)
+        let _ = mol.add_bond_unchecked(idx2, idx3, BondOrder::Single);
+
+        let mut output = Vec::new();
+        {
+            let mut writer = PdbWriter::new(&mut output);
+            writer.write(&mol).unwrap();
+        }
+
+        let pdb_string = String::from_utf8(output).unwrap();
+        let conect_lines: Vec<&str> = pdb_string
+            .lines()
+            .filter(|l| l.starts_with("CONECT"))
+            .collect();
+
+        // Should have CONECT records (for the HETATM bond)
+        assert!(
+            !conect_lines.is_empty(),
+            "Expected CONECT records for HETATM bonds"
+        );
+
+        // CONECT should reference serials 2 and 3 (the atoms involved in the HETATM bond)
+        // Serial 1 should NOT appear as a CONECT center (it's only bonded to another ATOM)
+        let conect_text = conect_lines.join("\n");
+        assert!(conect_text.contains("    2"), "Expected serial 2 in CONECT");
+        assert!(conect_text.contains("    3"), "Expected serial 3 in CONECT");
+    }
+
+    #[test]
+    fn test_conect_serial_numbers_match_atoms() {
+        // Verify that CONECT records use the same serial numbers as ATOM records,
+        // not the original atom.id values
+        let mut mol = ObjectMolecule::new("serial_test");
+
+        // Create atoms with non-sequential original IDs
+        let mut atom1 = Atom::new("O", Element::Oxygen);
+        atom1.set_residue("HOH", 1, "A");
+        atom1.state.hetatm = true;
+        atom1.id = 500; // Original ID that should NOT appear in output
+        let idx1 = mol.add_atom(atom1);
+
+        let mut atom2 = Atom::new("H", Element::Hydrogen);
+        atom2.set_residue("HOH", 1, "A");
+        atom2.state.hetatm = true;
+        atom2.id = 501; // Original ID that should NOT appear in output
+        let idx2 = mol.add_atom(atom2);
+
+        let coords = CoordSet::from_vec3(&[Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.96, 0.0, 0.0)]);
+        mol.add_coord_set(coords);
+
+        let _ = mol.add_bond_unchecked(idx1, idx2, BondOrder::Single);
+
+        let mut output = Vec::new();
+        {
+            let mut writer = PdbWriter::new(&mut output);
+            writer.write(&mol).unwrap();
+        }
+
+        let pdb_string = String::from_utf8(output).unwrap();
+
+        // ATOM records should have serials 1 and 2
+        let conect_lines: Vec<&str> = pdb_string
+            .lines()
+            .filter(|l| l.starts_with("CONECT"))
+            .collect();
+
+        assert!(!conect_lines.is_empty());
+
+        // Should NOT contain the original IDs (500, 501)
+        let conect_text = conect_lines.join("\n");
+        assert!(
+            !conect_text.contains("  500"),
+            "CONECT should not contain original atom ID 500"
+        );
+        assert!(
+            !conect_text.contains("  501"),
+            "CONECT should not contain original atom ID 501"
+        );
+
+        // Should contain the sequential serials (1, 2)
+        assert!(
+            conect_text.contains("    1"),
+            "CONECT should contain serial 1"
+        );
+        assert!(
+            conect_text.contains("    2"),
+            "CONECT should contain serial 2"
+        );
     }
 }
