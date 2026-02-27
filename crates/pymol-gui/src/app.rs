@@ -167,7 +167,7 @@ impl TaskContext for App {
 
     fn execute_command(&mut self, cmd: &str) {
         // Ignore the result - TaskContext doesn't propagate errors
-        let _ = self.execute_command(cmd);
+        let _ = self.execute_command(cmd, false);
     }
 
     fn print_info(&mut self, msg: String) {
@@ -1101,7 +1101,7 @@ impl App {
             || !sequence_actions.is_empty();
         for cmd in commands_to_execute {
             // Errors are displayed in the GUI output, no need to propagate
-            let _ = self.execute_command(&cmd);
+            let _ = self.execute_command(&cmd, false);
         }
         for action in object_actions {
             self.handle_object_action(action);
@@ -1109,7 +1109,7 @@ impl App {
         for action in sequence_actions {
             match action {
                 SequenceAction::Execute(cmd) => {
-                    let _ = self.execute_command(&cmd);
+                    let _ = self.execute_command(&cmd, false);
                 }
                 SequenceAction::Notify(msg) => {
                     self.output.print_info(msg);
@@ -1151,39 +1151,29 @@ impl App {
     /// registered via IPC, it will send a callback request to the client.
     ///
     /// Returns Ok(()) on success, Err(message) on failure.
-    fn execute_command(&mut self, cmd: &str) -> Result<(), String> {
+    /// When `silent` is true, no output is written to the GUI output buffer.
+    fn execute_command(&mut self, cmd: &str, silent: bool) -> Result<(), String> {
         let cmd = cmd.trim();
         if cmd.is_empty() || cmd.starts_with('#') {
             return Ok(());
         }
 
         // Echo the command to output
-        self.output.print_command(format!("PyMOL> {}", cmd));
+        if !silent {
+            self.output.print_command(format!("PyMOL> {}", cmd));
+        }
 
         // Parse using pymol-cmd parser for proper handling of quotes, commas, etc.
         let parsed = match parse_command(cmd) {
             Ok(p) => p,
             Err(e) => {
                 let msg = format!("Parse error: {}", e);
-                self.output.print_error(msg.clone());
+                if !silent {
+                    self.output.print_error(msg.clone());
+                }
                 return Err(msg);
             }
         };
-
-        // Handle "help <external_command>" - check if help target is an external command
-        if parsed.name == "help" {
-            if let Some(target_cmd) = parsed.get_str(0) {
-                if let Some(help_text) = self.external_commands.help(target_cmd) {
-                    self.output.print_info(help_text);
-                    return Ok(());
-                } else if self.external_commands.contains(target_cmd) {
-                    // External command without help text
-                    self.output.print_info(format!(" '{}' - external command (no help available)", target_cmd));
-                    return Ok(());
-                }
-                // Fall through to built-in help command
-            }
-        }
 
         // Check if it's an external command (registered via IPC)
         if self.external_commands.contains(&parsed.name) {
@@ -1193,7 +1183,7 @@ impl App {
         }
 
         // Execute as built-in command using CommandExecutor
-        self.execute_builtin_command_internal(cmd)
+        self.execute_builtin_command_internal(cmd, silent)
     }
 
     /// Execute an external command via IPC callback
@@ -1241,7 +1231,8 @@ impl App {
     /// Execute a built-in command (internal helper)
     ///
     /// Returns Ok(()) on success, Err(message) on failure.
-    fn execute_builtin_command_internal(&mut self, cmd: &str) -> Result<(), String> {
+    /// When `silent` is true, no output is written to the GUI output buffer.
+    fn execute_builtin_command_internal(&mut self, cmd: &str, silent: bool) -> Result<(), String> {
         // Calculate default size for PNG capture from viewport or window
         let default_size = self.view.viewport_rect
             .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))
@@ -1278,11 +1269,13 @@ impl App {
         match result {
             Ok(output) => {
                 // Display any output messages from the command with appropriate styling
-                for msg in output.messages {
-                    match msg.kind {
-                        MessageKind::Info => self.output.print_info(msg.text),
-                        MessageKind::Warning => self.output.print_warning(msg.text),
-                        MessageKind::Error => self.output.print_error(msg.text),
+                if !silent {
+                    for msg in output.messages {
+                        match msg.kind {
+                            MessageKind::Info => self.output.print_info(msg.text),
+                            MessageKind::Warning => self.output.print_warning(msg.text),
+                            MessageKind::Error => self.output.print_error(msg.text),
+                        }
                     }
                 }
                 Ok(())
@@ -1295,7 +1288,9 @@ impl App {
             Err(e) => {
                 // Print the error to the GUI output
                 let msg = format!("{}", e);
-                self.output.print_error(msg.clone());
+                if !silent {
+                    self.output.print_error(msg.clone());
+                }
                 Err(msg)
             }
         }
@@ -1355,7 +1350,7 @@ impl App {
             IpcRequest::Execute { id, command } => {
                 log::debug!("IPC Execute: {}", command);
                 // Execute the command and propagate errors to the client
-                match self.execute_command(command) {
+                match self.execute_command(command, false) {
                     Ok(()) => Some(IpcResponse::Ok { id: *id }),
                     Err(message) => Some(IpcResponse::Error { id: *id, message }),
                 }
@@ -1363,16 +1358,16 @@ impl App {
 
             IpcRequest::RegisterCommand { name, help } => {
                 log::info!("IPC RegisterCommand: {}", name);
-                self.external_commands.register(name.clone(), help.clone());
-                // Note: We no longer need to update a cached list - command names are queried on demand
-                None // No response needed
+                self.external_commands.register(name.clone());
+                self.executor.registry_mut().register_external_help(name.clone(), help.clone());
+                None
             }
 
             IpcRequest::UnregisterCommand { name } => {
                 log::info!("IPC UnregisterCommand: {}", name);
                 self.external_commands.unregister(name);
-                // Note: We no longer need to update a cached list - command names are queried on demand
-                None // No response needed
+                self.executor.registry_mut().remove_external_help(name);
+                None
             }
 
             IpcRequest::CallbackResponse { id, success, error, output } => {
@@ -1430,6 +1425,12 @@ impl App {
                     id: *id,
                     value: serde_json::json!(count)
                 })
+            }
+
+            IpcRequest::Hello { client_id } => {
+                log::info!("IPC client identified as: {}", client_id);
+                server.set_client_id(client_id.clone());
+                Some(IpcResponse::Ok { id: 0 })
             }
 
             IpcRequest::Quit => {
@@ -1611,10 +1612,10 @@ impl App {
                 self.needs_redraw = true;
             }
             ObjectAction::ZoomTo(name) => {
-                let _ = self.execute_command(&format!("zoom {}", name));
+                let _ = self.execute_command(&format!("zoom {}", name), false);
             }
             ObjectAction::CenterOn(name) => {
-                let _ = self.execute_command(&format!("center {}", name));
+                let _ = self.execute_command(&format!("center {}", name), false);
             }
             ObjectAction::DeleteSelection(name) => {
                 self.state.selections.remove(&name);
@@ -1782,12 +1783,12 @@ impl App {
 
                     let has_sele = self.state.selections.contains("sele");
                     if let Some(cmd) = build_sele_command(&expr, overlaps_sele, has_sele) {
-                        let _ = self.execute_command(&cmd);
+                        let _ = self.execute_command(&cmd, false);
                     }
                 }
             }
         } else if self.state.selections.contains("sele") {
-            let _ = self.execute_command("deselect sele");
+            let _ = self.execute_command("deselect sele", false);
         }
 
         // Sync selection highlights to sequence viewer immediately
@@ -1860,7 +1861,7 @@ impl ApplicationHandler for App {
         if let Some(path) = self.pending_load_file.take() {
             // Quote the path to handle spaces and special characters
             // Errors are displayed in the GUI output, no need to propagate
-            let _ = self.execute_command(&format!("load \"{}\"", path));
+            let _ = self.execute_command(&format!("load \"{}\"", path), false);
         }
 
         window.request_redraw();
@@ -2069,7 +2070,7 @@ impl ApplicationHandler for App {
                 self.drag_hover_path = None;
                 let path_str = path.to_string_lossy();
                 log::info!("Drag-and-drop: loading \"{}\"", path_str);
-                match self.execute_command(&format!("load \"{}\"", path_str)) {
+                match self.execute_command(&format!("load \"{}\"", path_str), false) {
                     Ok(_) => {}
                     Err(e) => self.output.print_error(format!(
                         "Failed to load \"{}\": {}",

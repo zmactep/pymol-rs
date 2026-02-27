@@ -120,6 +120,12 @@ pub enum IpcRequest {
         selection: String,
     },
 
+    /// Client handshake: identifies the connecting client
+    Hello {
+        /// Client identifier string (e.g. "pymol-python", "script:analysis.py")
+        client_id: String,
+    },
+
     /// Close the GUI application
     Quit,
 
@@ -206,6 +212,7 @@ impl IpcRequest {
             Self::GetState { id } => Some(*id),
             Self::GetNames { id } => Some(*id),
             Self::CountAtoms { id, .. } => Some(*id),
+            Self::Hello { .. } => None,
             Self::Quit => None,
             Self::Ping { id } => Some(*id),
             Self::ShowWindow { id } => Some(*id),

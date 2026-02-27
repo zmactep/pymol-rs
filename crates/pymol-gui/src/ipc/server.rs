@@ -35,6 +35,7 @@ pub struct IpcServer {
 struct ClientConnection {
     stream: std::os::unix::net::UnixStream,
     reader: BufReader<std::os::unix::net::UnixStream>,
+    client_id: String,
 }
 
 impl IpcServer {
@@ -93,9 +94,13 @@ impl IpcServer {
     #[cfg(unix)]
     pub fn poll(&mut self) -> Option<IpcRequest> {
         // Try to accept new connections
-        if self.client.is_none() {
-            match self.listener.accept() {
-                Ok((stream, _addr)) => {
+        match self.listener.accept() {
+            Ok((stream, _addr)) => {
+                if self.client.is_some() {
+                    // Already have a client — reject the new connection
+                    log::warn!("IPC: rejecting second client, only one connection allowed");
+                    Self::reject_connection(stream);
+                } else {
                     log::info!("IPC client connected");
                     if let Err(e) = stream.set_nonblocking(true) {
                         log::error!("Failed to set non-blocking: {}", e);
@@ -111,14 +116,15 @@ impl IpcServer {
                     self.client = Some(ClientConnection {
                         stream,
                         reader: BufReader::new(reader_stream),
+                        client_id: String::from("unknown"),
                     });
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No pending connections
-                }
-                Err(e) => {
-                    log::error!("Failed to accept connection: {}", e);
-                }
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // No pending connections
+            }
+            Err(e) => {
+                log::error!("Failed to accept connection: {}", e);
             }
         }
 
@@ -203,6 +209,26 @@ impl IpcServer {
         ))
     }
 
+    /// Get the connected client's identifier
+    pub fn client_id(&self) -> Option<&str> {
+        #[cfg(unix)]
+        {
+            self.client.as_ref().map(|c| c.client_id.as_str())
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
+    }
+
+    /// Set the connected client's identifier (called when Hello is received)
+    pub fn set_client_id(&mut self, id: String) {
+        #[cfg(unix)]
+        if let Some(ref mut client) = self.client {
+            client.client_id = id;
+        }
+    }
+
     /// Check if a client is connected
     pub fn is_connected(&self) -> bool {
         #[cfg(unix)]
@@ -242,6 +268,20 @@ impl IpcServer {
             }
         }
         false
+    }
+
+    /// Reject an incoming connection by sending an error and closing
+    #[cfg(unix)]
+    fn reject_connection(mut stream: std::os::unix::net::UnixStream) {
+        let response = IpcResponse::Error {
+            id: 0,
+            message: "Another client is already connected".to_string(),
+        };
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = writeln!(stream, "{}", json);
+            let _ = stream.flush();
+        }
+        // stream is dropped here, closing the connection
     }
 }
 

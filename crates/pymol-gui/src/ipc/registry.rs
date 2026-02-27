@@ -1,9 +1,9 @@
 //! External Command Registry
 //!
 //! Tracks commands registered via IPC that should be forwarded back to the client
-//! for execution (callbacks).
+//! for execution (callbacks). Help text is stored separately in the CommandRegistry.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// Registry for external commands registered via IPC
 ///
@@ -12,15 +12,15 @@ use std::collections::HashMap;
 /// it internally.
 #[derive(Debug, Default)]
 pub struct ExternalCommandRegistry {
-    /// command name -> help text
-    commands: HashMap<String, Option<String>>,
+    /// Registered command names
+    commands: HashSet<String>,
 }
 
 impl ExternalCommandRegistry {
     /// Create a new empty registry
     pub fn new() -> Self {
         Self {
-            commands: HashMap::new(),
+            commands: HashSet::new(),
         }
     }
 
@@ -28,30 +28,25 @@ impl ExternalCommandRegistry {
     ///
     /// The command will appear in autocomplete and when invoked,
     /// will trigger a callback to the IPC client.
-    pub fn register(&mut self, name: String, help: Option<String>) {
-        self.commands.insert(name, help);
+    pub fn register(&mut self, name: String) {
+        self.commands.insert(name);
     }
 
     /// Unregister an external command
     ///
     /// Returns true if the command was registered, false otherwise.
     pub fn unregister(&mut self, name: &str) -> bool {
-        self.commands.remove(name).is_some()
+        self.commands.remove(name)
     }
 
     /// Check if a command is registered
     pub fn contains(&self, name: &str) -> bool {
-        self.commands.contains_key(name)
+        self.commands.contains(name)
     }
 
     /// Get all registered command names
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.commands.keys().map(|s| s.as_str())
-    }
-
-    /// Get help text for a command
-    pub fn help(&self, name: &str) -> Option<&str> {
-        self.commands.get(name).and_then(|h| h.as_deref())
+        self.commands.iter().map(|s| s.as_str())
     }
 
     /// Get the number of registered commands
@@ -77,11 +72,10 @@ mod tests {
     #[test]
     fn test_register_unregister() {
         let mut registry = ExternalCommandRegistry::new();
-        
-        registry.register("highlight".to_string(), Some("Highlight atoms".to_string()));
+
+        registry.register("highlight".to_string());
         assert!(registry.contains("highlight"));
-        assert_eq!(registry.help("highlight"), Some("Highlight atoms"));
-        
+
         assert!(registry.unregister("highlight"));
         assert!(!registry.contains("highlight"));
         assert!(!registry.unregister("highlight")); // Already removed
@@ -90,10 +84,10 @@ mod tests {
     #[test]
     fn test_names_iterator() {
         let mut registry = ExternalCommandRegistry::new();
-        registry.register("cmd1".to_string(), None);
-        registry.register("cmd2".to_string(), None);
-        registry.register("cmd3".to_string(), None);
-        
+        registry.register("cmd1".to_string());
+        registry.register("cmd2".to_string());
+        registry.register("cmd3".to_string());
+
         let mut names: Vec<_> = registry.names().collect();
         names.sort();
         assert_eq!(names, vec!["cmd1", "cmd2", "cmd3"]);

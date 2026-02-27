@@ -23,15 +23,22 @@ pub struct IpcClient {
 }
 
 impl IpcClient {
-    /// Connect to the GUI IPC server
+    /// Connect to the GUI IPC server with the default client identifier
+    #[cfg(unix)]
+    pub fn connect(socket_path: &Path) -> std::io::Result<Self> {
+        Self::connect_with_id(socket_path, "pymol-python")
+    }
+
+    /// Connect to the GUI IPC server with a specific client identifier
     ///
     /// # Arguments
     /// * `socket_path` - Path to the Unix domain socket
+    /// * `client_id` - Identifier string sent to the server during handshake
     ///
     /// # Errors
-    /// Returns an error if the connection fails
+    /// Returns an error if the connection fails or the server rejects the connection
     #[cfg(unix)]
-    pub fn connect(socket_path: &Path) -> std::io::Result<Self> {
+    pub fn connect_with_id(socket_path: &Path, client_id: &str) -> std::io::Result<Self> {
         use std::os::unix::net::UnixStream;
 
         log::info!("Connecting to IPC server at {:?}", socket_path);
@@ -40,16 +47,41 @@ impl IpcClient {
         let reader_stream = stream.try_clone()?;
         let reader = BufReader::new(reader_stream);
 
-        Ok(Self {
+        let mut client = Self {
             socket_path: socket_path.to_path_buf(),
             stream,
             reader,
             next_id: AtomicU64::new(1),
-        })
+        };
+
+        // Send handshake
+        let hello = IpcRequest::Hello {
+            client_id: client_id.to_string(),
+        };
+        client.send(&hello)?;
+
+        // Read acknowledgment
+        let ack = client.recv()?;
+        if let IpcResponse::Error { message, .. } = ack {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("Server rejected connection: {}", message),
+            ));
+        }
+
+        Ok(client)
     }
 
     #[cfg(not(unix))]
     pub fn connect(_socket_path: &Path) -> std::io::Result<Self> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "IPC client not yet supported on this platform",
+        ))
+    }
+
+    #[cfg(not(unix))]
+    pub fn connect_with_id(_socket_path: &Path, _client_id: &str) -> std::io::Result<Self> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "IPC client not yet supported on this platform",

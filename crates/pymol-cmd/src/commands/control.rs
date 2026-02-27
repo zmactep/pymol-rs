@@ -280,14 +280,30 @@ EXAMPLES
 
         if let Some(cmd_name) = command {
             // Show help for specific command
-            if let Some(registry) = ctx.registry() {
+            // Look up in registry, collecting result to release borrow before printing
+            enum HelpResult {
+                Builtin(std::sync::Arc<dyn crate::command::Command>),
+                External(Option<String>),
+                Unknown,
+                NoRegistry,
+            }
+            let result = if let Some(registry) = ctx.registry() {
                 if let Some(cmd) = registry.get(cmd_name) {
-                    ctx.print(cmd.help());
+                    HelpResult::Builtin(cmd)
+                } else if let Some(ext_help) = registry.get_external_help(cmd_name) {
+                    HelpResult::External(ext_help.map(|s| s.to_string()))
                 } else {
-                    ctx.print(&format!(" Unknown command: '{}'", cmd_name));
+                    HelpResult::Unknown
                 }
             } else {
-                ctx.print(&format!(" Help for '{}' - registry not available", cmd_name));
+                HelpResult::NoRegistry
+            };
+            match result {
+                HelpResult::Builtin(cmd) => ctx.print(cmd.help()),
+                HelpResult::External(Some(text)) => ctx.print(&text),
+                HelpResult::External(None) => ctx.print(&format!(" '{}' - external command (no help available)", cmd_name)),
+                HelpResult::Unknown => ctx.print(&format!(" Unknown command: '{}'", cmd_name)),
+                HelpResult::NoRegistry => ctx.print(&format!(" Help for '{}' - registry not available", cmd_name)),
             }
         } else {
             // List available commands
@@ -298,6 +314,21 @@ EXAMPLES
             ctx.print("   Objects:  delete, rename, create, copy, group");
             ctx.print("   Settings: set, get, unset");
             ctx.print("   Control:  quit, reinitialize, refresh, rebuild, help");
+
+            // Collect external names before printing to release registry borrow
+            let ext_line = ctx.registry().and_then(|registry| {
+                let mut ext_names: Vec<&str> = registry.external_names().collect();
+                if ext_names.is_empty() {
+                    None
+                } else {
+                    ext_names.sort();
+                    Some(format!("   External: {}", ext_names.join(", ")))
+                }
+            });
+            if let Some(line) = ext_line {
+                ctx.print(&line);
+            }
+
             ctx.print("");
             ctx.print(" Type 'help <command>' for detailed help");
         }

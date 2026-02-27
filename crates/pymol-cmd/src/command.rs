@@ -227,6 +227,8 @@ pub struct CommandRegistry {
     commands: AHashMap<String, Arc<dyn Command>>,
     /// Aliases mapping alias -> command name
     aliases: AHashMap<String, String>,
+    /// Help text for external commands (not backed by Command implementations)
+    extra_help: AHashMap<String, Option<String>>,
 }
 
 impl Default for CommandRegistry {
@@ -241,6 +243,7 @@ impl CommandRegistry {
         Self {
             commands: AHashMap::new(),
             aliases: AHashMap::new(),
+            extra_help: AHashMap::new(),
         }
     }
 
@@ -358,6 +361,32 @@ impl CommandRegistry {
             .map(|cmd| cmd.arg_hints().get(position) == Some(&hint))
             .unwrap_or(false)
     }
+
+    /// Register help text for an external command (no Command implementation needed)
+    ///
+    /// These entries appear in help lookups but do not participate in execution.
+    pub fn register_external_help(&mut self, name: impl Into<String>, help: Option<String>) {
+        self.extra_help.insert(name.into(), help);
+    }
+
+    /// Remove external help for a command
+    pub fn remove_external_help(&mut self, name: &str) {
+        self.extra_help.remove(name);
+    }
+
+    /// Look up external help text for a command name
+    ///
+    /// Returns `Some(Some(text))` if the command has help text,
+    /// `Some(None)` if registered but has no help text,
+    /// or `None` if not registered as external.
+    pub fn get_external_help(&self, name: &str) -> Option<Option<&str>> {
+        self.extra_help.get(name).map(|h| h.as_deref())
+    }
+
+    /// Get all external command names
+    pub fn external_names(&self) -> impl Iterator<Item = &str> {
+        self.extra_help.keys().map(|s| s.as_str())
+    }
 }
 
 #[cfg(test)]
@@ -403,5 +432,36 @@ mod tests {
 
         let cmd = registry.get("test_alias").unwrap();
         assert_eq!(cmd.name(), "test");
+    }
+
+    #[test]
+    fn test_external_help() {
+        let mut registry = CommandRegistry::new();
+
+        // Not registered
+        assert!(registry.get_external_help("foo").is_none());
+
+        // Register with help text
+        registry.register_external_help("foo", Some("Help for foo".to_string()));
+        assert_eq!(registry.get_external_help("foo"), Some(Some("Help for foo")));
+
+        // Register without help text
+        registry.register_external_help("bar", None);
+        assert_eq!(registry.get_external_help("bar"), Some(None));
+
+        // Remove
+        registry.remove_external_help("foo");
+        assert!(registry.get_external_help("foo").is_none());
+    }
+
+    #[test]
+    fn test_external_names() {
+        let mut registry = CommandRegistry::new();
+        registry.register_external_help("cmd_b", None);
+        registry.register_external_help("cmd_a", Some("help".to_string()));
+
+        let mut names: Vec<&str> = registry.external_names().collect();
+        names.sort();
+        assert_eq!(names, vec!["cmd_a", "cmd_b"]);
     }
 }
