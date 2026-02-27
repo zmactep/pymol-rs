@@ -302,8 +302,9 @@ impl SequencePanel {
                     );
                     let painter = ui.painter_at(rect);
                     let name = &seq_obj.object_name;
-                    let display_name = if name.len() > 4 {
-                        format!("{}...", &name[..3])
+                    let display_name = if name.chars().count() > 4 {
+                        let truncated: String = name.chars().take(3).collect();
+                        format!("{truncated}...")
                     } else {
                         name.clone()
                     };
@@ -314,7 +315,7 @@ impl SequencePanel {
                         obj_name_font.clone(),
                         obj_name_color,
                     );
-                    if name.len() > 4 {
+                    if name.chars().count() > 4 {
                         response.on_hover_text(name);
                     }
                     if i + 1 < n_objects {
