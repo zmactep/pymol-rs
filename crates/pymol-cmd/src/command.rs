@@ -39,6 +39,8 @@ pub enum ArgHint {
     NamedSelection,
     /// Label property expression (name, resn, resi, chain, b, q, etc.)
     LabelProperty,
+    /// Command name (for help, etc.)
+    Command,
 }
 
 // ============================================================================

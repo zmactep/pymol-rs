@@ -253,6 +253,10 @@ impl Command for HelpCommand {
         "help"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Command]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -306,27 +310,23 @@ EXAMPLES
                 HelpResult::NoRegistry => ctx.print(&format!(" Help for '{}' - registry not available", cmd_name)),
             }
         } else {
-            // List available commands
-            ctx.print(" Available commands:");
-            ctx.print("   File I/O: load, save, cd, pwd, ls, run");
-            ctx.print("   Viewing:  zoom, center, orient, reset, clip");
-            ctx.print("   Display:  show, hide, as, enable, disable, color, bg_color");
-            ctx.print("   Objects:  delete, rename, create, copy, group");
-            ctx.print("   Settings: set, get, unset");
-            ctx.print("   Control:  quit, reinitialize, refresh, rebuild, help");
-
-            // Collect external names before printing to release registry borrow
-            let ext_line = ctx.registry().and_then(|registry| {
-                let mut ext_names: Vec<&str> = registry.external_names().collect();
-                if ext_names.is_empty() {
-                    None
-                } else {
-                    ext_names.sort();
-                    Some(format!("   External: {}", ext_names.join(", ")))
-                }
+            // List available commands from registry
+            let lines: Option<Vec<String>> = ctx.registry().map(|registry| {
+                let mut names: Vec<&str> = registry.names()
+                    .chain(registry.external_names())
+                    .collect();
+                names.sort();
+                names.chunks(5)
+                    .map(|chunk| format!("   {}", chunk.join(", ")))
+                    .collect()
             });
-            if let Some(line) = ext_line {
-                ctx.print(&line);
+            if let Some(lines) = lines {
+                ctx.print(" Available commands:");
+                for line in &lines {
+                    ctx.print(line);
+                }
+            } else {
+                ctx.print(" Command registry not available");
             }
 
             ctx.print("");

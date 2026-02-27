@@ -109,6 +109,7 @@ pub fn generate_completions(
                             complete_from_list(prefix, prefix_start, &ctx.selection_names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
                         }
                         ArgHint::LabelProperty => complete_from_static(prefix, prefix_start, LABEL_PROPERTY_NAMES),
+                        ArgHint::Command => complete_from_list(prefix, prefix_start, ctx.command_names),
                         ArgHint::None => CompletionResult::empty(cursor_pos),
                     }
                 } else {
