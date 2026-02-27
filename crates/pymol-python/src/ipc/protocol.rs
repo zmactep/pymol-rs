@@ -68,6 +68,9 @@ pub enum IpcRequest {
         id: u64,
         /// Command string to execute
         command: String,
+        /// If true, suppress command echo and info/warning output
+        #[serde(default)]
+        silent: bool,
     },
 
     /// Register an external command (appears in GUI autocomplete)

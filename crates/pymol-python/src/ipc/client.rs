@@ -191,6 +191,18 @@ impl IpcClient {
         let request = IpcRequest::Execute {
             id,
             command: command.to_string(),
+            silent: false,
+        };
+        self.request(&request)
+    }
+
+    /// Execute a command on the GUI in silent mode (no echo or info output)
+    pub fn execute_silent(&mut self, command: &str) -> std::io::Result<IpcResponse> {
+        let id = self.next_id();
+        let request = IpcRequest::Execute {
+            id,
+            command: command.to_string(),
+            silent: true,
         };
         self.request(&request)
     }

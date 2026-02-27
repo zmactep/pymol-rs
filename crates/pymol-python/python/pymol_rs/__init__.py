@@ -50,20 +50,44 @@ from pymol_rs._pymol_rs import settings
 _cmd_instance = None
 
 
+def _get_cmd():
+    """Get or create the global cmd instance."""
+    global _cmd_instance
+    if _cmd_instance is None:
+        _cmd_instance = _create_cmd()
+    return _cmd_instance
+
+
 def __getattr__(name: str):
     """Lazy attribute access for the cmd object."""
-    global _cmd_instance
     if name == "cmd":
-        if _cmd_instance is None:
-            _cmd_instance = _create_cmd()
-        return _cmd_instance
+        return _get_cmd()
     raise AttributeError(f"module 'pymol_rs' has no attribute {name!r}")
+
+
+def set_silent(silent: bool) -> None:
+    """Set default silent mode for all commands.
+
+    When silent mode is enabled, commands will not echo to the GUI
+    output panel and info/warning messages will be suppressed.
+
+    Args:
+        silent: True to suppress output, False to show output.
+
+    Examples:
+        >>> import pymol_rs
+        >>> pymol_rs.set_silent(True)   # All commands run silently
+        >>> pymol_rs.cmd.load("protein.pdb")  # No echo
+        >>> pymol_rs.set_silent(False)  # Restore output
+    """
+    _get_cmd().set_silent(silent)
 
 
 __version__ = "0.1.0"
 __all__ = [
     # Main interface
     "cmd",
+    "set_silent",
     # GUI launcher
     "run_gui",
     # Types

@@ -1347,10 +1347,10 @@ impl App {
     /// Handle a single IPC request
     fn handle_ipc_request(&mut self, request: &IpcRequest, server: &mut IpcServer) -> Option<IpcResponse> {
         match request {
-            IpcRequest::Execute { id, command } => {
+            IpcRequest::Execute { id, command, silent } => {
                 log::debug!("IPC Execute: {}", command);
                 // Execute the command and propagate errors to the client
-                match self.execute_command(command, false) {
+                match self.execute_command(command, *silent) {
                     Ok(()) => Some(IpcResponse::Ok { id: *id }),
                     Err(message) => Some(IpcResponse::Error { id: *id, message }),
                 }

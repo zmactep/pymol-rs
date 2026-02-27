@@ -70,6 +70,9 @@ pub enum IpcRequest {
         id: u64,
         /// Command string to execute
         command: String,
+        /// If true, suppress command echo and info/warning output
+        #[serde(default)]
+        silent: bool,
     },
 
     /// Register an external command (appears in autocomplete)
@@ -245,13 +248,14 @@ mod tests {
         let req = IpcRequest::Execute {
             id: 1,
             command: "load protein.pdb".to_string(),
+            silent: false,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("Execute"));
         assert!(json.contains("load protein.pdb"));
 
         let parsed: IpcRequest = serde_json::from_str(&json).unwrap();
-        if let IpcRequest::Execute { id, command } = parsed {
+        if let IpcRequest::Execute { id, command, .. } = parsed {
             assert_eq!(id, 1);
             assert_eq!(command, "load protein.pdb");
         } else {

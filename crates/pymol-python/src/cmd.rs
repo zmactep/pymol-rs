@@ -37,6 +37,8 @@ pub struct PyCmd {
     listener: Arc<Mutex<Option<CallbackListener>>>,
     /// Extended command callbacks (shared with listener)
     extended_commands: Arc<Mutex<ExtendedCommands>>,
+    /// Default silent mode for command execution
+    silent: bool,
 }
 
 impl PyCmd {
@@ -66,6 +68,7 @@ impl PyCmd {
             connection: Some(connection),
             listener,
             extended_commands,
+            silent: false,
         })
     }
 
@@ -127,12 +130,26 @@ impl PyCmd {
             connection: Some(connection),
             listener,
             extended_commands,
+            silent: false,
         })
     }
 
     /// Execute a command via IPC and return the result
+    ///
+    /// Uses the default silent mode set by `set_silent()`.
     fn execute_cmd(&self, command: &str) -> PyResult<()> {
-        let response = self.with_client(|client| client.execute(command))?;
+        self.execute_cmd_opts(command, self.silent)
+    }
+
+    /// Execute a command via IPC with options
+    fn execute_cmd_opts(&self, command: &str, silent: bool) -> PyResult<()> {
+        let response = self.with_client(|client| {
+            if silent {
+                client.execute_silent(command)
+            } else {
+                client.execute(command)
+            }
+        })?;
 
         match response {
             IpcResponse::Ok { .. } => Ok(()),
@@ -234,7 +251,7 @@ impl PyCmd {
         });
 
         let cmd = format!("load {}, {}", abs_path.display(), obj_name);
-        self.execute_cmd(&cmd)?;
+        self.execute_cmd_opts(&cmd, quiet)?;
 
         Ok(obj_name)
     }
@@ -408,7 +425,7 @@ impl PyCmd {
     #[pyo3(signature = (name, selection, enable=-1, quiet=true))]
     fn select(&self, name: &str, selection: &str, enable: i32, quiet: bool) -> PyResult<i32> {
         let cmd = format!("select {}, {}", name, selection);
-        self.execute_cmd(&cmd)?;
+        self.execute_cmd_opts(&cmd, quiet)?;
         // Can't return accurate count via IPC currently
         Ok(0)
     }
@@ -957,7 +974,7 @@ impl PyCmd {
             format!("set {}, {}", name, value_str)
         };
 
-        self.execute_cmd(&cmd)
+        self.execute_cmd_opts(&cmd, quiet)
     }
 
     /// Get a setting value
@@ -1013,9 +1030,10 @@ impl PyCmd {
     ///
     /// Args:
     ///     command: Command string (e.g., "load file.pdb; show cartoon")
-    #[pyo3(name = "do")]
-    fn do_(&self, command: &str) -> PyResult<()> {
-        self.execute_cmd(command)
+    ///     quiet: Suppress command echo and info output (default: False)
+    #[pyo3(name = "do", signature = (command, quiet=false))]
+    fn do_(&self, command: &str, quiet: bool) -> PyResult<()> {
+        self.execute_cmd_opts(command, quiet)
     }
 
     // =========================================================================
@@ -1044,7 +1062,7 @@ impl PyCmd {
             (Some(w), None) => format!("png {}, {}", filename, w),
             _ => format!("png {}", filename),
         };
-        self.execute_cmd(&cmd)
+        self.execute_cmd_opts(&cmd, quiet)
     }
 
     /// Refresh the display
@@ -1539,6 +1557,32 @@ impl PyCmd {
     // =========================================================================
     // Misc
     // =========================================================================
+
+    /// Set default silent mode for all commands
+    ///
+    /// When silent mode is enabled, commands will not echo to the GUI
+    /// output panel and info/warning messages will be suppressed.
+    /// Individual commands can still override this with their `quiet` parameter.
+    ///
+    /// Args:
+    ///     silent: True to suppress output, False to show output (default)
+    ///
+    /// Examples:
+    ///     cmd.set_silent(True)   # All subsequent commands run silently
+    ///     cmd.load("protein.pdb")  # No echo in GUI output
+    ///     cmd.set_silent(False)  # Restore normal output
+    #[pyo3(signature = (silent))]
+    fn set_silent(&mut self, silent: bool) {
+        self.silent = silent;
+    }
+
+    /// Get the current default silent mode
+    ///
+    /// Returns:
+    ///     True if silent mode is enabled, False otherwise
+    fn get_silent(&self) -> bool {
+        self.silent
+    }
 
     /// Print version information
     fn version(&self) -> String {
