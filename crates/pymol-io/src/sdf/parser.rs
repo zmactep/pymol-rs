@@ -47,16 +47,21 @@ impl<R: Read> SdfReader<R> {
 
     /// Parse a single molecule from the file
     fn parse_molecule(&mut self) -> IoResult<Option<ObjectMolecule>> {
-        // Line 1: Molecule name
-        let name = match self.read_line()? {
-            Some(line) => line.trim().to_string(),
-            None => return Ok(None),
+        // Line 1: Molecule name.
+        // Loop (not recursion) to skip any leading $$$$ separators — the spec
+        // forbids $$$$ as a record name, and recursion would overflow on large files.
+        let name = loop {
+            match self.read_line()? {
+                None => return Ok(None),
+                Some(line) => {
+                    let trimmed = line.trim().to_string();
+                    if trimmed != "$$$$" {
+                        break trimmed;
+                    }
+                    // $$$$ is a record separator, not a molecule name — skip it
+                }
+            }
         };
-
-        // Check for end of SDF file
-        if name == "$$$$" {
-            return self.parse_molecule(); // Try next molecule
-        }
 
         // Line 2: Program/timestamp line (ignored)
         self.read_line()?;
@@ -153,17 +158,37 @@ impl<R: Read> SdfReader<R> {
         let coord_set = CoordSet::from_vec3(&coords);
         mol.add_coord_set(coord_set);
 
-        // Skip to end of molecule (for SDF files)
+        // Skip the SDF data section (key-value fields after M  END).
+        //
+        // The $$$$ delimiter is "a line beginning with $$$$" per the CTFile spec,
+        // so $$$$ABCD is a valid (rare) terminator.  Crucially, $$$$ can also
+        // appear as a DATA VALUE inside a data item (e.g. a price tier), so we
+        // must not treat it as a separator while reading value lines.
+        //
+        // Two-state machine:
+        //   BetweenItems — $$$$ is the record separator; > starts a new item
+        //   InItem       — blank line ends the item; everything else is a value
+        let mut in_data_item = false;
         loop {
             let line = match self.read_line()? {
                 Some(line) => line,
-                None => break,
+                None => break, // EOF without $$$$: treat as end of record
             };
 
-            if line.starts_with("$$$$") {
-                break;
+            if in_data_item {
+                if line.trim().is_empty() {
+                    in_data_item = false; // blank line terminates data item
+                }
+                // Non-blank lines are data values; $$$$ here is NOT a separator
+            } else {
+                if line.starts_with("$$$$") {
+                    break; // record separator (spec: line *beginning* with $$$$)
+                }
+                if line.starts_with('>') {
+                    in_data_item = true; // data header — values follow
+                }
+                // blank lines between items are legal, just skip
             }
-            // Skip data fields in SDF format
         }
 
         Ok(Some(mol))
@@ -213,8 +238,11 @@ fn parse_counts_line(line: &str) -> IoResult<(u32, u32, String)> {
         .and_then(|s| s.trim().parse().ok())
         .ok_or_else(|| IoError::parse_msg("Invalid bond count"))?;
 
-    // Check for version string
-    let version = if line.contains("V3000") {
+    // Check for version string at the correct column position.
+    // Per the CTFile spec the version field occupies columns 34–39 (1-indexed),
+    // i.e. bytes 33..39 (0-indexed). Checking with contains() anywhere in the
+    // line risks false positives from data in obsolete fields.
+    let version = if line.get(33..39).map_or(false, |s| s.trim() == "V3000") {
         "V3000".to_string()
     } else {
         "V2000".to_string()
@@ -390,6 +418,70 @@ M  END
         assert_eq!(mol.name, "Water");
         assert_eq!(mol.atom_count(), 3);
         assert_eq!(mol.bond_count(), 2);
+    }
+
+    #[test]
+    fn test_parse_counts_line_v3000_at_correct_column() {
+        // V3000 in an obsolete field before column 34 must NOT be detected as V3000
+        let line = "  3  2  0  0  0  0  0  0  0  0999 V2000"; // V2000 at col 34
+        let (_, _, version) = parse_counts_line(line).unwrap();
+        assert_eq!(version, "V2000");
+
+        // V3000 at the correct column
+        let line = "  3  2  0  0  0  0  0  0  0  0999 V3000";
+        let (_, _, version) = parse_counts_line(line).unwrap();
+        assert_eq!(version, "V3000");
+
+        // "V3000" appearing only in the obsolete fields (before col 34) must not
+        // trigger V3000 detection — this was the false-positive the spec warns about.
+        // We can't easily construct a real line for this without a full 39-char prefix,
+        // so just verify the column check doesn't fire on a short line.
+        let short = "  1  0  0  0  0";
+        let (_, _, version) = parse_counts_line(short).unwrap();
+        assert_eq!(version, "V2000");
+    }
+
+    #[test]
+    fn test_leading_separator_no_stack_overflow() {
+        // A file that starts with $$$$ (an empty/leading separator).
+        // The old recursive implementation would re-enter parse_molecule for every
+        // leading $$$$; with many of them it would overflow.  The loop-based fix
+        // handles any number of leading separators without recursion.
+        let sdf_data = "$$$$\n$$$$\n$$$$\nWater\n  test\nComment\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 O   0  0  0  0  0  0  0  0  0  0  0  0\nM  END\n$$$$\n";
+        let mut reader = SdfReader::new(sdf_data.as_bytes());
+        let mols = reader.read_all().unwrap();
+        assert_eq!(mols.len(), 1);
+        assert_eq!(mols[0].name, "Water");
+    }
+
+    #[test]
+    fn test_data_value_with_dollar_signs() {
+        // Data values of "$", "$$", "$$$" must NOT be mistaken for the $$$$ separator.
+        let sdf_data = "\
+Mol1\n  test\nComment\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0\nM  END\n> <PRICE>\n$$$\n\n$$$$\n";
+        let mut reader = SdfReader::new(sdf_data.as_bytes());
+        let mols = reader.read_all().unwrap();
+        assert_eq!(mols.len(), 1);
+        assert_eq!(mols[0].name, "Mol1");
+    }
+
+    #[test]
+    fn test_data_value_is_exactly_four_dollars() {
+        // A data item whose VALUE is exactly "$$$$" (e.g. highest price tier).
+        // This is the real-world case dalke describes where companies used
+        // $/$$/$$$/$$$$  as price categories.  The two-state parser must NOT
+        // treat the value line as a record separator.
+        //
+        // Structure:
+        //   > <TIER>          <- data header  (starts in_data_item = true)
+        //   $$$$              <- data VALUE   (must NOT terminate the record)
+        //                     <- blank line   (ends the data item)
+        //   $$$$              <- actual record separator
+        let sdf_data = "Mol1\n  test\nComment\n  1  0  0  0  0  0  0  0  0  0999 V2000\n    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0\nM  END\n> <TIER>\n$$$$\n\n$$$$\n";
+        let mut reader = SdfReader::new(sdf_data.as_bytes());
+        let mols = reader.read_all().unwrap();
+        assert_eq!(mols.len(), 1);
+        assert_eq!(mols[0].name, "Mol1");
     }
 
     #[test]

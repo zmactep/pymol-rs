@@ -13,6 +13,7 @@ use pymol_mol::{
 };
 
 use crate::error::{IoError, IoResult};
+use crate::pdb::hybrid36::hy36decode;
 use crate::traits::MoleculeReader;
 
 use super::records::{AtomRecord, ConectRecord, Cryst1Record, HelixRecord, SheetRecord};
@@ -353,7 +354,7 @@ fn parse_atom_record(input: &str) -> IResult<&str, AtomRecord> {
 
     let serial: i32 = input
         .get(6..11)
-        .and_then(|s| s.trim().parse().ok())
+        .and_then(|s| hy36decode(5, s))
         .unwrap_or(0);
     let name = input.get(12..16).unwrap_or("    ").trim().to_string();
     let alt_loc = input.chars().nth(16).unwrap_or(' ');
@@ -361,7 +362,7 @@ fn parse_atom_record(input: &str) -> IResult<&str, AtomRecord> {
     let chain = input.get(21..22).unwrap_or(" ").trim().to_string();
     let resv: i32 = input
         .get(22..26)
-        .and_then(|s| s.trim().parse().ok())
+        .and_then(|s| hy36decode(4, s))
         .unwrap_or(0);
     let icode = input.chars().nth(26).unwrap_or(' ');
 
@@ -421,14 +422,14 @@ fn parse_conect_record(input: &str) -> IResult<&str, ConectRecord> {
 
     let atom: i32 = input
         .get(6..11)
-        .and_then(|s| s.trim().parse().ok())
+        .and_then(|s| hy36decode(5, s))
         .unwrap_or(0);
 
     let mut bonded = Vec::new();
 
     for start in [11, 16, 21, 26] {
         if let Some(field) = input.get(start..start + 5) {
-            if let Ok(serial) = field.trim().parse::<i32>() {
+            if let Some(serial) = hy36decode(5, field) {
                 if serial > 0 {
                     bonded.push(serial);
                 }

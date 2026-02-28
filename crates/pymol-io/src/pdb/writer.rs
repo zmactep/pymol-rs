@@ -8,6 +8,7 @@ use std::io::Write;
 use pymol_mol::{AtomIndex, ObjectMolecule, SecondaryStructure};
 
 use crate::error::{IoError, IoResult};
+use crate::pdb::hybrid36::hy36encode;
 use crate::traits::MoleculeWriter;
 
 /// PDB file writer
@@ -292,11 +293,16 @@ impl<W: Write> PdbWriter<W> {
         // Format charge
         let charge = format_charge(atom.formal_charge);
 
+        let serial_str = hy36encode(5, serial)
+            .unwrap_or_else(|| format!("{:5}", serial % 100000));
+        let resv_str = hy36encode(4, atom.residue.resv)
+            .unwrap_or_else(|| format!("{:4}", atom.residue.resv));
+
         writeln!(
             self.writer,
-            "{}{:5} {:4}{}{:3} {}{:4}{}   {:8.3}{:8.3}{:8.3}{:6.2}{:6.2}          {}{}",
+            "{}{} {:4}{}{:3} {}{}{}   {:8.3}{:8.3}{:8.3}{:6.2}{:6.2}          {}{}",
             record_type,
-            serial % 100000,
+            serial_str,
             name,
             if atom.alt == ' ' { ' ' } else { atom.alt },
             if atom.residue.resn.len() > 3 {
@@ -305,7 +311,7 @@ impl<W: Write> PdbWriter<W> {
                 &atom.residue.resn
             },
             chain,
-            atom.residue.resv,
+            resv_str,
             icode,
             x,
             y,
@@ -321,17 +327,21 @@ impl<W: Write> PdbWriter<W> {
 
     /// Write TER record
     fn write_ter(&mut self, serial: i32, resn: &str, chain: &str, resv: i32) -> IoResult<()> {
+        let serial_str = hy36encode(5, serial)
+            .unwrap_or_else(|| format!("{:5}", serial % 100000));
+        let resv_str = hy36encode(4, resv)
+            .unwrap_or_else(|| format!("{:4}", resv));
         writeln!(
             self.writer,
-            "TER   {:5}      {:3} {:1}{:4}",
-            serial % 100000,
+            "TER   {}      {:3} {:1}{}",
+            serial_str,
             if resn.len() > 3 { &resn[..3] } else { resn },
             if chain.is_empty() {
                 " "
             } else {
                 &chain[..1.min(chain.len())]
             },
-            resv
+            resv_str
         )?;
         Ok(())
     }
@@ -375,11 +385,15 @@ impl<W: Write> PdbWriter<W> {
 
         for serial in serials {
             if let Some(bonded) = bonds_by_serial.get(&serial) {
+                let serial_str = hy36encode(5, serial)
+                    .unwrap_or_else(|| format!("{:5}", serial % 100000));
                 // Write in chunks of 4 bonded atoms per CONECT record
                 for chunk in bonded.chunks(4) {
-                    write!(self.writer, "CONECT{:5}", serial)?;
+                    write!(self.writer, "CONECT{}", serial_str)?;
                     for &bonded_serial in chunk {
-                        write!(self.writer, "{:5}", bonded_serial)?;
+                        let bonded_str = hy36encode(5, bonded_serial)
+                            .unwrap_or_else(|| format!("{:5}", bonded_serial % 100000));
+                        write!(self.writer, "{}", bonded_str)?;
                     }
                     writeln!(self.writer)?;
                 }
