@@ -26,50 +26,56 @@ use crate::secondary::SecondaryStructure;
 // DSS Settings (from PyMOL's SettingInfo.h)
 // ============================================================================
 
+/// Phi/psi angle window used to include or exclude a residue from a
+/// secondary structure type.
+///
+/// A residue is **included** if both its phi and psi deltas are within the
+/// `*_include` radii of the targets. It is **excluded** if either delta
+/// exceeds the `*_exclude` radius. Values in between are neutral.
+#[derive(Debug, Clone, Copy)]
+pub struct AngleWindow {
+    /// Target phi angle (degrees)
+    pub phi_target: f32,
+    /// Target psi angle (degrees)
+    pub psi_target: f32,
+    /// Phi tolerance for inclusion (degrees)
+    pub phi_include: f32,
+    /// Psi tolerance for inclusion (degrees)
+    pub psi_include: f32,
+    /// Phi tolerance for exclusion (degrees)
+    pub phi_exclude: f32,
+    /// Psi tolerance for exclusion (degrees)
+    pub psi_exclude: f32,
+}
+
 /// Settings for DSS secondary structure assignment
 #[derive(Debug, Clone)]
 pub struct DssSettings {
-    /// Target phi angle for helix (degrees)
-    pub helix_phi_target: f32,
-    /// Target psi angle for helix (degrees)
-    pub helix_psi_target: f32,
-    /// Phi angle tolerance for helix inclusion (degrees)
-    pub helix_phi_include: f32,
-    /// Psi angle tolerance for helix inclusion (degrees)
-    pub helix_psi_include: f32,
-    /// Phi angle tolerance for helix exclusion (degrees)
-    pub helix_phi_exclude: f32,
-    /// Psi angle tolerance for helix exclusion (degrees)
-    pub helix_psi_exclude: f32,
-    /// Target phi angle for strand (degrees)
-    pub strand_phi_target: f32,
-    /// Target psi angle for strand (degrees)
-    pub strand_psi_target: f32,
-    /// Phi angle tolerance for strand inclusion (degrees)
-    pub strand_phi_include: f32,
-    /// Psi angle tolerance for strand inclusion (degrees)
-    pub strand_psi_include: f32,
-    /// Phi angle tolerance for strand exclusion (degrees)
-    pub strand_phi_exclude: f32,
-    /// Psi angle tolerance for strand exclusion (degrees)
-    pub strand_psi_exclude: f32,
+    /// Angle window for helix classification
+    pub helix: AngleWindow,
+    /// Angle window for strand classification
+    pub strand: AngleWindow,
 }
 
 impl Default for DssSettings {
     fn default() -> Self {
         Self {
-            helix_phi_target: -57.0,
-            helix_psi_target: -48.0,
-            helix_phi_include: 55.0,
-            helix_psi_include: 55.0,
-            helix_phi_exclude: 85.0,
-            helix_psi_exclude: 85.0,
-            strand_phi_target: -129.0,
-            strand_psi_target: 124.0,
-            strand_phi_include: 40.0,
-            strand_psi_include: 40.0,
-            strand_phi_exclude: 100.0,
-            strand_psi_exclude: 90.0,
+            helix: AngleWindow {
+                phi_target: -57.0,
+                psi_target: -48.0,
+                phi_include: 55.0,
+                psi_include: 55.0,
+                phi_exclude: 85.0,
+                psi_exclude: 85.0,
+            },
+            strand: AngleWindow {
+                phi_target: -129.0,
+                psi_target: 124.0,
+                phi_include: 40.0,
+                psi_include: 40.0,
+                phi_exclude: 100.0,
+                psi_exclude: 90.0,
+            },
         }
     }
 }
@@ -180,7 +186,30 @@ const HBOND_POWER_B: f32 = 5.0;
 // Spatial Grid for H-Bond Detection — see crate::spatial::SpatialGrid
 // ============================================================================
 
-/// Internal structure for residue data during DSS calculation
+// ============================================================================
+// Internal Secondary Structure State
+// ============================================================================
+
+/// Working secondary structure state during DSS calculation.
+///
+/// `HelixPending` is a temporary state for gap-fill candidates (residues that
+/// lack a direct H-bond but have helical phi/psi and are flanked by helix
+/// H-bonds). They are either promoted to `Helix` or reset to `Loop` before
+/// the sheet assignment pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum SsState {
+    #[default]
+    Loop,
+    Helix,
+    Sheet,
+    HelixPending,
+}
+
+// ============================================================================
+// Residue Working Data
+// ============================================================================
+
+/// Per-residue data used internally during DSS calculation
 #[derive(Debug, Clone)]
 struct ResidueData {
     ca_idx: Option<AtomIndex>,
@@ -189,11 +218,14 @@ struct ResidueData {
     o_idx: Option<AtomIndex>,
     chain: String,
     resv: i32,
+    /// `false` for dummy chain-break padding residues
     real: bool,
     phi_psi: Option<PhiPsi>,
     flags: SsFlags,
-    ss: u8,
+    ss: SsState,
+    /// Indices of residues for which this residue's O is an H-bond acceptor
     acc: Vec<usize>,
+    /// Indices of residues for which this residue's N is an H-bond donor
     don: Vec<usize>,
 }
 
@@ -209,10 +241,86 @@ impl Default for ResidueData {
             real: false,
             phi_psi: None,
             flags: SsFlags::empty(),
-            ss: b'L',
+            ss: SsState::Loop,
             acc: Vec::new(),
             don: Vec::new(),
         }
+    }
+}
+
+impl ResidueData {
+    /// Construct a residue with complete backbone atoms.
+    fn new_real(
+        ca_idx: AtomIndex,
+        n_idx: AtomIndex,
+        c_idx: AtomIndex,
+        o_idx: AtomIndex,
+        chain: String,
+        resv: i32,
+    ) -> Self {
+        Self {
+            ca_idx: Some(ca_idx),
+            n_idx: Some(n_idx),
+            c_idx: Some(c_idx),
+            o_idx: Some(o_idx),
+            chain,
+            resv,
+            real: true,
+            ..Default::default()
+        }
+    }
+
+    fn is_helix(&self) -> bool {
+        self.ss == SsState::Helix
+    }
+
+    fn is_sheet(&self) -> bool {
+        self.ss == SsState::Sheet
+    }
+
+    fn has_helix_hbond(&self) -> bool {
+        self.flags.intersects(HELIX_HBOND_FLAGS)
+    }
+
+    fn has_helix_phi_psi(&self) -> bool {
+        self.flags.contains(SsFlags::PHI_PSI_HELIX)
+    }
+
+    /// Residue is *actively* excluded from helix: its phi/psi fall outside the
+    /// exclusion radius. `PHI_PSI_HELIX` and `PHI_PSI_NOT_HELIX` are mutually
+    /// exclusive (set by an if/else if in `classify_residues`), so checking
+    /// `PHI_PSI_NOT_HELIX` alone is sufficient.
+    fn phi_psi_excludes_helix(&self) -> bool {
+        self.flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
+    }
+
+    fn has_strand_phi_psi(&self) -> bool {
+        self.flags.contains(SsFlags::PHI_PSI_STRAND)
+    }
+
+    fn phi_psi_excludes_strand(&self) -> bool {
+        self.flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
+    }
+
+    /// True if this residue participates in any antiparallel strand H-bond
+    /// (single or double).
+    fn has_anti_strand_hbond(&self) -> bool {
+        self.flags
+            .intersects(SsFlags::ANTI_STRAND_SINGLE_HB | SsFlags::ANTI_STRAND_DOUBLE_HB)
+    }
+
+    /// True if this residue participates in any parallel strand H-bond
+    /// (single or double).
+    fn has_para_strand_hbond(&self) -> bool {
+        self.flags
+            .intersects(SsFlags::PARA_STRAND_SINGLE_HB | SsFlags::PARA_STRAND_DOUBLE_HB)
+    }
+
+    /// True if this residue is a skip position in either an antiparallel or
+    /// parallel strand ladder.
+    fn is_skip_residue(&self) -> bool {
+        self.flags
+            .intersects(SsFlags::ANTI_STRAND_SKIP | SsFlags::PARA_STRAND_SKIP)
     }
 }
 
@@ -315,47 +423,30 @@ fn collect_residue_data_with_breaks(molecule: &ObjectMolecule) -> Vec<ResidueDat
 }
 
 fn collect_raw_residues(molecule: &ObjectMolecule) -> Vec<ResidueData> {
-    let mut residue_data = Vec::new();
-
-    for residue in molecule.residues() {
-        if !crate::residue::is_amino_acid(&residue.key.resn) {
-            continue;
-        }
-
-        let ca_idx = find_atom_by_name(&residue, "CA");
-        let n_idx = find_atom_by_name(&residue, "N");
-        let c_idx = find_atom_by_name(&residue, "C");
-        let o_idx = find_atom_by_name(&residue, "O");
-
-        // Require CA, N, C, O for full backbone
-        if ca_idx.is_some() && n_idx.is_some() && c_idx.is_some() && o_idx.is_some() {
-            residue_data.push(ResidueData {
+    molecule
+        .residues()
+        .filter(|r| crate::residue::is_amino_acid(&r.key.resn))
+        .filter_map(|residue| {
+            let ca_idx = find_atom_by_name(&residue, "CA")?;
+            let n_idx = find_atom_by_name(&residue, "N")?;
+            let c_idx = find_atom_by_name(&residue, "C")?;
+            let o_idx = find_atom_by_name(&residue, "O")?;
+            Some(ResidueData::new_real(
                 ca_idx,
                 n_idx,
                 c_idx,
                 o_idx,
-                chain: residue.key.chain.clone(),
-                resv: residue.key.resv,
-                real: true,
-                phi_psi: None,
-                flags: SsFlags::empty(),
-                ss: b'L',
-                acc: Vec::new(),
-                don: Vec::new(),
-            });
-        }
-    }
-
-    residue_data
+                residue.key.chain.clone(),
+                residue.key.resv,
+            ))
+        })
+        .collect()
 }
 
 fn find_atom_by_name(residue: &ResidueView, name: &str) -> Option<AtomIndex> {
-    for (idx, atom) in residue.iter_indexed() {
-        if &*atom.name == name {
-            return Some(idx);
-        }
-    }
-    None
+    residue
+        .iter_indexed()
+        .find_map(|(idx, atom)| (&*atom.name == name).then_some(idx))
 }
 
 // ============================================================================
@@ -604,29 +695,26 @@ fn calculate_all_phi_psi(res: &mut [ResidueData], coord_set: &CoordSet) {
 }
 
 fn classify_residues(res: &mut [ResidueData], settings: &DssSettings) {
+    let helix = &settings.helix;
+    let strand = &settings.strand;
+
     for r in res.iter_mut() {
         if let Some(phi_psi) = r.phi_psi {
-            let helix_phi_delta = angle_delta(phi_psi.phi, settings.helix_phi_target);
-            let helix_psi_delta = angle_delta(phi_psi.psi, settings.helix_psi_target);
-            let strand_phi_delta = angle_delta(phi_psi.phi, settings.strand_phi_target);
-            let strand_psi_delta = angle_delta(phi_psi.psi, settings.strand_psi_target);
+            let helix_phi_delta = angle_delta(phi_psi.phi, helix.phi_target);
+            let helix_psi_delta = angle_delta(phi_psi.psi, helix.psi_target);
+            let strand_phi_delta = angle_delta(phi_psi.phi, strand.phi_target);
+            let strand_psi_delta = angle_delta(phi_psi.psi, strand.psi_target);
 
-            if helix_phi_delta > settings.helix_phi_exclude
-                || helix_psi_delta > settings.helix_psi_exclude
-            {
+            if helix_phi_delta > helix.phi_exclude || helix_psi_delta > helix.psi_exclude {
                 r.flags |= SsFlags::PHI_PSI_NOT_HELIX;
-            } else if helix_phi_delta < settings.helix_phi_include
-                && helix_psi_delta < settings.helix_psi_include
-            {
+            } else if helix_phi_delta < helix.phi_include && helix_psi_delta < helix.psi_include {
                 r.flags |= SsFlags::PHI_PSI_HELIX;
             }
 
-            if strand_phi_delta > settings.strand_phi_exclude
-                || strand_psi_delta > settings.strand_psi_exclude
-            {
+            if strand_phi_delta > strand.phi_exclude || strand_psi_delta > strand.psi_exclude {
                 r.flags |= SsFlags::PHI_PSI_NOT_STRAND;
-            } else if strand_phi_delta < settings.strand_phi_include
-                && strand_psi_delta < settings.strand_psi_include
+            } else if strand_phi_delta < strand.phi_include
+                && strand_psi_delta < strand.psi_include
             {
                 r.flags |= SsFlags::PHI_PSI_STRAND;
             }
@@ -649,73 +737,74 @@ fn angle_delta(angle: f32, target: f32) -> f32 {
 fn detect_hbond_patterns(res: &mut [ResidueData]) {
     let n_res = res.len();
 
+    // Collect all flag updates in a read pass, then apply them.
+    // This avoids borrowing `res` mutably while iterating `res[a].acc`/`don`.
+    let mut updates: Vec<(usize, SsFlags)> = Vec::new();
+
     for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
         if !res[a].real {
             continue;
         }
 
-        // Helix patterns: check if residue is acceptor for i+3,4,5 or donor for i-3,4,5
-        let acc_list: Vec<usize> = res[a].acc.clone();
-        for &acc in &acc_list {
+        // Helix patterns: i's O is H-bond acceptor for i+3, i+4, i+5
+        for &acc in &res[a].acc {
             if acc == a + 3 {
-                res[a].flags |= SsFlags::HELIX_3_HBOND;
+                updates.push((a, SsFlags::HELIX_3_HBOND));
             }
             if acc == a + 4 {
-                res[a].flags |= SsFlags::HELIX_4_HBOND;
+                updates.push((a, SsFlags::HELIX_4_HBOND));
             }
             if acc == a + 5 {
-                res[a].flags |= SsFlags::HELIX_5_HBOND;
+                updates.push((a, SsFlags::HELIX_5_HBOND));
             }
         }
 
-        let don_list: Vec<usize> = res[a].don.clone();
-        for &don in &don_list {
-            if don == a.wrapping_sub(3) {
-                res[a].flags |= SsFlags::HELIX_3_HBOND;
+        // Helix patterns: i's N is H-bond donor for i-3, i-4, i-5
+        for &don in &res[a].don {
+            if a >= 3 && don == a - 3 {
+                updates.push((a, SsFlags::HELIX_3_HBOND));
             }
-            if don == a.wrapping_sub(4) {
-                res[a].flags |= SsFlags::HELIX_4_HBOND;
+            if a >= 4 && don == a - 4 {
+                updates.push((a, SsFlags::HELIX_4_HBOND));
             }
-            if don == a.wrapping_sub(5) {
-                res[a].flags |= SsFlags::HELIX_5_HBOND;
+            if a >= 5 && don == a - 5 {
+                updates.push((a, SsFlags::HELIX_5_HBOND));
             }
         }
 
-        // Antiparallel double H-bond: i accepts j, j accepts i
-        for &acc_j in &acc_list {
+        // Antiparallel double H-bond: a accepts acc_j AND acc_j accepts a
+        for &acc_j in &res[a].acc {
             if acc_j >= n_res || !res[acc_j].real {
                 continue;
             }
-            let acc_j_list: Vec<usize> = res[acc_j].acc.clone();
-            for &acc_k in &acc_j_list {
+            for &acc_k in &res[acc_j].acc {
                 if acc_k == a {
-                    res[a].flags |= SsFlags::ANTI_STRAND_DOUBLE_HB;
-                    res[acc_j].flags |= SsFlags::ANTI_STRAND_DOUBLE_HB;
+                    updates.push((a, SsFlags::ANTI_STRAND_DOUBLE_HB));
+                    updates.push((acc_j, SsFlags::ANTI_STRAND_DOUBLE_HB));
                 }
             }
         }
 
-        // Antiparallel bulge: i accepts j, j+1 accepts i
-        for &acc_j in &acc_list {
+        // Antiparallel bulge: a accepts acc_j, and acc_j+1 accepts a
+        for &acc_j in &res[a].acc {
             if acc_j >= n_res || !res[acc_j].real {
                 continue;
             }
             let j_plus_1 = acc_j + 1;
             if j_plus_1 < n_res && res[j_plus_1].real {
-                let acc_jp1_list: Vec<usize> = res[j_plus_1].acc.clone();
-                for &acc_k in &acc_jp1_list {
+                for &acc_k in &res[j_plus_1].acc {
                     if acc_k == a {
-                        res[a].flags |= SsFlags::ANTI_STRAND_DOUBLE_HB;
-                        res[j_plus_1].flags |= SsFlags::ANTI_STRAND_BULGE_HB;
-                        res[acc_j].flags |= SsFlags::ANTI_STRAND_BULGE_HB;
+                        updates.push((a, SsFlags::ANTI_STRAND_DOUBLE_HB));
+                        updates.push((j_plus_1, SsFlags::ANTI_STRAND_BULGE_HB));
+                        updates.push((acc_j, SsFlags::ANTI_STRAND_BULGE_HB));
                     }
                 }
             }
         }
 
-        // Antiparallel ladder: i accepts j, (j-2) accepts (i+2)
+        // Antiparallel ladder: a accepts acc_j, and (acc_j-2) accepts (a+2)
         if a + 2 < n_res && res[a + 1].real && res[a + 2].real {
-            for &acc_j in &acc_list {
+            for &acc_j in &res[a].acc {
                 if acc_j < 2 || !res[acc_j].real {
                     continue;
                 }
@@ -723,39 +812,42 @@ fn detect_hbond_patterns(res: &mut [ResidueData]) {
                 if !res[j_minus_2].real {
                     continue;
                 }
-                let acc_jm2_list: Vec<usize> = res[j_minus_2].acc.clone();
-                for &acc_k in &acc_jm2_list {
+                for &acc_k in &res[j_minus_2].acc {
                     if acc_k == a + 2 {
-                        res[a].flags |= SsFlags::ANTI_STRAND_SINGLE_HB;
-                        res[a + 1].flags |= SsFlags::ANTI_STRAND_SKIP;
-                        res[a + 2].flags |= SsFlags::ANTI_STRAND_SINGLE_HB;
-                        res[j_minus_2].flags |= SsFlags::ANTI_STRAND_SINGLE_HB;
+                        updates.push((a, SsFlags::ANTI_STRAND_SINGLE_HB));
+                        updates.push((a + 1, SsFlags::ANTI_STRAND_SKIP));
+                        updates.push((a + 2, SsFlags::ANTI_STRAND_SINGLE_HB));
+                        updates.push((j_minus_2, SsFlags::ANTI_STRAND_SINGLE_HB));
                         if acc_j >= j_minus_2 + 2 {
-                            res[j_minus_2 + 1].flags |= SsFlags::ANTI_STRAND_SKIP;
+                            updates.push((j_minus_2 + 1, SsFlags::ANTI_STRAND_SKIP));
                         }
-                        res[acc_j].flags |= SsFlags::ANTI_STRAND_SINGLE_HB;
+                        updates.push((acc_j, SsFlags::ANTI_STRAND_SINGLE_HB));
                     }
                 }
             }
         }
 
-        // Parallel ladder: i accepts j, j accepts (i+2)
+        // Parallel ladder: a accepts acc_j, and acc_j accepts (a+2)
         if a + 2 < n_res && res[a + 1].real && res[a + 2].real {
-            for &acc_j in &acc_list {
+            for &acc_j in &res[a].acc {
                 if acc_j >= n_res || !res[acc_j].real {
                     continue;
                 }
-                let acc_j_list2: Vec<usize> = res[acc_j].acc.clone();
-                for &acc_k in &acc_j_list2 {
+                for &acc_k in &res[acc_j].acc {
                     if acc_k == a + 2 {
-                        res[a].flags |= SsFlags::PARA_STRAND_SINGLE_HB;
-                        res[a + 1].flags |= SsFlags::PARA_STRAND_SKIP;
-                        res[a + 2].flags |= SsFlags::PARA_STRAND_SINGLE_HB;
-                        res[acc_j].flags |= SsFlags::PARA_STRAND_DOUBLE_HB;
+                        updates.push((a, SsFlags::PARA_STRAND_SINGLE_HB));
+                        updates.push((a + 1, SsFlags::PARA_STRAND_SKIP));
+                        updates.push((a + 2, SsFlags::PARA_STRAND_SINGLE_HB));
+                        updates.push((acc_j, SsFlags::PARA_STRAND_DOUBLE_HB));
                     }
                 }
             }
         }
+    }
+
+    // Apply all flag updates
+    for (idx, flag) in updates {
+        res[idx].flags |= flag;
     }
 }
 
@@ -766,90 +858,86 @@ fn detect_hbond_patterns(res: &mut [ResidueData]) {
 fn assign_helices(res: &mut [ResidueData]) {
     let n_res = res.len();
 
-    // Pass 1: Clean internal helical residues using H-bonds
-    // Three consecutive residues with helix H-bonds and acceptable phi/psi.
-    // Also require that neighbors don't have explicitly non-helical geometry,
-    // unless they also have helical geometry (matching PyMOL's neighbor check).
+    // Pass 1: Assign helix to residues flanked by helix H-bonds on both sides
+    // with acceptable phi/psi. A neighbor that is *actively* anti-helical
+    // blocks the assignment.
     for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
         if !res[a].real {
             continue;
         }
 
-        if res[a - 1].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a + 1].flags.intersects(HELIX_HBOND_FLAGS)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-            && !(res[a - 1].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-                && !res[a - 1].flags.contains(SsFlags::PHI_PSI_HELIX))
-            && !(res[a + 1].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-                && !res[a + 1].flags.contains(SsFlags::PHI_PSI_HELIX))
+        if res[a - 1].has_helix_hbond()
+            && res[a].has_helix_hbond()
+            && res[a + 1].has_helix_hbond()
+            && !res[a].phi_psi_excludes_helix()
+            && !res[a - 1].phi_psi_excludes_helix()
+            && !res[a + 1].phi_psi_excludes_helix()
         {
-            res[a].ss = b'H';
+            res[a].ss = SsState::Helix;
         }
     }
 
-    // Pass 2: Fill gaps — one missing H-bond residue surrounded by helix H-bonds + good geometry
+    // Pass 2: Fill gaps — a residue that lacks a direct H-bond but has helical
+    // phi/psi and is flanked by helix H-bonds and helical phi/psi neighbours.
     for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
         if !res[a].real {
             continue;
         }
 
-        if res[a - 2].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a - 1].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a - 1].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a + 1].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a + 1].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a + 2].flags.intersects(HELIX_HBOND_FLAGS)
+        if res[a - 2].has_helix_hbond()
+            && res[a - 1].has_helix_hbond()
+            && res[a - 1].has_helix_phi_psi()
+            && res[a].has_helix_phi_psi()
+            && res[a + 1].has_helix_hbond()
+            && res[a + 1].has_helix_phi_psi()
+            && res[a + 2].has_helix_hbond()
         {
-            res[a].ss = b'h';
+            res[a].ss = SsState::HelixPending;
         }
     }
 
-    // Promote 'h' to 'H' and add H-bond flags so cap extension can work
+    // Promote HelixPending → Helix and add H-bond flags so cap extension works
     for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
-        if res[a].real && res[a].ss == b'h' {
+        if res[a].real && res[a].ss == SsState::HelixPending {
             res[a].flags |= HELIX_HBOND_FLAGS;
-            res[a].ss = b'H';
+            res[a].ss = SsState::Helix;
         }
     }
 
-    // Pass 3: Cap extension — extend helix boundaries using geometry.
-    // Only extends if the candidate residue is not already excluded by phi/psi
-    // AND its outer neighbor (the one not yet in the helix) is not anti-helical.
+    // Pass 3: Cap extension — extend helix boundaries using phi/psi geometry.
+    // Only extends if the candidate is not excluded by phi/psi and its outer
+    // neighbour (the one not yet in the helix) is not actively anti-helical.
     for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
-        if !res[a].real || res[a].ss == b'H' {
+        if !res[a].real || res[a].is_helix() {
             continue;
         }
 
-        // Extend forward: a is N-terminal cap, a+1 is already H
-        if res[a].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-            && res[a + 1].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a + 1].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a + 2].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a + 2].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a + 1].ss == b'H'
-            && !(res[a - 1].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-                && !res[a - 1].flags.contains(SsFlags::PHI_PSI_HELIX))
+        // Extend forward: a is N-terminal cap, a+1 is already Helix
+        if res[a].has_helix_hbond()
+            && res[a].has_helix_phi_psi()
+            && !res[a].phi_psi_excludes_helix()
+            && res[a + 1].has_helix_hbond()
+            && res[a + 1].has_helix_phi_psi()
+            && res[a + 2].has_helix_hbond()
+            && res[a + 2].has_helix_phi_psi()
+            && res[a + 1].is_helix()
+            && !res[a - 1].phi_psi_excludes_helix()
         {
-            res[a].ss = b'H';
+            res[a].ss = SsState::Helix;
         }
 
-        // Extend backward: a is C-terminal cap, a-1 is already H
-        if res[a].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-            && res[a - 1].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a - 1].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a - 2].flags.intersects(HELIX_HBOND_FLAGS)
-            && res[a - 2].flags.contains(SsFlags::PHI_PSI_HELIX)
-            && res[a - 1].ss == b'H'
-            && !(res[a + 1].flags.contains(SsFlags::PHI_PSI_NOT_HELIX)
-                && !res[a + 1].flags.contains(SsFlags::PHI_PSI_HELIX))
+        // Extend backward: a is C-terminal cap, a-1 is already Helix
+        if res[a].has_helix_hbond()
+            && res[a].has_helix_phi_psi()
+            && !res[a].phi_psi_excludes_helix()
+            && res[a - 1].has_helix_hbond()
+            && res[a - 1].has_helix_phi_psi()
+            && res[a - 2].has_helix_hbond()
+            && res[a - 2].has_helix_phi_psi()
+            && res[a - 1].is_helix()
+            && !res[a + 1].phi_psi_excludes_helix()
         {
-            res[a].ss = b'H';
+            res[a].ss = SsState::Helix;
         }
     }
 }
@@ -864,9 +952,9 @@ fn assign_sheets(res: &mut [ResidueData]) {
 
         // Antiparallel: double H-bond + phi/psi not excluded
         if res[a].flags.contains(SsFlags::ANTI_STRAND_DOUBLE_HB)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
+            && !res[a].phi_psi_excludes_strand()
         {
-            res[a].ss = b'S';
+            res[a].ss = SsState::Sheet;
         }
 
         // Antiparallel bulge: consecutive bulge pair
@@ -874,96 +962,70 @@ fn assign_sheets(res: &mut [ResidueData]) {
             && a + 1 < n_res
             && res[a + 1].flags.contains(SsFlags::ANTI_STRAND_BULGE_HB)
         {
-            res[a].ss = b'S';
-            res[a + 1].ss = b'S';
+            res[a].ss = SsState::Sheet;
+            res[a + 1].ss = SsState::Sheet;
         }
 
         // Antiparallel skip: between double HB anchors + phi/psi not excluded
-        if res[a].flags.contains(SsFlags::ANTI_STRAND_SKIP)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
-        {
-            if res[a - 1]
-                .flags
-                .contains(SsFlags::ANTI_STRAND_DOUBLE_HB)
-                && res[a + 1]
-                    .flags
-                    .intersects(SsFlags::ANTI_STRAND_SINGLE_HB | SsFlags::ANTI_STRAND_DOUBLE_HB)
+        if res[a].flags.contains(SsFlags::ANTI_STRAND_SKIP) && !res[a].phi_psi_excludes_strand() {
+            if res[a - 1].flags.contains(SsFlags::ANTI_STRAND_DOUBLE_HB)
+                && res[a + 1].has_anti_strand_hbond()
             {
-                res[a].ss = b'S';
+                res[a].ss = SsState::Sheet;
             }
-            if res[a - 1]
-                .flags
-                .intersects(SsFlags::ANTI_STRAND_SINGLE_HB | SsFlags::ANTI_STRAND_DOUBLE_HB)
-                && res[a + 1]
-                    .flags
-                    .contains(SsFlags::ANTI_STRAND_DOUBLE_HB)
+            if res[a - 1].has_anti_strand_hbond()
+                && res[a + 1].flags.contains(SsFlags::ANTI_STRAND_DOUBLE_HB)
             {
-                res[a].ss = b'S';
+                res[a].ss = SsState::Sheet;
             }
         }
 
         // Antiparallel: open ladders with PHI_PSI_STRAND support
-        if res[a - 1]
-            .flags
-            .intersects(SsFlags::ANTI_STRAND_SINGLE_HB | SsFlags::ANTI_STRAND_DOUBLE_HB)
-            && res[a - 1].flags.contains(SsFlags::PHI_PSI_STRAND)
-            && !res[a - 1].flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
-            && res[a].flags.contains(SsFlags::PHI_PSI_STRAND)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
-            && res[a + 1]
-                .flags
-                .intersects(SsFlags::ANTI_STRAND_SINGLE_HB | SsFlags::ANTI_STRAND_DOUBLE_HB)
-            && res[a + 1].flags.contains(SsFlags::PHI_PSI_STRAND)
+        if res[a - 1].has_anti_strand_hbond()
+            && res[a - 1].has_strand_phi_psi()
+            && !res[a - 1].phi_psi_excludes_strand()
+            && res[a].has_strand_phi_psi()
+            && !res[a].phi_psi_excludes_strand()
+            && res[a + 1].has_anti_strand_hbond()
+            && res[a + 1].has_strand_phi_psi()
         {
-            res[a - 1].ss = b'S';
-            res[a].ss = b'S';
-            res[a + 1].ss = b'S';
+            res[a - 1].ss = SsState::Sheet;
+            res[a].ss = SsState::Sheet;
+            res[a + 1].ss = SsState::Sheet;
         }
 
         // Parallel: double H-bond + phi/psi not excluded
         if res[a].flags.contains(SsFlags::PARA_STRAND_DOUBLE_HB)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
+            && !res[a].phi_psi_excludes_strand()
         {
-            res[a].ss = b'S';
+            res[a].ss = SsState::Sheet;
         }
 
         // Parallel skip: between HB anchors + phi/psi not excluded
-        if res[a].flags.contains(SsFlags::PARA_STRAND_SKIP)
-            && !res[a].flags.contains(SsFlags::PHI_PSI_NOT_STRAND)
-        {
+        if res[a].flags.contains(SsFlags::PARA_STRAND_SKIP) && !res[a].phi_psi_excludes_strand() {
             if res[a - 1].flags.contains(SsFlags::PARA_STRAND_DOUBLE_HB)
-                && res[a + 1]
-                    .flags
-                    .intersects(SsFlags::PARA_STRAND_SINGLE_HB | SsFlags::PARA_STRAND_DOUBLE_HB)
+                && res[a + 1].has_para_strand_hbond()
             {
-                res[a].ss = b'S';
+                res[a].ss = SsState::Sheet;
             }
-            if res[a - 1]
-                .flags
-                .intersects(SsFlags::PARA_STRAND_SINGLE_HB | SsFlags::PARA_STRAND_DOUBLE_HB)
-                && res[a + 1]
-                    .flags
-                    .contains(SsFlags::PARA_STRAND_DOUBLE_HB)
+            if res[a - 1].has_para_strand_hbond()
+                && res[a + 1].flags.contains(SsFlags::PARA_STRAND_DOUBLE_HB)
             {
-                res[a].ss = b'S';
+                res[a].ss = SsState::Sheet;
             }
         }
 
         // Parallel: open ladders with PHI_PSI_STRAND support
-        if res[a - 1]
-            .flags
-            .intersects(SsFlags::PARA_STRAND_SINGLE_HB | SsFlags::PARA_STRAND_DOUBLE_HB)
-            && res[a - 1].flags.contains(SsFlags::PHI_PSI_STRAND)
+        if res[a - 1].has_para_strand_hbond()
+            && res[a - 1].has_strand_phi_psi()
             && res[a].flags.contains(SsFlags::PARA_STRAND_SKIP)
-            && res[a].flags.contains(SsFlags::PHI_PSI_STRAND)
-            && res[a + 1]
-                .flags
-                .intersects(SsFlags::PARA_STRAND_SINGLE_HB | SsFlags::PARA_STRAND_DOUBLE_HB)
-            && res[a + 1].flags.contains(SsFlags::PHI_PSI_STRAND)
+            && res[a].has_strand_phi_psi()
+            && res[a + 1].has_para_strand_hbond()
+            && res[a + 1].has_strand_phi_psi()
         {
-            res[a - 1].ss = b'S';
-            res[a].ss = b'S';
-            res[a + 1].ss = b'S';
+            res[a - 1].ss = SsState::Sheet;
+            res[a].ss = SsState::Sheet;
+            res[a + 1].ss = SsState::Sheet;
         }
     }
 }
@@ -975,9 +1037,11 @@ fn assign_sheets(res: &mut [ResidueData]) {
 fn validate_assignments(res: &mut [ResidueData]) {
     let n_res = res.len();
     let mut repeat = true;
+    let mut iters = 0;
 
-    while repeat {
+    while repeat && iters < 100 {
         repeat = false;
+        iters += 1;
 
         for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
             if !res[a].real {
@@ -985,89 +1049,61 @@ fn validate_assignments(res: &mut [ResidueData]) {
             }
 
             // Remove 2-residue segments
-            if res[a].ss == b'S'
-                && res[a + 1].ss == b'S'
-                && res[a - 1].ss != b'S'
-                && res[a + 2].ss != b'S'
+            if res[a].is_sheet()
+                && res[a + 1].is_sheet()
+                && !res[a - 1].is_sheet()
+                && !res[a + 2].is_sheet()
             {
-                res[a].ss = b'L';
-                res[a + 1].ss = b'L';
+                res[a].ss = SsState::Loop;
+                res[a + 1].ss = SsState::Loop;
                 repeat = true;
             }
-            if res[a].ss == b'H'
-                && res[a + 1].ss == b'H'
-                && res[a - 1].ss != b'H'
-                && res[a + 2].ss != b'H'
+            if res[a].is_helix()
+                && res[a + 1].is_helix()
+                && !res[a - 1].is_helix()
+                && !res[a + 2].is_helix()
             {
-                res[a].ss = b'L';
-                res[a + 1].ss = b'L';
+                res[a].ss = SsState::Loop;
+                res[a + 1].ss = SsState::Loop;
                 repeat = true;
             }
 
             // Remove 1-residue segments
-            if res[a].ss == b'S' && res[a - 1].ss != b'S' && res[a + 1].ss != b'S' {
-                res[a].ss = b'L';
+            if res[a].is_sheet() && !res[a - 1].is_sheet() && !res[a + 1].is_sheet() {
+                res[a].ss = SsState::Loop;
                 repeat = true;
             }
-            if res[a].ss == b'H' && res[a - 1].ss != b'H' && res[a + 1].ss != b'H' {
-                res[a].ss = b'L';
+            if res[a].is_helix() && !res[a - 1].is_helix() && !res[a + 1].is_helix() {
+                res[a].ss = SsState::Loop;
                 repeat = true;
             }
 
-            // Terminal strand residues must have H-bond partner that's also 'S'
-            if res[a].ss == b'S' && (res[a - 1].ss != b'S' || res[a + 1].ss != b'S') {
-                let mut found = false;
+            // Terminal strand residues must have an H-bond partner that is also Sheet
+            if res[a].is_sheet() && (!res[a - 1].is_sheet() || !res[a + 1].is_sheet()) {
+                let is_sheet = |idx: usize| idx < n_res && res[idx].is_sheet();
 
-                // Check acceptors
-                for &acc in &res[a].acc {
-                    if acc < n_res && res[acc].ss == b'S' {
-                        found = true;
-                        break;
+                let mut found = res[a].acc.iter().any(|&acc| is_sheet(acc))
+                    || res[a].don.iter().any(|&don| is_sheet(don));
+
+                // Skip residues may borrow a partner through their neighbour
+                if !found && res[a].is_skip_residue() {
+                    if res[a + 1].is_sheet() {
+                        found = res[a + 1].acc.iter().any(|&acc| is_sheet(acc));
                     }
-                }
-
-                // Check donors
-                if !found {
-                    for &don in &res[a].don {
-                        if don < n_res && res[don].ss == b'S' {
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Allow skip residues if neighbor has partner
-                if !found
-                    && res[a]
-                        .flags
-                        .intersects(SsFlags::ANTI_STRAND_SKIP | SsFlags::PARA_STRAND_SKIP)
-                {
-                    if res[a + 1].ss == res[a].ss {
-                        for &acc in &res[a + 1].acc {
-                            if acc < n_res && res[acc].ss == b'S' {
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !found && res[a - 1].ss == res[a].ss {
-                        for &don in &res[a - 1].don {
-                            if don < n_res && res[don].ss == b'S' {
-                                found = true;
-                                break;
-                            }
-                        }
+                    if !found && res[a - 1].is_sheet() {
+                        found = res[a - 1].don.iter().any(|&don| is_sheet(don));
                     }
                 }
 
                 if !found {
-                    res[a].ss = b'L';
+                    res[a].ss = SsState::Loop;
                     repeat = true;
                 }
             }
         }
     }
+
+    debug_assert!(iters < 100, "validate_assignments: did not converge");
 }
 
 // ============================================================================
@@ -1083,9 +1119,9 @@ fn apply_ss_assignments(molecule: &mut ObjectMolecule, res: &[ResidueData]) -> u
             continue;
         }
         let ss = match r.ss {
-            b'H' => SecondaryStructure::Helix,
-            b'S' => SecondaryStructure::Sheet,
-            _ => SecondaryStructure::Loop,
+            SsState::Helix => SecondaryStructure::Helix,
+            SsState::Sheet => SecondaryStructure::Sheet,
+            SsState::Loop | SsState::HelixPending => SecondaryStructure::Loop,
         };
         ss_map.insert((r.chain.clone(), r.resv), ss);
     }
@@ -1148,10 +1184,10 @@ mod tests {
     #[test]
     fn test_dss_settings_default() {
         let settings = DssSettings::default();
-        assert!((settings.helix_phi_target - (-57.0)).abs() < 0.01);
-        assert!((settings.helix_psi_target - (-48.0)).abs() < 0.01);
-        assert!((settings.strand_phi_target - (-129.0)).abs() < 0.01);
-        assert!((settings.strand_psi_target - 124.0).abs() < 0.01);
+        assert!((settings.helix.phi_target - (-57.0)).abs() < 0.01);
+        assert!((settings.helix.psi_target - (-48.0)).abs() < 0.01);
+        assert!((settings.strand.phi_target - (-129.0)).abs() < 0.01);
+        assert!((settings.strand.psi_target - 124.0).abs() < 0.01);
     }
 
     #[test]
@@ -1175,5 +1211,62 @@ mod tests {
 
         flags |= SsFlags::PARA_STRAND_SINGLE_HB;
         assert!(flags.intersects(SsFlags::PARA_STRAND_SINGLE_HB | SsFlags::PARA_STRAND_DOUBLE_HB));
+    }
+
+    #[test]
+    fn test_ss_state_default() {
+        let r = ResidueData::default();
+        assert_eq!(r.ss, SsState::Loop);
+        assert!(!r.real);
+    }
+
+    #[test]
+    fn test_residue_predicates() {
+        let mut r = ResidueData::default();
+
+        // No flags set — not excluded, not included
+        assert!(!r.has_helix_hbond());
+        assert!(!r.has_helix_phi_psi());
+        assert!(!r.phi_psi_excludes_helix());
+        assert!(!r.phi_psi_excludes_strand());
+        assert!(!r.has_anti_strand_hbond());
+        assert!(!r.has_para_strand_hbond());
+        assert!(!r.is_skip_residue());
+        assert!(!r.is_helix());
+        assert!(!r.is_sheet());
+
+        // Helix state
+        r.ss = SsState::Helix;
+        assert!(r.is_helix());
+        assert!(!r.is_sheet());
+
+        // Sheet state
+        r.ss = SsState::Sheet;
+        assert!(r.is_sheet());
+        assert!(!r.is_helix());
+
+        // phi_psi_excludes_helix: set by NOT_HELIX alone (mutually exclusive with HELIX)
+        r.ss = SsState::Loop;
+        r.flags |= SsFlags::PHI_PSI_NOT_HELIX;
+        assert!(r.phi_psi_excludes_helix());
+
+        // Strand H-bond predicates
+        r.flags = SsFlags::empty();
+        r.flags |= SsFlags::ANTI_STRAND_SINGLE_HB;
+        assert!(r.has_anti_strand_hbond());
+        assert!(!r.has_para_strand_hbond());
+
+        r.flags = SsFlags::empty();
+        r.flags |= SsFlags::PARA_STRAND_DOUBLE_HB;
+        assert!(r.has_para_strand_hbond());
+        assert!(!r.has_anti_strand_hbond());
+
+        // Skip predicate
+        r.flags = SsFlags::empty();
+        r.flags |= SsFlags::ANTI_STRAND_SKIP;
+        assert!(r.is_skip_residue());
+        r.flags = SsFlags::empty();
+        r.flags |= SsFlags::PARA_STRAND_SKIP;
+        assert!(r.is_skip_residue());
     }
 }
