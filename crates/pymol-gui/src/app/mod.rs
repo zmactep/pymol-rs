@@ -115,6 +115,13 @@ impl TaskContext for App {
         }
 
         self.state.registry.add(MoleculeObject::with_name(mol, name));
+
+        // Update effective frame count for movie navigation
+        let max_states = self.state.registry.iter()
+            .map(|obj| obj.n_states())
+            .max()
+            .unwrap_or(1);
+        self.state.movie.set_n_object_states(max_states);
     }
 
     fn execute_command(&mut self, cmd: &str) {

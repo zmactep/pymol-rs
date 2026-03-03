@@ -122,6 +122,9 @@ EXAMPLES
             return Err(CmdError::ObjectNotFound(name.to_string()));
         }
 
+        if deleted_objects > 0 {
+            ctx.viewer.update_movie_state_count();
+        }
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
@@ -590,10 +593,6 @@ struct StateCommand;
 impl Command for StateCommand {
     fn name(&self) -> &str {
         "state"
-    }
-
-    fn aliases(&self) -> &[&str] {
-        &["frame"]
     }
 
     fn help(&self) -> &str {

@@ -150,6 +150,9 @@ pub struct Movie {
     rock_angle: f32,
     /// Whether rock mode is enabled
     rock_enabled: bool,
+    /// Max state count across all objects (for effective frame count when no mset)
+    #[serde(skip, default = "default_one")]
+    n_object_states: usize,
     /// Precomputed interpolated views for all frames between keyframes
     #[serde(skip)]
     precomputed_views: Vec<Option<SceneView>>,
@@ -157,6 +160,10 @@ pub struct Movie {
 
 fn default_frame_delay() -> Duration {
     Duration::from_secs_f32(1.0 / 30.0)
+}
+
+fn default_one() -> usize {
+    1
 }
 
 impl Default for Movie {
@@ -181,6 +188,7 @@ impl Movie {
             interpolation_t: 0.0,
             rock_angle: 0.0,
             rock_enabled: false,
+            n_object_states: 1,
             precomputed_views: Vec::new(),
         }
     }
@@ -197,9 +205,41 @@ impl Movie {
         self.frames.len()
     }
 
-    /// Check if the movie is empty
+    /// Check if the movie is empty (no explicit mset frames)
     pub fn is_empty(&self) -> bool {
         self.frames.is_empty()
+    }
+
+    /// Set the max state count across all objects.
+    pub fn set_n_object_states(&mut self, n: usize) {
+        self.n_object_states = n.max(1);
+    }
+
+    /// Effective frame count: movie frames if defined, otherwise max object states.
+    /// Mirrors PyMOL's `SceneCountFrames()`.
+    pub fn effective_frame_count(&self) -> usize {
+        if self.frames.is_empty() {
+            self.n_object_states
+        } else {
+            self.frames.len()
+        }
+    }
+
+    /// Whether an explicit movie sequence exists (via mset).
+    /// Mirrors PyMOL's `MovieDefined()`.
+    pub fn has_movie(&self) -> bool {
+        !self.frames.is_empty()
+    }
+
+    /// Convert frame index to 0-indexed state index.
+    /// Uses mset mapping if defined, otherwise identity.
+    /// Mirrors PyMOL's `MovieFrameToIndex()`.
+    pub fn frame_to_state(&self, frame: usize) -> usize {
+        if frame < self.frames.len() {
+            self.frames[frame].state_index.saturating_sub(1) // 1-indexed → 0-indexed
+        } else {
+            frame // identity mapping
+        }
     }
 
     /// Get the current frame index
@@ -343,7 +383,7 @@ impl Movie {
 
     /// Start playing
     pub fn play(&mut self) {
-        if !self.frames.is_empty() {
+        if self.effective_frame_count() > 0 {
             self.state = PlaybackState::Playing;
             self.last_frame_time = Some(Instant::now());
         }
@@ -384,7 +424,7 @@ impl Movie {
 
     /// Go to a specific frame
     pub fn goto_frame(&mut self, frame: usize) {
-        if frame < self.frames.len() {
+        if frame < self.effective_frame_count() {
             self.current_frame = frame;
             self.interpolation_t = 0.0;
         }
@@ -398,14 +438,15 @@ impl Movie {
 
     /// Go to the last frame
     pub fn fast_forward(&mut self) {
-        if !self.frames.is_empty() {
-            self.goto_frame(self.frames.len() - 1);
+        let count = self.effective_frame_count();
+        if count > 0 {
+            self.goto_frame(count - 1);
         }
     }
 
     /// Advance to next frame (manual)
     pub fn next_frame(&mut self) {
-        if self.current_frame + 1 < self.frames.len() {
+        if self.current_frame + 1 < self.effective_frame_count() {
             self.current_frame += 1;
             self.interpolation_t = 0.0;
         }
@@ -423,7 +464,7 @@ impl Movie {
     ///
     /// Returns true if the frame changed
     pub fn update(&mut self) -> bool {
-        if self.state != PlaybackState::Playing || self.frames.is_empty() {
+        if self.state != PlaybackState::Playing || self.effective_frame_count() == 0 {
             return false;
         }
 
@@ -449,10 +490,11 @@ impl Movie {
     /// Advance to the next frame based on direction and loop mode
     fn advance_frame(&mut self) -> bool {
         let old_frame = self.current_frame;
+        let count = self.effective_frame_count();
 
         match self.direction {
             PlayDirection::Forward => {
-                if self.current_frame + 1 < self.frames.len() {
+                if self.current_frame + 1 < count {
                     self.current_frame += 1;
                 } else {
                     // Reached end
@@ -482,11 +524,11 @@ impl Movie {
                             self.state = PlaybackState::Stopped;
                         }
                         LoopMode::Loop => {
-                            self.current_frame = self.frames.len().saturating_sub(1);
+                            self.current_frame = count.saturating_sub(1);
                         }
                         LoopMode::Swing => {
                             self.direction = PlayDirection::Forward;
-                            if self.current_frame + 1 < self.frames.len() {
+                            if self.current_frame + 1 < count {
                                 self.current_frame += 1;
                             }
                         }
@@ -945,5 +987,96 @@ mod tests {
         movie.advance_frame();
         assert_eq!(movie.current_frame(), 1); // Should reverse
         assert_eq!(movie.direction, PlayDirection::Backward);
+    }
+
+    #[test]
+    fn test_effective_frame_count_no_movie() {
+        let mut movie = Movie::new();
+        assert_eq!(movie.effective_frame_count(), 1); // default n_object_states
+        assert!(!movie.has_movie());
+
+        movie.set_n_object_states(41);
+        assert_eq!(movie.effective_frame_count(), 41);
+        assert!(!movie.has_movie());
+    }
+
+    #[test]
+    fn test_effective_frame_count_with_movie() {
+        let mut movie = Movie::new();
+        movie.set_n_object_states(41);
+        movie.set_from_spec(vec![1; 100]); // 100 frames, all state 1
+        assert_eq!(movie.effective_frame_count(), 100);
+        assert!(movie.has_movie());
+    }
+
+    #[test]
+    fn test_frame_to_state_identity() {
+        let mut movie = Movie::new();
+        movie.set_n_object_states(41);
+        // No mset → identity mapping
+        assert_eq!(movie.frame_to_state(0), 0);
+        assert_eq!(movie.frame_to_state(5), 5);
+        assert_eq!(movie.frame_to_state(40), 40);
+    }
+
+    #[test]
+    fn test_frame_to_state_mset() {
+        let mut movie = Movie::new();
+        // mset 1 -41 → states [1, 2, ..., 41] (1-indexed)
+        let states: Vec<usize> = (1..=41).collect();
+        movie.set_from_spec(states);
+
+        // frame_to_state converts 1-indexed → 0-indexed
+        assert_eq!(movie.frame_to_state(0), 0);  // state_index=1 → 0
+        assert_eq!(movie.frame_to_state(1), 1);  // state_index=2 → 1
+        assert_eq!(movie.frame_to_state(40), 40); // state_index=41 → 40
+    }
+
+    #[test]
+    fn test_frame_to_state_constant() {
+        let mut movie = Movie::new();
+        // mset 1 x100 → all frames map to state 1 (1-indexed)
+        movie.set_from_spec(vec![1; 100]);
+
+        assert_eq!(movie.frame_to_state(0), 0);  // state_index=1 → 0
+        assert_eq!(movie.frame_to_state(50), 0); // state_index=1 → 0
+        assert_eq!(movie.frame_to_state(99), 0); // state_index=1 → 0
+    }
+
+    #[test]
+    fn test_navigation_without_explicit_movie() {
+        let mut movie = Movie::new();
+        movie.set_n_object_states(5);
+
+        // Navigation should work with effective frames
+        assert_eq!(movie.current_frame(), 0);
+        movie.next_frame();
+        assert_eq!(movie.current_frame(), 1);
+        movie.next_frame();
+        assert_eq!(movie.current_frame(), 2);
+        movie.prev_frame();
+        assert_eq!(movie.current_frame(), 1);
+
+        movie.fast_forward();
+        assert_eq!(movie.current_frame(), 4); // last frame
+
+        movie.rewind();
+        assert_eq!(movie.current_frame(), 0);
+
+        movie.goto_frame(3);
+        assert_eq!(movie.current_frame(), 3);
+
+        // Out of range should be no-op
+        movie.goto_frame(10);
+        assert_eq!(movie.current_frame(), 3);
+    }
+
+    #[test]
+    fn test_play_without_explicit_movie() {
+        let mut movie = Movie::new();
+        movie.set_n_object_states(5);
+
+        movie.play();
+        assert!(movie.is_playing()); // should start playing
     }
 }

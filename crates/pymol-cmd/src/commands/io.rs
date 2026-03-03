@@ -186,12 +186,14 @@ EXAMPLES
                 }
                 // Zoom to show everything
                 ctx.viewer.zoom_all();
+                ctx.viewer.update_movie_state_count();
                 return Ok(());
             }
             "prs" => {
                 use pymol_session::load_prs;
                 let session = load_prs(&path).map_err(|e| CmdError::FileFormat(e.to_string()))?;
                 ctx.viewer.replace_session(session);
+                ctx.viewer.update_movie_state_count();
                 if !quiet {
                     ctx.print(&format!(" Loaded PRS session \"{}\"", filename));
                 }
@@ -225,6 +227,7 @@ EXAMPLES
 
         // Zoom to loaded molecule (preserves rotation)
         ctx.viewer.zoom_on(&object_name);
+        ctx.viewer.update_movie_state_count();
 
         Ok(())
     }
@@ -799,6 +802,7 @@ EXAMPLES
 
             // Zoom to fetched molecule (preserves rotation)
             ctx.viewer.zoom_on(name);
+            ctx.viewer.update_movie_state_count();
 
             return Ok(());
         }

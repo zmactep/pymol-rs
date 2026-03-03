@@ -389,6 +389,7 @@ pub trait ViewerLike {
     /// Stop movie and reset to first frame
     fn movie_stop(&mut self) {
         self.movie_mut().stop();
+        self.sync_movie_to_objects();
         self.request_redraw();
     }
 
@@ -406,19 +407,54 @@ pub trait ViewerLike {
     /// Go to a specific frame (0-indexed)
     fn movie_goto(&mut self, frame: usize) {
         self.movie_mut().goto_frame(frame);
+        self.sync_movie_to_objects();
         self.request_redraw();
     }
 
     /// Advance to next frame
     fn movie_next(&mut self) {
         self.movie_mut().next_frame();
+        self.sync_movie_to_objects();
         self.request_redraw();
     }
 
     /// Go to previous frame
     fn movie_prev(&mut self) {
         self.movie_mut().prev_frame();
+        self.sync_movie_to_objects();
         self.request_redraw();
+    }
+
+    /// Update `Movie::n_object_states` from the current max across all objects.
+    /// Call after loading/deleting objects.
+    fn update_movie_state_count(&mut self) {
+        let max_states = self.objects().iter()
+            .map(|obj| obj.n_states())
+            .max()
+            .unwrap_or(1);
+        self.movie_mut().set_n_object_states(max_states);
+    }
+
+    /// Sync the movie's current frame to all objects' display states and camera.
+    fn sync_movie_to_objects(&mut self) {
+        let (state_index, view) = {
+            let movie = self.movie();
+            let current_frame = movie.current_frame();
+            let state_index = movie.frame_to_state(current_frame);
+            let view = movie.interpolated_view();
+            (state_index, view)
+        };
+
+        let names: Vec<String> = self.objects().names().map(|s| s.to_string()).collect();
+        for name in &names {
+            if let Some(obj) = self.objects_mut().get_molecule_mut(name) {
+                obj.set_display_state(state_index);
+            }
+        }
+
+        if let Some(view) = view {
+            self.camera_mut().set_view(view);
+        }
     }
 
     /// Set frames per second
@@ -426,9 +462,9 @@ pub trait ViewerLike {
         self.movie_mut().set_fps(fps);
     }
 
-    /// Get total number of frames
+    /// Get total number of frames (effective: movie frames or max object states)
     fn movie_frame_count(&self) -> usize {
-        self.movie().frame_count()
+        self.movie().effective_frame_count()
     }
 
     /// Get current frame index (0-indexed)
