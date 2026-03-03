@@ -9,4 +9,5 @@ target
 CLAUDE.md
 .claude
 .env
+.DS_Store
 BACKLOG.md
