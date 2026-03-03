@@ -1,75 +1,45 @@
 //! Movie Panel Component
 //!
 //! Provides playback controls for movie/animation sequences.
+//! Sends `AppMessage` directly to the `MessageBus`.
 
 use pymol_scene::Movie;
 
-/// Action returned by the movie panel when user interacts with controls
-#[derive(Debug, Clone, PartialEq)]
-pub enum MovieAction {
-    /// No action taken
-    None,
-    /// Play button clicked
-    Play,
-    /// Pause button clicked
-    Pause,
-    /// Stop button clicked
-    Stop,
-    /// Go to specific frame (0-indexed)
-    GotoFrame(usize),
-    /// Set playback FPS
-    SetFps(f32),
-    /// Set loop mode (0=once, 1=loop, 2=swing)
-    SetLoopMode(u8),
-}
+use crate::message::{AppMessage, MessageBus};
 
 /// Movie panel with playback controls
 pub struct MoviePanel;
 
 impl MoviePanel {
-    /// Show the movie panel and return any action taken by the user
-    ///
-    /// This panel displays playback controls (play/pause/stop), a frame counter,
-    /// and a frame slider when the movie has frames.
-    ///
-    /// # Arguments
-    ///
-    /// * `ui` - The egui UI context to render into
-    /// * `movie` - Reference to the current movie state
-    ///
-    /// # Returns
-    ///
-    /// The action taken by the user, or `MovieAction::None` if no interaction
-    pub fn show(ui: &mut egui::Ui, movie: &Movie) -> MovieAction {
-        let mut action = MovieAction::None;
-
+    /// Show the movie panel, sending messages directly to the bus.
+    pub fn show(ui: &mut egui::Ui, movie: &Movie, bus: &mut MessageBus) {
         ui.horizontal(|ui| {
             // Play/Pause toggle button
             let play_text = if movie.is_playing() { "⏸" } else { "▶" };
             let play_tooltip = if movie.is_playing() { "Pause" } else { "Play" };
             if ui.button(play_text).on_hover_text(play_tooltip).clicked() {
-                action = if movie.is_playing() {
-                    MovieAction::Pause
+                if movie.is_playing() {
+                    bus.send(AppMessage::MoviePause);
                 } else {
-                    MovieAction::Play
-                };
+                    bus.send(AppMessage::MoviePlay);
+                }
             }
 
             // Stop button
             if ui.button("⏹").on_hover_text("Stop").clicked() {
-                action = MovieAction::Stop;
+                bus.send(AppMessage::MovieStop);
             }
 
             // Rewind button
             if ui.button("⏮").on_hover_text("First frame").clicked() {
-                action = MovieAction::GotoFrame(0);
+                bus.send(AppMessage::MovieGotoFrame(0));
             }
 
             // Previous frame button
             if ui.button("⏪").on_hover_text("Previous frame").clicked() {
                 let current = movie.current_frame();
                 if current > 0 {
-                    action = MovieAction::GotoFrame(current - 1);
+                    bus.send(AppMessage::MovieGotoFrame(current - 1));
                 }
             }
 
@@ -78,7 +48,7 @@ impl MoviePanel {
                 let current = movie.current_frame();
                 let count = movie.frame_count();
                 if current + 1 < count {
-                    action = MovieAction::GotoFrame(current + 1);
+                    bus.send(AppMessage::MovieGotoFrame(current + 1));
                 }
             }
 
@@ -86,7 +56,7 @@ impl MoviePanel {
             if ui.button("⏭").on_hover_text("Last frame").clicked() {
                 let count = movie.frame_count();
                 if count > 0 {
-                    action = MovieAction::GotoFrame(count - 1);
+                    bus.send(AppMessage::MovieGotoFrame(count - 1));
                 }
             }
 
@@ -106,33 +76,27 @@ impl MoviePanel {
                 .show_value(false)
                 .text("Frame");
             if ui.add(slider).changed() {
-                action = MovieAction::GotoFrame(frame);
+                bus.send(AppMessage::MovieGotoFrame(frame));
             }
         }
-
-        action
     }
 
     /// Show a compact horizontal movie control bar
-    ///
-    /// This is a more compact version suitable for embedding in a toolbar.
-    pub fn show_compact(ui: &mut egui::Ui, movie: &Movie) -> MovieAction {
-        let mut action = MovieAction::None;
-
+    pub fn show_compact(ui: &mut egui::Ui, movie: &Movie, bus: &mut MessageBus) {
         ui.horizontal(|ui| {
             // Play/Pause toggle
             let play_text = if movie.is_playing() { "⏸" } else { "▶" };
             if ui.small_button(play_text).clicked() {
-                action = if movie.is_playing() {
-                    MovieAction::Pause
+                if movie.is_playing() {
+                    bus.send(AppMessage::MoviePause);
                 } else {
-                    MovieAction::Play
-                };
+                    bus.send(AppMessage::MoviePlay);
+                }
             }
 
             // Stop
             if ui.small_button("⏹").clicked() {
-                action = MovieAction::Stop;
+                bus.send(AppMessage::MovieStop);
             }
 
             // Frame counter
@@ -140,16 +104,10 @@ impl MoviePanel {
             let current = movie.current_frame() + 1;
             ui.label(format!("{}/{}", current, count));
         });
-
-        action
     }
 
     /// Show the movie panel as a collapsing header
-    ///
-    /// Wraps the full panel in a collapsible section.
-    pub fn show_collapsible(ui: &mut egui::Ui, movie: &Movie) -> MovieAction {
-        let mut action = MovieAction::None;
-
+    pub fn show_collapsible(ui: &mut egui::Ui, movie: &Movie, bus: &mut MessageBus) {
         let header = if movie.is_playing() {
             "▶ Movie (playing)"
         } else {
@@ -159,9 +117,7 @@ impl MoviePanel {
         egui::CollapsingHeader::new(header)
             .default_open(false)
             .show(ui, |ui| {
-                action = Self::show(ui, movie);
+                Self::show(ui, movie, bus);
             });
-
-        action
     }
 }

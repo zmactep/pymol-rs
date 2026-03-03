@@ -26,20 +26,20 @@ impl App {
     /// to the camera. Called once per frame in update().
     pub(crate) fn process_input(&mut self) {
         // Check if mouse is over viewport using stored rect and current mouse position
-        let mouse_pos = self.input.mouse_position();
+        let mouse_pos = self.viewport.input.mouse_position();
         let over_viewport = self.view.is_over_viewport(mouse_pos);
 
         // Also skip camera updates when egui is using the pointer (e.g. dragging a
         // floating window that overlaps the viewport).
-        let egui_using_pointer = self.view.egui_ctx.is_using_pointer();
+        let egui_using_pointer = self.view.egui.ctx.is_using_pointer();
 
         if !over_viewport || egui_using_pointer {
             // Still need to consume the deltas to avoid accumulation
-            self.input.take_camera_deltas();
+            self.viewport.input.take_camera_deltas();
             return;
         }
 
-        let deltas = self.input.take_camera_deltas();
+        let deltas = self.viewport.input.take_camera_deltas();
         for delta in deltas {
             // Clear raytraced overlay on any camera change
             if self.state.raytraced_image.is_some() {
@@ -49,23 +49,23 @@ impl App {
                 CameraDelta::Rotate { x, y } => {
                     self.state.camera.rotate_x(x);
                     self.state.camera.rotate_y(y);
-                    self.needs_redraw = true;
+                    self.scene_dirty = true;
                 }
                 CameraDelta::Translate(v) => {
                     let vh = self.view.viewport_rect.map(|r| r.height()).unwrap_or(768.0);
                     let scale = self.state.camera.screen_vertex_scale(vh);
                     self.state.camera.translate(v * scale);
-                    self.needs_redraw = true;
+                    self.scene_dirty = true;
                 }
                 CameraDelta::Zoom(factor) => {
                     self.state.camera.zoom(factor);
-                    self.needs_redraw = true;
+                    self.scene_dirty = true;
                 }
                 CameraDelta::Clip { front, back } => {
                     let view = self.state.camera.view_mut();
                     view.clip_front = (view.clip_front + front).max(0.01);
                     view.clip_back = (view.clip_back + back).max(view.clip_front + 0.01);
-                    self.needs_redraw = true;
+                    self.scene_dirty = true;
                 }
                 CameraDelta::SlabScale(raw_delta) => {
                     let mws = self
@@ -81,7 +81,7 @@ impl App {
 
                     view.clip_front = (avg - new_half).max(0.01);
                     view.clip_back = (avg + new_half).max(view.clip_front + 0.1);
-                    self.needs_redraw = true;
+                    self.scene_dirty = true;
                 }
             }
         }
@@ -109,7 +109,7 @@ impl App {
             &view_inv.data,
         );
 
-        self.picker.pick_ray(&ray, &self.state.registry)
+        self.viewport.picker.pick_ray(&ray, &self.state.registry)
     }
 
     /// Process hover picking — detect atom under cursor and update hover indicator.
@@ -117,22 +117,22 @@ impl App {
     /// Called once per frame when the cursor moves over the viewport.
     /// Skipped while dragging (any mouse button held) to avoid interference with camera control.
     pub(crate) fn process_hover(&mut self) {
-        if self.input.any_button_pressed() {
+        if self.viewport.input.any_button_pressed() {
             return;
         }
 
-        let mouse_pos = self.input.mouse_position();
+        let mouse_pos = self.viewport.input.mouse_position();
         if !self.view.is_over_viewport(mouse_pos) {
-            if self.hover_hit.is_some() {
-                self.hover_hit = None;
-                self.needs_redraw = true;
+            if self.viewport.hover_hit.is_some() {
+                self.viewport.hover_hit = None;
+                self.scene_dirty = true;
             }
             return;
         }
 
         let new_hit = self.pick_at(mouse_pos);
 
-        let changed = match (&self.hover_hit, &new_hit) {
+        let changed = match (&self.viewport.hover_hit, &new_hit) {
             (None, None) => false,
             (Some(_), None) | (None, Some(_)) => true,
             (Some(a), Some(b)) => {
@@ -141,8 +141,8 @@ impl App {
         };
 
         if changed {
-            self.hover_hit = new_hit;
-            self.needs_redraw = true;
+            self.viewport.hover_hit = new_hit;
+            self.scene_dirty = true;
         }
     }
 
@@ -152,7 +152,7 @@ impl App {
     /// Clicking on already-selected atoms removes them from `sele`.
     /// Clicking on empty space clears `sele`.
     pub(crate) fn process_click(&mut self) {
-        let mouse_pos = self.input.mouse_position();
+        let mouse_pos = self.viewport.input.mouse_position();
         let hit = self.pick_at(mouse_pos);
         let mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
 
@@ -190,16 +190,20 @@ impl App {
 
         // Don't process app key bindings when command input has focus
         // Let egui handle the keyboard events for text input
-        if self.command_line.has_focus {
+        if self
+            .components
+            .get::<crate::components::ReplComponent>()
+            .is_some_and(|repl| repl.command_line_ui.has_focus)
+        {
             return;
         }
 
         if let PhysicalKey::Code(key) = event.physical_key {
             let binding = KeyBinding {
                 key,
-                ctrl: self.input.ctrl_held(),
-                shift: self.input.shift_held(),
-                alt: self.input.alt_held(),
+                ctrl: self.viewport.input.ctrl_held(),
+                shift: self.viewport.input.shift_held(),
+                alt: self.viewport.input.alt_held(),
             };
 
             if let Some(action) = self.key_bindings.get_cloned(&binding) {

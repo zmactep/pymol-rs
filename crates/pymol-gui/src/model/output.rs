@@ -1,6 +1,7 @@
-//! Output Buffer State
+//! Output Model
 //!
-//! Manages the output/log buffer for displaying messages to the user.
+//! Pure domain model for the output/log message buffer.
+//! No egui dependency — testable, serializable, headless-compatible.
 
 use std::collections::VecDeque;
 
@@ -73,34 +74,34 @@ impl OutputMessage {
     }
 }
 
-/// Output buffer state for log/message display
+/// Output buffer model for log/message display
 #[derive(Debug)]
-pub struct OutputBufferState {
+pub struct OutputModel {
     /// Output messages buffer (circular)
     pub buffer: VecDeque<OutputMessage>,
     /// Whether to auto-scroll output to bottom
     pub auto_scroll: bool,
 }
 
-impl Default for OutputBufferState {
+impl Default for OutputModel {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OutputBufferState {
-    /// Create a new output buffer state with default values
+impl OutputModel {
+    /// Create a new output model with default values
     pub fn new() -> Self {
-        let mut state = Self {
+        let mut model = Self {
             buffer: VecDeque::with_capacity(MAX_OUTPUT_LINES),
             auto_scroll: true,
         };
 
         // Add initial welcome messages
-        state.add(OutputMessage::info("PyMOL-RS - Molecular Visualization"));
-        state.add(OutputMessage::info("Type commands at the prompt below."));
+        model.add(OutputMessage::info("PyMOL-RS - Molecular Visualization"));
+        model.add(OutputMessage::info("Type commands at the prompt below."));
 
-        state
+        model
     }
 
     /// Add an output message to the buffer

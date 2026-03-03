@@ -1,60 +1,35 @@
-//! Command Line State
+//! Command Line Model
 //!
-//! Manages command line input, history navigation, focus tracking, and autocomplete.
+//! Pure domain model for command line input and history navigation.
+//! No egui dependency — testable, serializable, headless-compatible.
 
-use super::completion::CompletionState;
-
-/// Command line input state
+/// Command line input model (history, current input, browsing state)
 #[derive(Debug)]
-pub struct CommandLineState {
-    // =========================================================================
-    // Input
-    // =========================================================================
+pub struct CommandLineModel {
     /// Current command input text
     pub input: String,
-
-    // =========================================================================
-    // History
-    // =========================================================================
     /// Command history
     pub history: Vec<String>,
     /// Current position in command history (None = not browsing)
     pub history_index: Option<usize>,
     /// Saved input when browsing history
     pub saved_input: String,
-
-    // =========================================================================
-    // Focus Tracking
-    // =========================================================================
-    /// Whether the command input should request focus (one-shot flag)
-    pub wants_focus: bool,
-    /// Whether the command input currently has focus
-    pub has_focus: bool,
-
-    // =========================================================================
-    // Autocomplete
-    // =========================================================================
-    /// Current autocomplete/completion state
-    pub completion: CompletionState,
 }
 
-impl Default for CommandLineState {
+impl Default for CommandLineModel {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl CommandLineState {
-    /// Create a new command line state with default values
+impl CommandLineModel {
+    /// Create a new command line model with default values
     pub fn new() -> Self {
         Self {
             input: String::new(),
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
-            wants_focus: true, // Focus on startup
-            has_focus: false,
-            completion: CompletionState::new(),
         }
     }
 
@@ -122,10 +97,5 @@ impl CommandLineState {
     pub fn take_command(&mut self) -> String {
         self.reset_history_browse();
         std::mem::take(&mut self.input)
-    }
-
-    /// Request focus on the command input for the next frame
-    pub fn request_focus(&mut self) {
-        self.wants_focus = true;
     }
 }

@@ -18,7 +18,7 @@ impl App {
     ) -> Result<(String, String), String> {
         // We need to get adapter info before init_gpu consumes it
         // For now, we'll do a quick adapter request just for info
-        let adapter = self.view.instance
+        let adapter = self.view.gpu.instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: None,
@@ -54,14 +54,14 @@ impl App {
 
         // Update camera aspect ratio
         self.state.camera.set_aspect(new_size.width as f32 / new_size.height as f32);
-        self.needs_redraw = true;
+        self.scene_dirty = true;
     }
 
     /// Render a frame — thin orchestrator.
     pub(crate) fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         // Extract config values before any mutable borrows.
         let (width, height) = {
-            let config = self.view.surface_config.as_ref().unwrap();
+            let config = self.view.gpu.surface_config.as_ref().unwrap();
             (config.width, config.height)
         };
         let scale_factor = self.view.scale_factor();
@@ -78,14 +78,14 @@ impl App {
         self.state.camera.set_aspect(viewport_width / viewport_height);
 
         // Get surface texture.
-        let surface = self.view.surface.as_ref().unwrap();
+        let surface = self.view.gpu.surface.as_ref().unwrap();
         let output = surface.get_current_texture()?;
         let output_view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Upload scene uniforms and set the active shading mode.
         let shading_mode = pymol_settings::ShadingMode::from_settings(&self.state.settings);
         {
-            let context = self.view.render_context.as_mut().unwrap();
+            let context = self.view.gpu.render_context.as_mut().unwrap();
             self.shading.set_mode(shading_mode, context);
             let uniforms = setup_uniforms(
                 &self.state.camera,
@@ -98,11 +98,11 @@ impl App {
 
         // Prepare molecule GPU geometry; detect geometry changes.
         let names: Vec<String> = self.state.registry.names().map(|s: &str| s.to_string()).collect();
-        self.prepare_molecules(&names);
+        self.prepare_gpu_geometry(&names);
 
         // Create command encoder.
         let mut encoder = {
-            let context = self.view.render_context.as_ref().unwrap();
+            let context = self.view.gpu.render_context.as_ref().unwrap();
             context.device().create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             })
@@ -127,7 +127,7 @@ impl App {
         // Run the active pipeline's prepare step. Returns true when the pipeline
         // requires additional render passes this frame (e.g. shadow depth passes).
         let need_shadow_passes = {
-            let context = self.view.render_context.as_mut().unwrap();
+            let context = self.view.gpu.render_context.as_mut().unwrap();
             self.shading.prepare(context, &self.state.settings)
         };
 
@@ -147,7 +147,7 @@ impl App {
         self.render_egui(&mut encoder, &output_view, egui_output, width, height, scale_factor);
 
         // Submit and present.
-        let context = self.view.render_context.as_ref().unwrap();
+        let context = self.view.gpu.render_context.as_ref().unwrap();
         context.queue().submit(std::iter::once(encoder.finish()));
         output.present();
 
@@ -158,7 +158,7 @@ impl App {
     ///
     /// Uses `ShadowPassState` from the pipeline — fully mode-agnostic.
     fn render_shadow_passes(&mut self, encoder: &mut wgpu::CommandEncoder, names: &[String]) {
-        let context = self.view.render_context.as_ref().unwrap();
+        let context = self.view.gpu.render_context.as_ref().unwrap();
 
         let state = match self.shading.shadow_pass_state() {
             Some(s) => s,
@@ -197,38 +197,30 @@ impl App {
         }
     }
 
-    /// Prepare molecule GPU geometry for the frame.
+    /// Update selection and hover indicators on molecules.
     ///
-    /// Calls `prepare_render` on each molecule, updates selection indicators,
-    /// and marks shadows dirty if any geometry changed.
-    fn prepare_molecules(&mut self, names: &[String]) {
+    /// Reads hover/selection state and writes indicator geometry to molecules.
+    /// Called before `render()` so mutations are complete before the GPU pass.
+    pub(crate) fn update_indicators(&mut self, names: &[String]) {
+        let context = match self.view.gpu.render_context.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
+
         let selection_results = self.evaluate_visible_selections();
         let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
         let mouse_selection_mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
 
         // Snapshot hover state to avoid borrow issues
-        let hover_hit = self.hover_hit.clone();
-        let sequence_hover = self.sequence_hover.clone();
-
-        // Sequence hover uses Ctrl/Cmd for exclusion mode
-        let ctrl_held = self.input.ctrl_or_cmd_held();
+        let hover_hit = self.viewport.hover_hit.clone();
+        let sequence_hover = self.viewport.sequence_hover.clone();
+        let ctrl_held = self.viewport.input.ctrl_or_cmd_held();
 
         const COLOR_YELLOW: [f32; 4] = [1.0, 1.0, 0.5, 0.7];
         const COLOR_RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
-        let mut geometry_changed = false;
-        let context = self.view.render_context.as_ref().unwrap();
         for name in names {
-            let color_resolver = ColorResolver::new(
-                &self.state.named_colors,
-                &self.state.element_colors,
-            );
             if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
-                if mol_obj.is_dirty() {
-                    geometry_changed = true;
-                }
-                mol_obj.prepare_render(context, color_resolver, &self.state.settings);
-
                 // Selection indicator
                 let sele_for_obj = selection_results.iter().find(|(n, _)| n == name).map(|(_, s)| s);
                 if let Some(sel) = sele_for_obj {
@@ -242,7 +234,6 @@ impl App {
                 if let Some(ref hit) = hover_hit {
                     if hit.object_name == *name {
                         let sel = pymol_scene::expand_pick_to_selection(hit, mouse_selection_mode, mol_obj.molecule());
-                        // 3D viewport: red if hovered atoms overlap sele, yellow otherwise
                         let overlaps_sele = sele_for_obj
                             .is_some_and(|sele| sel.intersection(sele).any());
                         let color = if overlaps_sele { COLOR_RED } else { COLOR_YELLOW };
@@ -265,7 +256,6 @@ impl App {
                                 }
                             }),
                         );
-                        // Sequence hover: red with Ctrl (exclusion), yellow without
                         let color = if ctrl_held { COLOR_RED } else { COLOR_YELLOW };
                         mol_obj.set_hover_indicator(&sel, context, selection_width, color);
                     } else {
@@ -276,8 +266,29 @@ impl App {
                 }
             }
         }
+    }
 
-        // Prepare measurement objects
+    /// Prepare molecule GPU geometry for the frame.
+    ///
+    /// Uploads vertex/index data, prepares measurement objects, and
+    /// invalidates shadows if any geometry changed.
+    fn prepare_gpu_geometry(&mut self, names: &[String]) {
+        let context = self.view.gpu.render_context.as_ref().unwrap();
+        let mut geometry_changed = false;
+
+        for name in names {
+            let color_resolver = ColorResolver::new(
+                &self.state.named_colors,
+                &self.state.element_colors,
+            );
+            if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
+                if mol_obj.is_dirty() {
+                    geometry_changed = true;
+                }
+                mol_obj.prepare_render(context, color_resolver, &self.state.settings);
+            }
+        }
+
         for name in names {
             if let Some(meas_obj) = self.state.registry.get_measurement_mut(name) {
                 meas_obj.prepare_render(context);
@@ -296,8 +307,8 @@ impl App {
         output_view: &wgpu::TextureView,
         names: &[String],
     ) {
-        let context = self.view.render_context.as_ref().unwrap();
-        let depth_view = self.view.depth_view.as_ref().unwrap();
+        let context = self.view.gpu.render_context.as_ref().unwrap();
+        let depth_view = self.view.gpu.depth_view.as_ref().unwrap();
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("3D Render Pass"),
@@ -331,10 +342,11 @@ impl App {
         if let Some(vp) = &self.view.viewport_rect {
             let (surf_w, surf_h) = self
                 .view
+                .gpu
                 .surface_config
                 .as_ref()
                 .map(|c| (c.width, c.height))
-                .unwrap_or((1, 1));
+                .unwrap_or((1u32, 1u32));
             let vp_x = (vp.min.x.max(0.0) as u32).min(surf_w.saturating_sub(1));
             let vp_y = (vp.min.y.max(0.0) as u32).min(surf_h.saturating_sub(1));
             let vp_w = (vp.width().max(1.0) as u32).min(surf_w - vp_x);
@@ -373,9 +385,9 @@ impl App {
             return;
         }
         if let (Some(silhouette), Some(depth_view)) =
-            (&self.view.silhouette_pipeline, &self.view.depth_view)
+            (&self.view.gpu.silhouette_pipeline, &self.view.gpu.depth_view)
         {
-            let context = self.view.render_context.as_ref().unwrap();
+            let context = self.view.gpu.render_context.as_ref().unwrap();
             let thickness = self.state.settings.get_float(pymol_settings::id::silhouette_width);
             let depth_jump = self.state.settings.get_float(pymol_settings::id::silhouette_depth_jump);
             let color_int = self.state.settings.get_color(pymol_settings::id::silhouette_color);
@@ -410,12 +422,12 @@ impl App {
             Some(o) => o,
             None => return,
         };
-        let egui_renderer = match &mut self.view.egui_renderer {
+        let egui_renderer = match &mut self.view.egui.renderer {
             Some(r) => r,
             None => return,
         };
 
-        let context = self.view.render_context.as_ref().unwrap();
+        let context = self.view.gpu.render_context.as_ref().unwrap();
         let device = context.device();
         let queue = context.queue();
 

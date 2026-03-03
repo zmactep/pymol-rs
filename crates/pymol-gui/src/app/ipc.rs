@@ -6,6 +6,7 @@ use crate::ipc::{
     IpcRequest, IpcResponse, IpcServer,
     OutputKind as IpcOutputKind,
 };
+use crate::message::AppMessage;
 
 use super::App;
 
@@ -16,7 +17,7 @@ impl App {
     /// from external clients (e.g., pymol-python).
     pub(crate) fn process_ipc(&mut self) {
         // Take the server temporarily to avoid borrow conflicts
-        let mut server = match self.ipc_server.take() {
+        let mut server = match self.ipc.server.take() {
             Some(s) => s,
             None => return,
         };
@@ -32,7 +33,7 @@ impl App {
         }
 
         // Put the server back
-        self.ipc_server = Some(server);
+        self.ipc.server = Some(server);
     }
 
     /// Handle a single IPC request
@@ -49,14 +50,14 @@ impl App {
 
             IpcRequest::RegisterCommand { name, help } => {
                 log::info!("IPC RegisterCommand: {}", name);
-                self.external_commands.register(name.clone());
+                self.ipc.external_commands.register(name.clone());
                 self.executor.registry_mut().register_external_help(name.clone(), help.clone());
                 None
             }
 
             IpcRequest::UnregisterCommand { name } => {
                 log::info!("IPC UnregisterCommand: {}", name);
-                self.external_commands.unregister(name);
+                self.ipc.external_commands.unregister(name);
                 self.executor.registry_mut().remove_external_help(name);
                 None
             }
@@ -66,22 +67,22 @@ impl App {
                 // This is handled by the async task system via the server's pending callbacks
                 let _ = server.handle_callback_response(request);
 
-                // Also display output immediately
+                // Display output via message bus
                 for msg in output {
                     match msg.kind {
-                        IpcOutputKind::Info => self.output.print_info(msg.text.clone()),
-                        IpcOutputKind::Warning => self.output.print_warning(msg.text.clone()),
-                        IpcOutputKind::Error => self.output.print_error(msg.text.clone()),
+                        IpcOutputKind::Info => self.bus.print_info(msg.text.clone()),
+                        IpcOutputKind::Warning => self.bus.print_warning(msg.text.clone()),
+                        IpcOutputKind::Error => self.bus.print_error(msg.text.clone()),
                     }
                 }
 
                 if !success {
                     if let Some(err) = error {
-                        self.output.print_error(err.clone());
+                        self.bus.send(AppMessage::PrintError(err.clone()));
                     }
                 }
 
-                self.needs_redraw = true;
+                self.scene_dirty = true;
                 None // No response needed
             }
 
@@ -126,7 +127,7 @@ impl App {
 
             IpcRequest::Quit => {
                 log::info!("IPC Quit received");
-                self.quit_requested = true;
+                self.frame.quit_requested = true;
                 Some(IpcResponse::Closing)
             }
 
@@ -138,7 +139,7 @@ impl App {
                 log::info!("IPC ShowWindow received");
                 self.show_window();
                 self.headless = false;
-                self.needs_redraw = true;
+                self.scene_dirty = true;
                 Some(IpcResponse::Ok { id: *id })
             }
 

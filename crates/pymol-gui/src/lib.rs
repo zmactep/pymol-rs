@@ -3,33 +3,47 @@
 //! This crate provides a PyMOL-like graphical user interface for molecular visualization.
 //! It combines the rendering capabilities of `pymol-scene` with an egui-based UI overlay.
 //!
-//! ## Features
+//! ## Architecture
 //!
-//! - 3D molecular viewer with wgpu rendering
-//! - Command line interface for PyMOL commands
-//! - Output/log panel showing command results
-//! - Object list panel with visibility controls
-//! - Control buttons (Reset, Zoom, Orient, etc.)
-//! - Mouse mode information panel
-//! - State/playback controls for multi-state molecules
+//! The GUI is built around a component system:
+//! - [`component::Component`] — trait for self-contained UI panels
+//! - [`component::SharedContext`] — read-only application state shared with components
+//! - [`component_store::ComponentStore`] — holds all components with typed + dynamic access
+//! - [`layout::Layout`] — configurable panel placement around the 3D viewport
+//! - [`message::MessageBus`] — per-frame message queue for inter-component communication
 
 pub mod app;
 pub mod async_tasks;
+pub mod component;
+pub mod component_store;
+pub mod components;
 pub mod fetch;
 pub mod ipc;
-pub mod state;
+pub mod layout;
+pub mod message;
+pub mod model;
 pub mod ui;
 pub mod view;
+
 pub use app::App;
 pub use async_tasks::{AsyncTask, TaskContext, TaskResult, TaskRunner};
+pub use component::{Component, SharedContext};
+pub use component_store::ComponentStore;
+pub use components::{
+    MovieComponent, ObjectListComponent, ReplComponent, SequenceComponent,
+};
 pub use fetch::{FetchResult, FetchTask};
 pub use ipc::{
     ExternalCommandRegistry, IpcCallbackResult, IpcCallbackTask, IpcRequest, IpcResponse,
     IpcServer, OutputKind as IpcOutputKind, OutputMessage as IpcOutputMessage,
 };
+pub use layout::Layout;
 
-// Re-export state types
-pub use state::{CommandLineState, CompletionState, OutputBufferState, OutputKind, OutputMessage};
+// Re-export model types
+pub use model::{CommandLineModel, OutputModel, OutputKind, OutputMessage};
+
+// Re-export UI state types
+pub use ui::{CommandLineUiState, ObjectListUiState, SequenceUiState};
 
 // Re-export view types
-pub use view::{AppView, UiConfig};
+pub use view::AppView;

@@ -1,12 +1,13 @@
 //! Object List Panel
 //!
 //! Displays loaded objects with action buttons (A/S/H/L/C) for each.
-//! Uses a stateful menu system where buttons only update state,
-//! and a single menu is rendered at the end to avoid overlapping popups.
+//! Sends `AppMessage` directly to the `MessageBus` — no intermediate action enums.
 
 use egui::{Color32, RichText, Ui, Vec2, Pos2, Id, Align2};
 use pymol_mol::RepMask;
 use pymol_scene::{ObjectRegistry, SelectionEntry, SelectionManager};
+
+use crate::message::{AppMessage, MessageBus};
 
 /// Minimum size for action buttons (A, S, H, L, C) to ensure consistent sizing
 const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(22.0);
@@ -43,6 +44,10 @@ const REPRESENTATIONS: &[(&str, RepMask)] = &[
     ("ribbon", RepMask::RIBBON),
 ];
 
+// =============================================================================
+// UI State
+// =============================================================================
+
 /// What menu is currently showing
 #[derive(Clone, PartialEq, Debug)]
 pub enum ActiveMenu {
@@ -66,14 +71,18 @@ impl Default for ActiveMenu {
     }
 }
 
-/// Stores which menu is active and where to position it
+/// Object list UI state (egui-specific: menu popups and anchor positions)
 #[derive(Default)]
-pub struct MenuState {
+pub struct ObjectListUiState {
     /// Which menu is currently active
-    pub active: ActiveMenu,
+    pub active_menu: ActiveMenu,
     /// Position to anchor the menu popup
     pub anchor_pos: Pos2,
 }
+
+// =============================================================================
+// View
+// =============================================================================
 
 /// Create a consistent action button with fixed size
 fn action_button(text: &str, color: Color32) -> egui::Button<'static> {
@@ -87,167 +96,80 @@ fn menu_button(
     text: &str,
     color: Color32,
     hover_text: &str,
-    menu_state: &mut MenuState,
+    ui_state: &mut ObjectListUiState,
     target_menu: ActiveMenu,
 ) -> egui::Response {
     let button = egui::Button::new(RichText::new(text).color(color))
         .min_size(BUTTON_MIN_SIZE);
     let response = ui.add(button);
 
-    // Check if this button's menu is currently active
-    let is_this_menu_active = menu_state.active == target_menu;
+    let is_this_menu_active = ui_state.active_menu == target_menu;
 
     if response.clicked() {
         if is_this_menu_active {
-            // Clicking the same button closes the menu
-            menu_state.active = ActiveMenu::None;
+            ui_state.active_menu = ActiveMenu::None;
         } else {
-            // Open this menu (automatically closes any other)
-            menu_state.active = target_menu;
-            // Use right_bottom so popup opens to the left (better for right-side panel)
-            menu_state.anchor_pos = response.rect.right_bottom();
+            ui_state.active_menu = target_menu;
+            ui_state.anchor_pos = response.rect.right_bottom();
         }
-        // Request immediate repaint to show menu without delay
         ui.ctx().request_repaint();
     } else if is_this_menu_active {
-        // Keep anchor_pos updated every frame for the active menu's button
-        // This prevents "jumping" when scroll position or layout changes
-        menu_state.anchor_pos = response.rect.right_bottom();
+        ui_state.anchor_pos = response.rect.right_bottom();
     }
 
-    // Show tooltip only when no menu is open
-    if menu_state.active == ActiveMenu::None {
+    if ui_state.active_menu == ActiveMenu::None {
         response.clone().on_hover_text(hover_text);
     }
 
     response
 }
 
-/// Action to perform on an object
-pub enum ObjectAction {
-    /// No action
-    None,
-    /// Toggle object visibility
-    ToggleEnabled(String),
-    /// Enable all objects
-    EnableAll,
-    /// Disable all objects
-    DisableAll,
-    /// Show all representations
-    ShowAll(String),
-    /// Hide all representations
-    HideAll(String),
-    /// Show specific representation
-    ShowRep(String, RepMask),
-    /// Hide specific representation
-    HideRep(String, RepMask),
-    /// Set color
-    SetColor(String, String),
-    /// Delete object
-    Delete(String),
-    /// Zoom to object
-    ZoomTo(String),
-    /// Center on object
-    CenterOn(String),
-    /// Delete a named selection
-    DeleteSelection(String),
-    /// Toggle selection enabled state
-    ToggleSelectionEnabled(String),
-}
-
-/// Object list panel - stateful to track menu state
-#[derive(Default)]
-pub struct ObjectListPanel {
-    /// Current menu state
-    menu_state: MenuState,
-}
-
+/// Object list panel
+pub struct ObjectListPanel;
 
 impl ObjectListPanel {
-    /// Create a new ObjectListPanel
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Render the right-aligned button bar (A, S, H, L, C) for an object or selection
-    ///
-    /// # Arguments
-    /// * `ui` - The egui UI context
-    /// * `target_name` - Name of the object or selection
-    /// * `is_selection` - true if this is a selection, false if it's an object
-    /// * `menu_button_clicked` - Mutable flag to track if any menu button was clicked
-    fn render_button_bar(
-        &mut self,
+    /// Draw the object list panel, sending messages directly to the bus.
+    pub fn show(
         ui: &mut Ui,
-        target_name: &str,
-        is_selection: bool,
-        menu_button_clicked: &mut bool,
+        ui_state: &mut ObjectListUiState,
+        registry: &ObjectRegistry,
+        selections: &SelectionManager,
+        bus: &mut MessageBus,
     ) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Buttons are added in reverse order (right-to-left): C, L, H, S, A
+        let mut menu_button_clicked = false;
 
-            // C - Color
-            let color_tooltip = if is_selection { "Color selection" } else { "Color" };
-            if menu_button(
-                ui, "C", colors::COLOR, color_tooltip,
-                &mut self.menu_state,
-                ActiveMenu::Color { object: target_name.to_string() }
-            ).clicked() {
-                *menu_button_clicked = true;
+        ui.vertical(|ui| {
+            Self::render_all_row(ui, registry, bus);
+
+            // Object rows
+            for name in registry.names() {
+                let is_enabled = registry
+                    .get(name)
+                    .map(|o| o.is_enabled())
+                    .unwrap_or(false);
+                Self::render_object_row(ui, ui_state, name, is_enabled, bus, &mut menu_button_clicked);
             }
 
-            // L - Labels (simple button, no menu)
-            if ui
-                .add(action_button("L", colors::LABEL))
-                .on_hover_text("Labels")
-                .clicked()
-            {
-                // Toggle labels (TODO: implement)
-            }
+            // Selection rows
+            if !selections.is_empty() {
+                ui.separator();
+                let mut sel_entries: Vec<_> = selections.iter().collect();
+                sel_entries.sort_by(|a, b| a.0.cmp(b.0));
 
-            // H - Hide
-            if menu_button(
-                ui, "H", colors::HIDE, "Hide representations",
-                &mut self.menu_state,
-                ActiveMenu::Hide { object: target_name.to_string() }
-            ).clicked() {
-                *menu_button_clicked = true;
-            }
-
-            // S - Show
-            if menu_button(
-                ui, "S", colors::SHOW, "Show representations",
-                &mut self.menu_state,
-                ActiveMenu::Show { object: target_name.to_string() }
-            ).clicked() {
-                *menu_button_clicked = true;
-            }
-
-            // A - Actions (different menu for selections vs objects)
-            let action_menu = if is_selection {
-                ActiveMenu::SelectionActions { selection: target_name.to_string() }
-            } else {
-                ActiveMenu::Actions { object: target_name.to_string() }
-            };
-            if menu_button(
-                ui, "A", colors::ACTION, "Actions",
-                &mut self.menu_state,
-                action_menu
-            ).clicked() {
-                *menu_button_clicked = true;
+                for (sel_name, entry) in sel_entries {
+                    Self::render_selection_row(ui, ui_state, sel_name, entry, bus, &mut menu_button_clicked);
+                }
             }
         });
-    }
 
-    /// Render the panel header
-    fn render_header(_ui: &mut Ui) {
+        Self::render_menu_and_handle_close(ui, ui_state, bus, menu_button_clicked);
     }
 
     /// Render the "all" row with aggregate actions for all objects
     fn render_all_row(
         ui: &mut Ui,
         registry: &ObjectRegistry,
-        actions: &mut Vec<ObjectAction>,
+        bus: &mut MessageBus,
     ) {
         let all_enabled = registry.names().all(|name| {
             registry.get(name).map(|o| o.is_enabled()).unwrap_or(false)
@@ -274,9 +196,9 @@ impl ObjectListPanel {
 
             if all_response.clicked() && has_objects {
                 if all_enabled {
-                    actions.push(ObjectAction::DisableAll);
+                    bus.send(AppMessage::DisableAllObjects);
                 } else {
-                    actions.push(ObjectAction::EnableAll);
+                    bus.send(AppMessage::EnableAllObjects);
                 }
             }
 
@@ -284,7 +206,6 @@ impl ObjectListPanel {
 
             // Right-align the buttons (simple action buttons, no menus)
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Buttons are added in reverse order (right-to-left)
                 if ui
                     .add(action_button("C", colors::COLOR))
                     .on_hover_text("Color all objects")
@@ -307,7 +228,7 @@ impl ObjectListPanel {
                     .clicked()
                 {
                     for name in registry.names() {
-                        actions.push(ObjectAction::HideAll(name.to_string()));
+                        bus.send(AppMessage::HideAllRepresentations(name.to_string()));
                     }
                 }
 
@@ -317,7 +238,10 @@ impl ObjectListPanel {
                     .clicked()
                 {
                     for name in registry.names() {
-                        actions.push(ObjectAction::ShowRep(name.to_string(), RepMask::LINES));
+                        bus.send(AppMessage::ShowRepresentation {
+                            object: name.to_string(),
+                            rep: RepMask::LINES,
+                        });
                     }
                 }
 
@@ -332,13 +256,75 @@ impl ObjectListPanel {
         });
     }
 
+    /// Render the button bar (A, S, H, L, C) for an object or selection
+    fn render_button_bar(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        target_name: &str,
+        is_selection: bool,
+        menu_button_clicked: &mut bool,
+    ) {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // C - Color
+            let color_tooltip = if is_selection { "Color selection" } else { "Color" };
+            if menu_button(
+                ui, "C", colors::COLOR, color_tooltip,
+                ui_state,
+                ActiveMenu::Color { object: target_name.to_string() }
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+
+            // L - Labels
+            if ui
+                .add(action_button("L", colors::LABEL))
+                .on_hover_text("Labels")
+                .clicked()
+            {
+                // Toggle labels (TODO: implement)
+            }
+
+            // H - Hide
+            if menu_button(
+                ui, "H", colors::HIDE, "Hide representations",
+                ui_state,
+                ActiveMenu::Hide { object: target_name.to_string() }
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+
+            // S - Show
+            if menu_button(
+                ui, "S", colors::SHOW, "Show representations",
+                ui_state,
+                ActiveMenu::Show { object: target_name.to_string() }
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+
+            // A - Actions
+            let action_menu = if is_selection {
+                ActiveMenu::SelectionActions { selection: target_name.to_string() }
+            } else {
+                ActiveMenu::Actions { object: target_name.to_string() }
+            };
+            if menu_button(
+                ui, "A", colors::ACTION, "Actions",
+                ui_state,
+                action_menu
+            ).clicked() {
+                *menu_button_clicked = true;
+            }
+        });
+    }
+
     /// Render a single object row
     fn render_object_row(
-        &mut self,
         ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
         name: &str,
         is_enabled: bool,
-        actions: &mut Vec<ObjectAction>,
+        bus: &mut MessageBus,
         menu_button_clicked: &mut bool,
     ) {
         ui.push_id(name, |ui| {
@@ -359,24 +345,24 @@ impl ObjectListPanel {
                 );
 
                 if name_response.clicked() {
-                    actions.push(ObjectAction::ToggleEnabled(name.to_string()));
+                    bus.send(AppMessage::ToggleObject(name.to_string()));
                 }
                 if name_response.secondary_clicked() {
-                    actions.push(ObjectAction::ZoomTo(name.to_string()));
+                    bus.send(AppMessage::ZoomTo(name.to_string()));
                 }
 
-                self.render_button_bar(ui, name, false, menu_button_clicked);
+                Self::render_button_bar(ui, ui_state, name, false, menu_button_clicked);
             });
         });
     }
 
     /// Render a single selection row
     fn render_selection_row(
-        &mut self,
         ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
         name: &str,
         entry: &SelectionEntry,
-        actions: &mut Vec<ObjectAction>,
+        bus: &mut MessageBus,
         menu_button_clicked: &mut bool,
     ) {
         ui.push_id(format!("sel_{}", name), |ui| {
@@ -407,215 +393,159 @@ impl ObjectListPanel {
                 ));
 
                 if clicked {
-                    actions.push(ObjectAction::ToggleSelectionEnabled(name.to_string()));
+                    bus.send(AppMessage::ToggleSelectionVisibility(name.to_string()));
                 }
 
-                self.render_button_bar(ui, name, true, menu_button_clicked);
+                Self::render_button_bar(ui, ui_state, name, true, menu_button_clicked);
             });
         });
     }
 
     /// Render the active menu and handle click-outside-to-close behavior
     fn render_menu_and_handle_close(
-        &mut self,
         ui: &mut Ui,
-        actions: &mut Vec<ObjectAction>,
+        ui_state: &mut ObjectListUiState,
+        bus: &mut MessageBus,
         menu_button_clicked: bool,
     ) {
-        if self.menu_state.active == ActiveMenu::None {
+        if ui_state.active_menu == ActiveMenu::None {
             return;
         }
 
-        let menu_clicked = self.render_active_menu(ui, actions);
+        let menu_clicked = Self::render_active_menu(ui, ui_state, bus);
 
-        // Close menu on click outside (but not if we clicked a menu button or menu item)
         if !menu_button_clicked && !menu_clicked {
             if ui.input(|i| i.pointer.any_click()) {
-                self.menu_state.active = ActiveMenu::None;
+                ui_state.active_menu = ActiveMenu::None;
             }
         }
-    }
-
-    /// Draw the object list panel
-    ///
-    /// # Arguments
-    /// * `ui` - The egui UI context
-    /// * `registry` - Object registry containing molecules and other objects
-    /// * `selections` - Named selections (name -> expression)
-    pub fn show(
-        &mut self,
-        ui: &mut Ui,
-        registry: &ObjectRegistry,
-        selections: &SelectionManager,
-    ) -> Vec<ObjectAction> {
-        let mut actions = Vec::new();
-        let mut menu_button_clicked = false;
-
-        ui.vertical(|ui| {
-            Self::render_header(ui);
-            Self::render_all_row(ui, registry, &mut actions);
-
-            // Object rows
-            for name in registry.names() {
-                let is_enabled = registry
-                    .get(name)
-                    .map(|o| o.is_enabled())
-                    .unwrap_or(false);
-                self.render_object_row(ui, name, is_enabled, &mut actions, &mut menu_button_clicked);
-            }
-
-            // Selection rows
-            if !selections.is_empty() {
-                ui.separator();
-                let mut sel_entries: Vec<_> = selections.iter().collect();
-                sel_entries.sort_by(|a, b| a.0.cmp(b.0));
-
-                for (sel_name, entry) in sel_entries {
-                    self.render_selection_row(ui, sel_name, entry, &mut actions, &mut menu_button_clicked);
-                }
-            }
-        });
-
-        self.render_menu_and_handle_close(ui, &mut actions, menu_button_clicked);
-        actions
     }
 
     /// Render the currently active menu - called ONCE at the end
     /// Returns true if a menu item was clicked
-    fn render_active_menu(&mut self, ui: &mut Ui, actions: &mut Vec<ObjectAction>) -> bool {
+    fn render_active_menu(ui: &mut Ui, ui_state: &mut ObjectListUiState, bus: &mut MessageBus) -> bool {
         let mut item_clicked = false;
 
-        // Request repaint to ensure the popup is fully rendered
-        // This is critical for the first frame after opening
         ui.ctx().request_repaint();
 
-        // Use a stable Area configuration:
-        // - fixed_pos: anchor to button's right-bottom corner
-        // - pivot RIGHT_TOP: popup's right-top aligns with anchor, so it expands LEFT
-        // - movable(false): prevent dragging
-        // - constrain(false): don't auto-adjust position (causes jumping)
-        // - Order::Tooltip: highest rendering priority, ensures immediate visibility
         egui::Area::new(Id::new("object_list_menu_panel"))
             .order(egui::Order::Tooltip)
-            .fixed_pos(self.menu_state.anchor_pos)
+            .fixed_pos(ui_state.anchor_pos)
             .pivot(Align2::RIGHT_TOP)
             .movable(false)
             .constrain(false)
             .show(ui.ctx(), |ui| {
-                // Use explicit solid colors to avoid semi-transparency on first frame
                 let popup_frame = egui::Frame::popup(ui.style())
-                    .fill(Color32::from_rgb(40, 40, 45))  // Solid dark background
+                    .fill(Color32::from_rgb(40, 40, 45))
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(80, 80, 85)));
 
                 popup_frame.show(ui, |ui| {
                         ui.set_min_width(100.0);
 
-                        match &self.menu_state.active.clone() {
+                        match &ui_state.active_menu.clone() {
                             ActiveMenu::None => {}
                             ActiveMenu::Actions { object } => {
-                                item_clicked = Self::render_actions_menu(ui, object, actions);
+                                item_clicked = Self::render_actions_menu(ui, object, bus);
                             }
                             ActiveMenu::Show { object } => {
-                                item_clicked = Self::render_representation_menu(ui, object, actions, true);
+                                item_clicked = Self::render_representation_menu(ui, object, bus, true);
                             }
                             ActiveMenu::Hide { object } => {
-                                item_clicked = Self::render_representation_menu(ui, object, actions, false);
+                                item_clicked = Self::render_representation_menu(ui, object, bus, false);
                             }
                             ActiveMenu::Color { object } => {
-                                item_clicked = Self::render_color_menu(ui, object, actions);
+                                item_clicked = Self::render_color_menu(ui, object, bus);
                             }
                             ActiveMenu::SelectionActions { selection } => {
-                                item_clicked = Self::render_selection_actions_menu(ui, selection, actions);
+                                item_clicked = Self::render_selection_actions_menu(ui, selection, bus);
                             }
                         }
                     });
             });
 
-        // Close menu if an item was clicked
         if item_clicked {
-            self.menu_state.active = ActiveMenu::None;
+            ui_state.active_menu = ActiveMenu::None;
         }
 
         item_clicked
     }
 
-    /// Render actions menu for selections - returns true if item clicked
-    fn render_selection_actions_menu(ui: &mut Ui, name: &str, actions: &mut Vec<ObjectAction>) -> bool {
+    /// Render actions menu for selections
+    fn render_selection_actions_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
         if ui.button("delete").clicked() {
-            actions.push(ObjectAction::DeleteSelection(name.to_string()));
+            bus.send(AppMessage::DeleteSelection(name.to_string()));
             return true;
         }
         false
     }
 
-    /// Render representation menu (show or hide) - returns true if item clicked
-    ///
-    /// # Arguments
-    /// * `is_show` - true for show menu, false for hide menu
+    /// Render representation menu (show or hide)
     fn render_representation_menu(
         ui: &mut Ui,
         name: &str,
-        actions: &mut Vec<ObjectAction>,
+        bus: &mut MessageBus,
         is_show: bool,
     ) -> bool {
-        // Render buttons for each representation
         for (rep_name, rep_mask) in REPRESENTATIONS {
             if ui.button(*rep_name).clicked() {
-                let action = if is_show {
-                    ObjectAction::ShowRep(name.to_string(), *rep_mask)
+                if is_show {
+                    bus.send(AppMessage::ShowRepresentation {
+                        object: name.to_string(),
+                        rep: *rep_mask,
+                    });
                 } else {
-                    ObjectAction::HideRep(name.to_string(), *rep_mask)
-                };
-                actions.push(action);
+                    bus.send(AppMessage::HideRepresentation {
+                        object: name.to_string(),
+                        rep: *rep_mask,
+                    });
+                }
                 return true;
             }
         }
 
-        // Separator and "all/everything" option
         ui.separator();
         let all_label = if is_show { "all" } else { "everything" };
         if ui.button(all_label).clicked() {
-            let action = if is_show {
-                ObjectAction::ShowAll(name.to_string())
+            if is_show {
+                bus.send(AppMessage::ShowAllRepresentations(name.to_string()));
             } else {
-                ObjectAction::HideAll(name.to_string())
-            };
-            actions.push(action);
+                bus.send(AppMessage::HideAllRepresentations(name.to_string()));
+            }
             return true;
         }
 
         false
     }
 
-    /// Render actions menu - returns true if item clicked
-    fn render_actions_menu(ui: &mut Ui, name: &str, actions: &mut Vec<ObjectAction>) -> bool {
+    /// Render actions menu
+    fn render_actions_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
         if ui.button("zoom").clicked() {
-            actions.push(ObjectAction::ZoomTo(name.to_string()));
+            bus.send(AppMessage::ZoomTo(name.to_string()));
             return true;
         }
         if ui.button("center").clicked() {
-            actions.push(ObjectAction::CenterOn(name.to_string()));
+            bus.send(AppMessage::CenterOn(name.to_string()));
             return true;
         }
         ui.separator();
         if ui.button("enable").clicked() {
-            actions.push(ObjectAction::ToggleEnabled(name.to_string()));
+            bus.send(AppMessage::ToggleObject(name.to_string()));
             return true;
         }
         if ui.button("disable").clicked() {
-            actions.push(ObjectAction::ToggleEnabled(name.to_string()));
+            bus.send(AppMessage::ToggleObject(name.to_string()));
             return true;
         }
         ui.separator();
         if ui.button("delete").clicked() {
-            actions.push(ObjectAction::Delete(name.to_string()));
+            bus.send(AppMessage::DeleteObject(name.to_string()));
             return true;
         }
         false
     }
 
-    /// Render color menu - returns true if item clicked
-    fn render_color_menu(ui: &mut Ui, name: &str, actions: &mut Vec<ObjectAction>) -> bool {
+    /// Render color menu
+    fn render_color_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
         let colors = [
             ("red", Color32::RED),
             ("green", Color32::GREEN),
@@ -633,7 +563,10 @@ impl ObjectListPanel {
                 .add(egui::Button::new(RichText::new(color_name).color(color)))
                 .clicked()
             {
-                actions.push(ObjectAction::SetColor(name.to_string(), color_name.to_string()));
+                bus.send(AppMessage::SetColor {
+                    object: name.to_string(),
+                    color: color_name.to_string(),
+                });
                 return true;
             }
         }
@@ -643,10 +576,10 @@ impl ObjectListPanel {
         let by_colors = ["by element", "by chain", "by ss", "by residue"];
         for by_color in by_colors {
             if ui.button(by_color).clicked() {
-                actions.push(ObjectAction::SetColor(
-                    name.to_string(),
-                    by_color.replace(' ', "_"),
-                ));
+                bus.send(AppMessage::SetColor {
+                    object: name.to_string(),
+                    color: by_color.replace(' ', "_"),
+                });
                 return true;
             }
         }

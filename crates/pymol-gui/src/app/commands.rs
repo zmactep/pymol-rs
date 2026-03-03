@@ -7,6 +7,7 @@ use pymol_cmd::{CmdError, MessageKind, parse_command};
 use pymol_scene::SessionAdapter;
 
 use crate::ipc::{IpcCallbackTask, IpcResponse};
+use crate::message::AppMessage;
 
 use super::App;
 
@@ -26,7 +27,7 @@ impl App {
 
         // Echo the command to output
         if !silent {
-            self.output.print_command(format!("PyMOL> {}", cmd));
+            self.bus.send(AppMessage::PrintCommand(format!("PyMOL> {}", cmd)));
         }
 
         // Parse using pymol-cmd parser for proper handling of quotes, commas, etc.
@@ -35,14 +36,14 @@ impl App {
             Err(e) => {
                 let msg = format!("Parse error: {}", e);
                 if !silent {
-                    self.output.print_error(msg.clone());
+                    self.bus.print_error(msg.clone());
                 }
                 return Err(msg);
             }
         };
 
         // Check if it's an external command (registered via IPC)
-        if self.external_commands.contains(&parsed.name) {
+        if self.ipc.external_commands.contains(&parsed.name) {
             self.execute_external_command(&parsed);
             // External commands are async, errors are handled separately via callback
             return Ok(());
@@ -56,10 +57,10 @@ impl App {
     ///
     /// This spawns an async task that waits for the callback response.
     fn execute_external_command(&mut self, parsed: &pymol_cmd::ParsedCommand) {
-        let server = match self.ipc_server.as_mut() {
+        let server = match self.ipc.server.as_mut() {
             Some(s) => s,
             None => {
-                self.output.print_error("No IPC server available");
+                self.bus.print_error("No IPC server available");
                 return;
             }
         };
@@ -85,7 +86,7 @@ impl App {
         };
 
         if let Err(e) = server.send(response) {
-            self.output.print_error(format!("IPC error: {}", e));
+            self.bus.print_error(format!("IPC error: {}", e));
             return;
         }
 
@@ -104,13 +105,16 @@ impl App {
             .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))
             .unwrap_or((1024, 768));
 
-        // Create a SessionAdapter that wraps our state
+        // Create a SessionAdapter that wraps our state.
+        // Use a proxy bool because SessionAdapter expects `&mut bool` for needs_redraw,
+        // but we store scene_dirty on App (which is already borrowed via &mut self.state).
+        let mut dirty_proxy = self.scene_dirty;
         let task_runner = &self.task_runner;
         let mut adapter = SessionAdapter {
             session: &mut self.state,
-            render_context: self.view.render_context.as_ref(),
+            render_context: self.view.gpu.render_context.as_ref(),
             default_size,
-            needs_redraw: &mut self.needs_redraw,
+            needs_redraw: &mut dirty_proxy,
             async_fetch_fn: Some(Box::new(|code: &str, name: &str, format: u8| {
                 let fmt = match format {
                     1 => pymol_io::FetchFormat::Pdb,
@@ -127,10 +131,18 @@ impl App {
         };
 
         // Temporarily take the executor out to avoid a borrow conflict
-        // (adapter already borrows self.state and self.needs_redraw mutably).
+        // (adapter already borrows self.state mutably).
         let mut executor = std::mem::replace(&mut self.executor, pymol_cmd::CommandExecutor::new());
         let result = executor.do_with_options(&mut adapter, cmd, true, false);
         self.executor = executor;
+
+        // Drop the adapter so we can read dirty_proxy
+        drop(adapter);
+
+        // Write back the proxy — if the command dirtied the scene, propagate it
+        if dirty_proxy {
+            self.scene_dirty = true;
+        }
 
         match result {
             Ok(output) => {
@@ -138,9 +150,9 @@ impl App {
                 if !silent {
                     for msg in output.messages {
                         match msg.kind {
-                            MessageKind::Info => self.output.print_info(msg.text),
-                            MessageKind::Warning => self.output.print_warning(msg.text),
-                            MessageKind::Error => self.output.print_error(msg.text),
+                            MessageKind::Info => self.bus.print_info(msg.text),
+                            MessageKind::Warning => self.bus.print_warning(msg.text),
+                            MessageKind::Error => self.bus.print_error(msg.text),
                         }
                     }
                 }
@@ -148,14 +160,14 @@ impl App {
             }
             Err(CmdError::Aborted) => {
                 // Quit/exit command was issued - signal application to close
-                self.quit_requested = true;
+                self.frame.quit_requested = true;
                 Ok(())  // Not an error to the caller
             }
             Err(e) => {
                 // Print the error to the GUI output
                 let msg = format!("{}", e);
                 if !silent {
-                    self.output.print_error(msg.clone());
+                    self.bus.print_error(msg.clone());
                 }
                 Err(msg)
             }
@@ -175,7 +187,7 @@ impl App {
         }
         // Request window redraw if any tasks completed
         if had_results {
-            self.request_redraw();
+            self.mark_dirty();
         }
     }
 }
