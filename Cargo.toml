@@ -18,7 +18,7 @@ members = [
 exclude = ["crates/pymol-python"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
