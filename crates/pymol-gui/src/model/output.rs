@@ -98,7 +98,10 @@ impl OutputModel {
         };
 
         // Add initial welcome messages
-        model.add(OutputMessage::info("PyMOL-RS - Molecular Visualization"));
+        model.add(OutputMessage::info(format!(
+            "PyMOL-RS v{} - Molecular Visualization",
+            env!("CARGO_PKG_VERSION")
+        )));
         model.add(OutputMessage::info("Type commands at the prompt below."));
 
         model
