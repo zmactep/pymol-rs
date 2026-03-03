@@ -3,7 +3,6 @@
 //! Main UI loop, message dispatch, and selection synchronization.
 //! Uses the Layout engine to render components into configurable panels.
 
-use pymol_mol::RepMask;
 use pymol_scene::Object;
 use pymol_select::SelectionResult;
 
@@ -262,48 +261,15 @@ impl App {
 
     /// Dispatch a single message, mutating application state.
     ///
-    /// The exhaustive match is kept for compiler safety; each arm delegates
-    /// to a focused handler method.
+    /// Domain operations (objects, representations, coloring, camera,
+    /// selections, movie) flow through `ExecuteCommand` — the command system
+    /// handles them uniformly. The remaining arms cover GUI-level concerns.
     fn dispatch(&mut self, msg: &AppMessage) {
         match msg {
-            // Command execution
+            // Command execution (covers all domain operations)
             AppMessage::ExecuteCommand { command, silent } => {
                 let _ = self.execute_command(command, *silent);
             }
-
-            // Object visibility / deletion
-            AppMessage::ToggleObject(_)
-            | AppMessage::EnableAllObjects
-            | AppMessage::DisableAllObjects
-            | AppMessage::DeleteObject(_) => self.dispatch_object(msg),
-
-            // Representation toggling
-            AppMessage::ShowRepresentation { .. }
-            | AppMessage::HideRepresentation { .. }
-            | AppMessage::ShowAllRepresentations(_)
-            | AppMessage::HideAllRepresentations(_)
-            | AppMessage::SetColor { .. } => self.dispatch_representation(msg),
-
-            // Camera navigation
-            AppMessage::ZoomTo(name) => {
-                let _ = self.execute_command(&format!("zoom {}", name), false);
-            }
-            AppMessage::CenterOn(name) => {
-                let _ = self.execute_command(&format!("center {}", name), false);
-            }
-
-            // Selections
-            AppMessage::DeleteSelection(_)
-            | AppMessage::ToggleSelectionVisibility(_)
-            | AppMessage::SelectionChanged { .. } => self.dispatch_selection(msg),
-
-            // Movie
-            AppMessage::MoviePlay
-            | AppMessage::MoviePause
-            | AppMessage::MovieStop
-            | AppMessage::MovieGotoFrame(_)
-            | AppMessage::MovieSetFps(_)
-            | AppMessage::MovieSetLoopMode(_) => self.dispatch_movie(msg),
 
             // Layout
             AppMessage::TogglePanel(_)
@@ -334,105 +300,6 @@ impl App {
     // =========================================================================
     // Grouped dispatch handlers
     // =========================================================================
-
-    fn dispatch_object(&mut self, msg: &AppMessage) {
-        match msg {
-            AppMessage::ToggleObject(name) => {
-                if let Some(obj) = self.state.registry.get_mut(name) {
-                    if obj.is_enabled() { obj.disable(); } else { obj.enable(); }
-                }
-            }
-            AppMessage::EnableAllObjects => {
-                let names: Vec<String> = self.state.registry.names().map(|s| s.to_string()).collect();
-                for name in names {
-                    if let Some(obj) = self.state.registry.get_mut(&name) { obj.enable(); }
-                }
-            }
-            AppMessage::DisableAllObjects => {
-                let names: Vec<String> = self.state.registry.names().map(|s| s.to_string()).collect();
-                for name in names {
-                    if let Some(obj) = self.state.registry.get_mut(&name) { obj.disable(); }
-                }
-            }
-            AppMessage::DeleteObject(name) => {
-                self.state.registry.remove(name);
-            }
-            _ => unreachable!(),
-        }
-        self.scene_dirty = true;
-    }
-
-    fn dispatch_representation(&mut self, msg: &AppMessage) {
-        match msg {
-            AppMessage::ShowRepresentation { object, rep } => {
-                if let Some(mol) = self.state.registry.get_molecule_mut(object) {
-                    mol.show(*rep);
-                }
-            }
-            AppMessage::HideRepresentation { object, rep } => {
-                if let Some(mol) = self.state.registry.get_molecule_mut(object) {
-                    mol.hide(*rep);
-                }
-            }
-            AppMessage::ShowAllRepresentations(name) => {
-                if let Some(mol) = self.state.registry.get_molecule_mut(name) {
-                    mol.show(RepMask::ALL);
-                }
-            }
-            AppMessage::HideAllRepresentations(name) => {
-                if let Some(mol) = self.state.registry.get_molecule_mut(name) {
-                    mol.hide_all();
-                }
-            }
-            AppMessage::SetColor { object, color } => {
-                if let Some(color_idx) = self.state.named_colors.get_by_name(color).map(|(idx, _)| idx) {
-                    if let Some(mol_obj) = self.state.registry.get_molecule_mut(object) {
-                        for atom in mol_obj.molecule_mut().atoms_mut() {
-                            atom.repr.colors.base = color_idx as i32;
-                        }
-                    }
-                }
-            }
-            _ => unreachable!(),
-        }
-        self.scene_dirty = true;
-    }
-
-    fn dispatch_selection(&mut self, msg: &AppMessage) {
-        match msg {
-            AppMessage::DeleteSelection(name) => {
-                self.state.selections.remove(name);
-                self.bus.print_info(format!("Deleted selection \"{}\"", name));
-                self.scene_dirty = true;
-            }
-            AppMessage::ToggleSelectionVisibility(name) => {
-                if let Some(entry) = self.state.selections.get_mut(name) {
-                    entry.visible = !entry.visible;
-                    log::debug!("Selection '{}' indicators toggled", name);
-                    self.scene_dirty = true;
-                }
-            }
-            AppMessage::SelectionChanged { .. } => {
-                self.sync_selection_to_sequence();
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn dispatch_movie(&mut self, msg: &AppMessage) {
-        match msg {
-            AppMessage::MoviePlay => self.state.movie.play(),
-            AppMessage::MoviePause => self.state.movie.pause(),
-            AppMessage::MovieStop => self.state.movie.stop(),
-            AppMessage::MovieGotoFrame(frame) => {
-                self.state.movie.goto_frame(*frame);
-                self.scene_dirty = true;
-            }
-            AppMessage::MovieSetFps(fps) => self.state.movie.set_fps(*fps),
-            AppMessage::MovieSetLoopMode(mode) => self.state.movie.set_loop_mode(*mode),
-            _ => unreachable!(),
-        }
-    }
 
     fn dispatch_layout(&mut self, msg: &AppMessage) {
         match msg {

@@ -111,6 +111,13 @@ impl Default for Layout {
 }
 
 impl Layout {
+    /// Empty layout with no panels.
+    pub fn empty() -> Self {
+        Self {
+            panels: Vec::new(),
+        }
+    }
+
     /// Default PyMOL-like layout: REPL on top, objects on right.
     pub fn pymol_classic() -> Self {
         Self {

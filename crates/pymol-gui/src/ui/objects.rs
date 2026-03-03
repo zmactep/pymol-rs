@@ -1,48 +1,111 @@
 //! Object List Panel
 //!
 //! Displays loaded objects with action buttons (A/S/H/L/C) for each.
-//! Sends `AppMessage` directly to the `MessageBus` — no intermediate action enums.
+//! Sends commands via `MessageBus::execute_command()`.
 
-use egui::{Color32, RichText, Ui, Vec2, Pos2, Id, Align2};
-use pymol_mol::RepMask;
+use egui::{Align2, Color32, Id, Pos2, Rect, RichText, Ui, Vec2};
 use pymol_scene::{ObjectRegistry, SelectionEntry, SelectionManager};
 
-use crate::message::{AppMessage, MessageBus};
+use crate::message::MessageBus;
 
 /// Minimum size for action buttons (A, S, H, L, C) to ensure consistent sizing
-const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(22.0);
+const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(16.0);
 
 /// All color constants used in the object list panel
 mod colors {
     use egui::Color32;
 
     // Button colors (A, S, H, L, C)
-    pub const ACTION: Color32 = Color32::from_rgb(150, 150, 255);   // A - blue
-    pub const SHOW: Color32 = Color32::from_rgb(100, 200, 100);     // S - green
-    pub const HIDE: Color32 = Color32::from_rgb(200, 100, 100);     // H - red
-    pub const LABEL: Color32 = Color32::from_rgb(200, 200, 255);    // L - light blue
-    pub const COLOR: Color32 = Color32::from_rgb(255, 200, 100);    // C - orange/yellow
+    pub const ACTION: Color32 = Color32::from_rgb(150, 150, 255); // A - blue
+    pub const SHOW: Color32 = Color32::from_rgb(100, 200, 100); // S - green
+    pub const HIDE: Color32 = Color32::from_rgb(200, 100, 100); // H - red
+    pub const LABEL: Color32 = Color32::from_rgb(200, 200, 255); // L - light blue
+    pub const COLOR: Color32 = Color32::from_rgb(255, 200, 100); // C - orange/yellow
 
     // Object state colors
-    pub const ENABLED: Color32 = Color32::from_rgb(100, 255, 100);  // Green for enabled
-    pub const DISABLED: Color32 = Color32::GRAY;                     // Gray for disabled
+    pub const ENABLED: Color32 = Color32::from_rgb(100, 255, 100); // Green for enabled
+    pub const DISABLED: Color32 = Color32::GRAY; // Gray for disabled
 
     // Selection colors
-    pub const SELECTION: Color32 = Color32::from_rgb(255, 85, 255);      // Bright pink
+    pub const SELECTION: Color32 = Color32::from_rgb(255, 85, 255); // Bright pink
     pub const SELECTION_HIDDEN: Color32 = Color32::from_rgb(128, 43, 128); // Dimmed pink
 }
 
-/// Available molecular representations for show/hide menus
-const REPRESENTATIONS: &[(&str, RepMask)] = &[
-    ("lines", RepMask::LINES),
-    ("sticks", RepMask::STICKS),
-    ("spheres", RepMask::SPHERES),
-    ("cartoon", RepMask::CARTOON),
-    ("surface", RepMask::SURFACE),
-    ("mesh", RepMask::MESH),
-    ("dots", RepMask::DOTS),
-    ("ribbon", RepMask::RIBBON),
+/// Named colors for color menus, with display swatches
+const NAMED_COLORS: &[(&str, Color32)] = &[
+    ("red", Color32::RED),
+    ("green", Color32::GREEN),
+    ("blue", Color32::BLUE),
+    ("yellow", Color32::YELLOW),
+    ("cyan", Color32::from_rgb(0, 255, 255)),
+    ("magenta", Color32::from_rgb(255, 0, 255)),
+    ("orange", Color32::from_rgb(255, 165, 0)),
+    ("white", Color32::WHITE),
+    ("gray", Color32::GRAY),
 ];
+
+/// Representation groups for Show/Hide menus (separated by group)
+const REP_GROUPS: &[&[&str]] = &[
+    &["lines", "sticks"],
+    &["cartoon", "ribbon"],
+    &["surface", "mesh"],
+    &["spheres", "dots"],
+];
+
+/// Representations available for "by rep" color submenu
+const COLOR_REPS: &[(&str, &str)] = &[
+    ("cartoon", "cartoon_color"),
+    ("ribbon", "ribbon_color"),
+    ("sticks", "stick_color"),
+    ("lines", "line_color"),
+    ("surface", "surface_color"),
+    ("mesh", "mesh_color"),
+    ("spheres", "sphere_color"),
+    ("dots", "dot_color"),
+];
+
+// =============================================================================
+// Command formatting helpers
+// =============================================================================
+
+/// Format a command with an optional positional argument.
+/// `cmd_arg("zoom", "")` → `"zoom"`, `cmd_arg("zoom", "obj")` → `"zoom obj"`
+fn cmd_arg(cmd: &str, arg: &str) -> String {
+    if arg.is_empty() {
+        cmd.to_string()
+    } else {
+        format!("{} {}", cmd, arg)
+    }
+}
+
+/// Format a command with an optional comma-separated selection.
+/// `cmd_sel("show lines", "")` → `"show lines"`, `cmd_sel("show lines", "obj")` → `"show lines, obj"`
+fn cmd_sel(cmd: &str, sel: &str) -> String {
+    if sel.is_empty() {
+        cmd.to_string()
+    } else {
+        format!("{}, {}", cmd, sel)
+    }
+}
+
+/// CA atom selection, optionally scoped to an object.
+/// `ca_sel("")` → `"name CA"`, `ca_sel("obj")` → `"name CA and obj"`
+fn ca_sel(name: &str) -> String {
+    if name.is_empty() {
+        "name CA".to_string()
+    } else {
+        format!("name CA and {}", name)
+    }
+}
+
+/// Atom selection: the object name, or "all" if empty.
+fn atom_sel(name: &str) -> &str {
+    if name.is_empty() {
+        "all"
+    } else {
+        name
+    }
+}
 
 // =============================================================================
 // UI State
@@ -53,12 +116,14 @@ const REPRESENTATIONS: &[(&str, RepMask)] = &[
 pub enum ActiveMenu {
     /// No menu open
     None,
-    /// Actions menu for an object (zoom, center, enable, disable, delete)
+    /// Actions menu for an object (zoom, orient, center, origin)
     Actions { object: String },
     /// Show representations menu for an object
     Show { object: String },
     /// Hide representations menu for an object
     Hide { object: String },
+    /// Label menu for an object
+    Label { object: String },
     /// Color menu for an object
     Color { object: String },
     /// Actions menu for a selection (just delete)
@@ -71,24 +136,56 @@ impl Default for ActiveMenu {
     }
 }
 
+/// Submenu state for nested menus (Show > as, Color > by rep)
+#[derive(Clone, PartialEq, Debug)]
+pub enum SubMenuState {
+    None,
+    /// Show > as (show_as submenu)
+    ShowAs,
+    /// Color > by rep (list of representations)
+    ColorByRep,
+    /// Color > by rep > specific rep (color picker for that rep)
+    ColorByRepColors { rep: String, setting: String },
+}
+
+impl Default for SubMenuState {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// Object list UI state (egui-specific: menu popups and anchor positions)
-#[derive(Default)]
 pub struct ObjectListUiState {
     /// Which menu is currently active
     pub active_menu: ActiveMenu,
     /// Position to anchor the menu popup
     pub anchor_pos: Pos2,
+    /// Current submenu state
+    pub submenu: SubMenuState,
+    /// Position to anchor submenu
+    pub submenu_anchor: Pos2,
+    /// Position to anchor sub-submenu (3rd level)
+    pub sub_submenu_anchor: Pos2,
+    /// Rects of all rendered menu areas this frame (for click-outside detection)
+    menu_rects: Vec<Rect>,
+}
+
+impl Default for ObjectListUiState {
+    fn default() -> Self {
+        Self {
+            active_menu: ActiveMenu::None,
+            anchor_pos: Pos2::ZERO,
+            submenu: SubMenuState::None,
+            submenu_anchor: Pos2::ZERO,
+            sub_submenu_anchor: Pos2::ZERO,
+            menu_rects: Vec::new(),
+        }
+    }
 }
 
 // =============================================================================
 // View
 // =============================================================================
-
-/// Create a consistent action button with fixed size
-fn action_button(text: &str, color: Color32) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text.to_string()).color(color))
-        .min_size(BUTTON_MIN_SIZE)
-}
 
 /// Menu button that only updates state - NEVER renders popups directly
 fn menu_button(
@@ -99,8 +196,7 @@ fn menu_button(
     ui_state: &mut ObjectListUiState,
     target_menu: ActiveMenu,
 ) -> egui::Response {
-    let button = egui::Button::new(RichText::new(text).color(color))
-        .min_size(BUTTON_MIN_SIZE);
+    let button = egui::Button::new(RichText::new(text).color(color)).min_size(BUTTON_MIN_SIZE);
     let response = ui.add(button);
 
     let is_this_menu_active = ui_state.active_menu == target_menu;
@@ -111,6 +207,7 @@ fn menu_button(
         } else {
             ui_state.active_menu = target_menu;
             ui_state.anchor_pos = response.rect.right_bottom();
+            ui_state.submenu = SubMenuState::None;
         }
         ui.ctx().request_repaint();
     } else if is_this_menu_active {
@@ -122,6 +219,21 @@ fn menu_button(
     }
 
     response
+}
+
+/// Popup frame styling shared by all menu panels
+fn popup_frame(ui: &Ui) -> egui::Frame {
+    egui::Frame::popup(ui.style())
+        .fill(Color32::from_rgb(40, 40, 45))
+        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(80, 80, 85)))
+}
+
+/// A button with a ">" arrow indicating a submenu
+fn submenu_button(ui: &mut Ui, label: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(RichText::new(format!("{label}  >")))
+            .min_size(Vec2::new(100.0, 0.0)),
+    )
 }
 
 /// Object list panel
@@ -139,7 +251,7 @@ impl ObjectListPanel {
         let mut menu_button_clicked = false;
 
         ui.vertical(|ui| {
-            Self::render_all_row(ui, registry, bus);
+            Self::render_all_row(ui, ui_state, registry, bus, &mut menu_button_clicked);
 
             // Object rows
             for name in registry.names() {
@@ -147,7 +259,14 @@ impl ObjectListPanel {
                     .get(name)
                     .map(|o| o.is_enabled())
                     .unwrap_or(false);
-                Self::render_object_row(ui, ui_state, name, is_enabled, bus, &mut menu_button_clicked);
+                Self::render_object_row(
+                    ui,
+                    ui_state,
+                    name,
+                    is_enabled,
+                    bus,
+                    &mut menu_button_clicked,
+                );
             }
 
             // Selection rows
@@ -157,7 +276,14 @@ impl ObjectListPanel {
                 sel_entries.sort_by(|a, b| a.0.cmp(b.0));
 
                 for (sel_name, entry) in sel_entries {
-                    Self::render_selection_row(ui, ui_state, sel_name, entry, bus, &mut menu_button_clicked);
+                    Self::render_selection_row(
+                        ui,
+                        ui_state,
+                        sel_name,
+                        entry,
+                        bus,
+                        &mut menu_button_clicked,
+                    );
                 }
             }
         });
@@ -168,8 +294,10 @@ impl ObjectListPanel {
     /// Render the "all" row with aggregate actions for all objects
     fn render_all_row(
         ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
         registry: &ObjectRegistry,
         bus: &mut MessageBus,
+        menu_button_clicked: &mut bool,
     ) {
         let all_enabled = registry.names().all(|name| {
             registry.get(name).map(|o| o.is_enabled()).unwrap_or(false)
@@ -196,67 +324,25 @@ impl ObjectListPanel {
 
             if all_response.clicked() && has_objects {
                 if all_enabled {
-                    bus.send(AppMessage::DisableAllObjects);
+                    bus.execute_command("disable");
                 } else {
-                    bus.send(AppMessage::EnableAllObjects);
+                    bus.execute_command("enable");
                 }
             }
 
-            all_response.on_hover_text(if all_enabled { "Click to disable all" } else { "Click to enable all" });
-
-            // Right-align the buttons (simple action buttons, no menus)
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(action_button("C", colors::COLOR))
-                    .on_hover_text("Color all objects")
-                    .clicked()
-                {
-                    // Color picker would go here
-                }
-
-                if ui
-                    .add(action_button("L", colors::LABEL))
-                    .on_hover_text("Toggle labels")
-                    .clicked()
-                {
-                    // Toggle labels for all
-                }
-
-                if ui
-                    .add(action_button("H", colors::HIDE))
-                    .on_hover_text("Hide all representations")
-                    .clicked()
-                {
-                    for name in registry.names() {
-                        bus.send(AppMessage::HideAllRepresentations(name.to_string()));
-                    }
-                }
-
-                if ui
-                    .add(action_button("S", colors::SHOW))
-                    .on_hover_text("Show representations")
-                    .clicked()
-                {
-                    for name in registry.names() {
-                        bus.send(AppMessage::ShowRepresentation {
-                            object: name.to_string(),
-                            rep: RepMask::LINES,
-                        });
-                    }
-                }
-
-                if ui
-                    .add(action_button("A", colors::ACTION))
-                    .on_hover_text("Actions menu")
-                    .clicked()
-                {
-                    // Actions menu would go here
-                }
+            all_response.on_hover_text(if all_enabled {
+                "Click to disable all"
+            } else {
+                "Click to enable all"
             });
+
+            // "all" uses the same button bar with empty name = commands apply to everything
+            Self::render_button_bar(ui, ui_state, "", false, menu_button_clicked);
         });
     }
 
-    /// Render the button bar (A, S, H, L, C) for an object or selection
+    /// Render the button bar (A, S, H, L, C) for an object or selection.
+    /// Pass empty `target_name` for the "all" row (commands without object scope).
     fn render_button_bar(
         ui: &mut Ui,
         ui_state: &mut ObjectListUiState,
@@ -264,58 +350,95 @@ impl ObjectListPanel {
         is_selection: bool,
         menu_button_clicked: &mut bool,
     ) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // C - Color
-            let color_tooltip = if is_selection { "Color selection" } else { "Color" };
-            if menu_button(
-                ui, "C", colors::COLOR, color_tooltip,
-                ui_state,
-                ActiveMenu::Color { object: target_name.to_string() }
-            ).clicked() {
-                *menu_button_clicked = true;
-            }
-
-            // L - Labels
-            if ui
-                .add(action_button("L", colors::LABEL))
-                .on_hover_text("Labels")
+        ui.with_layout(
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                // C - Color
+                let color_tooltip = if is_selection {
+                    "Color selection"
+                } else {
+                    "Color"
+                };
+                if menu_button(
+                    ui,
+                    "C",
+                    colors::COLOR,
+                    color_tooltip,
+                    ui_state,
+                    ActiveMenu::Color {
+                        object: target_name.to_string(),
+                    },
+                )
                 .clicked()
-            {
-                // Toggle labels (TODO: implement)
-            }
+                {
+                    *menu_button_clicked = true;
+                }
 
-            // H - Hide
-            if menu_button(
-                ui, "H", colors::HIDE, "Hide representations",
-                ui_state,
-                ActiveMenu::Hide { object: target_name.to_string() }
-            ).clicked() {
-                *menu_button_clicked = true;
-            }
+                // L - Labels
+                if menu_button(
+                    ui,
+                    "L",
+                    colors::LABEL,
+                    "Labels",
+                    ui_state,
+                    ActiveMenu::Label {
+                        object: target_name.to_string(),
+                    },
+                )
+                .clicked()
+                {
+                    *menu_button_clicked = true;
+                }
 
-            // S - Show
-            if menu_button(
-                ui, "S", colors::SHOW, "Show representations",
-                ui_state,
-                ActiveMenu::Show { object: target_name.to_string() }
-            ).clicked() {
-                *menu_button_clicked = true;
-            }
+                // H - Hide
+                if menu_button(
+                    ui,
+                    "H",
+                    colors::HIDE,
+                    "Hide representations",
+                    ui_state,
+                    ActiveMenu::Hide {
+                        object: target_name.to_string(),
+                    },
+                )
+                .clicked()
+                {
+                    *menu_button_clicked = true;
+                }
 
-            // A - Actions
-            let action_menu = if is_selection {
-                ActiveMenu::SelectionActions { selection: target_name.to_string() }
-            } else {
-                ActiveMenu::Actions { object: target_name.to_string() }
-            };
-            if menu_button(
-                ui, "A", colors::ACTION, "Actions",
-                ui_state,
-                action_menu
-            ).clicked() {
-                *menu_button_clicked = true;
-            }
-        });
+                // S - Show
+                if menu_button(
+                    ui,
+                    "S",
+                    colors::SHOW,
+                    "Show representations",
+                    ui_state,
+                    ActiveMenu::Show {
+                        object: target_name.to_string(),
+                    },
+                )
+                .clicked()
+                {
+                    *menu_button_clicked = true;
+                }
+
+                // A - Actions
+                let action_menu = if is_selection {
+                    ActiveMenu::SelectionActions {
+                        selection: target_name.to_string(),
+                    }
+                } else {
+                    ActiveMenu::Actions {
+                        object: target_name.to_string(),
+                    }
+                };
+                if menu_button(ui, "A", colors::ACTION, "Actions", ui_state, action_menu)
+                    .clicked()
+                {
+                    *menu_button_clicked = true;
+                }
+            },
+        );
     }
 
     /// Render a single object row
@@ -345,10 +468,10 @@ impl ObjectListPanel {
                 );
 
                 if name_response.clicked() {
-                    bus.send(AppMessage::ToggleObject(name.to_string()));
+                    bus.execute_command(format!("toggle {}", name));
                 }
                 if name_response.secondary_clicked() {
-                    bus.send(AppMessage::ZoomTo(name.to_string()));
+                    bus.execute_command(format!("zoom {}", name));
                 }
 
                 Self::render_button_bar(ui, ui_state, name, false, menu_button_clicked);
@@ -393,7 +516,7 @@ impl ObjectListPanel {
                 ));
 
                 if clicked {
-                    bus.send(AppMessage::ToggleSelectionVisibility(name.to_string()));
+                    bus.execute_command(format!("toggle {}", name));
                 }
 
                 Self::render_button_bar(ui, ui_state, name, true, menu_button_clicked);
@@ -412,178 +535,437 @@ impl ObjectListPanel {
             return;
         }
 
-        let menu_clicked = Self::render_active_menu(ui, ui_state, bus);
+        // Clear rects from previous frame, will be populated by render_active_menu
+        ui_state.menu_rects.clear();
 
-        if !menu_button_clicked && !menu_clicked {
+        let item_clicked = Self::render_active_menu(ui, ui_state, bus);
+
+        if item_clicked {
+            ui_state.active_menu = ActiveMenu::None;
+            ui_state.submenu = SubMenuState::None;
+            return;
+        }
+
+        // Close on click outside all menu areas
+        if !menu_button_clicked {
             if ui.input(|i| i.pointer.any_click()) {
-                ui_state.active_menu = ActiveMenu::None;
+                let pointer_in_menu = ui
+                    .input(|i| i.pointer.interact_pos())
+                    .map_or(false, |pos| {
+                        ui_state.menu_rects.iter().any(|r| r.contains(pos))
+                    });
+                if !pointer_in_menu {
+                    ui_state.active_menu = ActiveMenu::None;
+                    ui_state.submenu = SubMenuState::None;
+                }
             }
         }
     }
 
-    /// Render the currently active menu - called ONCE at the end
-    /// Returns true if a menu item was clicked
-    fn render_active_menu(ui: &mut Ui, ui_state: &mut ObjectListUiState, bus: &mut MessageBus) -> bool {
+    /// Render the currently active menu - called ONCE at the end.
+    /// Returns true if a final action item was clicked.
+    fn render_active_menu(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        bus: &mut MessageBus,
+    ) -> bool {
         let mut item_clicked = false;
 
         ui.ctx().request_repaint();
 
-        egui::Area::new(Id::new("object_list_menu_panel"))
+        // -- Main menu panel --
+        let area_resp = egui::Area::new(Id::new("object_list_menu_panel"))
             .order(egui::Order::Tooltip)
             .fixed_pos(ui_state.anchor_pos)
             .pivot(Align2::RIGHT_TOP)
             .movable(false)
             .constrain(false)
             .show(ui.ctx(), |ui| {
-                let popup_frame = egui::Frame::popup(ui.style())
-                    .fill(Color32::from_rgb(40, 40, 45))
-                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(80, 80, 85)));
+                popup_frame(ui).show(ui, |ui| {
+                    ui.set_min_width(100.0);
 
-                popup_frame.show(ui, |ui| {
-                        ui.set_min_width(100.0);
-
-                        match &ui_state.active_menu.clone() {
-                            ActiveMenu::None => {}
-                            ActiveMenu::Actions { object } => {
-                                item_clicked = Self::render_actions_menu(ui, object, bus);
-                            }
-                            ActiveMenu::Show { object } => {
-                                item_clicked = Self::render_representation_menu(ui, object, bus, true);
-                            }
-                            ActiveMenu::Hide { object } => {
-                                item_clicked = Self::render_representation_menu(ui, object, bus, false);
-                            }
-                            ActiveMenu::Color { object } => {
-                                item_clicked = Self::render_color_menu(ui, object, bus);
-                            }
-                            ActiveMenu::SelectionActions { selection } => {
-                                item_clicked = Self::render_selection_actions_menu(ui, selection, bus);
-                            }
+                    match &ui_state.active_menu.clone() {
+                        ActiveMenu::None => {}
+                        ActiveMenu::Actions { object } => {
+                            item_clicked = Self::render_actions_menu(ui, object, bus);
                         }
-                    });
+                        ActiveMenu::Show { object } => {
+                            item_clicked =
+                                Self::render_show_menu(ui, ui_state, object, bus);
+                        }
+                        ActiveMenu::Hide { object } => {
+                            item_clicked = Self::render_hide_menu(ui, object, bus);
+                        }
+                        ActiveMenu::Label { object } => {
+                            item_clicked = Self::render_label_menu(ui, object, bus);
+                        }
+                        ActiveMenu::Color { object } => {
+                            item_clicked =
+                                Self::render_color_menu(ui, ui_state, object, bus);
+                        }
+                        ActiveMenu::SelectionActions { selection } => {
+                            item_clicked =
+                                Self::render_selection_actions_menu(ui, selection, bus);
+                        }
+                    }
+                });
             });
+        ui_state.menu_rects.push(area_resp.response.rect);
 
-        if item_clicked {
-            ui_state.active_menu = ActiveMenu::None;
+        // -- Submenus (rendered as separate Areas) --
+        if !item_clicked {
+            item_clicked = Self::render_submenus(ui, ui_state, bus);
         }
 
         item_clicked
     }
 
-    /// Render actions menu for selections
-    fn render_selection_actions_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
-        if ui.button("delete").clicked() {
-            bus.send(AppMessage::DeleteSelection(name.to_string()));
-            return true;
-        }
-        false
-    }
+    // =========================================================================
+    // Menu renderers
+    // =========================================================================
 
-    /// Render representation menu (show or hide)
-    fn render_representation_menu(
-        ui: &mut Ui,
-        name: &str,
-        bus: &mut MessageBus,
-        is_show: bool,
-    ) -> bool {
-        for (rep_name, rep_mask) in REPRESENTATIONS {
-            if ui.button(*rep_name).clicked() {
-                if is_show {
-                    bus.send(AppMessage::ShowRepresentation {
-                        object: name.to_string(),
-                        rep: *rep_mask,
-                    });
-                } else {
-                    bus.send(AppMessage::HideRepresentation {
-                        object: name.to_string(),
-                        rep: *rep_mask,
-                    });
-                }
-                return true;
-            }
-        }
-
-        ui.separator();
-        let all_label = if is_show { "all" } else { "everything" };
-        if ui.button(all_label).clicked() {
-            if is_show {
-                bus.send(AppMessage::ShowAllRepresentations(name.to_string()));
-            } else {
-                bus.send(AppMessage::HideAllRepresentations(name.to_string()));
-            }
-            return true;
-        }
-
-        false
-    }
-
-    /// Render actions menu
+    /// Actions menu: zoom, orient, center, origin
     fn render_actions_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
         if ui.button("zoom").clicked() {
-            bus.send(AppMessage::ZoomTo(name.to_string()));
+            bus.execute_command(cmd_arg("zoom", name));
+            return true;
+        }
+        if ui.button("orient").clicked() {
+            bus.execute_command(cmd_arg("orient", name));
             return true;
         }
         if ui.button("center").clicked() {
-            bus.send(AppMessage::CenterOn(name.to_string()));
+            bus.execute_command(cmd_arg("center", name));
             return true;
         }
-        ui.separator();
-        if ui.button("enable").clicked() {
-            bus.send(AppMessage::ToggleObject(name.to_string()));
-            return true;
-        }
-        if ui.button("disable").clicked() {
-            bus.send(AppMessage::ToggleObject(name.to_string()));
-            return true;
-        }
-        ui.separator();
-        if ui.button("delete").clicked() {
-            bus.send(AppMessage::DeleteObject(name.to_string()));
+        if ui.button("origin").clicked() {
+            bus.execute_command(cmd_arg("origin", name));
             return true;
         }
         false
     }
 
-    /// Render color menu
-    fn render_color_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
-        let colors = [
-            ("red", Color32::RED),
-            ("green", Color32::GREEN),
-            ("blue", Color32::BLUE),
-            ("yellow", Color32::YELLOW),
-            ("cyan", Color32::from_rgb(0, 255, 255)),
-            ("magenta", Color32::from_rgb(255, 0, 255)),
-            ("orange", Color32::from_rgb(255, 165, 0)),
-            ("white", Color32::WHITE),
-            ("gray", Color32::GRAY),
-        ];
+    /// Show menu: "as" submenu trigger, then grouped representations
+    fn render_show_menu(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        name: &str,
+        bus: &mut MessageBus,
+    ) -> bool {
+        // "as" submenu trigger
+        let as_resp = submenu_button(ui, "as");
+        if as_resp.clicked() {
+            if ui_state.submenu == SubMenuState::ShowAs {
+                ui_state.submenu = SubMenuState::None;
+            } else {
+                ui_state.submenu = SubMenuState::ShowAs;
+            }
+        }
+        if matches!(ui_state.submenu, SubMenuState::ShowAs) {
+            ui_state.submenu_anchor = as_resp.rect.left_center();
+        }
 
-        for (color_name, color) in colors {
+        ui.separator();
+
+        Self::render_rep_groups(ui, name, bus, "show")
+    }
+
+    /// Hide menu: "everything" first, then grouped representations
+    fn render_hide_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
+        if ui.button("everything").clicked() {
+            bus.execute_command(cmd_sel("hide everything", name));
+            return true;
+        }
+        ui.separator();
+
+        Self::render_rep_groups(ui, name, bus, "hide")
+    }
+
+    /// Label menu: hide, separator, label options
+    fn render_label_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
+        if ui.button("hide").clicked() {
+            bus.execute_command(cmd_sel("hide labels", name));
+            return true;
+        }
+        ui.separator();
+
+        let ca = ca_sel(name);
+        let sel = atom_sel(name);
+
+        if ui.button("residue (3)").clicked() {
+            bus.execute_command(format!("label {}, resn", ca));
+            return true;
+        }
+        if ui.button("residue (1)").clicked() {
+            bus.execute_command(format!("label {}, oneletter", ca));
+            return true;
+        }
+        if ui.button("position").clicked() {
+            bus.execute_command(format!("label {}, resi", ca));
+            return true;
+        }
+        ui.separator();
+
+        if ui.button("atom name").clicked() {
+            bus.execute_command(format!("label {}, name", sel));
+            return true;
+        }
+        if ui.button("element").clicked() {
+            bus.execute_command(format!("label {}, elem", sel));
+            return true;
+        }
+        ui.separator();
+
+        if ui.button("b-factor").clicked() {
+            bus.execute_command(format!("label {}, b", sel));
+            return true;
+        }
+        if ui.button("vdw radius").clicked() {
+            bus.execute_command(format!("label {}, vdw", sel));
+            return true;
+        }
+
+        false
+    }
+
+    /// Color menu: "by rep" submenu trigger, named colors, color schemes
+    fn render_color_menu(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        name: &str,
+        bus: &mut MessageBus,
+    ) -> bool {
+        // "by rep" submenu trigger
+        let by_rep_resp = submenu_button(ui, "by rep");
+        if by_rep_resp.clicked() {
+            if matches!(
+                ui_state.submenu,
+                SubMenuState::ColorByRep | SubMenuState::ColorByRepColors { .. }
+            ) {
+                ui_state.submenu = SubMenuState::None;
+            } else {
+                ui_state.submenu = SubMenuState::ColorByRep;
+            }
+        }
+        if matches!(
+            ui_state.submenu,
+            SubMenuState::ColorByRep | SubMenuState::ColorByRepColors { .. }
+        ) {
+            ui_state.submenu_anchor = by_rep_resp.rect.left_center();
+        }
+
+        ui.separator();
+
+        // Named colors
+        for &(color_name, color) in NAMED_COLORS {
             if ui
                 .add(egui::Button::new(RichText::new(color_name).color(color)))
                 .clicked()
             {
-                bus.send(AppMessage::SetColor {
-                    object: name.to_string(),
-                    color: color_name.to_string(),
-                });
+                bus.execute_command(cmd_sel(&format!("color {}", color_name), name));
                 return true;
             }
         }
 
         ui.separator();
 
-        let by_colors = ["by element", "by chain", "by ss", "by residue"];
-        for by_color in by_colors {
-            if ui.button(by_color).clicked() {
-                bus.send(AppMessage::SetColor {
-                    object: name.to_string(),
-                    color: by_color.replace(' ', "_"),
-                });
+        // Color schemes
+        let schemes = [
+            ("by element", "atomic"),
+            ("by chain", "chain"),
+            ("by ss", "ss"),
+            ("by b-factor", "b"),
+            ("by residue", "residue"),
+        ];
+        for (label, scheme) in schemes {
+            if ui.button(label).clicked() {
+                bus.execute_command(cmd_sel(&format!("color {}", scheme), name));
                 return true;
             }
         }
 
         false
+    }
+
+    /// Actions menu for selections
+    fn render_selection_actions_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
+        if ui.button("delete").clicked() {
+            bus.execute_command(format!("delete {}", name));
+            return true;
+        }
+        false
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    /// Render representation groups with separators between groups
+    fn render_rep_groups(
+        ui: &mut Ui,
+        name: &str,
+        bus: &mut MessageBus,
+        action: &str,
+    ) -> bool {
+        for (i, group) in REP_GROUPS.iter().enumerate() {
+            if i > 0 {
+                ui.separator();
+            }
+            for rep in *group {
+                if ui.button(*rep).clicked() {
+                    bus.execute_command(cmd_sel(&format!("{} {}", action, rep), name));
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // =========================================================================
+    // Submenus
+    // =========================================================================
+
+    /// Render active submenus. Returns true if a final action item was clicked.
+    fn render_submenus(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        bus: &mut MessageBus,
+    ) -> bool {
+        match ui_state.submenu.clone() {
+            SubMenuState::None => false,
+            SubMenuState::ShowAs => {
+                let object = match &ui_state.active_menu {
+                    ActiveMenu::Show { object } => object.clone(),
+                    _ => return false,
+                };
+                Self::render_submenu_panel(
+                    ui,
+                    ui_state,
+                    "submenu_show_as",
+                    ui_state.submenu_anchor,
+                    |ui| {
+                        for (i, group) in REP_GROUPS.iter().enumerate() {
+                            if i > 0 {
+                                ui.separator();
+                            }
+                            for rep in *group {
+                                if ui.button(*rep).clicked() {
+                                    bus.execute_command(cmd_sel(
+                                        &format!("show_as {}", rep),
+                                        &object,
+                                    ));
+                                    return true;
+                                }
+                            }
+                        }
+                        false
+                    },
+                )
+            }
+            SubMenuState::ColorByRep | SubMenuState::ColorByRepColors { .. } => {
+                let object = match &ui_state.active_menu {
+                    ActiveMenu::Color { object } => object.clone(),
+                    _ => return false,
+                };
+                let mut sub_sub_anchor = ui_state.sub_submenu_anchor;
+                let mut new_sub = ui_state.submenu.clone();
+
+                let clicked = Self::render_submenu_panel(
+                    ui,
+                    ui_state,
+                    "submenu_color_by_rep",
+                    ui_state.submenu_anchor,
+                    |ui| {
+                        for &(rep_name, setting_name) in COLOR_REPS {
+                            let resp = submenu_button(ui, rep_name);
+                            if resp.clicked() {
+                                let target = SubMenuState::ColorByRepColors {
+                                    rep: rep_name.to_string(),
+                                    setting: setting_name.to_string(),
+                                };
+                                if new_sub == target {
+                                    new_sub = SubMenuState::ColorByRep;
+                                } else {
+                                    new_sub = target;
+                                    sub_sub_anchor = resp.rect.left_center();
+                                }
+                            }
+                            // Keep updating anchor for the active rep
+                            if matches!(&new_sub, SubMenuState::ColorByRepColors { rep, .. } if rep == rep_name)
+                            {
+                                sub_sub_anchor = resp.rect.left_center();
+                            }
+                        }
+                        false
+                    },
+                );
+
+                // Update sub-submenu state
+                if new_sub != ui_state.submenu {
+                    ui_state.submenu = new_sub;
+                    ui_state.sub_submenu_anchor = sub_sub_anchor;
+                }
+
+                if clicked {
+                    return true;
+                }
+
+                // Render 3rd-level color picker if active
+                if let SubMenuState::ColorByRepColors { setting, .. } = &ui_state.submenu {
+                    let setting = setting.clone();
+                    Self::render_submenu_panel(
+                        ui,
+                        ui_state,
+                        "submenu_color_rep_colors",
+                        ui_state.sub_submenu_anchor,
+                        |ui| {
+                            for &(color_name, color) in NAMED_COLORS {
+                                if ui
+                                    .add(egui::Button::new(
+                                        RichText::new(color_name).color(color),
+                                    ))
+                                    .clicked()
+                                {
+                                    bus.execute_command(cmd_sel(
+                                        &format!("set {}, {}", setting, color_name),
+                                        &object,
+                                    ));
+                                    return true;
+                                }
+                            }
+                            false
+                        },
+                    )
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Render a submenu panel at the given anchor position.
+    /// Tracks the area rect for click-outside detection.
+    fn render_submenu_panel(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        id: &str,
+        anchor: Pos2,
+        content: impl FnOnce(&mut Ui) -> bool,
+    ) -> bool {
+        let mut clicked = false;
+        let area_resp = egui::Area::new(Id::new(id))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(anchor)
+            .pivot(Align2::RIGHT_CENTER)
+            .movable(false)
+            .constrain(false)
+            .show(ui.ctx(), |ui| {
+                popup_frame(ui).show(ui, |ui| {
+                    ui.set_min_width(100.0);
+                    clicked = content(ui);
+                });
+            });
+        ui_state.menu_rects.push(area_resp.response.rect);
+        clicked
     }
 }

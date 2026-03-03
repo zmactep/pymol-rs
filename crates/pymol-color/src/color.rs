@@ -134,7 +134,7 @@ pub enum ColorIndex {
 
 /// Primary color scheme names for autocompletion (one per variant).
 /// Keep in sync with [`ColorIndex::from_scheme_name`].
-pub const SCHEME_NAMES: &[&str] = &["atomic", "chain", "ss", "b"];
+pub const SCHEME_NAMES: &[&str] = &["atomic", "chain", "ss", "b", "residue"];
 
 impl ColorIndex {
     /// Parse a color scheme name alias into a `ColorIndex`.
@@ -146,6 +146,7 @@ impl ColorIndex {
             "chain" | "by_chain" | "chainbow" => Some(ColorIndex::ByChain),
             "ss" | "secondary_structure" | "by_ss" | "dssp" => Some(ColorIndex::BySS),
             "b" | "b_factor" | "bfactor" | "by_b" => Some(ColorIndex::ByBFactor),
+            "residue" | "by_residue" | "residue_type" => Some(ColorIndex::ByResidueType),
             _ => None,
         }
     }

@@ -9,14 +9,16 @@
 
 use std::collections::HashSet;
 
-use pymol_mol::RepMask;
-
 use crate::model::sequence::ResidueRef;
 
 /// Unified application message.
 ///
 /// Produced by UI components, IPC handlers, and async tasks.
 /// Consumed by the central dispatcher after each egui frame.
+///
+/// Domain operations (object management, representations, coloring, camera,
+/// selections, movie) are represented as `ExecuteCommand` with PyMOL command
+/// strings, keeping the message enum focused on GUI-level concerns.
 #[derive(Debug, Clone)]
 pub enum AppMessage {
     // =====================================================================
@@ -25,54 +27,6 @@ pub enum AppMessage {
     /// Execute a PyMOL command string (from command line, sequence viewer,
     /// viewport click, IPC, or any other source).
     ExecuteCommand { command: String, silent: bool },
-
-    // =====================================================================
-    // Object Management
-    // =====================================================================
-    /// Toggle an object's enabled/disabled state.
-    ToggleObject(String),
-    /// Enable all objects.
-    EnableAllObjects,
-    /// Disable all objects.
-    DisableAllObjects,
-    /// Delete an object by name.
-    DeleteObject(String),
-
-    // =====================================================================
-    // Representations
-    // =====================================================================
-    /// Show a representation on an object.
-    ShowRepresentation { object: String, rep: RepMask },
-    /// Hide a representation on an object.
-    HideRepresentation { object: String, rep: RepMask },
-    /// Show all representations on an object.
-    ShowAllRepresentations(String),
-    /// Hide all representations on an object.
-    HideAllRepresentations(String),
-
-    // =====================================================================
-    // Coloring
-    // =====================================================================
-    /// Set the color of an object by color name.
-    SetColor { object: String, color: String },
-
-    // =====================================================================
-    // Camera / Navigation
-    // =====================================================================
-    /// Zoom to an object.
-    ZoomTo(String),
-    /// Center on an object.
-    CenterOn(String),
-
-    // =====================================================================
-    // Selections
-    // =====================================================================
-    /// Delete a named selection.
-    DeleteSelection(String),
-    /// Toggle a selection's visibility indicator.
-    ToggleSelectionVisibility(String),
-    /// A selection was modified (triggers cross-component sync).
-    SelectionChanged { name: String },
 
     // =====================================================================
     // Output / Notifications
@@ -91,22 +45,6 @@ pub enum AppMessage {
     // =====================================================================
     /// Hover state changed in the sequence viewer.
     HoverResidue(Option<ResidueRef>),
-
-    // =====================================================================
-    // Movie / Animation
-    // =====================================================================
-    /// Play the movie.
-    MoviePlay,
-    /// Pause the movie.
-    MoviePause,
-    /// Stop the movie (reset to frame 0).
-    MovieStop,
-    /// Jump to a specific frame.
-    MovieGotoFrame(usize),
-    /// Set playback FPS.
-    MovieSetFps(f32),
-    /// Set loop mode (0=once, 1=loop, 2=swing).
-    MovieSetLoopMode(pymol_scene::LoopMode),
 
     // =====================================================================
     // System
@@ -205,6 +143,17 @@ impl MessageBus {
         self.send(AppMessage::ExecuteCommand {
             command: cmd.into(),
             silent: false,
+        });
+    }
+
+    /// Send an `ExecuteCommand` message with `silent: true` (no output echo).
+    ///
+    /// Use for high-frequency operations (e.g., frame slider dragging) where
+    /// command echo to the output log would be noisy.
+    pub fn execute_command_silent(&mut self, cmd: impl Into<String>) {
+        self.send(AppMessage::ExecuteCommand {
+            command: cmd.into(),
+            silent: true,
         });
     }
 

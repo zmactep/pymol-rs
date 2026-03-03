@@ -1,6 +1,6 @@
 //! Display commands: show, hide, enable, disable, color, bg_color, label
 
-use pymol_mol::{Atom, RepMask};
+use pymol_mol::{three_to_one, Atom, RepMask};
 use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
 
@@ -813,6 +813,12 @@ enum LabelExpression {
     Type,
     FormalCharge,
     PartialCharge,
+    /// Element symbol (e.g., "C", "N", "O")
+    Elem,
+    /// Van der Waals radius
+    Vdw,
+    /// One-letter amino acid code
+    Oneletter,
     StringLiteral(String),
 }
 
@@ -839,6 +845,9 @@ fn parse_label_expr(s: &str) -> Result<LabelExpression, CmdError> {
         "type" => Ok(LabelExpression::Type),
         "formal_charge" => Ok(LabelExpression::FormalCharge),
         "partial_charge" => Ok(LabelExpression::PartialCharge),
+        "elem" | "element" => Ok(LabelExpression::Elem),
+        "vdw" => Ok(LabelExpression::Vdw),
+        "oneletter" | "one_letter" => Ok(LabelExpression::Oneletter),
         // Anything else is a string literal (quotes are stripped by the command parser)
         _ => Ok(LabelExpression::StringLiteral(trimmed.to_string())),
     }
@@ -869,6 +878,11 @@ fn eval_label_expr(expr: &LabelExpression, atom: &Atom) -> String {
         }
         LabelExpression::FormalCharge => atom.formal_charge.to_string(),
         LabelExpression::PartialCharge => format!("{:.4}", atom.partial_charge),
+        LabelExpression::Elem => atom.element.symbol().to_string(),
+        LabelExpression::Vdw => format!("{:.2}", atom.effective_vdw()),
+        LabelExpression::Oneletter => three_to_one(&atom.residue.resn)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| atom.residue.resn.clone()),
         LabelExpression::StringLiteral(s) => s.clone(),
     }
 }
