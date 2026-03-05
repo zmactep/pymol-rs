@@ -86,6 +86,88 @@ jobs:
           path: pymol-rs-${{ matrix.name }}.*
           if-no-files-found: error
 
+  build-plugins:
+    name: Build plugins ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: windows-x86_64
+            lib_glob: '*_plugin.dll'
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: macos-arm64
+            lib_glob: 'lib*_plugin.dylib'
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: linux-x86_64
+            lib_glob: 'lib*_plugin.so'
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            name: linux-arm64
+            lib_glob: 'lib*_plugin.so'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb-randr0-dev \
+            libxcb-xfixes0-dev \
+            libasound2-dev \
+            libfontconfig1-dev
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build plugins
+        run: cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin --target ${{ matrix.target }}
+        env:
+          PYO3_PYTHON: python3
+
+      - name: Package plugins (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/${{ matrix.lib_glob }} staging/
+          cd staging
+          tar -czvf ../pymol-rs-plugins-${{ matrix.name }}.tar.gz *
+
+      - name: Package plugins (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir staging
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.lib_glob }}" staging/
+          cd staging
+          7z a ../pymol-rs-plugins-${{ matrix.name }}.zip *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pymol-rs-plugins-${{ matrix.name }}
+          path: pymol-rs-plugins-${{ matrix.name }}.*
+          if-no-files-found: error
+
   build-wheels:
     name: Build wheel ${{ matrix.os }} ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -130,7 +212,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-executables, build-wheels]
+    needs: [build-executables, build-plugins, build-wheels]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -147,7 +229,7 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          # Move executables
+          # Move all archives (executables + plugins)
           find artifacts -name 'pymol-rs-*.tar.gz' -exec mv {} release/ \;
           find artifacts -name 'pymol-rs-*.zip' -exec mv {} release/ \;
           # Move wheels
