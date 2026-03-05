@@ -4,7 +4,7 @@
 
 use egui::{Key, TextEdit, Ui, Color32, RichText, ScrollArea, Sense, Id};
 
-use crate::message::{AppMessage, MessageBus};
+use pymol_framework::message::{AppMessage, MessageBus};
 use crate::model::CommandLineModel;
 use super::completion::{generate_completions, CompletionContext};
 

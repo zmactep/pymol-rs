@@ -1,0 +1,16 @@
+[package]
+name = "pymol-plugin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Plugin SDK for PyMOL-RS — register commands, components, and message handlers"
+
+[dependencies]
+pymol-framework = { workspace = true }
+pymol-cmd = { workspace = true }
+pymol-scene = { workspace = true }
+pymol-mol = { workspace = true }
+pymol-color = { workspace = true }
+pymol-settings = { workspace = true }

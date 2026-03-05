@@ -25,6 +25,13 @@ python-dev:
 test:
 	cargo test
 
+plugins:
+	cargo build --release -p hello-plugin
+	mkdir -p ~/.pymol-rs/plugins
+	cp target/release/libhello_plugin.dylib ~/.pymol-rs/plugins/ 2>/dev/null || \
+	cp target/release/libhello_plugin.so ~/.pymol-rs/plugins/ 2>/dev/null || \
+	cp target/release/hello_plugin.dll ~/.pymol-rs/plugins/ 2>/dev/null || true
+
 clean:
 	cargo clean
 	rm -rf crates/pymol-python/target

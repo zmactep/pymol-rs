@@ -3,8 +3,8 @@
 //! Combines the output log and command line into a single panel.
 //! Output is displayed above, command input below — always shown together.
 
-use crate::component::{Component, SharedContext};
-use crate::message::{AppMessage, MessageBus};
+use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::message::{AppMessage, MessageBus};
 use crate::model::{CommandLineModel, OutputModel};
 use crate::ui::command::CommandLineUiState;
 use crate::ui::completion::CompletionContext;

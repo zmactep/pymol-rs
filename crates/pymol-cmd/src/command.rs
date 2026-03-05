@@ -272,6 +272,21 @@ impl CommandRegistry {
         self.commands.insert(name, cmd);
     }
 
+    /// Register a boxed command (for plugin system).
+    ///
+    /// Like [`register`](Self::register) but accepts a `Box<dyn Command>`.
+    pub fn register_boxed(&mut self, cmd: Box<dyn Command>) {
+        let name = cmd.name().to_string();
+        let aliases: Vec<String> = cmd.aliases().iter().map(|s| s.to_string()).collect();
+        let cmd: Arc<dyn Command> = cmd.into();
+
+        for alias in aliases {
+            self.aliases.insert(alias, name.clone());
+        }
+
+        self.commands.insert(name, cmd);
+    }
+
     /// Add an alias for an existing command
     pub fn add_alias(&mut self, alias: impl Into<String>, command: impl Into<String>) {
         self.aliases.insert(alias.into(), command.into());

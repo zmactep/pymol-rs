@@ -6,7 +6,7 @@ use crate::ipc::{
     IpcRequest, IpcResponse, IpcServer,
     OutputKind as IpcOutputKind,
 };
-use crate::message::AppMessage;
+use pymol_framework::message::AppMessage;
 
 use super::App;
 

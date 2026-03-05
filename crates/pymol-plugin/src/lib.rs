@@ -1,0 +1,50 @@
+//! PyMOL-RS Plugin SDK
+//!
+//! This crate provides everything a plugin author needs to extend PyMOL-RS
+//! with new commands, GUI components, and message handlers.
+//!
+//! # Quick Start
+//!
+//! ```rust,ignore
+//! use pymol_plugin::prelude::*;
+//!
+//! pymol_plugin! {
+//!     name: "my-plugin",
+//!     version: "0.1.0",
+//!     description: "My awesome plugin",
+//!     commands: [MyCommand],
+//! }
+//! ```
+//!
+//! # Architecture
+//!
+//! Plugins are compiled as `cdylib` shared libraries and loaded at runtime
+//! by the host application. The `pymol_plugin!` macro generates a C-compatible
+//! entry point that the host discovers via `libloading`.
+
+pub mod ffi;
+pub mod macros;
+pub mod registrar;
+
+/// Convenient re-exports for plugin authors.
+///
+/// A single `use pymol_plugin::prelude::*;` gives access to all types
+/// needed to implement commands, components, and message handlers.
+pub mod prelude {
+    // Framework types
+    pub use pymol_framework::component::{Component, SharedContext};
+    pub use pymol_framework::layout::{PanelConfig, Slot};
+    pub use pymol_framework::message::{AppMessage, MessageBus};
+    pub use pymol_framework::topics::{publish, subscribe};
+
+    // Command system
+    pub use pymol_cmd::{ArgHint, CmdError, CmdResult, Command, CommandContext, ParsedCommand, ViewerLike};
+
+    // Domain types
+    pub use pymol_mol::{Atom, Bond, CoordSet, ObjectMolecule};
+    pub use pymol_scene::{Camera, ObjectRegistry, SelectionManager};
+
+    // Plugin API
+    pub use crate::registrar::{MessageHandler, PluginMetadata, PluginRegistrar};
+    // pymol_plugin! macro is auto-exported via #[macro_export]
+}

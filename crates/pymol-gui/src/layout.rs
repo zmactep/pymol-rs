@@ -1,66 +1,62 @@
-//! Layout Engine
+//! Layout Rendering
 //!
-//! Configurable panel placement around the central 3D viewport.
-//! Panels are rendered in a fixed order (top -> bottom -> left -> right -> floating)
-//! so that egui's panel system correctly allocates space.
+//! Rendering functions for the configurable panel layout around the central 3D viewport.
+//! Data types and state methods live in [`pymol_framework::layout`].
 
-use serde::{Deserialize, Serialize};
+// Re-export all data types from pymol-framework
+pub use pymol_framework::layout::*;
 
-use crate::component::SharedContext;
-use crate::component_store::ComponentStore;
-use crate::message::MessageBus;
+use pymol_framework::component::SharedContext;
+use pymol_framework::component_store::ComponentStore;
+use pymol_framework::message::{AppMessage, MessageBus};
 
 // ---------------------------------------------------------------------------
-// Slot types
+// Default layout
 // ---------------------------------------------------------------------------
 
-/// Which side of the window a docked panel belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum SlotSide {
-    Top,
-    Bottom,
-    Left,
-    Right,
-}
-
-/// Where a panel is positioned relative to the 3D viewport.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Slot {
-    /// Fixed at top of window. Panels stack top-to-bottom in declaration order.
-    Top { height: f32 },
-    /// Fixed at bottom of window.
-    Bottom { height: f32 },
-    /// Fixed at left side.
-    Left { width: f32 },
-    /// Fixed at right side.
-    Right { width: f32 },
-    /// Floating window at an arbitrary position.
-    Floating { pos: [f32; 2], size: [f32; 2] },
-}
-
-impl Slot {
-    /// Which side this slot belongs to, or `None` for floating panels.
-    fn side(&self) -> Option<SlotSide> {
-        match self {
-            Slot::Top { .. } => Some(SlotSide::Top),
-            Slot::Bottom { .. } => Some(SlotSide::Bottom),
-            Slot::Left { .. } => Some(SlotSide::Left),
-            Slot::Right { .. } => Some(SlotSide::Right),
-            Slot::Floating { .. } => None,
-        }
-    }
-
-    /// Convert to an orientation for the panel shell renderer.
-    fn orientation(&self) -> Option<Orientation> {
-        match *self {
-            Slot::Top { height } => Some(Orientation::Horizontal { is_top: true, size: height }),
-            Slot::Bottom { height } => Some(Orientation::Horizontal { is_top: false, size: height }),
-            Slot::Left { width } => Some(Orientation::Vertical { is_left: true, size: width }),
-            Slot::Right { width } => Some(Orientation::Vertical { is_left: false, size: width }),
-            Slot::Floating { .. } => None,
-        }
+/// Default PyMOL-like layout: REPL on top, objects on right.
+pub fn pymol_classic() -> Layout {
+    Layout {
+        panels: vec![
+            PanelSlot {
+                component_id: "repl".into(),
+                slot: Slot::Top { height: 150.0 },
+                expanded: true,
+                resizable: true,
+                floatable: true,
+                docked_slot: None,
+            },
+            PanelSlot {
+                component_id: "movie".into(),
+                slot: Slot::Bottom { height: 40.0 },
+                expanded: false,
+                resizable: false,
+                floatable: true,
+                docked_slot: None,
+            },
+            PanelSlot {
+                component_id: "sequence".into(),
+                slot: Slot::Bottom { height: 80.0 },
+                expanded: false,
+                resizable: true,
+                floatable: true,
+                docked_slot: None,
+            },
+            PanelSlot {
+                component_id: "object_list".into(),
+                slot: Slot::Right { width: 200.0 },
+                expanded: true,
+                resizable: true,
+                floatable: true,
+                docked_slot: None,
+            },
+        ],
     }
 }
+
+// ---------------------------------------------------------------------------
+// Orientation (rendering-specific helper)
+// ---------------------------------------------------------------------------
 
 /// Axis + direction, abstracting over the four docked slot types.
 #[derive(Debug, Clone, Copy)]
@@ -71,251 +67,14 @@ enum Orientation {
     Vertical { is_left: bool, size: f32 },
 }
 
-// ---------------------------------------------------------------------------
-// Panel configuration
-// ---------------------------------------------------------------------------
-
-/// One panel placement in the layout.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PanelSlot {
-    /// Component ID — must match [`Component::id()`].
-    pub component_id: String,
-    /// Where the panel is placed.
-    pub slot: Slot,
-    /// Whether the panel is currently expanded (false = collapsed tab).
-    pub expanded: bool,
-    /// Whether the user can drag-resize the panel edge.
-    pub resizable: bool,
-    /// Whether the panel can be detached into a floating window.
-    pub floatable: bool,
-    /// Original docked slot, saved when the panel is floated so it can dock back.
-    #[serde(skip)]
-    pub docked_slot: Option<Slot>,
-}
-
-/// The full window layout configuration.
-///
-/// Panels are rendered in declaration order within each slot type.
-/// The order of slot types is: Top, Bottom, Left, Right, then Floating.
-/// After all panels are rendered, `CentralPanel` claims the remaining space
-/// as the 3D viewport.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Layout {
-    pub panels: Vec<PanelSlot>,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Self::pymol_classic()
-    }
-}
-
-impl Layout {
-    /// Empty layout with no panels.
-    pub fn empty() -> Self {
-        Self {
-            panels: Vec::new(),
-        }
-    }
-
-    /// Default PyMOL-like layout: REPL on top, objects on right.
-    pub fn pymol_classic() -> Self {
-        Self {
-            panels: vec![
-                PanelSlot {
-                    component_id: "repl".into(),
-                    slot: Slot::Top { height: 150.0 },
-                    expanded: true,
-                    resizable: true,
-                    floatable: true,
-                    docked_slot: None,
-                },
-                PanelSlot {
-                    component_id: "movie".into(),
-                    slot: Slot::Bottom { height: 40.0 },
-                    expanded: false,
-                    resizable: false,
-                    floatable: true,
-                    docked_slot: None,
-                },
-                PanelSlot {
-                    component_id: "sequence".into(),
-                    slot: Slot::Bottom { height: 80.0 },
-                    expanded: false,
-                    resizable: true,
-                    floatable: true,
-                    docked_slot: None,
-                },
-                PanelSlot {
-                    component_id: "object_list".into(),
-                    slot: Slot::Right { width: 200.0 },
-                    expanded: true,
-                    resizable: true,
-                    floatable: true,
-                    docked_slot: None,
-                },
-            ],
-        }
-    }
-
-    /// Toggle expanded/collapsed state of a panel by component ID.
-    ///
-    /// Group-aware: in a multi-panel group (same slot side), expanding
-    /// one panel collapses its siblings (tab switching). Collapsing the active
-    /// tab collapses the entire group.
-    pub fn toggle_expanded(&mut self, id: &str) {
-        let side = self
-            .panels
-            .iter()
-            .find(|p| p.component_id == id)
-            .and_then(|p| p.slot.side());
-
-        let is_currently_expanded = self
-            .panels
-            .iter()
-            .find(|p| p.component_id == id)
-            .map_or(false, |p| p.expanded);
-
-        if let Some(side) = side {
-            if is_currently_expanded {
-                // Collapse the active tab -> collapses the group
-                if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
-                    panel.expanded = false;
-                }
-            } else {
-                // Expand this tab -> collapse siblings in the same group
-                for panel in &mut self.panels {
-                    if panel.slot.side() == Some(side) {
-                        panel.expanded = panel.component_id == id;
-                    }
-                }
-            }
-        } else {
-            // Floating panel -- simple toggle
-            if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
-                panel.expanded = !panel.expanded;
-            }
-        }
-    }
-
-    /// Set expanded state of a panel by component ID.
-    pub fn set_expanded(&mut self, id: &str, expanded: bool) {
-        if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
-            panel.expanded = expanded;
-        }
-    }
-
-    /// Check if a panel is expanded.
-    pub fn is_expanded(&self, id: &str) -> bool {
-        self.panels
-            .iter()
-            .find(|p| p.component_id == id)
-            .map_or(false, |p| p.expanded)
-    }
-
-    /// Detach a docked panel into a floating window.
-    pub fn float_panel(&mut self, id: &str) {
-        if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
-            if matches!(panel.slot, Slot::Floating { .. }) {
-                return;
-            }
-            let original = std::mem::replace(
-                &mut panel.slot,
-                Slot::Floating {
-                    pos: [100.0, 100.0],
-                    size: [400.0, 300.0],
-                },
-            );
-            panel.docked_slot = Some(original);
-            panel.expanded = true;
-        }
-    }
-
-    /// Dock a floating panel back to its original slot.
-    pub fn dock_panel(&mut self, id: &str) {
-        if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
-            if let Some(original) = panel.docked_slot.take() {
-                panel.slot = original;
-            }
-        }
-    }
-
-    /// Make a panel the active tab in its group (expand it, collapse siblings).
-    pub fn activate_tab(&mut self, id: &str) {
-        let side = self
-            .panels
-            .iter()
-            .find(|p| p.component_id == id)
-            .and_then(|p| p.slot.side());
-        if let Some(side) = side {
-            for panel in &mut self.panels {
-                if panel.slot.side() == Some(side) {
-                    panel.expanded = panel.component_id == id;
-                }
-            }
-        }
-    }
-
-    /// Render all panels around the central viewport and return the viewport rect.
-    ///
-    /// Panels are rendered in a specific order to satisfy egui's layout rules:
-    /// Top, Bottom, Left, Right, then Floating. CentralPanel claims the rest.
-    ///
-    /// Panels sharing the same slot type are rendered as tabs within a single
-    /// egui panel. A solo panel renders with expand/collapse as before.
-    pub fn show(
-        &self,
-        egui_ctx: &egui::Context,
-        store: &mut ComponentStore,
-        shared: &SharedContext,
-        bus: &mut MessageBus,
-    ) -> egui::Rect {
-        // Collect panel descriptors so closures don't borrow self.
-        let descriptors: Vec<_> = self
-            .panels
-            .iter()
-            .map(|p| PanelDescriptor {
-                id: p.component_id.clone(),
-                slot: p.slot.clone(),
-                resizable: p.resizable,
-                expanded: p.expanded,
-                floatable: p.floatable,
-                is_floating: p.docked_slot.is_some(),
-            })
-            .collect();
-
-        // Group docked panels by side, preserving declaration order.
-        let mut groups: [Vec<&PanelDescriptor>; 4] = Default::default();
-        let mut floating: Vec<&PanelDescriptor> = Vec::new();
-
-        for desc in &descriptors {
-            match desc.slot.side() {
-                Some(SlotSide::Top) => groups[0].push(desc),
-                Some(SlotSide::Bottom) => groups[1].push(desc),
-                Some(SlotSide::Left) => groups[2].push(desc),
-                Some(SlotSide::Right) => groups[3].push(desc),
-                None => floating.push(desc),
-            }
-        }
-
-        // Render docked groups in egui's required order: Top, Bottom, Left, Right
-        for group in &groups {
-            render_group(egui_ctx, store, group, shared, bus);
-        }
-
-        // Floating panels
-        for desc in &floating {
-            render_floating_panel(egui_ctx, store, desc, shared, bus);
-        }
-
-        // CentralPanel claims remaining space = 3D viewport
-        let response = egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(egui_ctx, |ui| {
-                ui.allocate_response(ui.available_size(), egui::Sense::hover())
-            });
-
-        response.inner.rect
+/// Convert a slot to an orientation for the panel shell renderer.
+fn slot_orientation(slot: &Slot) -> Option<Orientation> {
+    match *slot {
+        Slot::Top { height } => Some(Orientation::Horizontal { is_top: true, size: height }),
+        Slot::Bottom { height } => Some(Orientation::Horizontal { is_top: false, size: height }),
+        Slot::Left { width } => Some(Orientation::Vertical { is_left: true, size: width }),
+        Slot::Right { width } => Some(Orientation::Vertical { is_left: false, size: width }),
+        Slot::Floating { .. } => None,
     }
 }
 
@@ -345,6 +104,72 @@ const FLOAT_ICON: &str = "\u{2197}"; // arrow upper-right
 
 /// Icon for the "dock back" button.
 const DOCK_ICON: &str = "\u{2199}"; // arrow lower-left
+
+// ---------------------------------------------------------------------------
+// Public render entry point
+// ---------------------------------------------------------------------------
+
+/// Render all panels around the central viewport and return the viewport rect.
+///
+/// Panels are rendered in a specific order to satisfy egui's layout rules:
+/// Top, Bottom, Left, Right, then Floating. CentralPanel claims the rest.
+///
+/// Panels sharing the same slot type are rendered as tabs within a single
+/// egui panel. A solo panel renders with expand/collapse as before.
+pub fn render_layout(
+    layout: &Layout,
+    egui_ctx: &egui::Context,
+    store: &mut ComponentStore,
+    shared: &SharedContext,
+    bus: &mut MessageBus,
+) -> egui::Rect {
+    // Collect panel descriptors so closures don't borrow layout.
+    let descriptors: Vec<_> = layout
+        .panels
+        .iter()
+        .map(|p| PanelDescriptor {
+            id: p.component_id.clone(),
+            slot: p.slot.clone(),
+            resizable: p.resizable,
+            expanded: p.expanded,
+            floatable: p.floatable,
+            is_floating: p.docked_slot.is_some(),
+        })
+        .collect();
+
+    // Group docked panels by side, preserving declaration order.
+    let mut groups: [Vec<&PanelDescriptor>; 4] = Default::default();
+    let mut floating: Vec<&PanelDescriptor> = Vec::new();
+
+    for desc in &descriptors {
+        match desc.slot.side() {
+            Some(SlotSide::Top) => groups[0].push(desc),
+            Some(SlotSide::Bottom) => groups[1].push(desc),
+            Some(SlotSide::Left) => groups[2].push(desc),
+            Some(SlotSide::Right) => groups[3].push(desc),
+            None => floating.push(desc),
+        }
+    }
+
+    // Render docked groups in egui's required order: Top, Bottom, Left, Right
+    for group in &groups {
+        render_group(egui_ctx, store, group, shared, bus);
+    }
+
+    // Floating panels
+    for desc in &floating {
+        render_floating_panel(egui_ctx, store, desc, shared, bus);
+    }
+
+    // CentralPanel claims remaining space = 3D viewport
+    let response = egui::CentralPanel::default()
+        .frame(egui::Frame::NONE)
+        .show(egui_ctx, |ui| {
+            ui.allocate_response(ui.available_size(), egui::Sense::hover())
+        });
+
+    response.inner.rect
+}
 
 // ---------------------------------------------------------------------------
 // Panel shell — the core abstraction that eliminates the 4-way duplication
@@ -434,7 +259,7 @@ fn render_single_panel(
     shared: &SharedContext,
     bus: &mut MessageBus,
 ) {
-    let orientation = match desc.slot.orientation() {
+    let orientation = match slot_orientation(&desc.slot) {
         Some(o) => o,
         None => return, // Floating handled separately
     };
@@ -471,7 +296,7 @@ fn render_tabbed_group(
     shared: &SharedContext,
     bus: &mut MessageBus,
 ) {
-    let orientation = match group[0].slot.orientation() {
+    let orientation = match slot_orientation(&group[0].slot) {
         Some(o) => o,
         None => return,
     };
@@ -495,7 +320,7 @@ fn render_tabbed_group(
     let resizable = active_desc.resizable;
 
     // Override orientation size from the active descriptor.
-    let orientation = match active_desc.slot.orientation() {
+    let orientation = match slot_orientation(&active_desc.slot) {
         Some(o) => o,
         None => orientation,
     };
@@ -565,7 +390,7 @@ fn render_floating_panel(
                                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .clicked()
                                     {
-                                        bus.send(crate::message::AppMessage::DockPanel(
+                                        bus.send(AppMessage::DockPanel(
                                             component.id().to_string(),
                                         ));
                                     }
@@ -602,9 +427,9 @@ fn show_tab_bar(
 
             if ui.selectable_label(is_active, &title).clicked() {
                 if is_active {
-                    bus.send(crate::message::AppMessage::TogglePanel(id.clone()));
+                    bus.send(AppMessage::TogglePanel(id.clone()));
                 } else {
-                    bus.send(crate::message::AppMessage::ActivateTab(id.clone()));
+                    bus.send(AppMessage::ActivateTab(id.clone()));
                 }
             }
         }
@@ -617,7 +442,7 @@ fn show_tab_bar(
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    bus.send(crate::message::AppMessage::FloatPanel(
+                    bus.send(AppMessage::FloatPanel(
                         active_id.to_string(),
                     ));
                 }
@@ -641,7 +466,7 @@ fn show_collapsed_tab_bar(
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                bus.send(crate::message::AppMessage::ActivateTab(id.clone()));
+                bus.send(AppMessage::ActivateTab(id.clone()));
             }
         }
     });
@@ -668,7 +493,7 @@ fn show_panel_header(
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         {
-            bus.send(crate::message::AppMessage::TogglePanel(
+            bus.send(AppMessage::TogglePanel(
                 component_id.to_string(),
             ));
         }
@@ -681,7 +506,7 @@ fn show_panel_header(
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    bus.send(crate::message::AppMessage::FloatPanel(
+                    bus.send(AppMessage::FloatPanel(
                         component_id.to_string(),
                     ));
                 }
@@ -710,7 +535,7 @@ fn show_collapsed_tab(
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    bus.send(crate::message::AppMessage::TogglePanel(
+                    bus.send(AppMessage::TogglePanel(
                         component_id.to_string(),
                     ));
                 }
@@ -721,7 +546,7 @@ fn show_collapsed_tab(
             let response = ui.allocate_rect(rect, egui::Sense::click());
 
             if response.clicked() {
-                bus.send(crate::message::AppMessage::TogglePanel(
+                bus.send(AppMessage::TogglePanel(
                     component_id.to_string(),
                 ));
             }

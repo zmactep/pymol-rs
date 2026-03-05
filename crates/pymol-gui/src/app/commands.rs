@@ -7,7 +7,7 @@ use pymol_cmd::{CmdError, MessageKind, parse_command};
 use pymol_scene::SessionAdapter;
 
 use crate::ipc::{IpcCallbackTask, IpcResponse};
-use crate::message::AppMessage;
+use pymol_framework::message::AppMessage;
 
 use super::App;
 

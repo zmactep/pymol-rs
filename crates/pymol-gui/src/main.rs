@@ -32,6 +32,10 @@ struct Args {
     #[arg(long)]
     headless: bool,
 
+    /// Directory to load plugins from
+    #[arg(long, value_name = "DIR")]
+    plugin_dir: Option<PathBuf>,
+
     /// Files to load at startup
     #[arg(value_name = "FILE")]
     files: Vec<PathBuf>,
@@ -69,6 +73,19 @@ fn main() {
     if let Some(ref state_path) = args.state {
         log::info!("Loading initial state from: {:?}", state_path);
         // TODO: Implement state loading
+    }
+
+    // Load plugins
+    {
+        let plugin_dir = args.plugin_dir.unwrap_or_else(|| {
+            let mut dir = dirs::home_dir().unwrap_or_default();
+            dir.push(".pymol-rs");
+            dir.push("plugins");
+            dir
+        });
+        if plugin_dir.is_dir() {
+            app.load_plugins(&plugin_dir);
+        }
     }
 
     // Queue files to load

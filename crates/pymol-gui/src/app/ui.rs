@@ -6,10 +6,11 @@
 use pymol_scene::Object;
 use pymol_select::SelectionResult;
 
-use crate::component::SharedContext;
-use crate::message::AppMessage;
+use pymol_framework::component::SharedContext;
+use pymol_framework::message::AppMessage;
 use crate::model::ResidueRef;
 use crate::ui::{DragDropOverlay, NotificationOverlay};
+use crate::layout::render_layout;
 
 use super::App;
 
@@ -80,7 +81,7 @@ impl App {
 
             self.view.egui.ctx.run(raw_input, |ctx| {
                 // Layout renders all panels + returns viewport rect
-                viewport_rect_logical = layout.show(ctx, components, &shared, bus);
+                viewport_rect_logical = render_layout(layout, ctx, components, &shared, bus);
 
                 // Render ray overlay in viewport if present
                 if let Some((texture_id, img_width, img_height)) = ray_overlay_info {
@@ -126,6 +127,15 @@ impl App {
 
         if has_messages {
             self.sync_selection_to_sequence();
+        }
+
+        // Sync sequence hover state to viewport (replaces HoverResidue message)
+        if let Some(seq) = self.components.get::<crate::components::SequenceComponent>() {
+            let new_hover = seq.ui_state.current_hover.clone();
+            if new_hover != self.viewport.sequence_hover {
+                self.viewport.sequence_hover = new_hover;
+                self.scene_dirty = true;
+            }
         }
 
         let egui_needs_repaint = full_output
@@ -256,6 +266,9 @@ impl App {
             for msg in &messages {
                 self.components.broadcast(msg);
             }
+            for msg in &messages {
+                self.plugin_manager.broadcast(msg, &mut self.bus);
+            }
         }
     }
 
@@ -277,16 +290,10 @@ impl App {
             | AppMessage::DockPanel(_)
             | AppMessage::ActivateTab(_) => self.dispatch_layout(msg),
 
-            // Viewport
-            AppMessage::HoverResidue(info) => {
-                self.viewport.sequence_hover = info.clone();
-                self.scene_dirty = true;
-            }
-
             // Handled via broadcast to components (no app-level mutation)
             AppMessage::PrintInfo(_) | AppMessage::PrintWarning(_)
             | AppMessage::PrintError(_) | AppMessage::PrintCommand(_)
-            | AppMessage::UpdateHighlights(_) | AppMessage::FocusPanel(_) => {}
+            | AppMessage::FocusPanel(_) => {}
 
             // Lifecycle
             AppMessage::RequestRedraw => self.scene_dirty = true,

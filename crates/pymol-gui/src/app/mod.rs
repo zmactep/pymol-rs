@@ -2,7 +2,7 @@
 //!
 //! The App struct is the main entry point that combines the Viewer, CommandExecutor,
 //! and egui UI into a single application. Components communicate through a unified
-//! [`MessageBus`](crate::message::MessageBus).
+//! [`MessageBus`](pymol_framework::message::MessageBus).
 
 mod commands;
 mod event_loop;
@@ -20,12 +20,14 @@ use pymol_scene::{KeyBinding, KeyBindings, MoleculeObject, Session};
 // Re-export SelectionEntry for use in UI
 pub use pymol_scene::SelectionEntry;
 
+use pymol_framework::component_store::ComponentStore;
+use pymol_framework::message::MessageBus;
+
 use crate::async_tasks::{TaskContext, TaskRunner};
-use crate::component_store::ComponentStore;
 use crate::ipc::{ExternalCommandRegistry, IpcServer};
-use crate::layout::Layout;
-use crate::message::MessageBus;
+use crate::layout::{Layout, pymol_classic};
 use crate::model::ViewportModel;
+use crate::plugin_manager::PluginManager;
 use crate::view::AppView;
 
 /// Type alias for key action callbacks
@@ -94,6 +96,9 @@ pub struct App {
 
     // IPC
     pub(crate) ipc: IpcContext,
+
+    // Plugin system
+    pub(crate) plugin_manager: PluginManager,
 
     // Init / mode
     headless: bool,
@@ -166,7 +171,7 @@ impl App {
                 }
                 store
             },
-            layout: Layout::default(),
+            layout: pymol_classic(),
             bus: MessageBus::new(),
             viewport: ViewportModel::new(),
             frame: FrameState::new(),
@@ -175,6 +180,7 @@ impl App {
             drag_hover_path: None,
             task_runner: TaskRunner::new(),
             ipc: IpcContext::new(),
+            plugin_manager: PluginManager::new(),
             headless,
             pending_load_file: None,
         };
@@ -248,5 +254,15 @@ impl App {
     pub(crate) fn mark_dirty(&mut self) {
         self.scene_dirty = true;
         self.view.request_redraw();
+    }
+
+    /// Load plugins from a directory.
+    pub fn load_plugins(&mut self, dir: &std::path::Path) {
+        self.plugin_manager.load_dir(
+            dir,
+            self.executor.registry_mut(),
+            &mut self.components,
+            &mut self.layout,
+        );
     }
 }

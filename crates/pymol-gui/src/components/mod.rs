@@ -13,7 +13,7 @@ pub use object_list::ObjectListComponent;
 pub use repl::ReplComponent;
 pub use sequence::SequenceComponent;
 
-use crate::component::Component;
+use pymol_framework::component::Component;
 
 /// Create the default set of UI components.
 ///

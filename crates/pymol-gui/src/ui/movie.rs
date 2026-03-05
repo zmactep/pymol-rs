@@ -5,7 +5,7 @@
 
 use pymol_scene::Movie;
 
-use crate::message::MessageBus;
+use pymol_framework::message::MessageBus;
 
 /// Movie panel with playback controls
 pub struct MoviePanel;

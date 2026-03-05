@@ -10,9 +10,12 @@ members = [
     "crates/pymol-raytracer",
     "crates/pymol-scene",
     "crates/pymol-cmd",
+    "crates/pymol-framework",
+    "crates/pymol-plugin",
     "crates/pymol-gui",
     "crates/pymol-algos",
     "crates/pymol-session",
+    "plugins/hello",
 ]
 # pymol-python requires maturin to build (use: cd crates/pymol-python && maturin build)
 exclude = ["crates/pymol-python"]
@@ -38,6 +41,8 @@ pymol-cmd = { path = "crates/pymol-cmd" }
 pymol-gui = { path = "crates/pymol-gui" }
 pymol-algos = { path = "crates/pymol-algos" }
 pymol-session = { path = "crates/pymol-session" }
+pymol-framework = { path = "crates/pymol-framework" }
+pymol-plugin = { path = "crates/pymol-plugin" }
 
 # External dependencies
 bitflags = { version = "2", features = ["serde"] }
@@ -61,6 +66,7 @@ rustyline = "17"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pollster = "0.4"
 shellexpand = "3"
+libloading = "0.8"
 serde = { version = "1", features = ["derive", "rc"] }
 rmp-serde = "1"
 

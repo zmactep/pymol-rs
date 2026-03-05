@@ -1224,6 +1224,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hello-plugin"
+version = "0.1.0"
+dependencies = [
+ "pymol-plugin",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2440,6 +2447,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pymol-framework"
+version = "0.1.1"
+dependencies = [
+ "egui",
+ "log",
+ "pymol-cmd",
+ "pymol-color",
+ "pymol-scene",
+ "rmp-serde",
+ "serde",
+]
+
+[[package]]
 name = "pymol-gui"
 version = "0.1.1"
 dependencies = [
@@ -2450,13 +2470,16 @@ dependencies = [
  "egui-winit",
  "env_logger",
  "image",
+ "libloading",
  "lin_alg",
  "log",
  "pollster",
  "pymol-cmd",
  "pymol-color",
+ "pymol-framework",
  "pymol-io",
  "pymol-mol",
+ "pymol-plugin",
  "pymol-raytracer",
  "pymol-render",
  "pymol-scene",
@@ -2500,6 +2523,18 @@ dependencies = [
  "serde",
  "smallvec",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "pymol-plugin"
+version = "0.1.1"
+dependencies = [
+ "pymol-cmd",
+ "pymol-color",
+ "pymol-framework",
+ "pymol-mol",
+ "pymol-scene",
+ "pymol-settings",
 ]
 
 [[package]]

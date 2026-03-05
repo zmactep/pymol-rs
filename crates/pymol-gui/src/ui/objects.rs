@@ -6,7 +6,7 @@
 use egui::{Align2, Color32, Id, Pos2, Rect, RichText, Ui, Vec2};
 use pymol_scene::{ObjectRegistry, SelectionEntry, SelectionManager};
 
-use crate::message::MessageBus;
+use pymol_framework::message::MessageBus;
 
 /// Minimum size for action buttons (A, S, H, L, C) to ensure consistent sizing
 const BUTTON_MIN_SIZE: Vec2 = Vec2::splat(16.0);

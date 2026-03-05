@@ -1,0 +1,17 @@
+[package]
+name = "pymol-framework"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared application infrastructure for PyMOL-RS (messaging, components, layout)"
+
+[dependencies]
+pymol-cmd = { workspace = true }
+pymol-scene = { workspace = true }
+pymol-color = { workspace = true }
+egui = { workspace = true }
+serde = { workspace = true }
+rmp-serde = { workspace = true }
+log = { workspace = true }

@@ -11,7 +11,7 @@ use pymol_color::NamedColors;
 use pymol_scene::ObjectRegistry;
 use pymol_select::build_sele_command;
 
-use crate::message::{AppMessage, MessageBus};
+use pymol_framework::message::MessageBus;
 use crate::model::sequence::{
     ResidueRef, ResidueKind, SeqChain, SeqObject, SequenceModel,
     chain_highlighted_sequence, chain_to_sequence, collect_all_sequences,
@@ -226,9 +226,8 @@ impl SequencePanel {
         });
             });
 
-        // Emit hover action only when the hovered residue changes
+        // Track hover state changes (synced to viewport after rendering)
         if hover_out != ui_state.current_hover {
-            bus.send(AppMessage::HoverResidue(hover_out.clone()));
             ui_state.current_hover = hover_out;
         }
     }

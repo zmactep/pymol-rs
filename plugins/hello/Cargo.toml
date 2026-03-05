@@ -1,0 +1,11 @@
+[package]
+name = "hello-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Example PyMOL-RS plugin: registers a 'hello' command"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pymol-plugin = { path = "../../crates/pymol-plugin" }

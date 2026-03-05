@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
+pymol-framework = { workspace = true }
+pymol-plugin = { workspace = true }
 pymol-scene = { workspace = true }
 pymol-cmd = { workspace = true }
 pymol-mol = { workspace = true }
@@ -22,6 +24,9 @@ pymol-settings = { workspace = true }
 pymol-color = { workspace = true }
 pymol-render = { workspace = true }
 pymol-raytracer = { workspace = true }
+
+# Plugin loading
+libloading = { workspace = true }
 
 # Image handling
 image = { workspace = true }

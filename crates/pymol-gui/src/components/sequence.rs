@@ -1,10 +1,10 @@
 //! Sequence Viewer Component
 //!
 //! Bundles [`SequenceModel`] + [`SequenceUiState`] + view into a single
-//! self-contained component. Reacts to `UpdateHighlights` messages.
+//! self-contained component.
 
-use crate::component::{Component, SharedContext};
-use crate::message::{AppMessage, MessageBus};
+use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::message::MessageBus;
 use crate::model::SequenceModel;
 use crate::ui::sequence::SequenceUiState;
 use crate::ui::SequencePanel;
@@ -50,11 +50,5 @@ impl Component for SequenceComponent {
             has_sele,
             bus,
         );
-    }
-
-    fn on_message(&mut self, msg: &AppMessage) {
-        if let AppMessage::UpdateHighlights(highlights) = msg {
-            self.model.update_highlights(highlights.clone());
-        }
     }
 }

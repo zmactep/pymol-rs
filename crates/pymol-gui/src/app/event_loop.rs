@@ -13,7 +13,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
 use super::App;
-use crate::message::AppMessage;
+use pymol_framework::message::AppMessage;
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {

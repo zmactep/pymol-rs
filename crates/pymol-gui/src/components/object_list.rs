@@ -3,8 +3,8 @@
 //! Bundles [`ObjectListUiState`] + view into a single self-contained component.
 //! This component has no domain model — it reads objects from [`SharedContext`].
 
-use crate::component::{Component, SharedContext};
-use crate::message::MessageBus;
+use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::message::MessageBus;
 use crate::ui::objects::ObjectListUiState;
 use crate::ui::ObjectListPanel;
 

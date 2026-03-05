@@ -1,20 +1,9 @@
 //! Unified message bus for inter-component communication
 //!
-//! All GUI components (command system, object list, viewport, sequence viewer,
-//! movie player, IPC, plugins) communicate through a single [`AppMessage`] type
-//! and a per-frame [`MessageBus`] queue.
-//!
-//! The centralized dispatch in [`App::dispatch`] uses exhaustive matching,
-//! so the compiler ensures every message variant is handled.
-
-use std::collections::HashSet;
-
-use crate::model::sequence::ResidueRef;
+//! All GUI components, plugins, and async tasks communicate through a single
+//! [`AppMessage`] type and a per-frame [`MessageBus`] queue.
 
 /// Unified application message.
-///
-/// Produced by UI components, IPC handlers, and async tasks.
-/// Consumed by the central dispatcher after each egui frame.
 ///
 /// Domain operations (object management, representations, coloring, camera,
 /// selections, movie) are represented as `ExecuteCommand` with PyMOL command
@@ -41,12 +30,6 @@ pub enum AppMessage {
     PrintCommand(String),
 
     // =====================================================================
-    // Viewport Interaction
-    // =====================================================================
-    /// Hover state changed in the sequence viewer.
-    HoverResidue(Option<ResidueRef>),
-
-    // =====================================================================
     // System
     // =====================================================================
     /// Request a window redraw.
@@ -57,10 +40,8 @@ pub enum AppMessage {
     FocusPanel(String),
 
     // =====================================================================
-    // Component System
+    // Layout / Component System
     // =====================================================================
-    /// Update sequence highlights (from selection sync).
-    UpdateHighlights(HashSet<ResidueRef>),
     /// Toggle a panel's expanded/collapsed state by component ID.
     TogglePanel(String),
     /// Detach a docked panel into a floating window.
@@ -73,7 +54,8 @@ pub enum AppMessage {
     // =====================================================================
     // Extensibility (Plugins)
     // =====================================================================
-    /// Custom event for plugins.
+    /// Custom event for plugins. `topic` identifies the message type,
+    /// `payload` is MessagePack-serialized data (use [`topics`](crate::topics) helpers).
     Custom { topic: String, payload: Vec<u8> },
 }
 
@@ -85,7 +67,7 @@ pub enum AppMessage {
 ///
 /// # Lifecycle per frame
 ///
-/// 1. `begin_frame()` — moves outbox → inbox
+/// 1. `begin_frame()` — moves outbox -> inbox
 /// 2. Components read inbox, write to outbox via `send()`
 /// 3. `drain_outbox()` — app processes new messages
 pub struct MessageBus {
@@ -102,7 +84,7 @@ impl MessageBus {
         }
     }
 
-    /// Start a new frame: moves outbox → inbox for component reading.
+    /// Start a new frame: moves outbox -> inbox for component reading.
     pub fn begin_frame(&mut self) {
         self.inbox.clear();
         std::mem::swap(&mut self.inbox, &mut self.outbox);
@@ -215,7 +197,7 @@ mod tests {
         bus.send(AppMessage::PrintInfo("hello".into()));
         bus.send(AppMessage::RequestRedraw);
 
-        // Begin next frame: outbox → inbox
+        // Begin next frame: outbox -> inbox
         bus.begin_frame();
         assert_eq!(bus.inbox().len(), 2);
         assert!(!bus.has_pending());
