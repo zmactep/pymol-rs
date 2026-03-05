@@ -36,6 +36,10 @@ pub enum AppMessage {
     RequestRedraw,
     /// Request application quit.
     Quit,
+    /// Show the application window (make visible).
+    ShowWindow,
+    /// Hide the application window (make invisible).
+    HideWindow,
     /// Focus a panel by id.
     FocusPanel(String),
 

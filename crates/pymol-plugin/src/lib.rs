@@ -26,6 +26,10 @@ pub mod ffi;
 pub mod macros;
 pub mod registrar;
 
+// Re-export log so the pymol_plugin! macro can reference it without
+// plugins needing an explicit `log` dependency.
+pub use log;
+
 /// Convenient re-exports for plugin authors.
 ///
 /// A single `use pymol_plugin::prelude::*;` gives access to all types
@@ -43,8 +47,12 @@ pub mod prelude {
     // Domain types
     pub use pymol_mol::{Atom, Bond, CoordSet, ObjectMolecule};
     pub use pymol_scene::{Camera, ObjectRegistry, SelectionManager};
+    pub use pymol_select::select;
 
     // Plugin API
-    pub use crate::registrar::{MessageHandler, PluginMetadata, PluginRegistrar};
+    pub use crate::registrar::{
+        CommandResult, DynamicCommandInvocation, MessageHandler,
+        PluginMetadata, PluginRegistrar, PollContext,
+    };
     // pymol_plugin! macro is auto-exported via #[macro_export]
 }

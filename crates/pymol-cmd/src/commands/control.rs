@@ -284,51 +284,26 @@ EXAMPLES
 
         if let Some(cmd_name) = command {
             // Show help for specific command
-            // Look up in registry, collecting result to release borrow before printing
-            enum HelpResult {
-                Builtin(std::sync::Arc<dyn crate::command::Command>),
-                External(Option<String>),
-                Unknown,
-                NoRegistry,
-            }
-            let result = if let Some(registry) = ctx.registry() {
-                if let Some(cmd) = registry.get(cmd_name) {
-                    HelpResult::Builtin(cmd)
-                } else if let Some(ext_help) = registry.get_external_help(cmd_name) {
-                    HelpResult::External(ext_help.map(|s| s.to_string()))
-                } else {
-                    HelpResult::Unknown
-                }
-            } else {
-                HelpResult::NoRegistry
-            };
-            match result {
-                HelpResult::Builtin(cmd) => ctx.print(cmd.help()),
-                HelpResult::External(Some(text)) => ctx.print(&text),
-                HelpResult::External(None) => ctx.print(&format!(" '{}' - external command (no help available)", cmd_name)),
-                HelpResult::Unknown => ctx.print(&format!(" Unknown command: '{}'", cmd_name)),
-                HelpResult::NoRegistry => ctx.print(&format!(" Help for '{}' - registry not available", cmd_name)),
+            let cmd = ctx.registry().and_then(|r| r.get(cmd_name));
+            match cmd {
+                Some(cmd) => ctx.print(cmd.help()),
+                None => ctx.print(&format!(" Unknown command: '{}'", cmd_name)),
             }
         } else {
             // List available commands from registry
-            let lines: Option<Vec<String>> = ctx.registry().map(|registry| {
-                let mut names: Vec<&str> = registry.names()
-                    .chain(registry.external_names())
-                    .collect();
+            let lines: Vec<String> = ctx.registry().map(|registry| {
+                let mut names: Vec<&str> = registry.names().collect();
                 names.sort();
                 names.chunks(5)
                     .map(|chunk| format!("   {}", chunk.join(", ")))
                     .collect()
-            });
-            if let Some(lines) = lines {
+            }).unwrap_or_default();
+            if !lines.is_empty() {
                 ctx.print(" Available commands:");
                 for line in &lines {
                     ctx.print(line);
                 }
-            } else {
-                ctx.print(" Command registry not available");
             }
-
             ctx.print("");
             ctx.print(" Type 'help <command>' for detailed help");
         }

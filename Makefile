@@ -1,5 +1,5 @@
 .PHONY: all build release debug python python-release python-dev clean test help \
-       app icon sign notarize dmg
+       plugins app icon sign notarize dmg
 
 # Default target
 all: release python-release
@@ -26,11 +26,11 @@ test:
 	cargo test
 
 plugins:
-	cargo build --release -p hello-plugin
+	cargo build --release -p hello-plugin -p ipc-plugin
 	mkdir -p ~/.pymol-rs/plugins
-	cp target/release/libhello_plugin.dylib ~/.pymol-rs/plugins/ 2>/dev/null || \
-	cp target/release/libhello_plugin.so ~/.pymol-rs/plugins/ 2>/dev/null || \
-	cp target/release/hello_plugin.dll ~/.pymol-rs/plugins/ 2>/dev/null || true
+	cp target/release/lib*_plugin.dylib ~/.pymol-rs/plugins/ 2>/dev/null || \
+	cp target/release/lib*_plugin.so ~/.pymol-rs/plugins/ 2>/dev/null || \
+	cp target/release/*_plugin.dll ~/.pymol-rs/plugins/ 2>/dev/null || true
 
 clean:
 	cargo clean

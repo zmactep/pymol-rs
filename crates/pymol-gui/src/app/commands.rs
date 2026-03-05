@@ -1,21 +1,17 @@
 //! Command Execution
 //!
-//! Parsing, dispatching, and executing PyMOL commands (built-in and external).
+//! Parsing, dispatching, and executing PyMOL commands.
 //! Also handles async task result processing.
 
-use pymol_cmd::{CmdError, MessageKind, parse_command};
+use pymol_cmd::{CmdError, MessageKind};
 use pymol_scene::SessionAdapter;
 
-use crate::ipc::{IpcCallbackTask, IpcResponse};
 use pymol_framework::message::AppMessage;
 
 use super::App;
 
 impl App {
     /// Execute a command using the CommandExecutor with SessionAdapter
-    ///
-    /// This method is IPC-aware - if the command is an external command
-    /// registered via IPC, it will send a callback request to the client.
     ///
     /// Returns Ok(()) on success, Err(message) on failure.
     /// When `silent` is true, no output is written to the GUI output buffer.
@@ -30,76 +26,14 @@ impl App {
             self.bus.send(AppMessage::PrintCommand(format!("PyMOL> {}", cmd)));
         }
 
-        // Parse using pymol-cmd parser for proper handling of quotes, commas, etc.
-        let parsed = match parse_command(cmd) {
-            Ok(p) => p,
-            Err(e) => {
-                let msg = format!("Parse error: {}", e);
-                if !silent {
-                    self.bus.print_error(msg.clone());
-                }
-                return Err(msg);
-            }
-        };
-
-        // Check if it's an external command (registered via IPC)
-        if self.ipc.external_commands.contains(&parsed.name) {
-            self.execute_external_command(&parsed);
-            // External commands are async, errors are handled separately via callback
-            return Ok(());
-        }
-
-        // Execute as built-in command using CommandExecutor
         self.execute_builtin_command_internal(cmd, silent)
-    }
-
-    /// Execute an external command via IPC callback
-    ///
-    /// This spawns an async task that waits for the callback response.
-    fn execute_external_command(&mut self, parsed: &pymol_cmd::ParsedCommand) {
-        let server = match self.ipc.server.as_mut() {
-            Some(s) => s,
-            None => {
-                self.bus.print_error("No IPC server available");
-                return;
-            }
-        };
-
-        let id = server.next_callback_id();
-        // Convert parsed arguments to strings using ArgValue's Display impl
-        let args: Vec<String> = parsed.args
-            .iter()
-            .map(|(_, v)| v.to_string())
-            .collect();
-
-        // Create oneshot channel for the callback response
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        // Register the callback with the server
-        server.register_callback(id, tx);
-
-        // Send the CallbackRequest to the client
-        let response = IpcResponse::CallbackRequest {
-            id,
-            name: parsed.name.clone(),
-            args,
-        };
-
-        if let Err(e) = server.send(response) {
-            self.bus.print_error(format!("IPC error: {}", e));
-            return;
-        }
-
-        // Spawn the async task that waits for the response
-        let task = IpcCallbackTask::new(id, parsed.name.clone(), rx);
-        self.task_runner.spawn(task);
     }
 
     /// Execute a built-in command (internal helper)
     ///
     /// Returns Ok(()) on success, Err(message) on failure.
     /// When `silent` is true, no output is written to the GUI output buffer.
-    fn execute_builtin_command_internal(&mut self, cmd: &str, silent: bool) -> Result<(), String> {
+    pub(crate) fn execute_builtin_command_internal(&mut self, cmd: &str, silent: bool) -> Result<(), String> {
         // Calculate default size for PNG capture from viewport or window
         let default_size = self.view.viewport_rect
             .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))

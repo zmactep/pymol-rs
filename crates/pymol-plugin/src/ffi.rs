@@ -12,9 +12,11 @@ pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// C-compatible plugin declaration exported by every plugin.
 ///
 /// The host loads the shared library, looks up the `PYMOL_PLUGIN_DECLARATION`
-/// symbol, checks ABI and SDK versions, then calls `register` with a
-/// `PluginRegistrar` to collect commands, components, and handlers.
+/// symbol, checks ABI and SDK versions, then calls `init` to forward the
+/// host's logger, followed by `register` with a `PluginRegistrar` to
+/// collect commands, components, and handlers.
 #[repr(C)]
+#[allow(improper_ctypes_definitions)]
 pub struct PluginDeclaration {
     /// Must equal [`ABI_VERSION`].
     pub abi_version: u32,
@@ -22,6 +24,9 @@ pub struct PluginDeclaration {
     pub sdk_version_ptr: *const u8,
     /// Length of the SDK version string (no null terminator).
     pub sdk_version_len: usize,
+    /// Initialization function. Called once before `register` to forward
+    /// the host's logger so `log` macros work inside the plugin.
+    pub init: unsafe extern "C" fn(logger: &'static dyn crate::log::Log, level: crate::log::LevelFilter),
     /// Registration function. Called once at load time.
     pub register: unsafe extern "C" fn(registrar: *mut crate::registrar::PluginRegistrar),
 }

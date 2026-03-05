@@ -34,32 +34,6 @@ pub struct OutputMessage {
     pub kind: OutputKind,
 }
 
-impl OutputMessage {
-    /// Create a new info message
-    pub fn info(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            kind: OutputKind::Info,
-        }
-    }
-
-    /// Create a new warning message
-    pub fn warning(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            kind: OutputKind::Warning,
-        }
-    }
-
-    /// Create a new error message
-    pub fn error(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            kind: OutputKind::Error,
-        }
-    }
-}
-
 /// Message FROM client TO GUI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -204,41 +178,6 @@ pub enum IpcResponse {
     Closing,
 }
 
-impl IpcRequest {
-    /// Get the request ID if this request has one
-    pub fn id(&self) -> Option<u64> {
-        match self {
-            Self::Execute { id, .. } => Some(*id),
-            Self::RegisterCommand { .. } => None,
-            Self::UnregisterCommand { .. } => None,
-            Self::CallbackResponse { id, .. } => Some(*id),
-            Self::GetState { id } => Some(*id),
-            Self::GetNames { id } => Some(*id),
-            Self::CountAtoms { id, .. } => Some(*id),
-            Self::Hello { .. } => None,
-            Self::Quit => None,
-            Self::Ping { id } => Some(*id),
-            Self::ShowWindow { id } => Some(*id),
-            Self::HideWindow { id } => Some(*id),
-            Self::GetView { id } => Some(*id),
-        }
-    }
-}
-
-impl IpcResponse {
-    /// Get the request ID if this response has one
-    pub fn id(&self) -> Option<u64> {
-        match self {
-            Self::Ok { id } => Some(*id),
-            Self::Error { id, .. } => Some(*id),
-            Self::Value { id, .. } => Some(*id),
-            Self::CallbackRequest { id, .. } => Some(*id),
-            Self::Pong { id } => Some(*id),
-            Self::Closing => None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,7 +224,10 @@ mod tests {
 
     #[test]
     fn test_output_message() {
-        let msg = OutputMessage::error("Something went wrong");
+        let msg = OutputMessage {
+            text: "Something went wrong".to_string(),
+            kind: OutputKind::Error,
+        };
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: OutputMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.text, "Something went wrong");

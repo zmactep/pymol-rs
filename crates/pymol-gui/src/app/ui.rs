@@ -41,9 +41,7 @@ impl App {
         let pending_messages = self.task_runner.pending_messages();
 
         // Build SharedContext for components
-        let builtin_names: Vec<String> = self.executor.registry().all_names().map(|s| s.to_string()).collect();
-        let external_names: Vec<String> = self.ipc.external_commands.names().map(|s| s.to_string()).collect();
-        let all_command_names: Vec<String> = builtin_names.into_iter().chain(external_names).collect();
+        let all_command_names: Vec<String> = self.executor.registry().all_names().map(|s| s.to_string()).collect();
         let setting_names = pymol_settings::setting_names();
         let setting_names_refs: Vec<&str> = setting_names.iter().copied().collect();
         let cmd_registry = self.executor.registry();
@@ -298,6 +296,15 @@ impl App {
             // Lifecycle
             AppMessage::RequestRedraw => self.scene_dirty = true,
             AppMessage::Quit => self.frame.quit_requested = true,
+            AppMessage::ShowWindow => {
+                self.show_window();
+                self.headless = false;
+                self.scene_dirty = true;
+            }
+            AppMessage::HideWindow => {
+                self.hide_window();
+                self.headless = true;
+            }
             AppMessage::Custom { topic, payload } => {
                 log::debug!("Custom event: {} ({} bytes)", topic, payload.len());
             }

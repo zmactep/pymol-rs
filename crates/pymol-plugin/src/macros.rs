@@ -48,6 +48,17 @@ macro_rules! pymol_plugin {
                 abi_version: $crate::ffi::ABI_VERSION,
                 sdk_version_ptr: $crate::ffi::SDK_VERSION.as_ptr(),
                 sdk_version_len: $crate::ffi::SDK_VERSION.len(),
+                init: {
+                    #[allow(improper_ctypes_definitions)]
+                    unsafe extern "C" fn __pymol_init(
+                        logger: &'static dyn $crate::log::Log,
+                        level: $crate::log::LevelFilter,
+                    ) {
+                        let _ = $crate::log::set_logger(logger);
+                        $crate::log::set_max_level(level);
+                    }
+                    __pymol_init
+                },
                 register: {
                     unsafe extern "C" fn __pymol_register(
                         __registrar: *mut $crate::registrar::PluginRegistrar,

@@ -7,14 +7,13 @@
 mod commands;
 mod event_loop;
 mod input;
-mod ipc;
 mod render;
 mod ui;
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use pymol_cmd::CommandExecutor;
+use pymol_cmd::{CommandExecutor, DynamicCommand};
 use pymol_render::ShadingManager;
 use pymol_scene::{KeyBinding, KeyBindings, MoleculeObject, Session};
 // Re-export SelectionEntry for use in UI
@@ -24,7 +23,6 @@ use pymol_framework::component_store::ComponentStore;
 use pymol_framework::message::MessageBus;
 
 use crate::async_tasks::{TaskContext, TaskRunner};
-use crate::ipc::{ExternalCommandRegistry, IpcServer};
 use crate::layout::{Layout, pymol_classic};
 use crate::model::ViewportModel;
 use crate::plugin_manager::PluginManager;
@@ -46,21 +44,6 @@ impl FrameState {
             last_frame: Instant::now(),
             frame_count: 0,
             quit_requested: false,
-        }
-    }
-}
-
-/// IPC server and externally-registered command names.
-pub(crate) struct IpcContext {
-    pub server: Option<IpcServer>,
-    pub external_commands: ExternalCommandRegistry,
-}
-
-impl IpcContext {
-    fn new() -> Self {
-        Self {
-            server: None,
-            external_commands: ExternalCommandRegistry::new(),
         }
     }
 }
@@ -93,9 +76,6 @@ pub struct App {
 
     // Background tasks
     task_runner: TaskRunner,
-
-    // IPC
-    pub(crate) ipc: IpcContext,
 
     // Plugin system
     pub(crate) plugin_manager: PluginManager,
@@ -179,7 +159,6 @@ impl App {
             key_bindings: KeyBindings::new(),
             drag_hover_path: None,
             task_runner: TaskRunner::new(),
-            ipc: IpcContext::new(),
             plugin_manager: PluginManager::new(),
             headless,
             pending_load_file: None,
@@ -189,28 +168,6 @@ impl App {
         app.setup_default_key_bindings();
 
         app
-    }
-
-    /// Create a new application with IPC server enabled
-    ///
-    /// # Arguments
-    /// * `socket_path` - Path to the Unix domain socket for IPC
-    /// * `headless` - If true, the window will not be displayed initially
-    pub fn with_ipc(socket_path: &std::path::Path, headless: bool) -> Result<Self, String> {
-        let mut app = Self::new(headless);
-
-        let server = IpcServer::bind(socket_path)
-            .map_err(|e| format!("Failed to create IPC server: {}", e))?;
-
-        app.ipc.server = Some(server);
-        app.bus.print_info("IPC server enabled");
-
-        Ok(app)
-    }
-
-    /// Check if IPC is enabled
-    pub fn ipc_enabled(&self) -> bool {
-        self.ipc.server.is_some()
     }
 
     /// Check if the application is running in headless mode
@@ -264,5 +221,85 @@ impl App {
             &mut self.components,
             &mut self.layout,
         );
+    }
+
+    /// Poll plugins and process their queued operations.
+    ///
+    /// Three sequential phases, each borrowing non-overlapping fields:
+    ///
+    /// 1. **Poll** — calls `poll()` on handlers that need it, providing
+    ///    read-only state and the message bus.
+    /// 2. **Execute** — runs queued commands via `execute_builtin_command_internal`,
+    ///    stores results for delivery in the next cycle.
+    /// 3. **Register/Unregister** — processes dynamic command registrations
+    ///    and unregistrations in the `CommandRegistry`.
+    pub(crate) fn poll_plugins(&mut self) {
+        if !self.plugin_manager.any_needs_poll() {
+            return;
+        }
+
+        // Phase 1: Poll all handlers
+        {
+            let all_names: Vec<String> = self
+                .executor
+                .registry()
+                .all_names()
+                .map(|s| s.to_string())
+                .collect();
+            let setting_names = pymol_settings::setting_names();
+            let setting_names_refs: Vec<&str> = setting_names.iter().copied().collect();
+
+            let shared = pymol_framework::component::SharedContext {
+                registry: &self.state.registry,
+                camera: &self.state.camera,
+                selections: &self.state.selections,
+                named_colors: &self.state.named_colors,
+                movie: &self.state.movie,
+                command_names: &all_names,
+                command_registry: self.executor.registry(),
+                setting_names: &setting_names_refs,
+            };
+
+            self.plugin_manager.poll_all(&shared, &mut self.bus);
+        }
+
+        // Phase 2: Execute queued commands, collect results
+        {
+            let requests = self.plugin_manager.take_pending_executions();
+            if !requests.is_empty() {
+                let mut results = Vec::with_capacity(requests.len());
+                for req in requests {
+                    let result = self.execute_builtin_command_internal(&req.command, req.silent);
+                    results.push(pymol_plugin::registrar::CommandResult {
+                        id: req.id,
+                        result: result.map_err(|e: String| e),
+                    });
+                }
+                self.plugin_manager.store_command_results(results);
+            }
+        }
+
+        // Phase 3: Process dynamic command registrations/unregistrations
+        {
+            let registrations = self.plugin_manager.take_pending_registrations();
+            let unregistrations = self.plugin_manager.take_pending_unregistrations();
+
+            for reg in registrations {
+                let invocations = self.plugin_manager.invocations_handle();
+                let dyn_cmd = DynamicCommand::new(
+                    reg.name.clone(),
+                    reg.help,
+                    invocations,
+                );
+                self.executor.registry_mut().register_boxed(Box::new(dyn_cmd));
+                log::info!("Registered dynamic command: {}", reg.name);
+            }
+
+            for name in unregistrations {
+                if self.executor.registry_mut().unregister(&name) {
+                    log::info!("Unregistered dynamic command: {}", name);
+                }
+            }
+        }
     }
 }

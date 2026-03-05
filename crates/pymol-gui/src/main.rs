@@ -4,8 +4,7 @@
 //! ```bash
 //! cargo run -p pymol-gui
 //! cargo run -p pymol-gui -- protein.pdb
-//! cargo run -p pymol-gui -- --ipc /tmp/pymol-rs.sock
-//! cargo run -p pymol-gui -- --headless --ipc /tmp/pymol-rs.sock
+//! cargo run -p pymol-gui -- --headless
 //! ```
 
 use std::path::PathBuf;
@@ -19,11 +18,6 @@ use winit::event_loop::{ControlFlow, EventLoop};
 #[command(name = "pymol-rs")]
 #[command(author, version, about = "PyMOL-RS molecular visualization", long_about = None)]
 struct Args {
-    /// Enable IPC server for external control (e.g., from Python)
-    /// Provide the path to the Unix domain socket
-    #[arg(long, value_name = "SOCKET_PATH")]
-    ipc: Option<PathBuf>,
-
     /// Load initial state from JSON file
     #[arg(long, value_name = "STATE_FILE")]
     state: Option<PathBuf>,
@@ -56,18 +50,7 @@ fn main() {
     }
 
     // Create the application
-    let mut app = if let Some(ref socket_path) = args.ipc {
-        log::info!("IPC mode enabled: {:?}", socket_path);
-        match App::with_ipc(socket_path, args.headless) {
-            Ok(app) => app,
-            Err(e) => {
-                log::error!("Failed to create app with IPC: {}", e);
-                std::process::exit(1);
-            }
-        }
-    } else {
-        App::new(args.headless)
-    };
+    let mut app = App::new(args.headless);
 
     // Load initial state if provided
     if let Some(ref state_path) = args.state {

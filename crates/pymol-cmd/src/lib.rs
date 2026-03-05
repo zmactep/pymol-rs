@@ -40,6 +40,7 @@
 mod args;
 mod command;
 pub mod commands;
+mod dynamic;
 mod error;
 mod executor;
 mod history;
@@ -50,6 +51,7 @@ mod script;
 // Re-export main types
 pub use args::{ArgValue, ParsedCommand};
 pub use command::{ArgHint, Command, CommandContext, CommandRegistry, MessageKind, OutputMessage, ViewerLike};
+pub use dynamic::{DynamicCommand, DynamicCommandInvocation};
 pub use error::{CmdError, CmdResult, ParseError};
 pub use executor::{CommandExecutor, CommandOutput};
 pub use history::CommandHistory;

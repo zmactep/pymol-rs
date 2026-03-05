@@ -16,6 +16,7 @@ members = [
     "crates/pymol-algos",
     "crates/pymol-session",
     "plugins/hello",
+    "plugins/ipc",
 ]
 # pymol-python requires maturin to build (use: cd crates/pymol-python && maturin build)
 exclude = ["crates/pymol-python"]

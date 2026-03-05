@@ -2479,7 +2479,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-algos"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lin_alg",
  "phf",
@@ -2488,7 +2488,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-cmd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "image",
@@ -2509,7 +2509,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-color"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "serde",
@@ -2517,8 +2517,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pymol-framework"
+version = "0.1.1"
+dependencies = [
+ "egui",
+ "log",
+ "pymol-cmd",
+ "pymol-color",
+ "pymol-scene",
+ "rmp-serde",
+ "serde",
+]
+
+[[package]]
 name = "pymol-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "dirs 5.0.1",
@@ -2527,20 +2540,21 @@ dependencies = [
  "egui-winit",
  "env_logger",
  "image",
+ "libloading",
  "lin_alg",
  "log",
  "pollster",
  "pymol-cmd",
  "pymol-color",
+ "pymol-framework",
  "pymol-io",
  "pymol-mol",
+ "pymol-plugin",
  "pymol-raytracer",
  "pymol-render",
  "pymol-scene",
  "pymol-select",
  "pymol-settings",
- "serde",
- "serde_json",
  "tokio",
  "wgpu",
  "winit",
@@ -2548,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-io"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "lin_alg",
@@ -2564,7 +2578,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-mol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "bitflags 2.10.0",
@@ -2577,8 +2591,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pymol-plugin"
+version = "0.1.1"
+dependencies = [
+ "log",
+ "pymol-cmd",
+ "pymol-color",
+ "pymol-framework",
+ "pymol-mol",
+ "pymol-scene",
+ "pymol-select",
+ "pymol-settings",
+]
+
+[[package]]
 name = "pymol-python"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "env_logger",
  "lin_alg",
@@ -2605,7 +2633,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-raytracer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "lin_alg",
@@ -2620,7 +2648,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-render"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "lin_alg",
@@ -2637,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-scene"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "bitflags 2.10.0",
@@ -2661,7 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-select"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "bitvec",
@@ -2674,7 +2702,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-session"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "flate2",
@@ -2691,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-settings"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ahash",
  "parking_lot",

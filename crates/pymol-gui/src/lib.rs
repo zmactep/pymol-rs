@@ -16,7 +16,6 @@ pub mod app;
 pub mod async_tasks;
 pub mod components;
 pub mod fetch;
-pub mod ipc;
 pub mod layout;
 pub mod model;
 pub mod plugin_manager;
@@ -31,10 +30,6 @@ pub use components::{
     MovieComponent, ObjectListComponent, ReplComponent, SequenceComponent,
 };
 pub use fetch::{FetchResult, FetchTask};
-pub use ipc::{
-    ExternalCommandRegistry, IpcCallbackResult, IpcCallbackTask, IpcRequest, IpcResponse,
-    IpcServer, OutputKind as IpcOutputKind, OutputMessage as IpcOutputMessage,
-};
 pub use layout::Layout;
 pub use plugin_manager::PluginManager;
 

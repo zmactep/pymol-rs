@@ -13,4 +13,6 @@ pymol-cmd = { workspace = true }
 pymol-scene = { workspace = true }
 pymol-mol = { workspace = true }
 pymol-color = { workspace = true }
+pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
+log = { workspace = true }

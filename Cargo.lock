@@ -1472,6 +1472,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipc-plugin"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pymol-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2485,8 +2495,6 @@ dependencies = [
  "pymol-scene",
  "pymol-select",
  "pymol-settings",
- "serde",
- "serde_json",
  "tokio",
  "wgpu",
  "winit",
@@ -2529,11 +2537,13 @@ dependencies = [
 name = "pymol-plugin"
 version = "0.1.1"
 dependencies = [
+ "log",
  "pymol-cmd",
  "pymol-color",
  "pymol-framework",
  "pymol-mol",
  "pymol-scene",
+ "pymol-select",
  "pymol-settings",
 ]
 

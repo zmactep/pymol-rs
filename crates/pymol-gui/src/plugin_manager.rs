@@ -4,13 +4,19 @@
 //! components, and message handlers into the application.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use libloading::Library;
 
 use pymol_cmd::CommandRegistry;
 use pymol_plugin::ffi::{ABI_VERSION, SDK_VERSION};
-use pymol_plugin::registrar::{MessageHandler, PluginMetadata, PluginRegistrar};
+use pymol_cmd::DynamicCommandInvocation;
+use pymol_plugin::registrar::{
+    CommandExecRequest, CommandResult, DynCmdRegistration,
+    MessageHandler, PluginMetadata, PluginRegistrar, PollContext,
+};
 
+use pymol_framework::component::SharedContext;
 use pymol_framework::component_store::ComponentStore;
 use pymol_framework::message::{AppMessage, MessageBus};
 
@@ -27,12 +33,24 @@ struct LoadedPlugin {
 /// Manages dynamically loaded plugins.
 pub struct PluginManager {
     plugins: Vec<LoadedPlugin>,
+    // Deferred command execution
+    pending_executions: Vec<CommandExecRequest>,
+    command_results: Vec<CommandResult>,
+    // Dynamic commands
+    dynamic_invocations: Arc<Mutex<Vec<DynamicCommandInvocation>>>,
+    pending_registrations: Vec<DynCmdRegistration>,
+    pending_unregistrations: Vec<String>,
 }
 
 impl PluginManager {
     pub fn new() -> Self {
         Self {
             plugins: Vec::new(),
+            pending_executions: Vec::new(),
+            command_results: Vec::new(),
+            dynamic_invocations: Arc::new(Mutex::new(Vec::new())),
+            pending_registrations: Vec::new(),
+            pending_unregistrations: Vec::new(),
         }
     }
 
@@ -120,6 +138,11 @@ impl PluginManager {
             ));
         }
 
+        // Forward the host's logger so log macros work inside the plugin
+        unsafe {
+            (declaration.init)(log::logger(), log::max_level());
+        }
+
         // Create registrar and call the plugin's register function
         let mut registrar = PluginRegistrar::new();
         unsafe {
@@ -160,6 +183,83 @@ impl PluginManager {
                 handler.on_message(msg, bus);
             }
         }
+    }
+
+    /// Whether any loaded plugin needs periodic polling.
+    pub fn any_needs_poll(&self) -> bool {
+        self.plugins.iter().any(|p| {
+            p.message_handler
+                .as_ref()
+                .map_or(false, |h| h.needs_poll())
+        })
+    }
+
+    /// Poll all handlers that need it (Phase 1 of the three-phase cycle).
+    ///
+    /// After this call, use `take_pending_executions()`, etc. to process
+    /// the queued requests in subsequent phases.
+    pub fn poll_all(&mut self, shared: &SharedContext<'_>, bus: &mut MessageBus) {
+        // Drain invocations captured since last poll
+        let invocations: Vec<DynamicCommandInvocation> = self
+            .dynamic_invocations
+            .lock()
+            .map(|mut v| std::mem::take(&mut *v))
+            .unwrap_or_default();
+
+        // Swap out results so plugins can read them
+        let results = std::mem::take(&mut self.command_results);
+
+        let mut exec_queue = Vec::new();
+        let mut reg_queue = Vec::new();
+        let mut unreg_queue = Vec::new();
+
+        let mut ctx = PollContext::new(
+            shared,
+            bus,
+            &results,
+            &invocations,
+            &mut exec_queue,
+            &mut reg_queue,
+            &mut unreg_queue,
+        );
+
+        for plugin in &mut self.plugins {
+            if let Some(handler) = &mut plugin.message_handler {
+                if handler.needs_poll() {
+                    handler.poll(&mut ctx);
+                }
+            }
+        }
+
+        // Store queued requests for the host to process
+        self.pending_executions = exec_queue;
+        self.pending_registrations = reg_queue;
+        self.pending_unregistrations = unreg_queue;
+    }
+
+    /// Take pending command execution requests (Phase 2 input).
+    pub fn take_pending_executions(&mut self) -> Vec<CommandExecRequest> {
+        std::mem::take(&mut self.pending_executions)
+    }
+
+    /// Store command results for delivery in the next poll cycle.
+    pub fn store_command_results(&mut self, results: Vec<CommandResult>) {
+        self.command_results = results;
+    }
+
+    /// Take pending dynamic command registrations (Phase 3 input).
+    pub fn take_pending_registrations(&mut self) -> Vec<DynCmdRegistration> {
+        std::mem::take(&mut self.pending_registrations)
+    }
+
+    /// Take pending dynamic command unregistrations (Phase 3 input).
+    pub fn take_pending_unregistrations(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_unregistrations)
+    }
+
+    /// Get a handle to the shared invocations sink for `DynamicCommand`.
+    pub fn invocations_handle(&self) -> Arc<Mutex<Vec<DynamicCommandInvocation>>> {
+        self.dynamic_invocations.clone()
     }
 
     /// Get the number of loaded plugins.

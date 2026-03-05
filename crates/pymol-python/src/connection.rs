@@ -266,12 +266,12 @@ fn spawn_via_python_entry_point(socket_path: &Path) -> Result<Child, ConnectionE
         ConnectionError::SpawnFailed("pymol-rs command not found in PATH".to_string())
     })?;
 
-    log::info!("Spawning headless server: {:?} --ipc {:?} --headless", pymol_rs, socket_path);
+    log::info!("Spawning headless server: {:?} --headless (PYMOL_RS_IPC_SOCKET={:?})", pymol_rs, socket_path);
 
     // Spawn the process with --quiet to suppress logs in the Python console
+    // IPC socket path is passed via env var instead of --ipc flag
     let child = Command::new(&pymol_rs)
-        .arg("--ipc")
-        .arg(socket_path)
+        .env("PYMOL_RS_IPC_SOCKET", socket_path)
         .arg("--headless")
         .arg("--quiet")
         .stdin(std::process::Stdio::null())
@@ -294,9 +294,9 @@ fn spawn_via_native_binary(socket_path: &Path) -> Result<Child, ConnectionError>
     log::info!("Spawning headless server: {:?}", binary_path);
 
     // Note: Native binary doesn't support --quiet flag, so we suppress I/O
+    // IPC socket path is passed via env var instead of --ipc flag
     Command::new(&binary_path)
-        .arg("--ipc")
-        .arg(socket_path)
+        .env("PYMOL_RS_IPC_SOCKET", socket_path)
         .arg("--headless")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

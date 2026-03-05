@@ -77,17 +77,13 @@ fn run_gui(
     // Initialize logging (consolidated quiet flag handling)
     init_gui_logging(quiet, headless, ipc_socket.as_ref());
 
+    // Set IPC socket path as env var (the IPC plugin reads it during registration)
+    if let Some(ref socket_path) = ipc_socket {
+        std::env::set_var("PYMOL_RS_IPC_SOCKET", socket_path);
+    }
+
     // Create the application
-    let mut app = if let Some(ref socket_path) = ipc_socket {
-        App::with_ipc(socket_path, headless).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to create app with IPC: {}",
-                e
-            ))
-        })?
-    } else {
-        App::new(headless)
-    };
+    let mut app = App::new(headless);
 
     // Queue files to load
     if let Some(file_list) = files {

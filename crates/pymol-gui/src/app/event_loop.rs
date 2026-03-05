@@ -121,24 +121,24 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Process IPC requests — essential for both headless and GUI modes
-        if self.ipc.server.is_some() {
-            self.process_ipc();
+        // Poll plugins that need periodic processing
+        self.poll_plugins();
 
-            // Timeout-based wake-up to check for IPC without spinning
+        // Timeout-based wake-up when plugins need polling
+        if self.plugin_manager.any_needs_poll() {
             use std::time::Duration;
             use winit::event_loop::ControlFlow;
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(50),
             ));
+        }
 
-            if self.frame.quit_requested {
-                event_loop.exit();
-            }
+        if self.frame.quit_requested {
+            event_loop.exit();
+        }
 
-            if !self.headless && self.scene_dirty {
-                self.mark_dirty();
-            }
+        if !self.headless && self.scene_dirty {
+            self.mark_dirty();
         }
 
         // Process async tasks
@@ -189,9 +189,9 @@ impl App {
         self.frame.last_frame = now;
         self.frame.frame_count = self.frame.frame_count.saturating_add(1);
 
-        // Process external events (async tasks, IPC)
+        // Process external events (async tasks, plugins)
         self.process_async_tasks();
-        self.process_ipc();
+        self.poll_plugins();
 
         // Process input and update camera
         self.process_input();
