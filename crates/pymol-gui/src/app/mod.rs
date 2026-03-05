@@ -217,7 +217,7 @@ impl App {
     pub fn load_plugins(&mut self, dir: &std::path::Path) {
         self.plugin_manager.load_dir(
             dir,
-            self.executor.registry_mut(),
+            &mut self.executor,
             &mut self.components,
             &mut self.layout,
         );

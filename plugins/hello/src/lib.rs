@@ -3,7 +3,7 @@ use pymol_plugin::pymol_plugin;
 
 pymol_plugin! {
     name: "hello",
-    version: "0.1.0",
+    version: "0.2.0",
     description: "Example plugin: registers a 'hello' command",
     commands: [HelloCommand],
 }

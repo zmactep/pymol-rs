@@ -264,11 +264,13 @@ fn parse_single_command(input: &str) -> IResult<&str, ParsedCommand> {
     ))
 }
 
-/// Parse a command name (alphanumeric + underscore + dot for util.xxx, or @ for script execution)
+/// Parse a command name (alphanumeric + underscore + dot for util.xxx, @ for script, / for Python)
 fn parse_command_name(input: &str) -> IResult<&str, &str> {
     alt((
         // Special case: @ command for script execution
         tag("@"),
+        // Special case: / command (Python expression alias)
+        tag("/"),
         // Regular command names: alphanumeric + underscore + dot
         recognize(pair(
             take_while1(|c: char| c.is_alphanumeric() || c == '_'),
@@ -947,5 +949,16 @@ ray 1920, 1080, filename=test.png"#;
         let cmd = parse_command("indicate ////1:5/CA").unwrap();
         assert_eq!(cmd.name, "indicate");
         assert_eq!(cmd.get_str(0), Some("////1:5/CA"));
+    }
+
+    #[test]
+    fn test_slash_as_command_name() {
+        // / is a command alias for python (like @ is for run)
+        let cmd = parse_command("/print('hello')").unwrap();
+        assert_eq!(cmd.name, "/");
+        assert_eq!(cmd.get_str(0), Some("print('hello')"));
+
+        let cmd = parse_command("/x = 42").unwrap();
+        assert_eq!(cmd.name, "/");
     }
 }

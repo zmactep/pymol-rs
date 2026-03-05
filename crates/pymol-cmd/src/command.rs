@@ -6,6 +6,11 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 
+/// A file handler registered by a plugin for a specific file extension.
+///
+/// Used by the `run` command to dispatch non-.pml files to the appropriate handler.
+pub type FileHandler = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
 // Re-export ViewerLike from pymol-scene
 pub use pymol_scene::ViewerLike;
 
@@ -113,6 +118,8 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     output_buffer: Vec<OutputMessage>,
     /// Optional reference to command registry (for help lookups)
     registry: Option<&'r CommandRegistry>,
+    /// File handlers registered by plugins (extension -> handler)
+    file_handlers: Option<&'r AHashMap<String, FileHandler>>,
 }
 
 impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
@@ -124,6 +131,7 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
             log: true,
             output_buffer: Vec::new(),
             registry: None,
+            file_handlers: None,
         }
     }
 
@@ -145,13 +153,24 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         self
     }
 
+    /// Set the file handlers reference
+    pub fn with_file_handlers(mut self, handlers: &'r AHashMap<String, FileHandler>) -> Self {
+        self.file_handlers = Some(handlers);
+        self
+    }
+
     /// Get a reference to the command registry (if available)
     pub fn registry(&self) -> Option<&CommandRegistry> {
         self.registry
     }
 
+    /// Get a file handler for the given extension
+    pub fn file_handler(&self, ext: &str) -> Option<&FileHandler> {
+        self.file_handlers.and_then(|h| h.get(ext))
+    }
+
     /// Print an info message (unless quiet mode is enabled)
-    /// 
+    ///
     /// The message is both logged and collected in the output buffer
     /// for retrieval by the GUI.
     pub fn print(&mut self, msg: &str) {
@@ -170,7 +189,7 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
     }
 
     /// Print an error message (even in quiet mode)
-    /// 
+    ///
     /// Error messages are always shown regardless of quiet mode.
     pub fn print_error(&mut self, msg: &str) {
         log::error!("{}", msg);
@@ -197,7 +216,7 @@ pub trait Command: Send + Sync {
     fn name(&self) -> &str;
 
     /// Execute the command
-    /// 
+    ///
     /// Uses lifetime parameters to allow the context to borrow from non-'static viewers.
     /// - `'v` - lifetime of the viewer reference
     /// - `'r` - lifetime of the registry reference
@@ -214,7 +233,7 @@ pub trait Command: Send + Sync {
     }
 
     /// Get argument hints for completion
-    /// 
+    ///
     /// Returns a slice of hints indicating what type of argument is expected
     /// at each position. Used by the completion system to provide context-aware
     /// suggestions (e.g., file paths for "load", selections for "select").
@@ -360,12 +379,12 @@ impl CommandRegistry {
 
     /// Get all command names (including aliases) that expect a specific argument hint
     /// at the given position (0-indexed).
-    /// 
+    ///
     /// This is used by the completion system to determine which commands should
     /// trigger specific completion types (e.g., file path completion).
     pub fn commands_with_hint(&self, hint: ArgHint, position: usize) -> Vec<&str> {
         let mut result = Vec::new();
-        
+
         for (name, cmd) in &self.commands {
             let hints = cmd.arg_hints();
             if hints.get(position) == Some(&hint) {
@@ -378,7 +397,7 @@ impl CommandRegistry {
                 }
             }
         }
-        
+
         result
     }
 

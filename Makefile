@@ -17,16 +17,17 @@ release:
 python: python-release
 
 python-release:
-	cd crates/pymol-python && maturin build --release
+	cd python && maturin build --release
 
 python-dev:
-	cd crates/pymol-python && maturin develop
+	cd python && maturin develop
 
 test:
 	cargo test
 
 plugins:
-	cargo build --release -p hello-plugin -p ipc-plugin
+	PYO3_PYTHON=$$(python3 -c "import sys; print(sys.executable)") \
+	cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin
 	mkdir -p ~/.pymol-rs/plugins
 	cp target/release/lib*_plugin.dylib ~/.pymol-rs/plugins/ 2>/dev/null || \
 	cp target/release/lib*_plugin.so ~/.pymol-rs/plugins/ 2>/dev/null || \
@@ -34,7 +35,7 @@ plugins:
 
 clean:
 	cargo clean
-	rm -rf crates/pymol-python/target
+	rm -rf python/target
 	rm -rf target/wheels
 	rm -rf target/app
 	rm -rf target/PyMOL-RS.dmg
@@ -47,7 +48,7 @@ run:
 APP_NAME     := PyMOL-RS
 APP_DIR      := target/app/$(APP_NAME).app
 BUNDLE_ID    := me.yakovlev.pymol-rs
-VERSION      := 0.1.0
+VERSION      := 0.2.0
 ICON_SRC     := images/pymol-rs.png
 ICONSET      := target/app/AppIcon.iconset
 ICNS         := target/app/AppIcon.icns

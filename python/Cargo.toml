@@ -16,33 +16,19 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.27.2", features = ["extension-module"] }
 
 # Internal crates (relative paths from this crate)
-pymol-mol = { path = "../pymol-mol" }
-pymol-io = { path = "../pymol-io", features = ["fetch"] }
-pymol-select = { path = "../pymol-select" }
-pymol-color = { path = "../pymol-color" }
-pymol-settings = { path = "../pymol-settings" }
-pymol-render = { path = "../pymol-render" }
-pymol-scene = { path = "../pymol-scene" }
-pymol-cmd = { path = "../pymol-cmd" }
-pymol-gui = { path = "../pymol-gui" }
-
-# For the GUI launcher (run_gui function)
-winit = "0.30.12"
+pymol-mol = { path = "../crates/pymol-mol" }
+pymol-io = { path = "../crates/pymol-io", features = ["fetch"] }
+pymol-select = { path = "../crates/pymol-select" }
+pymol-color = { path = "../crates/pymol-color" }
+pymol-settings = { path = "../crates/pymol-settings" }
+pymol-scene = { path = "../crates/pymol-scene" }
+pymol-cmd = { path = "../crates/pymol-cmd" }
 
 # External dependencies
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
 thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
-parking_lot = "0.12"
-
-# IPC / Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Process management
-which = "7"
-shellexpand = "3"
 
 [features]
 default = []
@@ -57,5 +43,5 @@ optional = true
 pyo3 = { version = "0.27.2", features = ["auto-initialize"] }
 
 [lints.rust]
-# Suppress warnings from PyO3's create_exception! macro which checks for gil-refs feature
+# Suppress warnings from PyO3's create_exception! macro
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"gil-refs\"))"] }

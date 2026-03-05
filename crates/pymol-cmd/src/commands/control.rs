@@ -335,7 +335,8 @@ impl Command for RunCommand {
         r#"
 DESCRIPTION
 
-    "run" executes a PyMOL script file (.pml).
+    "run" executes a script file. Supports .pml (PyMOL script) and any
+    file type registered by a plugin (e.g., .py via the Python plugin).
 
 USAGE
 
@@ -349,6 +350,7 @@ EXAMPLES
 
     run setup.pml
     run ~/scripts/analysis.pml
+    run script.py
     @ script.pml
 "#
     }
@@ -360,9 +362,29 @@ EXAMPLES
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
         let path = expand_path(filename);
-        
-        // Delegate to ScriptEngine - the single source of truth for script execution
-        let mut engine = ScriptEngine::new();
-        engine.run_pml(ctx.viewer, &path)
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("pml");
+
+        match ext {
+            "pml" => {
+                let mut engine = ScriptEngine::new();
+                engine.run_pml(ctx.viewer, &path)
+            }
+            other => {
+                if let Some(handler) = ctx.file_handler(other) {
+                    let path_str = path.to_str().ok_or_else(|| {
+                        CmdError::Execution("invalid path encoding".to_string())
+                    })?;
+                    handler(path_str).map_err(CmdError::Execution)
+                } else {
+                    Err(CmdError::Execution(format!(
+                        "no handler for .{} files. Install a plugin that handles this format.",
+                        other
+                    )))
+                }
+            }
+        }
     }
 }

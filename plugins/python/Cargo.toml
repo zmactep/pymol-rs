@@ -1,0 +1,15 @@
+[package]
+name = "python-plugin"
+version = "0.2.0"
+edition = "2021"
+description = "PyMOL-RS Python interpreter plugin: embedded Python scripting"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pymol-plugin = { path = "../../crates/pymol-plugin" }
+pymol-mol = { path = "../../crates/pymol-mol" }
+pymol-select = { path = "../../crates/pymol-select" }
+pyo3 = { version = "0.27.2", features = ["auto-initialize"] }
+log = "0.4"

@@ -5,7 +5,10 @@
 //! and message handlers. After registration, the host drains the registrar
 //! and integrates everything into the running application.
 
+use std::sync::Arc;
+
 use pymol_cmd::Command;
+pub use pymol_cmd::FileHandler;
 pub use pymol_cmd::DynamicCommandInvocation;
 use pymol_framework::component::{Component, SharedContext};
 use pymol_framework::layout::PanelConfig;
@@ -157,6 +160,7 @@ pub struct PluginRegistrar {
     pub(crate) commands: Vec<Box<dyn Command>>,
     pub(crate) components: Vec<(Box<dyn Component>, PanelConfig)>,
     pub(crate) message_handler: Option<Box<dyn MessageHandler>>,
+    pub(crate) file_handlers: Vec<(String, FileHandler)>,
 }
 
 impl PluginRegistrar {
@@ -167,6 +171,7 @@ impl PluginRegistrar {
             commands: Vec::new(),
             components: Vec::new(),
             message_handler: None,
+            file_handlers: Vec::new(),
         }
     }
 
@@ -188,6 +193,19 @@ impl PluginRegistrar {
     /// Set a message handler for headless message processing.
     pub fn set_message_handler(&mut self, handler: impl MessageHandler + 'static) {
         self.message_handler = Some(Box::new(handler));
+    }
+
+    /// Register a file handler for a specific extension.
+    ///
+    /// Used by the builtin `run` command to dispatch non-.pml files
+    /// to the appropriate plugin (e.g., `.py` → Python plugin).
+    pub fn register_file_handler(
+        &mut self,
+        extension: &str,
+        handler: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+    ) {
+        self.file_handlers
+            .push((extension.to_string(), Arc::new(handler)));
     }
 
     // =================================================================
@@ -212,6 +230,11 @@ impl PluginRegistrar {
     /// Take the message handler (returns `None` if not set or already taken).
     pub fn take_message_handler(&mut self) -> Option<Box<dyn MessageHandler>> {
         self.message_handler.take()
+    }
+
+    /// Drain all registered file handlers.
+    pub fn drain_file_handlers(&mut self) -> Vec<(String, FileHandler)> {
+        std::mem::take(&mut self.file_handlers)
     }
 }
 

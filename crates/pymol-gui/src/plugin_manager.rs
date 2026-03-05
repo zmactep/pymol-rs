@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use libloading::Library;
 
-use pymol_cmd::CommandRegistry;
+use pymol_cmd::CommandExecutor;
 use pymol_plugin::ffi::{ABI_VERSION, SDK_VERSION};
 use pymol_cmd::DynamicCommandInvocation;
 use pymol_plugin::registrar::{
@@ -61,7 +61,7 @@ impl PluginManager {
     pub fn load_dir(
         &mut self,
         dir: &Path,
-        registry: &mut CommandRegistry,
+        executor: &mut CommandExecutor,
         components: &mut ComponentStore,
         layout: &mut Layout,
     ) {
@@ -85,7 +85,7 @@ impl PluginManager {
             };
 
             if is_plugin {
-                match self.load_library(&path, registry, components, layout) {
+                match self.load_library(&path, executor, components, layout) {
                     Ok(name) => log::info!("Loaded plugin: {}", name),
                     Err(e) => log::warn!("Failed to load plugin {:?}: {}", path, e),
                 }
@@ -97,7 +97,7 @@ impl PluginManager {
     pub fn load_library(
         &mut self,
         path: &Path,
-        registry: &mut CommandRegistry,
+        executor: &mut CommandExecutor,
         components: &mut ComponentStore,
         layout: &mut Layout,
     ) -> Result<String, String> {
@@ -155,7 +155,12 @@ impl PluginManager {
 
         // Register commands
         for cmd in registrar.drain_commands() {
-            registry.register_boxed(cmd);
+            executor.registry_mut().register_boxed(cmd);
+        }
+
+        // Register file handlers
+        for (ext, handler) in registrar.drain_file_handlers() {
+            executor.register_file_handler(ext, handler);
         }
 
         // Register components

@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use crate::command::{CommandContext, CommandRegistry, OutputMessage, ViewerLike};
+use ahash::AHashMap;
+
+use crate::command::{CommandContext, CommandRegistry, FileHandler, OutputMessage, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
 use crate::logger::CommandLogger;
@@ -41,6 +43,8 @@ pub struct CommandExecutor {
     history: CommandHistory,
     /// Whether to echo commands
     echo: bool,
+    /// File handlers registered by plugins (extension -> handler)
+    file_handlers: AHashMap<String, FileHandler>,
 }
 
 impl Default for CommandExecutor {
@@ -57,6 +61,7 @@ impl CommandExecutor {
             logger: CommandLogger::new(),
             history: CommandHistory::new(),
             echo: false,
+            file_handlers: AHashMap::new(),
         }
     }
 
@@ -88,6 +93,18 @@ impl CommandExecutor {
     /// Get a mutable reference to the logger
     pub fn logger_mut(&mut self) -> &mut CommandLogger {
         &mut self.logger
+    }
+
+    /// Register a file handler for a specific extension.
+    ///
+    /// Used by plugins to handle non-.pml files in the `run` command.
+    pub fn register_file_handler(&mut self, extension: impl Into<String>, handler: FileHandler) {
+        self.file_handlers.insert(extension.into(), handler);
+    }
+
+    /// Get a reference to the file handlers map
+    pub fn file_handlers(&self) -> &AHashMap<String, FileHandler> {
+        &self.file_handlers
     }
 
     /// Execute a single command string
@@ -158,7 +175,8 @@ impl CommandExecutor {
         let mut ctx = CommandContext::new(viewer)
             .with_quiet(quiet)
             .with_log(log)
-            .with_registry(&self.registry);
+            .with_registry(&self.registry)
+            .with_file_handlers(&self.file_handlers);
         command.execute(&mut ctx, &parsed)?;
 
         // Return collected output
