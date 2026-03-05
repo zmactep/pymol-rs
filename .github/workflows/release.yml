@@ -119,13 +119,13 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           manylinux: ${{ matrix.manylinux || 'auto' }}
-          working-directory: crates/pymol-python
+          working-directory: python
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
-          path: crates/pymol-python/dist/*.whl
+          path: python/dist/*.whl
           if-no-files-found: error
 
   release:
