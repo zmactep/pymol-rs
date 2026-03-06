@@ -3,6 +3,8 @@
 //! Loads plugin shared libraries at runtime and integrates their commands,
 //! components, and message handlers into the application.
 
+use std::any::Any;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -28,6 +30,8 @@ struct LoadedPlugin {
     _library: Library,
     _metadata: PluginMetadata,
     message_handler: Option<Box<dyn MessageHandler>>,
+    /// Set to `true` after a panic; the plugin will be skipped for all future calls.
+    faulted: bool,
 }
 
 /// Manages dynamically loaded plugins.
@@ -139,14 +143,26 @@ impl PluginManager {
         }
 
         // Forward the host's logger so log macros work inside the plugin
-        unsafe {
+        let init_result = catch_unwind(AssertUnwindSafe(|| unsafe {
             (declaration.init)(log::logger(), log::max_level());
+        }));
+        if let Err(panic_info) = init_result {
+            return Err(format!(
+                "Plugin panicked during init: {}",
+                panic_payload_to_string(&panic_info)
+            ));
         }
 
         // Create registrar and call the plugin's register function
         let mut registrar = PluginRegistrar::new();
-        unsafe {
+        let register_result = catch_unwind(AssertUnwindSafe(|| unsafe {
             (declaration.register)(&mut registrar as *mut PluginRegistrar);
+        }));
+        if let Err(panic_info) = register_result {
+            return Err(format!(
+                "Plugin panicked during register: {}",
+                panic_payload_to_string(&panic_info)
+            ));
         }
 
         // Extract metadata
@@ -176,6 +192,7 @@ impl PluginManager {
             _library: library,
             _metadata: metadata,
             message_handler: registrar.take_message_handler(),
+            faulted: false,
         });
 
         Ok(plugin_name)
@@ -184,8 +201,21 @@ impl PluginManager {
     /// Broadcast a message to all plugin message handlers.
     pub fn broadcast(&mut self, msg: &AppMessage, bus: &mut MessageBus) {
         for plugin in &mut self.plugins {
+            if plugin.faulted {
+                continue;
+            }
             if let Some(handler) = &mut plugin.message_handler {
-                handler.on_message(msg, bus);
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    handler.on_message(msg, bus);
+                }));
+                if let Err(panic_info) = result {
+                    log::error!(
+                        "Plugin '{}' panicked during on_message: {}. Plugin disabled.",
+                        plugin._metadata.name,
+                        panic_payload_to_string(&panic_info),
+                    );
+                    plugin.faulted = true;
+                }
             }
         }
     }
@@ -193,9 +223,10 @@ impl PluginManager {
     /// Whether any loaded plugin needs periodic polling.
     pub fn any_needs_poll(&self) -> bool {
         self.plugins.iter().any(|p| {
-            p.message_handler
-                .as_ref()
-                .map_or(false, |h| h.needs_poll())
+            !p.faulted
+                && p.message_handler
+                    .as_ref()
+                    .map_or(false, |h| h.needs_poll())
         })
     }
 
@@ -229,9 +260,22 @@ impl PluginManager {
         );
 
         for plugin in &mut self.plugins {
+            if plugin.faulted {
+                continue;
+            }
             if let Some(handler) = &mut plugin.message_handler {
                 if handler.needs_poll() {
-                    handler.poll(&mut ctx);
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        handler.poll(&mut ctx);
+                    }));
+                    if let Err(panic_info) = result {
+                        log::error!(
+                            "Plugin '{}' panicked during poll: {}. Plugin disabled.",
+                            plugin._metadata.name,
+                            panic_payload_to_string(&panic_info),
+                        );
+                        plugin.faulted = true;
+                    }
                 }
             }
         }
@@ -276,5 +320,16 @@ impl PluginManager {
 impl Default for PluginManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Extract a human-readable message from a panic payload.
+fn panic_payload_to_string(payload: &Box<dyn Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic".to_string()
     }
 }

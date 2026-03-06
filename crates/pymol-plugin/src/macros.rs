@@ -54,8 +54,10 @@ macro_rules! pymol_plugin {
                         logger: &'static dyn $crate::log::Log,
                         level: $crate::log::LevelFilter,
                     ) {
-                        let _ = $crate::log::set_logger(logger);
-                        $crate::log::set_max_level(level);
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let _ = $crate::log::set_logger(logger);
+                            $crate::log::set_max_level(level);
+                        }));
                     }
                     __pymol_init
                 },
