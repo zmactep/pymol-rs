@@ -44,6 +44,8 @@ pub struct PluginManager {
     dynamic_invocations: Arc<Mutex<Vec<DynamicCommandInvocation>>>,
     pending_registrations: Vec<DynCmdRegistration>,
     pending_unregistrations: Vec<String>,
+    // Notification messages from plugins (cleared each poll cycle)
+    notification_messages: Vec<String>,
 }
 
 impl PluginManager {
@@ -55,6 +57,7 @@ impl PluginManager {
             dynamic_invocations: Arc::new(Mutex::new(Vec::new())),
             pending_registrations: Vec::new(),
             pending_unregistrations: Vec::new(),
+            notification_messages: Vec::new(),
         }
     }
 
@@ -253,6 +256,7 @@ impl PluginManager {
         let mut exec_queue = Vec::new();
         let mut reg_queue = Vec::new();
         let mut unreg_queue = Vec::new();
+        let mut notification_queue = Vec::new();
 
         let mut ctx = PollContext::new(
             shared,
@@ -262,6 +266,7 @@ impl PluginManager {
             &mut exec_queue,
             &mut reg_queue,
             &mut unreg_queue,
+            &mut notification_queue,
         );
 
         for plugin in &mut self.plugins {
@@ -289,6 +294,7 @@ impl PluginManager {
         self.pending_executions = exec_queue;
         self.pending_registrations = reg_queue;
         self.pending_unregistrations = unreg_queue;
+        self.notification_messages = notification_queue;
     }
 
     /// Take pending command execution requests (Phase 2 input).
@@ -319,6 +325,11 @@ impl PluginManager {
     /// Get the number of loaded plugins.
     pub fn plugin_count(&self) -> usize {
         self.plugins.len()
+    }
+
+    /// Get notification messages from plugins (set during the last poll cycle).
+    pub fn notification_messages(&self) -> &[String] {
+        &self.notification_messages
     }
 }
 

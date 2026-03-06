@@ -2,12 +2,13 @@
 //!
 //! Implements the `python` command (with `/` alias) for executing
 //! Python code from the PyMOL-RS command line.
-
-use std::sync::{Arc, Mutex};
+//!
+//! Execution is non-blocking: the code is submitted to the Python
+//! worker thread, and output appears asynchronously via the poll cycle.
 
 use pymol_plugin::prelude::*;
 
-use crate::engine::PythonEngine;
+use crate::worker::{WorkItem, WorkOrigin, WorkerHandle};
 
 /// The `python` command — executes Python code inline.
 ///
@@ -15,12 +16,12 @@ use crate::engine::PythonEngine;
 ///   python print("hello")
 ///   /import math; print(math.pi)
 pub struct PythonCommand {
-    pub(crate) engine: Arc<Mutex<PythonEngine>>,
+    pub(crate) worker: WorkerHandle,
 }
 
 impl PythonCommand {
-    pub fn new(engine: Arc<Mutex<PythonEngine>>) -> Self {
-        Self { engine }
+    pub fn new(worker: WorkerHandle) -> Self {
+        Self { worker }
     }
 }
 
@@ -59,21 +60,12 @@ impl Command for PythonCommand {
             return Ok(());
         }
 
-        let mut engine = self.engine.lock().unwrap();
-        match engine.eval(code) {
-            Ok(output) => {
-                if !output.is_empty() {
-                    for line in output.lines() {
-                        ctx.print(line);
-                    }
-                }
-                Ok(())
-            }
-            Err(err) => {
-                ctx.print_error(&err);
-                Err(CmdError::Execution(err))
-            }
-        }
+        self.worker.submit(WorkItem::Eval {
+            code: code.to_string(),
+            origin: WorkOrigin::Command,
+        });
+
+        Ok(())
     }
 
     fn help(&self) -> &str {

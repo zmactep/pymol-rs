@@ -1,77 +1,87 @@
 //! Python Message Handler
 //!
 //! Implements `MessageHandler` with `needs_poll() = true` for:
-//! 1. Updating shared molecule/name snapshots from `SharedContext`
-//! 2. Setting `sys._pymolrs_backend` on first poll
-//! 3. Draining the command queue → `ctx.execute_command()`
-//! 4. Syncing viewport image between Python and the host
+//! 1. Draining results from the Python worker thread
+//! 2. Setting notification overlay while Python is busy
+//! 3. Updating shared molecule/name snapshots from `SharedContext`
+//! 4. Installing `sys._pymolrs_backend` on first poll (via worker)
+//! 5. Draining the command queue → `ctx.execute_command()`
+//! 6. Syncing viewport image between Python and the host
 
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Receiver;
 
-use pyo3::prelude::*;
 use pymol_plugin::prelude::*;
 
-use crate::backend::{PluginBackend, SharedStateHandle};
-use crate::engine::PythonEngine;
+use crate::backend::SharedStateHandle;
+use crate::worker::{
+    EditorOutputHandle, OutputEntry, WorkItem, WorkOrigin, WorkResult, WorkerHandle,
+};
 
 /// Message handler for the Python plugin.
 ///
-/// Polls each frame to synchronize state and drain queued commands.
+/// Polls each frame to drain worker results, synchronize state,
+/// and process queued commands.
 pub struct PythonHandler {
-    engine: Arc<Mutex<PythonEngine>>,
+    worker: WorkerHandle,
     shared: SharedStateHandle,
-    backend_installed: bool,
+    result_rx: Receiver<WorkResult>,
+    editor_output: EditorOutputHandle,
+    backend_requested: bool,
     next_cmd_id: u64,
 }
 
 impl PythonHandler {
-    pub fn new(engine: Arc<Mutex<PythonEngine>>, shared: SharedStateHandle) -> Self {
+    pub fn new(
+        worker: WorkerHandle,
+        shared: SharedStateHandle,
+        result_rx: Receiver<WorkResult>,
+        editor_output: EditorOutputHandle,
+    ) -> Self {
         Self {
-            engine,
+            worker,
             shared,
-            backend_installed: false,
+            result_rx,
+            editor_output,
+            backend_requested: false,
             next_cmd_id: 1,
         }
     }
 
-    /// Install the PluginBackend into `sys._pymolrs_backend`.
-    fn install_backend(&mut self) {
-        // Ensure Python is initialized (configures PYTHONHOME etc.)
-        // before any Python::attach call.
-        {
-            let mut engine = self.engine.lock().unwrap();
-            if let Err(e) = engine.ensure_init() {
-                log::warn!("Python plugin: failed to initialize: {}", e);
-                self.backend_installed = true; // don't retry
-                return;
-            }
-        }
-
-        let shared = self.shared.clone();
-
-        let result = Python::attach(|py| -> Result<(), String> {
-            let backend = PluginBackend::new(shared);
-            let py_backend = Py::new(py, backend).map_err(|e| e.to_string())?;
-
-            let mut engine = self.engine.lock().unwrap();
-            engine.set_backend(py_backend.into_any())
-        });
-
-        match result {
-            Ok(()) => {
-                self.backend_installed = true;
-                log::info!("Python plugin: backend installed into sys._pymolrs_backend");
-
-                // Auto-import cmd into __main__ so it's available in the REPL
-                let mut engine = self.engine.lock().unwrap();
-                if let Err(e) = engine.eval("from pymol_rs import cmd") {
-                    log::warn!("Python plugin: failed to auto-import cmd: {}", e);
-                } else {
-                    log::info!("Python plugin: cmd auto-imported into global namespace");
+    /// Drain results from the Python worker thread and route by origin.
+    fn drain_python_results(&mut self, ctx: &mut PollContext<'_>) {
+        while let Ok(result) = self.result_rx.try_recv() {
+            match result.origin {
+                WorkOrigin::Command | WorkOrigin::Script => match &result.result {
+                    Ok(output) if !output.is_empty() => {
+                        ctx.bus.print_info(output);
+                    }
+                    Err(err) => {
+                        ctx.bus.print_error(err);
+                    }
+                    _ => {}
+                },
+                WorkOrigin::Editor => {
+                    let entry = match result.result {
+                        Ok(output) if !output.is_empty() => Some(OutputEntry {
+                            text: output,
+                            is_error: false,
+                        }),
+                        Err(err) => Some(OutputEntry {
+                            text: err,
+                            is_error: true,
+                        }),
+                        _ => None,
+                    };
+                    if let Some(entry) = entry {
+                        if let Ok(mut buf) = self.editor_output.lock() {
+                            buf.push(entry);
+                        }
+                    }
                 }
-            }
-            Err(e) => {
-                log::warn!("Python plugin: failed to install backend: {}", e);
+                WorkOrigin::Setup => match &result.result {
+                    Ok(msg) => log::info!("Python plugin: {}", msg),
+                    Err(e) => log::warn!("Python plugin: setup failed: {}", e),
+                },
             }
         }
     }
@@ -81,20 +91,26 @@ impl PythonHandler {
         let mut state = self.shared.lock().unwrap();
 
         // Update names
-        state.names = shared_ctx.registry.names().map(|s| s.to_string()).collect();
+        state.names = shared_ctx
+            .registry
+            .names()
+            .map(|s| s.to_string())
+            .collect();
 
         // Update molecule snapshots
         state.molecules.clear();
         for name in shared_ctx.registry.names() {
             if let Some(mol_obj) = shared_ctx.registry.get_molecule(name) {
-                state.molecules.push((name.to_string(), mol_obj.molecule().clone()));
+                state
+                    .molecules
+                    .push((name.to_string(), mol_obj.molecule().clone()));
             }
         }
 
         // Update viewport image snapshot
-        state.viewport_image = shared_ctx.viewport_image.map(|img| {
-            (img.data.clone(), img.width, img.height)
-        });
+        state.viewport_image = shared_ctx
+            .viewport_image
+            .map(|img| (img.data.clone(), img.width, img.height));
     }
 
     /// Drain the command queue and schedule execution.
@@ -141,15 +157,26 @@ impl MessageHandler for PythonHandler {
     }
 
     fn poll(&mut self, ctx: &mut PollContext<'_>) {
-        // Install backend on first poll
-        if !self.backend_installed {
-            self.install_backend();
+        // Request backend installation on first poll (async via worker)
+        if !self.backend_requested {
+            self.worker.submit(WorkItem::InstallBackend {
+                shared: self.shared.clone(),
+            });
+            self.backend_requested = true;
+        }
+
+        // Drain results from the Python worker thread
+        self.drain_python_results(ctx);
+
+        // Show notification overlay while Python is busy
+        if self.worker.is_busy() {
+            ctx.set_notification("Running Python...");
         }
 
         // Sync state snapshots
         self.update_snapshots(ctx.shared);
 
-        // Drain queued commands
+        // Drain queued commands from Python
         self.drain_commands(ctx);
 
         // Drain queued viewport image changes

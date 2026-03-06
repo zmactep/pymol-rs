@@ -59,6 +59,7 @@ pub struct PollContext<'a> {
     pub(crate) exec_queue: &'a mut Vec<CommandExecRequest>,
     pub(crate) reg_queue: &'a mut Vec<DynCmdRegistration>,
     pub(crate) unreg_queue: &'a mut Vec<String>,
+    pub(crate) notification_queue: &'a mut Vec<String>,
 }
 
 impl<'a> PollContext<'a> {
@@ -73,6 +74,7 @@ impl<'a> PollContext<'a> {
         exec_queue: &'a mut Vec<CommandExecRequest>,
         reg_queue: &'a mut Vec<DynCmdRegistration>,
         unreg_queue: &'a mut Vec<String>,
+        notification_queue: &'a mut Vec<String>,
     ) -> Self {
         Self {
             shared,
@@ -82,6 +84,7 @@ impl<'a> PollContext<'a> {
             exec_queue,
             reg_queue,
             unreg_queue,
+            notification_queue,
         }
     }
 
@@ -110,6 +113,15 @@ impl<'a> PollContext<'a> {
     /// Unregister a dynamic command.
     pub fn unregister_dynamic_command(&mut self, name: &str) {
         self.unreg_queue.push(name.to_string());
+    }
+
+    /// Show a notification message in the overlay (spinner + text).
+    ///
+    /// Call this during `poll()` while a background operation is in progress.
+    /// The notification is cleared automatically when `poll()` returns without
+    /// calling this method.
+    pub fn set_notification(&mut self, msg: impl Into<String>) {
+        self.notification_queue.push(msg.into());
     }
 }
 

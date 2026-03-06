@@ -3,72 +3,57 @@
 //! A GUI panel with a multiline code editor (syntax-highlighted),
 //! a Run button, and an output area for execution results.
 //!
+//! Execution is non-blocking: code is submitted to the Python worker
+//! thread, and results are received via a shared output buffer.
+//!
 //! NOTE: This component runs inside a cdylib plugin, which has its own copy
 //! of egui statics. Widgets that use TypeId-based context lookups (Label,
 //! Button) will panic because their TypeIds differ from the host's.
 //! We use cdylib-safe helpers from [`crate::widgets`] instead.
 
-use std::sync::{Arc, Mutex};
-
 use egui::{Color32, FontId, Pos2, ScrollArea, Stroke, TextBuffer, TextEdit, Ui};
 use pymol_plugin::prelude::*;
 
-use crate::engine::PythonEngine;
 use crate::highlight::PythonHighlighter;
 use crate::widgets::{painted_button, painted_text};
-
-/// Output entry from script execution.
-struct OutputEntry {
-    text: String,
-    is_error: bool,
-}
+use crate::worker::{EditorOutputHandle, OutputEntry, WorkItem, WorkOrigin, WorkerHandle};
 
 /// Python script editor with syntax highlighting and execution.
 pub struct PythonEditorComponent {
     code: String,
     output: Vec<OutputEntry>,
-    engine: Arc<Mutex<PythonEngine>>,
+    worker: WorkerHandle,
+    editor_output: EditorOutputHandle,
     highlighter: PythonHighlighter,
 }
 
 impl PythonEditorComponent {
-    pub fn new(engine: Arc<Mutex<PythonEngine>>) -> Self {
+    pub fn new(worker: WorkerHandle, editor_output: EditorOutputHandle) -> Self {
         Self {
             code: String::new(),
             output: Vec::new(),
-            engine,
+            worker,
+            editor_output,
             highlighter: PythonHighlighter::new(),
         }
     }
 
-    /// Execute the current editor contents and capture output.
-    fn run_code(&mut self, bus: &mut MessageBus) {
-        if self.code.trim().is_empty() {
+    /// Submit the current editor contents for execution.
+    fn run_code(&mut self) {
+        if self.code.trim().is_empty() || self.worker.is_busy() {
             return;
         }
 
-        let result = {
-            let mut engine = self.engine.lock().unwrap();
-            engine.eval(&self.code)
-        };
+        self.worker.submit(WorkItem::Eval {
+            code: self.code.clone(),
+            origin: WorkOrigin::Editor,
+        });
+    }
 
-        match result {
-            Ok(output) => {
-                if !output.is_empty() {
-                    bus.print_info(&output);
-                    self.output.push(OutputEntry {
-                        text: output,
-                        is_error: false,
-                    });
-                }
-            }
-            Err(err) => {
-                bus.print_error(&err);
-                self.output.push(OutputEntry {
-                    text: err,
-                    is_error: true,
-                });
-            }
+    /// Drain any results that arrived from the worker thread.
+    fn drain_results(&mut self) {
+        if let Ok(mut buf) = self.editor_output.try_lock() {
+            self.output.append(&mut buf);
         }
     }
 
@@ -82,10 +67,16 @@ impl PythonEditorComponent {
     }
 
     /// Render the toolbar row (Run button + shortcut hint + Clear).
-    fn show_toolbar(&mut self, ui: &mut Ui, bus: &mut MessageBus) {
+    fn show_toolbar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if painted_button(ui, "▶ Run", Color32::from_rgb(150, 255, 150)) {
-                self.run_code(bus);
+            let busy = self.worker.is_busy();
+
+            if busy {
+                if painted_button(ui, "\u{25a0} Stop", Color32::from_rgb(255, 100, 100)) {
+                    self.worker.request_interrupt();
+                }
+            } else if painted_button(ui, "\u{25b6} Run", Color32::from_rgb(150, 255, 150)) {
+                self.run_code();
             }
 
             if !self.output.is_empty() {
@@ -150,6 +141,7 @@ impl PythonEditorComponent {
             .max_height(height)
             .stick_to_bottom(true)
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 let mono = FontId::monospace(12.0);
                 for entry in &self.output {
                     let color = if entry.is_error {
@@ -174,7 +166,10 @@ impl Component for PythonEditorComponent {
         "Python"
     }
 
-    fn show(&mut self, ui: &mut Ui, _ctx: &SharedContext, bus: &mut MessageBus) {
+    fn show(&mut self, ui: &mut Ui, _ctx: &SharedContext, _bus: &mut MessageBus) {
+        // Drain any results from the worker thread
+        self.drain_results();
+
         let available = ui.available_height();
         // Prevent the resizable panel from shrinking to fit content
         ui.set_min_height(available);
@@ -183,7 +178,7 @@ impl Component for PythonEditorComponent {
         let output_height = self.output_height(available);
         let editor_height = (available - toolbar_height - output_height - 4.0).max(40.0);
 
-        self.show_toolbar(ui, bus);
+        self.show_toolbar(ui);
         ui.add_space(2.0);
 
         // Consume Cmd+Enter / Ctrl+Enter BEFORE TextEdit sees it
@@ -191,7 +186,7 @@ impl Component for PythonEditorComponent {
             .ctx()
             .input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
         if run_shortcut {
-            self.run_code(bus);
+            self.run_code();
         }
 
         self.show_editor(ui, editor_height);

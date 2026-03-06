@@ -133,6 +133,13 @@ impl ApplicationHandler for App {
             ));
         }
 
+        // Request redraw when plugins have notifications to display.
+        // Without this, notification overlays and component state changes
+        // (like busy→idle transitions) won't render until a user event.
+        if !self.plugin_manager.notification_messages().is_empty() {
+            self.mark_dirty();
+        }
+
         if self.frame.quit_requested {
             event_loop.exit();
         }

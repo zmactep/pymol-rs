@@ -37,8 +37,9 @@ impl App {
 
         let mut viewport_rect_logical = egui::Rect::NOTHING;
 
-        // Check for pending async tasks and get their messages before entering the closure
-        let pending_messages = self.task_runner.pending_messages();
+        // Check for pending async tasks and plugin notifications
+        let mut pending_messages = self.task_runner.pending_messages();
+        pending_messages.extend(self.plugin_manager.notification_messages().iter().cloned());
 
         // Build SharedContext for components
         let all_command_names: Vec<String> = self.executor.registry().all_names().map(|s| s.to_string()).collect();

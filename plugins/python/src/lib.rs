@@ -12,6 +12,7 @@ mod engine;
 mod handler;
 mod highlight;
 mod widgets;
+mod worker;
 
 use std::sync::{Arc, Mutex};
 
@@ -21,43 +22,43 @@ use pymol_plugin::pymol_plugin;
 use backend::SharedState;
 use commands::PythonCommand;
 use editor::PythonEditorComponent;
-use engine::PythonEngine;
 use handler::PythonHandler;
+use worker::{EditorOutputHandle, WorkItem, WorkOrigin};
 
 pymol_plugin! {
     name: "python",
-    version: "0.2.0",
+    version: "0.3.0",
     description: "Embedded Python interpreter for scripting and automation",
     commands: [],
     register: |reg| {
-        // Shared engine and state
-        let engine = Arc::new(Mutex::new(PythonEngine::new()));
+        // Shared state for host ↔ Python communication
         let shared_state = Arc::new(Mutex::new(SharedState::new()));
 
-        // Register the `python` command (with `/` alias)
-        reg.register_command(PythonCommand::new(engine.clone()));
+        // Spawn the Python worker thread
+        let (worker_handle, result_rx) = worker::spawn_worker();
 
-        // Register .py script handler
-        let file_engine = engine.clone();
+        // Shared buffer for routing editor results
+        let editor_output: EditorOutputHandle = Arc::new(Mutex::new(Vec::new()));
+
+        // Register the `python` command (with `/` alias)
+        reg.register_command(PythonCommand::new(worker_handle.clone()));
+
+        // Register .py script handler (fire-and-forget: output via poll)
+        let script_worker = worker_handle.clone();
         reg.register_script_handler("py", move |path: &str| {
-            let mut eng = file_engine.lock().unwrap();
-            match eng.exec_file(path) {
-                Ok(output) => {
-                    if !output.is_empty() {
-                        log::info!("{}", output);
-                    }
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            }
+            script_worker.submit(WorkItem::ExecFile {
+                path: path.to_string(),
+                origin: WorkOrigin::Script,
+            });
+            Ok(())
         });
 
         // Script editor panel (Top slot, tabbed with REPL)
-        let editor = PythonEditorComponent::new(engine.clone());
+        let editor = PythonEditorComponent::new(worker_handle.clone(), editor_output.clone());
         reg.register_component(editor, PanelConfig::top(150.0));
 
-        // Message handler for poll-based state sync and backend installation
-        let handler = PythonHandler::new(engine, shared_state);
+        // Message handler for poll-based state sync, result draining, and backend installation
+        let handler = PythonHandler::new(worker_handle, shared_state, result_rx, editor_output);
         reg.set_message_handler(handler);
     },
 }

@@ -284,6 +284,15 @@ impl PythonEngine {
         match result {
             Ok(()) => {
                 self.initialized = true;
+
+                // Install Python's default SIGINT handler so that
+                // PyErr_SetInterrupt() (from WorkerHandle::request_interrupt)
+                // actually raises KeyboardInterrupt. In embedded mode, signal
+                // handlers aren't installed by default.
+                let _ = self.eval(
+                    "import signal; signal.signal(signal.SIGINT, signal.default_int_handler)"
+                );
+
                 Ok(())
             }
             Err(_) => {
@@ -347,11 +356,42 @@ impl PythonEngine {
         })
     }
 
-    /// Execute a Python script file.
-    pub fn exec_file(&mut self, path: &str) -> Result<String, String> {
-        let code = std::fs::read_to_string(path)
-            .map_err(|e| format!("failed to read {}: {}", path, e))?;
-        self.eval(&code)
+    /// Evaluate Python code with custom stdout/stderr writers.
+    ///
+    /// Unlike [`eval`], this does not capture output into a string — the
+    /// provided writer objects receive `write()` calls in real time.
+    /// Returns `Ok(())` on success or `Err(error_message)` on exception.
+    pub fn eval_with_writers(
+        &mut self,
+        code: &str,
+        stdout: &Bound<'_, PyAny>,
+        stderr: &Bound<'_, PyAny>,
+    ) -> Result<(), String> {
+        self.ensure_init()?;
+
+        Python::attach(|py| {
+            let sys = py.import("sys").map_err(|e| e.to_string())?;
+
+            let old_stdout = sys.getattr("stdout").map_err(|e| e.to_string())?;
+            let old_stderr = sys.getattr("stderr").map_err(|e| e.to_string())?;
+
+            sys.setattr("stdout", stdout).map_err(|e| e.to_string())?;
+            sys.setattr("stderr", stderr).map_err(|e| e.to_string())?;
+
+            let globals = py
+                .import("__main__")
+                .map_err(|e| e.to_string())?
+                .dict();
+
+            let c_code = CString::new(code).map_err(|e| e.to_string())?;
+            let result = py.run(&c_code, Some(&globals), None);
+
+            // Restore stdout/stderr before inspecting the result
+            let _ = sys.setattr("stdout", old_stdout);
+            let _ = sys.setattr("stderr", old_stderr);
+
+            result.map_err(|e| e.to_string())
+        })
     }
 
     /// Install the plugin backend into `sys._pymolrs_backend`.

@@ -19,7 +19,7 @@
 
 ## Why?
 
-PyMOL is the gold standard for molecular visualization — but it's 25 years of C/C++/Python accumulated into a monolith. PyMOL-RS is a clean-room rewrite that keeps the familiar command language and workflow while replacing the engine:
+PyMOL is the gold standard for molecular visualization — but it's 25 years of C/C++/Python accumulated into a monolith. PyMOL-RS started as a Rust port of the original PyMOL, carrying over many of its core algorithms and concepts, but has since evolved with its own architectural decisions. It aims to keep the familiar command language and workflow while replacing the engine:
 
 | | PyMOL (classic) | PyMOL-RS |
 |---|---|---|
