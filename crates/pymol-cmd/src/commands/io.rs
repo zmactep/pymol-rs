@@ -3,7 +3,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-use pymol_io::{read_file, FileFormat};
+use pymol_io::FileFormat;
 use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_mol::ObjectMolecule;
 use pymol_scene::MoleculeObject;
@@ -202,13 +202,36 @@ EXAMPLES
             _ => {}
         }
 
+        // Detect format
+        let builtin_format = format.unwrap_or_else(|| FileFormat::from_path(&path));
+
         // Load molecular file
-        let mut mol = if let Some(fmt) = format {
-            pymol_io::read_file_format(&path, fmt)
+        let mut mol = if builtin_format != FileFormat::Unknown {
+            // Built-in format
+            pymol_io::read_file_format(&path, builtin_format)
+                .map_err(|e| CmdError::FileFormat(e.to_string()))?
+        } else if let Some(handler) = ctx.format_handler(&ext) {
+            // Plugin-provided format
+            let reader_fn = handler.reader.as_ref().ok_or_else(|| {
+                CmdError::execution(format!(
+                    "Format '{}' does not support reading",
+                    handler.name
+                ))
+            })?;
+            let file = std::fs::File::open(&path)
+                .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+            let buf_reader: Box<dyn std::io::Read> = Box::new(std::io::BufReader::new(file));
+            let molecules = (reader_fn)(buf_reader)
+                .map_err(CmdError::FileFormat)?;
+            molecules.into_iter().next().ok_or_else(|| {
+                CmdError::FileFormat("No molecules in file".to_string())
+            })?
         } else {
-            read_file(&path)
-        }
-        .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+            return Err(CmdError::execution(format!(
+                "Unknown file format: .{} (no built-in or plugin handler found)",
+                ext
+            )));
+        };
 
         // Apply DSS (Define Secondary Structure) if auto_dss is enabled
         // This recalculates secondary structure based on backbone geometry
@@ -315,9 +338,9 @@ EXAMPLES
         }
 
         let format = FileFormat::from_extension(&ext);
-        if format == FileFormat::Unknown {
+        if format == FileFormat::Unknown && ctx.format_handler(&ext).is_none() {
             return Err(CmdError::execution(format!(
-                "Unknown file format: .{} (supported: pdb, cif, mol2, sdf, xyz, gro, prs)",
+                "Unknown file format: .{} (supported: pdb, cif, mol2, sdf, xyz, gro, prs + plugins)",
                 ext
             )));
         }
@@ -358,16 +381,36 @@ EXAMPLES
             ));
         }
 
-        // Write
         let total_atoms: usize = filtered.iter().map(|m| m.atom_count()).sum();
-        pymol_io::write_all(&path, &filtered)
-            .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+
+        // Write
+        let format_name = if format != FileFormat::Unknown {
+            // Built-in format
+            pymol_io::write_all(&path, &filtered)
+                .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+            format.name().to_string()
+        } else {
+            // Plugin-provided format
+            let handler = ctx.format_handler(&ext).unwrap();
+            let writer_fn = handler.writer.as_ref().ok_or_else(|| {
+                CmdError::execution(format!(
+                    "Format '{}' does not support writing",
+                    handler.name
+                ))
+            })?;
+            let file = std::fs::File::create(&path)
+                .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+            let buf_writer: Box<dyn std::io::Write> = Box::new(std::io::BufWriter::new(file));
+            (writer_fn)(buf_writer, &filtered)
+                .map_err(CmdError::FileFormat)?;
+            handler.name.clone()
+        };
 
         ctx.print(&format!(
             " Saved {} atoms to \"{}\" ({} format)",
             total_atoms,
             filename,
-            format.name()
+            format_name
         ));
 
         Ok(())

@@ -37,9 +37,9 @@ pymol_plugin! {
         // Register the `python` command (with `/` alias)
         reg.register_command(PythonCommand::new(engine.clone()));
 
-        // Register .py file handler
+        // Register .py script handler
         let file_engine = engine.clone();
-        reg.register_file_handler("py", move |path: &str| {
+        reg.register_script_handler("py", move |path: &str| {
             let mut eng = file_engine.lock().unwrap();
             match eng.exec_file(path) {
                 Ok(output) => {

@@ -3,10 +3,11 @@
 //! Dispatches and executes commands against a ViewerLike implementation.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use ahash::AHashMap;
 
-use crate::command::{CommandContext, CommandRegistry, FileHandler, OutputMessage, ViewerLike};
+use crate::command::{CommandContext, CommandRegistry, FormatHandler, ScriptHandler, OutputMessage, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
 use crate::logger::CommandLogger;
@@ -43,8 +44,10 @@ pub struct CommandExecutor {
     history: CommandHistory,
     /// Whether to echo commands
     echo: bool,
-    /// File handlers registered by plugins (extension -> handler)
-    file_handlers: AHashMap<String, FileHandler>,
+    /// Script handlers registered by plugins (extension -> handler for `run` command)
+    script_handlers: AHashMap<String, ScriptHandler>,
+    /// Format handlers registered by plugins (extension -> handler for `load`/`save`)
+    format_handlers: AHashMap<String, Arc<FormatHandler>>,
 }
 
 impl Default for CommandExecutor {
@@ -61,7 +64,8 @@ impl CommandExecutor {
             logger: CommandLogger::new(),
             history: CommandHistory::new(),
             echo: false,
-            file_handlers: AHashMap::new(),
+            script_handlers: AHashMap::new(),
+            format_handlers: AHashMap::new(),
         }
     }
 
@@ -95,16 +99,32 @@ impl CommandExecutor {
         &mut self.logger
     }
 
-    /// Register a file handler for a specific extension.
+    /// Register a script handler for a specific extension.
     ///
     /// Used by plugins to handle non-.pml files in the `run` command.
-    pub fn register_file_handler(&mut self, extension: impl Into<String>, handler: FileHandler) {
-        self.file_handlers.insert(extension.into(), handler);
+    pub fn register_script_handler(&mut self, extension: impl Into<String>, handler: ScriptHandler) {
+        self.script_handlers.insert(extension.into(), handler);
     }
 
-    /// Get a reference to the file handlers map
-    pub fn file_handlers(&self) -> &AHashMap<String, FileHandler> {
-        &self.file_handlers
+    /// Get a reference to the script handlers map
+    pub fn script_handlers(&self) -> &AHashMap<String, ScriptHandler> {
+        &self.script_handlers
+    }
+
+    /// Register a format handler for `load`/`save`.
+    ///
+    /// Each extension in the handler's list gets an entry pointing to the
+    /// shared handler. Built-in formats always take priority over plugins.
+    pub fn register_format_handler(&mut self, handler: FormatHandler) {
+        let handler = Arc::new(handler);
+        for ext in &handler.extensions {
+            self.format_handlers.insert(ext.clone(), handler.clone());
+        }
+    }
+
+    /// Get a reference to the format handlers map
+    pub fn format_handlers(&self) -> &AHashMap<String, Arc<FormatHandler>> {
+        &self.format_handlers
     }
 
     /// Execute a single command string
@@ -176,7 +196,8 @@ impl CommandExecutor {
             .with_quiet(quiet)
             .with_log(log)
             .with_registry(&self.registry)
-            .with_file_handlers(&self.file_handlers);
+            .with_script_handlers(&self.script_handlers)
+            .with_format_handlers(&self.format_handlers);
         command.execute(&mut ctx, &parsed)?;
 
         // Return collected output

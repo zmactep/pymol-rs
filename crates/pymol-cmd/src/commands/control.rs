@@ -373,7 +373,7 @@ EXAMPLES
                 engine.run_pml(ctx.viewer, &path)
             }
             other => {
-                if let Some(handler) = ctx.file_handler(other) {
+                if let Some(handler) = ctx.script_handler(other) {
                     let path_str = path.to_str().ok_or_else(|| {
                         CmdError::Execution("invalid path encoding".to_string())
                     })?;

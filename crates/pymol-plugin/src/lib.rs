@@ -51,8 +51,8 @@ pub mod prelude {
 
     // Plugin API
     pub use crate::registrar::{
-        CommandResult, DynamicCommandInvocation, MessageHandler,
-        PluginMetadata, PluginRegistrar, PollContext,
+        CommandResult, DynamicCommandInvocation, FormatHandler, MessageHandler,
+        PluginMetadata, PluginReaderFn, PluginRegistrar, PluginWriterFn, PollContext,
     };
     // pymol_plugin! macro is auto-exported via #[macro_export]
 }

@@ -174,9 +174,14 @@ impl PluginManager {
             executor.registry_mut().register_boxed(cmd);
         }
 
-        // Register file handlers
-        for (ext, handler) in registrar.drain_file_handlers() {
-            executor.register_file_handler(ext, handler);
+        // Register script handlers
+        for (ext, handler) in registrar.drain_script_handlers() {
+            executor.register_script_handler(ext, handler);
+        }
+
+        // Register format handlers (for load/save)
+        for handler in registrar.drain_format_handlers() {
+            executor.register_format_handler(handler);
         }
 
         // Register components

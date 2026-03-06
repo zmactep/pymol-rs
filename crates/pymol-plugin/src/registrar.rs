@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use pymol_cmd::Command;
-pub use pymol_cmd::FileHandler;
 pub use pymol_cmd::DynamicCommandInvocation;
+pub use pymol_cmd::{FormatHandler, PluginReaderFn, PluginWriterFn, ScriptHandler};
 use pymol_framework::component::{Component, SharedContext};
 use pymol_framework::layout::PanelConfig;
 use pymol_framework::message::{AppMessage, MessageBus};
@@ -160,7 +160,8 @@ pub struct PluginRegistrar {
     pub(crate) commands: Vec<Box<dyn Command>>,
     pub(crate) components: Vec<(Box<dyn Component>, PanelConfig)>,
     pub(crate) message_handler: Option<Box<dyn MessageHandler>>,
-    pub(crate) file_handlers: Vec<(String, FileHandler)>,
+    pub(crate) script_handlers: Vec<(String, ScriptHandler)>,
+    pub(crate) format_handlers: Vec<FormatHandler>,
 }
 
 impl PluginRegistrar {
@@ -171,7 +172,8 @@ impl PluginRegistrar {
             commands: Vec::new(),
             components: Vec::new(),
             message_handler: None,
-            file_handlers: Vec::new(),
+            script_handlers: Vec::new(),
+            format_handlers: Vec::new(),
         }
     }
 
@@ -195,17 +197,26 @@ impl PluginRegistrar {
         self.message_handler = Some(Box::new(handler));
     }
 
-    /// Register a file handler for a specific extension.
+    /// Register a script handler for a specific extension.
     ///
     /// Used by the builtin `run` command to dispatch non-.pml files
     /// to the appropriate plugin (e.g., `.py` → Python plugin).
-    pub fn register_file_handler(
+    pub fn register_script_handler(
         &mut self,
         extension: &str,
         handler: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
     ) {
-        self.file_handlers
+        self.script_handlers
             .push((extension.to_string(), Arc::new(handler)));
+    }
+
+    /// Register a file format handler for `load` and `save` commands.
+    ///
+    /// The handler specifies supported extensions and optional reader/writer
+    /// factories. When a user runs `load file.ext` or `save file.ext` and
+    /// the extension matches, the plugin's reader or writer is used.
+    pub fn register_format_handler(&mut self, handler: FormatHandler) {
+        self.format_handlers.push(handler);
     }
 
     // =================================================================
@@ -232,9 +243,14 @@ impl PluginRegistrar {
         self.message_handler.take()
     }
 
-    /// Drain all registered file handlers.
-    pub fn drain_file_handlers(&mut self) -> Vec<(String, FileHandler)> {
-        std::mem::take(&mut self.file_handlers)
+    /// Drain all registered script handlers.
+    pub fn drain_script_handlers(&mut self) -> Vec<(String, ScriptHandler)> {
+        std::mem::take(&mut self.script_handlers)
+    }
+
+    /// Drain all registered format handlers.
+    pub fn drain_format_handlers(&mut self) -> Vec<FormatHandler> {
+        std::mem::take(&mut self.format_handlers)
     }
 }
 

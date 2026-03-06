@@ -2,14 +2,42 @@
 //!
 //! Defines the interface for commands and the registry that maps names to implementations.
 
+use std::io::{Read, Write};
 use std::sync::Arc;
 
 use ahash::AHashMap;
+use pymol_mol::ObjectMolecule;
 
-/// A file handler registered by a plugin for a specific file extension.
+/// A script handler registered by a plugin for a specific file extension.
 ///
 /// Used by the `run` command to dispatch non-.pml files to the appropriate handler.
-pub type FileHandler = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+pub type ScriptHandler = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+/// Factory that reads molecules from a plugin-provided file format.
+///
+/// The host opens the file and passes a `Box<dyn Read>`. The plugin
+/// parses the content and returns molecules.
+pub type PluginReaderFn =
+    Arc<dyn Fn(Box<dyn Read>) -> Result<Vec<ObjectMolecule>, String> + Send + Sync>;
+
+/// Factory that writes molecules in a plugin-provided file format.
+///
+/// The host opens the file and passes a `Box<dyn Write>`. The plugin
+/// serializes the molecules.
+pub type PluginWriterFn =
+    Arc<dyn Fn(Box<dyn Write>, &[ObjectMolecule]) -> Result<(), String> + Send + Sync>;
+
+/// A plugin-provided file format handler for `load` and `save` commands.
+pub struct FormatHandler {
+    /// Human-readable format name (e.g., "MMTF", "DCD")
+    pub name: String,
+    /// File extensions this handler supports (lowercase, no dot, e.g., `["mmtf"]`)
+    pub extensions: Vec<String>,
+    /// Reader factory, or `None` if the format is write-only
+    pub reader: Option<PluginReaderFn>,
+    /// Writer factory, or `None` if the format is read-only
+    pub writer: Option<PluginWriterFn>,
+}
 
 // Re-export ViewerLike from pymol-scene
 pub use pymol_scene::ViewerLike;
@@ -118,8 +146,10 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     output_buffer: Vec<OutputMessage>,
     /// Optional reference to command registry (for help lookups)
     registry: Option<&'r CommandRegistry>,
-    /// File handlers registered by plugins (extension -> handler)
-    file_handlers: Option<&'r AHashMap<String, FileHandler>>,
+    /// Script handlers registered by plugins (extension -> handler)
+    script_handlers: Option<&'r AHashMap<String, ScriptHandler>>,
+    /// Format handlers registered by plugins (extension -> handler)
+    format_handlers: Option<&'r AHashMap<String, Arc<FormatHandler>>>,
 }
 
 impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
@@ -131,7 +161,8 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
             log: true,
             output_buffer: Vec::new(),
             registry: None,
-            file_handlers: None,
+            script_handlers: None,
+            format_handlers: None,
         }
     }
 
@@ -153,9 +184,9 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         self
     }
 
-    /// Set the file handlers reference
-    pub fn with_file_handlers(mut self, handlers: &'r AHashMap<String, FileHandler>) -> Self {
-        self.file_handlers = Some(handlers);
+    /// Set the script handlers reference
+    pub fn with_script_handlers(mut self, handlers: &'r AHashMap<String, ScriptHandler>) -> Self {
+        self.script_handlers = Some(handlers);
         self
     }
 
@@ -164,9 +195,20 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         self.registry
     }
 
-    /// Get a file handler for the given extension
-    pub fn file_handler(&self, ext: &str) -> Option<&FileHandler> {
-        self.file_handlers.and_then(|h| h.get(ext))
+    /// Set the format handlers reference
+    pub fn with_format_handlers(mut self, handlers: &'r AHashMap<String, Arc<FormatHandler>>) -> Self {
+        self.format_handlers = Some(handlers);
+        self
+    }
+
+    /// Get a script handler for the given extension
+    pub fn script_handler(&self, ext: &str) -> Option<&ScriptHandler> {
+        self.script_handlers.and_then(|h| h.get(ext))
+    }
+
+    /// Get a format handler for the given extension
+    pub fn format_handler(&self, ext: &str) -> Option<&Arc<FormatHandler>> {
+        self.format_handlers.and_then(|h| h.get(ext))
     }
 
     /// Print an info message (unless quiet mode is enabled)
