@@ -1,10 +1,29 @@
-.PHONY: all build release debug python python-release python-dev clean test help \
-       plugins app icon sign notarize dmg
+.PHONY: all build release debug test clean run help \
+       python python-release python-dev \
+       plugins plugins-install \
+       icon app app-full \
+       sign sign-full notarize dmg dmg-full
 
-# Default target
+# ── Variables ─────────────────────────────────────────────────────
+
+APP_NAME       := PyMOL-RS
+APP_DIR        := target/app/$(APP_NAME).app
+BUNDLE_ID      := me.yakovlev.pymol-rs
+VERSION        := 0.2.0
+ICON_SRC       := images/pymol-rs.png
+ICONSET        := target/app/AppIcon.iconset
+ICNS           := target/app/AppIcon.icns
+BINARY         := target/release/pymol-rs
+PLIST_TPL      := macos/Info.plist.in
+PYTHON_VERSION := 3.13
+ENV_FILE       := .env
+
+# Python installation managed by uv (--system skips project venvs)
+PYTHON_DIST = $(shell uv python find --system $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
+
+# ── Build ─────────────────────────────────────────────────────────
+
 all: release python-release
-
-# ── Build ──────────────────────────────────────────────────────────
 
 build: debug
 
@@ -14,6 +33,18 @@ debug:
 release:
 	cargo build --release
 
+test:
+	cargo test
+
+run:
+	./target/release/pymol-rs
+
+clean:
+	cargo clean
+	rm -rf python/target target/wheels target/app target/dmg-stage target/$(APP_NAME).dmg
+
+# ── Python ────────────────────────────────────────────────────────
+
 python: python-release
 
 python-release:
@@ -22,92 +53,116 @@ python-release:
 python-dev:
 	cd python && maturin develop
 
-test:
-	cargo test
+# ── Plugins ───────────────────────────────────────────────────────
 
 plugins:
 	cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin
+	mkdir -p target/release/plugins
+	cp target/release/lib*_plugin.dylib target/release/plugins/ 2>/dev/null || \
+	cp target/release/lib*_plugin.so    target/release/plugins/ 2>/dev/null || \
+	cp target/release/*_plugin.dll      target/release/plugins/ 2>/dev/null || true
+
+plugins-install: plugins
 	mkdir -p ~/.pymol-rs/plugins
-	cp target/release/lib*_plugin.dylib ~/.pymol-rs/plugins/ 2>/dev/null || \
-	cp target/release/lib*_plugin.so ~/.pymol-rs/plugins/ 2>/dev/null || \
-	cp target/release/*_plugin.dll ~/.pymol-rs/plugins/ 2>/dev/null || true
+	cp target/release/plugins/* ~/.pymol-rs/plugins/
 
-clean:
-	cargo clean
-	rm -rf python/target
-	rm -rf target/wheels
-	rm -rf target/app
-	rm -rf target/PyMOL-RS.dmg
+# ── macOS App Bundle ──────────────────────────────────────────────
 
-run:
-	./target/release/pymol-rs
-
-# ── macOS App Bundle ───────────────────────────────────────────────
-
-APP_NAME     := PyMOL-RS
-APP_DIR      := target/app/$(APP_NAME).app
-BUNDLE_ID    := me.yakovlev.pymol-rs
-VERSION      := 0.2.0
-ICON_SRC     := images/pymol-rs.png
-ICONSET      := target/app/AppIcon.iconset
-ICNS         := target/app/AppIcon.icns
-BINARY       := target/release/pymol-rs
-PLIST_TPL    := macos/Info.plist.in
-
-# .env is sourced by sign/notarize/dmg targets at shell level.
-# It must define: PYMOL_RS_APPLE_TEAMID, PYMOL_RS_APPLE_EMAIL, PYMOL_RS_APPLE_APP_PASS
-ENV_FILE := .env
-
-# Generate .icns from source PNG
 icon: $(ICON_SRC)
 	@echo "── Generating .icns ──"
 	@mkdir -p $(ICONSET)
-	sips -z   16   16 $(ICON_SRC) --out $(ICONSET)/icon_16x16.png      >/dev/null
-	sips -z   32   32 $(ICON_SRC) --out $(ICONSET)/icon_16x16@2x.png   >/dev/null
-	sips -z   32   32 $(ICON_SRC) --out $(ICONSET)/icon_32x32.png      >/dev/null
-	sips -z   64   64 $(ICON_SRC) --out $(ICONSET)/icon_32x32@2x.png   >/dev/null
-	sips -z  128  128 $(ICON_SRC) --out $(ICONSET)/icon_128x128.png    >/dev/null
-	sips -z  256  256 $(ICON_SRC) --out $(ICONSET)/icon_128x128@2x.png >/dev/null
-	sips -z  256  256 $(ICON_SRC) --out $(ICONSET)/icon_256x256.png    >/dev/null
-	sips -z  512  512 $(ICON_SRC) --out $(ICONSET)/icon_256x256@2x.png >/dev/null
-	sips -z  512  512 $(ICON_SRC) --out $(ICONSET)/icon_512x512.png    >/dev/null
-	sips -z 1024 1024 $(ICON_SRC) --out $(ICONSET)/icon_512x512@2x.png >/dev/null
+	@for size in 16 32 64 128 256 512 1024; do \
+	    sips -z $$size $$size $(ICON_SRC) --out $(ICONSET)/icon_$${size}x$${size}.png >/dev/null 2>&1; \
+	done
+	@sips -z   32   32 $(ICON_SRC) --out $(ICONSET)/icon_16x16@2x.png    >/dev/null
+	@sips -z   64   64 $(ICON_SRC) --out $(ICONSET)/icon_32x32@2x.png    >/dev/null
+	@sips -z  256  256 $(ICON_SRC) --out $(ICONSET)/icon_128x128@2x.png  >/dev/null
+	@sips -z  512  512 $(ICON_SRC) --out $(ICONSET)/icon_256x256@2x.png  >/dev/null
+	@sips -z 1024 1024 $(ICON_SRC) --out $(ICONSET)/icon_512x512@2x.png  >/dev/null
+	@rm -f $(ICONSET)/icon_64x64.png $(ICONSET)/icon_1024x1024.png
 	iconutil -c icns $(ICONSET) -o $(ICNS)
 	@rm -rf $(ICONSET)
 	@echo "✓ $(ICNS)"
 
-# Build .app bundle (release build + icon + Info.plist)
-app: release icon
-	@echo "── Assembling $(APP_NAME).app ──"
-	@mkdir -p $(APP_DIR)/Contents/MacOS
-	@mkdir -p $(APP_DIR)/Contents/Resources
+# Shared: assemble base .app structure (binary + icon + Info.plist)
+define assemble-app
+	@rm -rf $(APP_DIR)
+	@mkdir -p $(APP_DIR)/Contents/MacOS $(APP_DIR)/Contents/Resources
 	cp $(BINARY) $(APP_DIR)/Contents/MacOS/pymol-rs
 	cp $(ICNS)   $(APP_DIR)/Contents/Resources/AppIcon.icns
 	sed -e 's/@APP_NAME@/$(APP_NAME)/g' \
 	    -e 's/@BUNDLE_ID@/$(BUNDLE_ID)/g' \
 	    -e 's/@VERSION@/$(VERSION)/g' \
 	    $(PLIST_TPL) > $(APP_DIR)/Contents/Info.plist
-	@rm $(ICNS)
+	@rm -f $(ICNS)
+endef
+
+# Minimal .app (binary only)
+app: release icon
+	@echo "── Assembling $(APP_NAME).app ──"
+	$(assemble-app)
 	@echo "✓ $(APP_DIR)"
 
-# Code-sign (requires Apple Developer certificate)
-sign: app
-	@echo "── Signing $(APP_NAME).app ──"
+# Full .app (binary + plugins + Python + venv)
+app-full: release plugins icon python-release
+	@echo "── Creating bundled venv (uv + Python $(PYTHON_VERSION)) ──"
+	@rm -rf target/app/python-venv
+	uv venv --python $(PYTHON_VERSION) target/app/python-venv
+	uv pip install --python target/app/python-venv/bin/python3 \
+	    $$(ls python/target/wheels/pymol_rs-*.whl | head -1)
+	@echo "── Assembling full $(APP_NAME).app ──"
+	$(assemble-app)
+	@mkdir -p $(APP_DIR)/Contents/PlugIns
+	cp target/release/lib*_plugin.dylib $(APP_DIR)/Contents/PlugIns/ 2>/dev/null || true
+	cp target/release/lib*_plugin.so    $(APP_DIR)/Contents/PlugIns/ 2>/dev/null || true
+	cp -R $(PYTHON_DIST)               $(APP_DIR)/Contents/Resources/python
+	cp -R target/app/python-venv        $(APP_DIR)/Contents/Resources/python-venv
+	bash macos/fix-dylib-paths.sh $(APP_DIR)
+	@echo "✓ $(APP_DIR) (full bundle)"
+
+# ── Code Signing ──────────────────────────────────────────────────
+
+# Shared: load signing identity from .env
+define load-identity
 	@test -f $(ENV_FILE) || { echo "ERROR: $(ENV_FILE) not found"; exit 1; }
 	. ./$(ENV_FILE) && \
-	  test -n "$$PYMOL_RS_APPLE_TEAMID" || { echo "ERROR: PYMOL_RS_APPLE_TEAMID not set in $(ENV_FILE)"; exit 1; } && \
-	  codesign --force --options runtime --sign "Developer ID Application: $$PYMOL_RS_APPLE_TEAMID" $(APP_DIR) && \
+	  test -n "$$PYMOL_RS_APPLE_TEAMID" || { echo "ERROR: PYMOL_RS_APPLE_TEAMID not set in $(ENV_FILE)"; exit 1; }
+endef
+
+sign: app
+	@echo "── Signing $(APP_NAME).app ──"
+	$(load-identity)
+	. ./$(ENV_FILE) && \
+	  codesign --force --options runtime \
+	    --sign "Developer ID Application: $$PYMOL_RS_APPLE_TEAMID" $(APP_DIR) && \
 	  codesign --verify --verbose $(APP_DIR)
 	@echo "✓ Signed"
 
-# Notarize with Apple
-notarize: sign
+sign-full: app-full
+	@echo "── Deep-signing $(APP_NAME).app ──"
+	$(load-identity)
+	. ./$(ENV_FILE) && \
+	  IDENTITY="Developer ID Application: $$PYMOL_RS_APPLE_TEAMID" && \
+	  find $(APP_DIR)/Contents/Resources/python \
+	       $(APP_DIR)/Contents/Resources/python-venv \
+	       $(APP_DIR)/Contents/PlugIns \
+	    -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null | \
+	    xargs -I{} codesign --force --options runtime --sign "$$IDENTITY" {} && \
+	  codesign --force --options runtime --sign "$$IDENTITY" \
+	    $(APP_DIR)/Contents/Resources/python/bin/python3 && \
+	  codesign --force --options runtime --sign "$$IDENTITY" $(APP_DIR) && \
+	  codesign --verify --verbose --deep $(APP_DIR)
+	@echo "✓ Signed (deep)"
+
+# ── Notarize & DMG ───────────────────────────────────────────────
+
+notarize:
 	@echo "── Notarizing $(APP_NAME).app ──"
 	@test -f $(ENV_FILE) || { echo "⚠ Notarization skipped: $(ENV_FILE) not found"; exit 0; }
 	@. ./$(ENV_FILE) && \
 	  test -n "$$PYMOL_RS_APPLE_EMAIL" && \
 	  test -n "$$PYMOL_RS_APPLE_TEAMID" && \
-	  test -n "$$PYMOL_RS_APPLE_APP_PASS" || { echo "⚠ Notarization skipped: missing credentials in $(ENV_FILE)"; exit 0; }
+	  test -n "$$PYMOL_RS_APPLE_APP_PASS" || { echo "⚠ Notarization skipped: missing credentials"; exit 0; }
 	@. ./$(ENV_FILE) && \
 	  ditto -c -k --keepParent $(APP_DIR) target/app/$(APP_NAME).zip && \
 	  xcrun notarytool submit target/app/$(APP_NAME).zip \
@@ -120,39 +175,48 @@ notarize: sign
 	  echo "⚠ Notarization failed — continuing without it"
 	@rm -f target/app/$(APP_NAME).zip
 
-# Create distributable DMG
-dmg: sign
+# Shared: create DMG from a clean staging directory (only .app + Applications link)
+define create-dmg
 	$(MAKE) notarize
 	@echo "── Creating DMG ──"
-	@ln -sf /Applications target/app/Applications
+	@rm -rf target/dmg-stage
+	@mkdir -p target/dmg-stage
+	@cp -R $(APP_DIR) target/dmg-stage/
+	@ln -sf /Applications target/dmg-stage/Applications
 	hdiutil create -volname "$(APP_NAME)" \
-	    -srcfolder target/app \
-	    -ov -format UDZO \
+	    -srcfolder target/dmg-stage -ov -format UDZO \
 	    target/$(APP_NAME).dmg
-	@rm -f target/app/Applications
+	@rm -rf target/dmg-stage
 	@echo "✓ target/$(APP_NAME).dmg"
+endef
 
-# ── Help ───────────────────────────────────────────────────────────
+dmg: sign
+	$(create-dmg)
+
+dmg-full: sign-full
+	$(create-dmg)
+
+# ── Help ──────────────────────────────────────────────────────────
 
 help:
-	@echo "Available targets:"
-	@echo "  all            - Build release binaries and Python wheel"
-	@echo "  build/debug    - Build Rust workspace (debug)"
-	@echo "  release        - Build Rust workspace (release)"
-	@echo "  run            - Run release version of GUI interface"
-	@echo "  python         - Build Python wheel (release)"
-	@echo "  python-dev     - Install Python package in development mode"
-	@echo "  test           - Run tests"
-	@echo "  clean          - Clean all build artifacts"
+	@echo "Build:"
+	@echo "  all              Build release binaries and Python wheel"
+	@echo "  debug / release  Build Rust workspace"
+	@echo "  test             Run tests"
+	@echo "  run              Launch GUI (release)"
+	@echo "  python           Build Python wheel (release)"
+	@echo "  python-dev       Install Python package in dev mode"
+	@echo "  plugins          Build all plugins (release)"
+	@echo "  plugins-install  Build + install plugins to ~/.pymol-rs/plugins"
+	@echo "  clean            Clean all build artifacts"
 	@echo ""
-	@echo "  app            - Build macOS .app bundle (release + icon)"
-	@echo "  sign           - Code-sign the .app (needs PYMOL_RS_APPLE_TEAMID)"
-	@echo "  notarize       - Notarize with Apple (needs _EMAIL, _TEAMID, _APP_PASS)"
-	@echo "  dmg            - Create distributable DMG (sign + notarize + package)"
+	@echo "macOS app bundle:"
+	@echo "  app              Minimal .app (binary + icon)"
+	@echo "  app-full         Full .app (+ plugins + Python + venv)"
+	@echo "  sign / sign-full Code-sign the .app"
+	@echo "  dmg / dmg-full   Distributable DMG (signed + notarized)"
 	@echo ""
-	@echo "Environment variables for signing:"
-	@echo "  PYMOL_RS_APPLE_TEAMID   - Apple Developer Team ID"
-	@echo "  PYMOL_RS_APPLE_EMAIL    - Apple ID email"
-	@echo "  PYMOL_RS_APPLE_APP_PASS - App-specific password"
-	@echo ""
-	@echo "  help           - Show this help message"
+	@echo "Signing credentials (.env):"
+	@echo "  PYMOL_RS_APPLE_TEAMID    Apple Developer Team ID"
+	@echo "  PYMOL_RS_APPLE_EMAIL     Apple ID email"
+	@echo "  PYMOL_RS_APPLE_APP_PASS  App-specific password"

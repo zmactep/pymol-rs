@@ -14,6 +14,7 @@
 
 pub mod app;
 pub mod async_tasks;
+pub mod bundle;
 pub mod components;
 pub mod fetch;
 pub mod layout;

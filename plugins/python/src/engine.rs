@@ -48,9 +48,53 @@ impl ConfigStatus {
     }
 }
 
+/// Check if running inside a macOS `.app` bundle and return the bundled Python path.
+fn bundled_python_path() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let contents = macos_dir.parent()?;
+    let python = contents.join("Resources/python/bin/python3");
+    if python.is_file() {
+        Some(python)
+    } else {
+        None
+    }
+}
+
+/// Return the bundled venv's `site-packages` path if running inside a `.app` bundle.
+fn bundled_venv_site_packages() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let contents = macos_dir.parent()?;
+    let venv_lib = contents.join("Resources/python-venv/lib");
+    if !venv_lib.is_dir() {
+        return None;
+    }
+    // Find python3.X/site-packages inside the venv lib/
+    let entries = std::fs::read_dir(&venv_lib).ok()?;
+    for entry in entries.flatten() {
+        let sp = entry.path().join("site-packages");
+        if sp.is_dir() {
+            return Some(sp.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
 /// Build a list of Python executables to probe, preferring venv if available.
 fn python_candidates() -> Vec<std::path::PathBuf> {
     let mut candidates = Vec::new();
+
+    // 0. Bundled Python inside .app bundle (highest priority)
+    if let Some(bundled) = bundled_python_path() {
+        candidates.push(bundled);
+    }
 
     // 1. VIRTUAL_ENV env var (activated venv)
     if let Some(venv) = std::env::var_os("VIRTUAL_ENV") {
@@ -163,6 +207,11 @@ print(sp[0] if sp else '')
         // If this candidate lives in a venv, add its site-packages
         if prefix != base_prefix && !site_packages.is_empty() {
             prepend_pythonpath(site_packages);
+        }
+
+        // If running from a .app bundle, also add the bundled venv's site-packages
+        if let Some(sp) = bundled_venv_site_packages() {
+            prepend_pythonpath(&sp);
         }
 
         ConfigStatus::Ready.store();

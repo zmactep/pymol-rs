@@ -58,16 +58,24 @@ fn main() {
         // TODO: Implement state loading
     }
 
-    // Load plugins
+    // Load plugins: bundled first (inside .app), then user directory
     {
-        let plugin_dir = args.plugin_dir.unwrap_or_else(|| {
+        if let Some(contents) = pymol_gui::bundle::bundle_contents_dir() {
+            let bundle_plugins = contents.join("PlugIns");
+            if bundle_plugins.is_dir() {
+                log::info!("Loading bundled plugins from {:?}", bundle_plugins);
+                app.load_plugins(&bundle_plugins);
+            }
+        }
+
+        let user_plugin_dir = args.plugin_dir.unwrap_or_else(|| {
             let mut dir = dirs::home_dir().unwrap_or_default();
             dir.push(".pymol-rs");
             dir.push("plugins");
             dir
         });
-        if plugin_dir.is_dir() {
-            app.load_plugins(&plugin_dir);
+        if user_plugin_dir.is_dir() {
+            app.load_plugins(&user_plugin_dir);
         }
     }
 
