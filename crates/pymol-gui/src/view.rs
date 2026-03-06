@@ -6,7 +6,7 @@
 //! Split into focused sub-structs:
 //! - [`GpuResources`] — wgpu device, surface, depth buffer, pipelines
 //! - [`EguiIntegration`] — egui context, input state, renderer
-//! - [`RayOverlay`] — raytraced image overlay texture
+//! - [`ImageOverlay`] — viewport image overlay texture
 
 use std::sync::Arc;
 
@@ -92,15 +92,15 @@ impl EguiIntegration {
     }
 }
 
-/// Raytraced image overlay state.
-pub struct RayOverlay {
-    /// egui texture ID for the raytraced overlay
+/// Viewport image overlay state.
+pub struct ImageOverlay {
+    /// egui texture ID for the image overlay
     pub texture_id: Option<egui::TextureId>,
-    /// Size of the current raytraced overlay texture
+    /// Size of the current overlay texture
     pub size: Option<(u32, u32)>,
 }
 
-impl RayOverlay {
+impl ImageOverlay {
     fn new() -> Self {
         Self {
             texture_id: None,
@@ -120,7 +120,7 @@ pub struct AppView {
     pub window: Option<Arc<Window>>,
     /// Viewport rect for 3D rendering (in physical pixels)
     pub viewport_rect: Option<egui::Rect>,
-    pub ray_overlay: RayOverlay,
+    pub image_overlay: ImageOverlay,
 }
 
 impl Default for AppView {
@@ -137,7 +137,7 @@ impl AppView {
             egui: EguiIntegration::new(),
             window: None,
             viewport_rect: None,
-            ray_overlay: RayOverlay::new(),
+            image_overlay: ImageOverlay::new(),
         }
     }
 
@@ -294,8 +294,8 @@ impl AppView {
             .unwrap_or(true) // Default to true if no viewport rect yet
     }
 
-    /// Update the raytraced overlay texture from image data
-    pub fn update_ray_overlay(&mut self, data: &[u8], width: u32, height: u32) -> Option<egui::TextureId> {
+    /// Update the image overlay texture from RGBA data
+    pub fn update_image_overlay(&mut self, data: &[u8], width: u32, height: u32) -> Option<egui::TextureId> {
         let egui_renderer = self.egui.renderer.as_mut()?;
         let context = self.gpu.render_context.as_ref()?;
         let device = context.device();
@@ -308,7 +308,7 @@ impl AppView {
         );
 
         // Create or update the texture
-        let texture_id = if let Some(existing_id) = self.ray_overlay.texture_id {
+        let texture_id = if let Some(existing_id) = self.image_overlay.texture_id {
             // Free the old texture and create a new one (size may have changed)
             egui_renderer.free_texture(&existing_id);
             let id = egui_renderer.register_native_texture(
@@ -316,7 +316,7 @@ impl AppView {
                 &Self::create_egui_texture(device, queue, &color_image),
                 wgpu::FilterMode::Linear,
             );
-            self.ray_overlay.texture_id = Some(id);
+            self.image_overlay.texture_id = Some(id);
             id
         } else {
             // Create new texture
@@ -325,26 +325,26 @@ impl AppView {
                 &Self::create_egui_texture(device, queue, &color_image),
                 wgpu::FilterMode::Linear,
             );
-            self.ray_overlay.texture_id = Some(id);
+            self.image_overlay.texture_id = Some(id);
             id
         };
 
-        self.ray_overlay.size = Some((width, height));
+        self.image_overlay.size = Some((width, height));
         Some(texture_id)
     }
 
-    /// Clear the raytraced overlay texture
-    pub fn clear_ray_overlay(&mut self) {
-        if let (Some(id), Some(renderer)) = (self.ray_overlay.texture_id.take(), &mut self.egui.renderer) {
+    /// Clear the image overlay texture
+    pub fn clear_image_overlay(&mut self) {
+        if let (Some(id), Some(renderer)) = (self.image_overlay.texture_id.take(), &mut self.egui.renderer) {
             renderer.free_texture(&id);
         }
-        self.ray_overlay.size = None;
+        self.image_overlay.size = None;
     }
 
     /// Create a wgpu texture view from an egui ColorImage
     fn create_egui_texture(device: &wgpu::Device, queue: &wgpu::Queue, image: &egui::ColorImage) -> wgpu::TextureView {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Ray Overlay Texture"),
+            label: Some("Image Overlay Texture"),
             size: wgpu::Extent3d {
                 width: image.width() as u32,
                 height: image.height() as u32,

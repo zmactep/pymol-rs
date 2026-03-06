@@ -532,19 +532,19 @@ EXAMPLES
                 ));
                 ctx.print(&format!(" Saved \"{}\"", path.display()));
             }
-        } else if let Some(ray_img) = ctx.viewer.get_raytraced_image() {
-            // Export stored raytraced image
+        } else if let Some(vp_img) = ctx.viewer.get_viewport_image() {
+            // Export stored viewport image overlay
             use image::RgbaImage;
 
-            let img = RgbaImage::from_raw(ray_img.width, ray_img.height, ray_img.data.clone())
-                .ok_or_else(|| CmdError::execution("Invalid raytraced image data".to_string()))?;
+            let img = RgbaImage::from_raw(vp_img.width, vp_img.height, vp_img.data.clone())
+                .ok_or_else(|| CmdError::execution("Invalid viewport image data".to_string()))?;
 
             img.save(&path)
                 .map_err(|e| CmdError::execution(format!("Failed to save PNG: {}", e)))?;
 
             if !quiet {
-                ctx.print(&format!(" ({}x{})", ray_img.width, ray_img.height));
-                ctx.print(&format!(" Saved raytraced image to \"{}\"", path.display()));
+                ctx.print(&format!(" ({}x{})", vp_img.width, vp_img.height));
+                ctx.print(&format!(" Saved viewport image to \"{}\"", path.display()));
             }
         } else {
             // Capture rasterized screenshot

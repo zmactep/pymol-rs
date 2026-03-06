@@ -56,6 +56,15 @@ pub enum AppMessage {
     ActivateTab(String),
 
     // =====================================================================
+    // Viewport Image Overlay
+    // =====================================================================
+    /// Display an RGBA image overlay in the viewport.
+    /// Plugins and commands can use this to show rendered or computed images.
+    SetViewportImage { data: Vec<u8>, width: u32, height: u32 },
+    /// Clear the viewport image overlay.
+    ClearViewportImage,
+
+    // =====================================================================
     // Extensibility (Plugins)
     // =====================================================================
     /// Custom event for plugins. `topic` identifies the message type,
@@ -161,6 +170,16 @@ impl MessageBus {
     /// Send a `RequestRedraw` message.
     pub fn request_redraw(&mut self) {
         self.send(AppMessage::RequestRedraw);
+    }
+
+    /// Send a `SetViewportImage` message to display an RGBA image in the viewport.
+    pub fn set_viewport_image(&mut self, data: Vec<u8>, width: u32, height: u32) {
+        self.send(AppMessage::SetViewportImage { data, width, height });
+    }
+
+    /// Send a `ClearViewportImage` message to remove the viewport image overlay.
+    pub fn clear_viewport_image(&mut self) {
+        self.send(AppMessage::ClearViewportImage);
     }
 }
 

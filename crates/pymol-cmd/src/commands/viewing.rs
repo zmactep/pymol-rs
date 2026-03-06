@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_algos::svd3;
 use pymol_mol::AtomIndex;
-use pymol_scene::{Object, RaytracedImage}; // For extent() method on MoleculeObject
+use pymol_scene::{Object, ViewportImage}; // For extent() method on MoleculeObject
 use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
@@ -208,7 +208,7 @@ EXAMPLES
         // Try as selection expression (resi 28, chain A, name CA, etc.)
         if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
             ctx.viewer.camera_mut().zoom_to(min, max);
-            ctx.viewer.set_raytraced_image(None);
+            ctx.viewer.set_viewport_image(None);
             ctx.viewer.request_redraw();
             if !ctx.quiet {
                 ctx.print(&format!(" Zoomed to \"{}\"", selection));
@@ -493,7 +493,7 @@ EXAMPLES
             ctx.viewer.camera_mut().zoom_to(min, max);
         }
 
-        ctx.viewer.set_raytraced_image(None);
+        ctx.viewer.set_viewport_image(None);
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
@@ -1704,8 +1704,8 @@ SEE ALSO
                 .raytrace(Some(final_width), Some(final_height), antialias)
                 .map_err(|e| CmdError::execution(format!("Ray tracing failed: {}", e)))?;
 
-            // Store the raytraced image for display in the viewport
-            ctx.viewer.set_raytraced_image(Some(RaytracedImage {
+            // Store the image for display in the viewport
+            ctx.viewer.set_viewport_image(Some(ViewportImage {
                 data: image_data,
                 width: final_width,
                 height: final_height,

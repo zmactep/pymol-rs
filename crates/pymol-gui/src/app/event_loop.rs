@@ -256,8 +256,7 @@ impl App {
             let speed = 5.0;
             let rock_delta = self.state.movie.update_rock(dt, amplitude, speed);
             self.state.camera.rotate_y(rock_delta * dt);
-            self.state.raytraced_image = None;
-            self.scene_dirty = true;
+            self.clear_viewport_image();
         }
 
         // Camera animation (zoom/pan/rotate lerp)

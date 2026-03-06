@@ -22,12 +22,13 @@ use crate::selection::SelectionManager;
 use crate::session::Session;
 use crate::view::ViewManager;
 
-/// Stored raytraced image for display in the viewport
+/// Image for display as a viewport overlay
 ///
-/// When `ray` is called without a filename, the raytraced image is stored
-/// here for display. It persists until camera or scene changes occur.
+/// Used by the `ray` command to show raytraced output, but any source
+/// (plugins, computed images, etc.) can provide an image for display.
+/// The overlay persists until camera or scene changes occur.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct RaytracedImage {
+pub struct ViewportImage {
     /// RGBA image data, row-major, top-to-bottom
     pub data: Vec<u8>,
     /// Image width in pixels
@@ -126,11 +127,11 @@ pub trait ViewerLike {
     /// Set the clear (background) color
     fn set_clear_color(&mut self, color: [f32; 3]);
 
-    /// Get a reference to the stored raytraced image, if any
-    fn raytraced_image_ref(&self) -> Option<&RaytracedImage>;
+    /// Get a reference to the stored viewport image overlay, if any
+    fn viewport_image_ref(&self) -> Option<&ViewportImage>;
 
-    /// Set or clear the stored raytraced image
-    fn set_raytraced_image_internal(&mut self, image: Option<RaytracedImage>);
+    /// Set or clear the stored viewport image overlay
+    fn set_viewport_image_internal(&mut self, image: Option<ViewportImage>);
 
     // =========================================================================
     // Camera / View — Default Implementations
@@ -140,7 +141,7 @@ pub trait ViewerLike {
     fn zoom_all(&mut self) {
         if let Some((min, max)) = self.objects().extent() {
             self.camera_mut().zoom_to(min, max);
-            self.set_raytraced_image_internal(None);
+            self.set_viewport_image_internal(None);
             self.request_redraw();
         }
     }
@@ -150,7 +151,7 @@ pub trait ViewerLike {
         if let Some(obj) = self.objects().get(name) {
             if let Some((min, max)) = obj.extent() {
                 self.camera_mut().zoom_to(min, max);
-                self.set_raytraced_image_internal(None);
+                self.set_viewport_image_internal(None);
                 self.request_redraw();
             }
         }
@@ -160,7 +161,7 @@ pub trait ViewerLike {
     fn center_all(&mut self) {
         if let Some((min, max)) = self.objects().extent() {
             self.camera_mut().center_to(min, max);
-            self.set_raytraced_image_internal(None);
+            self.set_viewport_image_internal(None);
             self.request_redraw();
         }
     }
@@ -170,7 +171,7 @@ pub trait ViewerLike {
         if let Some(obj) = self.objects().get(name) {
             if let Some((min, max)) = obj.extent() {
                 self.camera_mut().center_to(min, max);
-                self.set_raytraced_image_internal(None);
+                self.set_viewport_image_internal(None);
                 self.request_redraw();
             }
         }
@@ -179,7 +180,7 @@ pub trait ViewerLike {
     /// Reset the camera to default view
     fn reset_view(&mut self) {
         *self.camera_mut() = Camera::new();
-        self.set_raytraced_image_internal(None);
+        self.set_viewport_image_internal(None);
         if let Some((min, max)) = self.objects().extent() {
             self.camera_mut().reset_view(min, max);
             self.request_redraw();
@@ -307,23 +308,23 @@ pub trait ViewerLike {
     }
 
     // =========================================================================
-    // Raytraced Image Overlay — Default Implementations
+    // Viewport Image Overlay — Default Implementations
     // =========================================================================
 
-    /// Store a raytraced image for display in the viewport
-    fn set_raytraced_image(&mut self, image: Option<RaytracedImage>) {
-        self.set_raytraced_image_internal(image);
+    /// Store an image for display as a viewport overlay
+    fn set_viewport_image(&mut self, image: Option<ViewportImage>) {
+        self.set_viewport_image_internal(image);
         self.request_redraw();
     }
 
-    /// Get the stored raytraced image, if any
-    fn get_raytraced_image(&self) -> Option<&RaytracedImage> {
-        self.raytraced_image_ref()
+    /// Get the stored viewport image overlay, if any
+    fn get_viewport_image(&self) -> Option<&ViewportImage> {
+        self.viewport_image_ref()
     }
 
-    /// Clear the stored raytraced image
-    fn clear_raytraced_image(&mut self) {
-        self.set_raytraced_image_internal(None);
+    /// Clear the viewport image overlay
+    fn clear_viewport_image(&mut self) {
+        self.set_viewport_image_internal(None);
     }
 
     // =========================================================================

@@ -46,16 +46,16 @@ impl App {
         let setting_names_refs: Vec<&str> = setting_names.iter().copied().collect();
         let cmd_registry = self.executor.registry();
 
-        // Update raytraced overlay texture if there's a new image
-        let ray_overlay_info = if let Some(ray_img) = &self.state.raytraced_image {
-            let needs_update = self.view.ray_overlay.size != Some((ray_img.width, ray_img.height));
+        // Update image overlay texture if there's a viewport image
+        let image_overlay_info = if let Some(vp_img) = &self.state.viewport_image {
+            let needs_update = self.view.image_overlay.size != Some((vp_img.width, vp_img.height));
             if needs_update {
-                self.view.update_ray_overlay(&ray_img.data, ray_img.width, ray_img.height);
+                self.view.update_image_overlay(&vp_img.data, vp_img.width, vp_img.height);
             }
-            self.view.ray_overlay.texture_id.map(|id| (id, ray_img.width, ray_img.height))
+            self.view.image_overlay.texture_id.map(|id| (id, vp_img.width, vp_img.height))
         } else {
-            if self.view.ray_overlay.texture_id.is_some() {
-                self.view.clear_ray_overlay();
+            if self.view.image_overlay.texture_id.is_some() {
+                self.view.clear_image_overlay();
             }
             None
         };
@@ -81,9 +81,9 @@ impl App {
                 // Layout renders all panels + returns viewport rect
                 viewport_rect_logical = render_layout(layout, ctx, components, &shared, bus);
 
-                // Render ray overlay in viewport if present
-                if let Some((texture_id, img_width, img_height)) = ray_overlay_info {
-                    Self::render_ray_overlay(ctx, viewport_rect_logical, texture_id, img_width, img_height);
+                // Render image overlay in viewport if present
+                if let Some((texture_id, img_width, img_height)) = image_overlay_info {
+                    Self::render_image_overlay(ctx, viewport_rect_logical, texture_id, img_width, img_height);
                 }
 
                 // Paint atom labels and measurement labels as 2D overlay
@@ -150,8 +150,8 @@ impl App {
         Some((clipped_primitives, full_output.textures_delta))
     }
 
-    /// Render the raytraced image overlay in the viewport area.
-    fn render_ray_overlay(
+    /// Render the image overlay in the viewport area.
+    fn render_image_overlay(
         ctx: &egui::Context,
         viewport_rect: egui::Rect,
         texture_id: egui::TextureId,
@@ -178,7 +178,7 @@ impl App {
 
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Middle,
-            egui::Id::new("ray_overlay"),
+            egui::Id::new("image_overlay"),
         ));
         painter.image(
             texture_id,
@@ -305,6 +305,18 @@ impl App {
                 self.hide_window();
                 self.headless = true;
             }
+            // Viewport image overlay
+            AppMessage::SetViewportImage { data, width, height } => {
+                self.set_viewport_image(Some(pymol_scene::ViewportImage {
+                    data: data.clone(),
+                    width: *width,
+                    height: *height,
+                }));
+            }
+            AppMessage::ClearViewportImage => {
+                self.clear_viewport_image();
+            }
+
             AppMessage::Custom { topic, payload } => {
                 log::debug!("Custom event: {} ({} bytes)", topic, payload.len());
             }

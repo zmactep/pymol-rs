@@ -41,9 +41,9 @@ impl App {
 
         let deltas = self.viewport.input.take_camera_deltas();
         for delta in deltas {
-            // Clear raytraced overlay on any camera change
-            if self.state.raytraced_image.is_some() {
-                self.state.raytraced_image = None;
+            // Clear viewport image overlay on any camera change
+            if self.state.viewport_image.is_some() {
+                self.clear_viewport_image();
             }
             match delta {
                 CameraDelta::Rotate { x, y } => {

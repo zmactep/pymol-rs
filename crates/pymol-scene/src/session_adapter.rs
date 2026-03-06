@@ -19,7 +19,7 @@ use crate::scene::{SceneManager, SceneStoreMask};
 use crate::selection::SelectionManager;
 use crate::session::Session;
 use crate::view::ViewManager;
-use crate::viewer_trait::{RaytracedImage, ViewerLike};
+use crate::viewer_trait::{ViewportImage, ViewerLike};
 
 /// Adapter that wraps a [`Session`] to implement [`ViewerLike`] for command execution.
 ///
@@ -61,8 +61,8 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     fn named_colors_mut(&mut self) -> &mut NamedColors { &mut self.session.named_colors }
     fn clear_color(&self) -> [f32; 3] { self.session.clear_color }
     fn set_clear_color(&mut self, color: [f32; 3]) { self.session.clear_color = color; }
-    fn raytraced_image_ref(&self) -> Option<&RaytracedImage> { self.session.raytraced_image.as_ref() }
-    fn set_raytraced_image_internal(&mut self, image: Option<RaytracedImage>) { self.session.raytraced_image = image; }
+    fn viewport_image_ref(&self) -> Option<&ViewportImage> { self.session.viewport_image.as_ref() }
+    fn set_viewport_image_internal(&mut self, image: Option<ViewportImage>) { self.session.viewport_image = image; }
 
     fn request_redraw(&mut self) {
         *self.needs_redraw = true;

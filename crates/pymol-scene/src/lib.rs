@@ -57,7 +57,7 @@ pub use session_adapter::SessionAdapter;
 pub use raytrace::{raytrace_scene, raytrace_to_file, RaytraceError, RaytraceInput};
 pub use uniform::setup_uniforms;
 pub use view::ViewManager;
-pub use viewer_trait::{RaytracedImage, ViewerLike};
+pub use viewer_trait::{ViewportImage, ViewerLike};
 pub use window::Window;
 
 // Re-export types from dependencies that are part of the public API
@@ -70,7 +70,7 @@ pub mod prelude {
     pub use crate::object::{MoleculeObject, Object, ObjectRegistry, ObjectState, ObjectType};
     pub use crate::session::Session;
     pub use crate::session_adapter::SessionAdapter;
-    pub use crate::viewer_trait::{RaytracedImage, ViewerLike};
+    pub use crate::viewer_trait::{ViewportImage, ViewerLike};
     pub use crate::scene::{Scene, SceneManager};
     pub use crate::view::ViewManager;
 }

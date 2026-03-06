@@ -19,7 +19,7 @@ use crate::raytrace::RaytraceInput;
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
 use crate::view::ViewManager;
-use crate::viewer_trait::RaytracedImage;
+use crate::viewer_trait::ViewportImage;
 
 /// Pure scene state — no GPU resources, no window, no event loop.
 ///
@@ -64,10 +64,10 @@ pub struct Session {
     pub clear_color: [f32; 3],
 
     // =========================================================================
-    // Raytraced Image Overlay
+    // Viewport Image Overlay
     // =========================================================================
-    /// Stored raytraced image for display (from `ray` command without filename)
-    pub raytraced_image: Option<RaytracedImage>,
+    /// Image overlay for display in the viewport (e.g. from `ray` command or plugins)
+    pub viewport_image: Option<ViewportImage>,
 }
 
 /// Serializable proxy for [`Session`] (for deserialization).
@@ -120,7 +120,7 @@ impl<'de> Deserialize<'de> for Session {
             element_colors: proxy.element_colors,
             chain_colors: proxy.chain_colors,
             clear_color: proxy.clear_color,
-            raytraced_image: None,
+            viewport_image: None,
         })
     }
 }
@@ -181,7 +181,7 @@ impl Session {
             element_colors: ElementColors::default(),
             chain_colors: ChainColors,
             clear_color: [0.0, 0.0, 0.0],
-            raytraced_image: None,
+            viewport_image: None,
         };
         session.apply_default_settings();
         session

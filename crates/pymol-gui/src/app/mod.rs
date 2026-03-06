@@ -213,6 +213,18 @@ impl App {
         self.view.request_redraw();
     }
 
+    /// Set or clear the viewport image overlay and mark scene dirty.
+    pub(crate) fn set_viewport_image(&mut self, image: Option<pymol_scene::ViewportImage>) {
+        self.state.viewport_image = image;
+        self.scene_dirty = true;
+    }
+
+    /// Clear the viewport image overlay and mark scene dirty.
+    pub(crate) fn clear_viewport_image(&mut self) {
+        self.state.viewport_image = None;
+        self.scene_dirty = true;
+    }
+
     /// Load plugins from a directory.
     pub fn load_plugins(&mut self, dir: &std::path::Path) {
         self.plugin_manager.load_dir(
