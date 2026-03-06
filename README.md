@@ -157,6 +157,11 @@ Three reference plugins are included in the `plugins/` directory:
 
 ### Python Plugin
 
+<p align="center">
+  <img src="images/python-plugin.png" alt="Python plugin" width="800">
+</p>
+
+
 The `python-plugin` embeds a CPython interpreter directly into PyMOL-RS using [PyO3](https://pyo3.rs). This is separate from the standalone Python wheel (`pymol_rs`) — the plugin runs Python _inside_ the native application, allowing scripts to register commands and manipulate the scene without a separate process.
 
 The plugin consists of four modules:
