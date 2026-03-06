@@ -117,6 +117,12 @@ app-full: release plugins icon python-release
 	cp target/release/lib*_plugin.so    $(APP_DIR)/Contents/PlugIns/ 2>/dev/null || true
 	cp -R $(PYTHON_DIST)               $(APP_DIR)/Contents/Resources/python
 	cp -R target/app/python-venv        $(APP_DIR)/Contents/Resources/python-venv
+	@# Fix venv python symlinks: point to bundled Python, not system Python
+	@cd $(APP_DIR)/Contents/Resources/python-venv/bin && \
+	  rm -f python python3 python$(PYTHON_VERSION) && \
+	  ln -s ../../python/bin/python3 python && \
+	  ln -s python python3 && \
+	  ln -s python python$(PYTHON_VERSION)
 	bash macos/fix-dylib-paths.sh $(APP_DIR)
 	@echo "✓ $(APP_DIR) (full bundle)"
 
