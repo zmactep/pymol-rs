@@ -45,6 +45,8 @@ impl Component for ReplComponent {
     fn show(&mut self, ui: &mut egui::Ui, ctx: &SharedContext, bus: &mut MessageBus) {
         // Output log fills available space minus the command line row
         let available = ui.available_height();
+        // Prevent the resizable panel from shrinking to fit content
+        ui.set_min_height(available);
         let cmd_line_height = 28.0;
         let output_height = (available - cmd_line_height - 2.0).max(0.0);
 

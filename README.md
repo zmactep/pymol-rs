@@ -128,11 +128,58 @@ pymol-rs/
 ├── pymol-scene       Viewer, camera, scene graph
 ├── pymol-session     Sessions save and load (`.prs` and `.pse`)
 ├── pymol-cmd         Command parser & executor
+├── pymol-framework   Messaging system and core reusable components
 ├── pymol-gui         GUI (egui)
-└── pymol-python      Python bindings (PyO3 / maturin)
+└── pymol-plugin      Plugin system
 ```
 
 Each crate is independently usable. Want just the selection parser? `pymol-select`. Need to read PDB files in your pipeline? `pymol-io` + `pymol-mol`. No GUI tax.
+
+## Plugin System
+
+PyMOL-RS supports a dynamic plugin architecture that lets you extend the application with native Rust shared libraries. Plugins are loaded at startup from `~/.pymol-rs/plugins/` and can register new commands, hook into the command pipeline, and interact with the viewer through the `PluginRegistrar` API.
+
+Plugins are compiled as dynamic libraries (`.dylib` on macOS, `.so` on Linux, `.dll` on Windows). At startup, PyMOL-RS scans the plugin directory, loads each library, and calls its registration entry point. The plugin receives a `PluginRegistrar` that provides capabilities for:
+
+- Registering new commands accessible from the PyMOL-RS command line
+- Routing command execution through the `pymol-cmd` dispatcher
+- Interacting with the viewer state through the plugin backend
+
+### Reference Plugins
+
+Three reference plugins are included in the `plugins/` directory:
+
+| Plugin | Crate | Description |
+|--------|-------|-------------|
+| **hello** | `hello-plugin` | Minimal example — registers a single command to demonstrate the plugin lifecycle |
+| **ipc** | `ipc-plugin` | Inter-process communication plugin for external tool integration |
+| **python** | `python-plugin` | Embedded CPython interpreter via PyO3 — enables Python scripting inside the native binary |
+
+### Python Plugin
+
+The `python-plugin` embeds a CPython interpreter directly into PyMOL-RS using [PyO3](https://pyo3.rs). This is separate from the standalone Python wheel (`pymol_rs`) — the plugin runs Python _inside_ the native application, allowing scripts to register commands and manipulate the scene without a separate process.
+
+The plugin consists of four modules:
+
+- **engine** — manages the embedded CPython interpreter lifecycle
+- **commands** — bridges Python-defined commands into the PyMOL-RS command system
+- **backend** — provides Python code with access to the viewer and scene state
+- **handler** — dispatches command execution between Rust and Python origins
+
+Python commands registered via `cmd.extend()` from within the embedded interpreter are routed through the same command dispatcher as native commands, with full tab completion and help support.
+
+### Building Plugins
+
+```bash
+make plugins
+```
+
+This builds all reference plugins and installs them to `~/.pymol-rs/plugins/`. The Python plugin requires a Python installation discoverable by PyO3:
+
+```bash
+PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
+    cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin
+```
 
 ## Roadmap
 

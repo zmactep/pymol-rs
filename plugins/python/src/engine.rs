@@ -7,15 +7,46 @@
 //! embedded interpreter can find its standard library (encodings, etc.).
 
 use std::ffi::CString;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Once;
 
 use pyo3::prelude::*;
 
+// ---------------------------------------------------------------------------
+// One-time Python environment configuration
+// ---------------------------------------------------------------------------
+
 static PYTHON_CONFIGURED: Once = Once::new();
+static PYTHON_CONFIG_STATUS: AtomicU8 = AtomicU8::new(ConfigStatus::Pending as u8);
 
 /// The Python major.minor version that PyO3 was compiled against.
 /// Set by `build.rs` from PyO3's build config.
 const PYO3_PYTHON_VERSION: &str = env!("PYMOLRS_PYO3_PYTHON_VERSION");
+
+/// Result of the one-time Python environment configuration.
+#[repr(u8)]
+enum ConfigStatus {
+    /// Configuration has not run yet.
+    Pending = 0,
+    /// A matching Python was found and PYTHONHOME is set.
+    Ready = 1,
+    /// No matching Python was found; the plugin is disabled.
+    NoPython = 2,
+}
+
+impl ConfigStatus {
+    fn load() -> Self {
+        match PYTHON_CONFIG_STATUS.load(Ordering::Relaxed) {
+            1 => Self::Ready,
+            2 => Self::NoPython,
+            _ => Self::Pending,
+        }
+    }
+
+    fn store(self) {
+        PYTHON_CONFIG_STATUS.store(self as u8, Ordering::Relaxed);
+    }
+}
 
 /// Build a list of Python executables to probe, preferring venv if available.
 fn python_candidates() -> Vec<std::path::PathBuf> {
@@ -57,7 +88,7 @@ fn prepend_pythonpath(path: &str) {
 /// Configure the Python interpreter's environment before initialization.
 ///
 /// When embedding Python in a non-Python host binary, `Py_Initialize()` needs
-/// `PYTHONHOME` to locate the standard library.  We detect it from the best
+/// `PYTHONHOME` to locate the standard library. We detect it from the best
 /// available Python executable whose version matches the PyO3 build-time version.
 ///
 /// If the matched interpreter lives in a venv, its `site-packages` is added
@@ -65,6 +96,7 @@ fn prepend_pythonpath(path: &str) {
 fn configure_python_home() {
     // Skip if PYTHONHOME is already set by the user
     if std::env::var_os("PYTHONHOME").is_some() {
+        ConfigStatus::Ready.store();
         return;
     }
 
@@ -133,14 +165,20 @@ print(sp[0] if sp else '')
             prepend_pythonpath(site_packages);
         }
 
+        ConfigStatus::Ready.store();
         return;
     }
 
     log::warn!(
-        "Python plugin: no Python {} found; interpreter may fail to initialize",
+        "Python plugin: no Python {} found; plugin disabled",
         required_version
     );
+    ConfigStatus::NoPython.store();
 }
+
+// ---------------------------------------------------------------------------
+// Public engine API
+// ---------------------------------------------------------------------------
 
 /// Embedded Python engine.
 ///
@@ -169,6 +207,16 @@ impl PythonEngine {
 
         // Configure PYTHONHOME once (before any Python::attach call)
         PYTHON_CONFIGURED.call_once(configure_python_home);
+
+        // If no matching Python was found, fail gracefully instead of
+        // letting Py_Initialize call abort() which kills the whole process.
+        if matches!(ConfigStatus::load(), ConfigStatus::NoPython) {
+            self.failed = true;
+            return Err(format!(
+                "Python {} not found on this system; Python plugin disabled",
+                PYO3_PYTHON_VERSION
+            ));
+        }
 
         // Catch panics from Python initialization (Py_Initialize may abort,
         // but if it raises a catchable error we handle it gracefully).

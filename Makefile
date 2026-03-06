@@ -26,7 +26,6 @@ test:
 	cargo test
 
 plugins:
-	PYO3_PYTHON=$$(python3 -c "import sys; print(sys.executable)") \
 	cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin
 	mkdir -p ~/.pymol-rs/plugins
 	cp target/release/lib*_plugin.dylib ~/.pymol-rs/plugins/ 2>/dev/null || \

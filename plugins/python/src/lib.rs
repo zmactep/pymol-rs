@@ -7,15 +7,20 @@
 
 mod backend;
 mod commands;
+mod editor;
 mod engine;
 mod handler;
+mod highlight;
+mod widgets;
 
 use std::sync::{Arc, Mutex};
 
+use pymol_plugin::prelude::PanelConfig;
 use pymol_plugin::pymol_plugin;
 
 use backend::SharedState;
 use commands::PythonCommand;
+use editor::PythonEditorComponent;
 use engine::PythonEngine;
 use handler::PythonHandler;
 
@@ -46,6 +51,10 @@ pymol_plugin! {
                 Err(e) => Err(e),
             }
         });
+
+        // Script editor panel (Top slot, tabbed with REPL)
+        let editor = PythonEditorComponent::new(engine.clone());
+        reg.register_component(editor, PanelConfig::top(150.0));
 
         // Message handler for poll-based state sync and backend installation
         let handler = PythonHandler::new(engine, shared_state);
