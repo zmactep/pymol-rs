@@ -180,6 +180,18 @@ class Cmd:
             cmd_str += f", {height}"
         self._backend.execute(cmd_str, quiet)
 
+    def get_viewport_image(self):
+        """Get viewport image as numpy array (H, W, 4) uint8, or None."""
+        return self._backend.get_viewport_image()
+
+    def set_viewport_image(self, array):
+        """Set viewport image from numpy array (H, W, 4) uint8."""
+        self._backend.set_viewport_image(array)
+
+    def clear_viewport_image(self):
+        """Clear viewport image overlay."""
+        self._backend.clear_viewport_image()
+
     # =====================================================================
     # Control
     # =====================================================================

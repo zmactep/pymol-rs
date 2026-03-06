@@ -4,6 +4,7 @@
 //! 1. Updating shared molecule/name snapshots from `SharedContext`
 //! 2. Setting `sys._pymolrs_backend` on first poll
 //! 3. Draining the command queue → `ctx.execute_command()`
+//! 4. Syncing viewport image between Python and the host
 
 use std::sync::{Arc, Mutex};
 
@@ -75,7 +76,7 @@ impl PythonHandler {
         }
     }
 
-    /// Sync molecule snapshots from SharedContext.
+    /// Sync molecule snapshots and viewport image from SharedContext.
     fn update_snapshots(&self, shared_ctx: &SharedContext<'_>) {
         let mut state = self.shared.lock().unwrap();
 
@@ -89,6 +90,11 @@ impl PythonHandler {
                 state.molecules.push((name.to_string(), mol_obj.molecule().clone()));
             }
         }
+
+        // Update viewport image snapshot
+        state.viewport_image = shared_ctx.viewport_image.map(|img| {
+            (img.data.clone(), img.width, img.height)
+        });
     }
 
     /// Drain the command queue and schedule execution.
@@ -102,6 +108,25 @@ impl PythonHandler {
             let id = self.next_cmd_id;
             self.next_cmd_id += 1;
             ctx.execute_command(id, &command, silent);
+        }
+    }
+
+    /// Drain queued viewport image set/clear and send via message bus.
+    fn drain_image_queue(&self, ctx: &mut PollContext<'_>) {
+        let pending = {
+            let mut state = self.shared.lock().unwrap();
+            state.set_image_queue.take()
+        };
+
+        if let Some(action) = pending {
+            match action {
+                Some((data, width, height)) => {
+                    ctx.bus.set_viewport_image(data, width, height);
+                }
+                None => {
+                    ctx.bus.clear_viewport_image();
+                }
+            }
         }
     }
 }
@@ -126,5 +151,8 @@ impl MessageHandler for PythonHandler {
 
         // Drain queued commands
         self.drain_commands(ctx);
+
+        // Drain queued viewport image changes
+        self.drain_image_queue(ctx);
     }
 }

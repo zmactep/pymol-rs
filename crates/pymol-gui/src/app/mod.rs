@@ -267,6 +267,7 @@ impl App {
                 selections: &self.state.selections,
                 named_colors: &self.state.named_colors,
                 movie: &self.state.movie,
+                viewport_image: self.state.viewport_image.as_ref(),
                 command_names: &all_names,
                 command_registry: self.executor.registry(),
                 setting_names: &setting_names_refs,

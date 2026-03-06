@@ -7,7 +7,7 @@ use pyo3::exceptions::{PyKeyError, PyRuntimeError};
 use pyo3::prelude::*;
 
 use pymol_cmd::CommandExecutor;
-use pymol_scene::{Session, SessionAdapter};
+use pymol_scene::{Session, SessionAdapter, ViewportImage};
 use pymol_select::select;
 
 use crate::mol::PyObjectMolecule;
@@ -109,5 +109,60 @@ impl StandaloneBackend {
             }
         }
         Ok(total)
+    }
+
+    /// Get the current viewport image as a numpy array (H, W, 4) uint8.
+    ///
+    /// Returns `None` if no viewport image is set.
+    #[cfg(feature = "numpy")]
+    fn get_viewport_image<'py>(&self, py: Python<'py>) -> PyResult<Option<Py<PyAny>>> {
+        use numpy::ndarray::Array3;
+        use numpy::IntoPyArray;
+
+        match &self.session.viewport_image {
+            Some(img) => {
+                let h = img.height as usize;
+                let w = img.width as usize;
+                let arr =
+                    Array3::from_shape_vec((h, w, 4), img.data.clone()).map_err(|e| {
+                        PyRuntimeError::new_err(format!("Failed to create array: {}", e))
+                    })?;
+                Ok(Some(arr.into_pyarray(py).into_any().unbind()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Set the viewport image from a numpy array (H, W, 4) uint8.
+    #[cfg(feature = "numpy")]
+    fn set_viewport_image(&mut self, array: &Bound<'_, PyAny>) -> PyResult<()> {
+        use numpy::{PyArray3, PyArrayMethods, PyUntypedArrayMethods};
+
+        let arr = array.cast::<PyArray3<u8>>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "Expected numpy array with shape (H, W, 4) and dtype uint8",
+            )
+        })?;
+        let shape = arr.shape();
+        if shape.len() != 3 || shape[2] != 4 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Expected shape (H, W, 4), got ({}, {}, {})",
+                shape[0], shape[1], shape[2]
+            )));
+        }
+        let height = shape[0] as u32;
+        let width = shape[1] as u32;
+        let data = arr.to_vec()?;
+        self.session.viewport_image = Some(ViewportImage {
+            data,
+            width,
+            height,
+        });
+        Ok(())
+    }
+
+    /// Clear the viewport image.
+    fn clear_viewport_image(&mut self) {
+        self.session.viewport_image = None;
     }
 }

@@ -5,7 +5,7 @@
 
 use pymol_cmd::CommandRegistry;
 use pymol_color::NamedColors;
-use pymol_scene::{Camera, Movie, ObjectRegistry, SelectionManager};
+use pymol_scene::{Camera, Movie, ObjectRegistry, SelectionManager, ViewportImage};
 
 use crate::message::{AppMessage, MessageBus};
 
@@ -20,6 +20,9 @@ pub struct SharedContext<'a> {
     pub selections: &'a SelectionManager,
     pub named_colors: &'a NamedColors,
     pub movie: &'a Movie,
+
+    // Viewport image overlay (e.g. from `ray` command or plugins)
+    pub viewport_image: Option<&'a ViewportImage>,
 
     // Command system (for autocomplete)
     pub command_names: &'a [String],

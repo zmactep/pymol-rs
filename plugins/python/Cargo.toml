@@ -12,6 +12,7 @@ pymol-plugin = { path = "../../crates/pymol-plugin" }
 pymol-mol = { path = "../../crates/pymol-mol" }
 pymol-select = { path = "../../crates/pymol-select" }
 pyo3 = { version = "0.27.2", features = ["auto-initialize"] }
+numpy = "0.27.1"
 log = "0.4"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 egui = "0.33"
