@@ -68,6 +68,8 @@ pub struct App {
     pub(crate) frame: FrameState,
     /// Whether the scene changed and a redraw should be scheduled.
     pub(crate) scene_dirty: bool,
+    /// Whether the viewport image data changed (even if size stayed the same).
+    pub(crate) image_dirty: bool,
 
     // Input
     key_bindings: KeyBindings<KeyAction>,
@@ -156,6 +158,7 @@ impl App {
             viewport: ViewportModel::new(),
             frame: FrameState::new(),
             scene_dirty: true,
+            image_dirty: false,
             key_bindings: KeyBindings::new(),
             drag_hover_path: None,
             task_runner: TaskRunner::new(),
@@ -217,6 +220,7 @@ impl App {
     pub(crate) fn set_viewport_image(&mut self, image: Option<pymol_scene::ViewportImage>) {
         self.state.viewport_image = image;
         self.scene_dirty = true;
+        self.image_dirty = true;
     }
 
     /// Clear the viewport image overlay and mark scene dirty.

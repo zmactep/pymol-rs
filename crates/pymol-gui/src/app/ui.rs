@@ -49,9 +49,10 @@ impl App {
 
         // Update image overlay texture if there's a viewport image
         let image_overlay_info = if let Some(vp_img) = &self.state.viewport_image {
-            let needs_update = self.view.image_overlay.size != Some((vp_img.width, vp_img.height));
+            let needs_update = self.image_dirty || self.view.image_overlay.size != Some((vp_img.width, vp_img.height));
             if needs_update {
                 self.view.update_image_overlay(&vp_img.data, vp_img.width, vp_img.height);
+                self.image_dirty = false;
             }
             self.view.image_overlay.texture_id.map(|id| (id, vp_img.width, vp_img.height))
         } else {
