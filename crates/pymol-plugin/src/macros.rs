@@ -39,6 +39,7 @@ macro_rules! pymol_plugin {
         description: $desc:expr,
         commands: [$($cmd:expr),* $(,)?]
         $(, components: [$( ($comp:expr, $config:expr) ),* $(,)?] )?
+        $(, hotkeys: [$( ($hk_key:expr, $hk_action:expr) ),* $(,)?] )?
         $(, register: |$reg:ident| $body:block )?
         $(,)?
     ) => {
@@ -74,6 +75,7 @@ macro_rules! pymol_plugin {
                             });
                             $( __registrar.register_command($cmd); )*
                             $( $( __registrar.register_component($comp, $config); )* )?
+                            $( $( __registrar.register_hotkey($hk_key, $hk_action); )* )?
                             $( let $reg = __registrar; $body )?
                         }));
                     }

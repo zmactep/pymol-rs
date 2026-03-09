@@ -8,9 +8,12 @@ use pymol_scene::{
     expand_pick_to_selection, normalize_matrix, pick_expression_for_hit,
     CameraDelta, KeyBinding, PickHit,
 };
+use pymol_plugin::registrar::PluginKeyAction;
 use pymol_select::build_sele_command;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::PhysicalKey;
+
+use pymol_framework::message::AppMessage;
 
 use super::App;
 
@@ -207,11 +210,41 @@ impl App {
                 alt: self.viewport.input.alt_held(),
             };
 
+            // 1. Main app bindings (priority)
             if let Some(action) = self.key_bindings.get_cloned(&binding) {
-                // Need to work around the borrow checker here
-                // Clone the action Arc and execute
                 let action = action.clone();
                 action(self);
+                return;
+            }
+
+            // 2. Plugin bindings (fallback)
+            if let Some(action) = self.plugin_manager.lookup_hotkey(&binding) {
+                match action {
+                    PluginKeyAction::Command(cmd) => {
+                        self.bus.send(AppMessage::ExecuteCommand {
+                            command: cmd.clone(),
+                            silent: false,
+                        });
+                    }
+                    PluginKeyAction::DynamicCommand { name, args } => {
+                        if let Ok(mut inv) = self.plugin_manager.invocations_handle().lock() {
+                            inv.push(pymol_cmd::DynamicCommandInvocation {
+                                name: name.clone(),
+                                args: args.clone(),
+                            });
+                        }
+                    }
+                    PluginKeyAction::Custom { topic, payload } => {
+                        self.bus.send(AppMessage::Custom {
+                            topic: topic.clone(),
+                            payload: payload.clone(),
+                        });
+                    }
+                    PluginKeyAction::Callback(_) => {
+                        // Deferred — will run during next poll phase with PollContext
+                        self.plugin_manager.trigger_hotkey(binding);
+                    }
+                }
             }
         }
     }

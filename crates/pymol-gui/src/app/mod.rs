@@ -250,7 +250,7 @@ impl App {
     /// 3. **Register/Unregister** — processes dynamic command registrations
     ///    and unregistrations in the `CommandRegistry`.
     pub(crate) fn poll_plugins(&mut self) {
-        if !self.plugin_manager.any_needs_poll() {
+        if !self.plugin_manager.any_needs_poll() && !self.plugin_manager.has_triggered_hotkeys() {
             return;
         }
 
@@ -317,6 +317,9 @@ impl App {
                     log::info!("Unregistered dynamic command: {}", name);
                 }
             }
+
+            // Process hotkey registration/unregistration changes
+            self.plugin_manager.apply_hotkey_changes();
         }
     }
 }

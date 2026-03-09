@@ -139,6 +139,11 @@ impl<A> KeyBindings<A> {
         self.bindings.get(binding)
     }
 
+    /// Get a mutable reference to the action bound to a key binding
+    pub fn get_mut(&mut self, binding: &KeyBinding) -> Option<&mut A> {
+        self.bindings.get_mut(binding)
+    }
+
     /// Get the number of bindings
     pub fn len(&self) -> usize {
         self.bindings.len()

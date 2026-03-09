@@ -13,6 +13,7 @@ pub use pymol_cmd::{FormatHandler, PluginReaderFn, PluginWriterFn, ScriptHandler
 use pymol_framework::component::{Component, SharedContext};
 use pymol_framework::layout::PanelConfig;
 use pymol_framework::message::{AppMessage, MessageBus};
+pub use pymol_scene::{KeyBinding, KeyCode};
 
 // =============================================================================
 // Polling types
@@ -41,6 +42,25 @@ pub struct DynCmdRegistration {
     pub help: String,
 }
 
+// =============================================================================
+// Hotkey types
+// =============================================================================
+
+/// Callback for hotkey actions — runs during the plugin poll phase.
+pub type HotkeyCallback = Box<dyn FnMut(&mut PollContext<'_>) + Send>;
+
+/// Action to perform when a plugin hotkey is triggered.
+pub enum PluginKeyAction {
+    /// Execute a PyMOL command string.
+    Command(String),
+    /// Invoke a dynamic command (delivered via `dynamic_invocations` in next poll).
+    DynamicCommand { name: String, args: Vec<String> },
+    /// Publish a custom message to the message bus.
+    Custom { topic: String, payload: Vec<u8> },
+    /// Run arbitrary code during the next poll phase with `PollContext` access.
+    Callback(HotkeyCallback),
+}
+
 /// Context provided to plugins during periodic polling.
 ///
 /// Plugins that return `needs_poll() == true` receive this each frame.
@@ -55,11 +75,15 @@ pub struct PollContext<'a> {
     pub command_results: &'a [CommandResult],
     /// Invocations of dynamic commands since last poll.
     pub dynamic_invocations: &'a [DynamicCommandInvocation],
+    /// Hotkey bindings triggered since last poll (read-only).
+    pub triggered_hotkeys: &'a [KeyBinding],
     // Internal queues — accessed via methods
     pub(crate) exec_queue: &'a mut Vec<CommandExecRequest>,
     pub(crate) reg_queue: &'a mut Vec<DynCmdRegistration>,
     pub(crate) unreg_queue: &'a mut Vec<String>,
     pub(crate) notification_queue: &'a mut Vec<String>,
+    pub(crate) hotkey_reg_queue: &'a mut Vec<(KeyBinding, PluginKeyAction)>,
+    pub(crate) hotkey_unreg_queue: &'a mut Vec<KeyBinding>,
 }
 
 impl<'a> PollContext<'a> {
@@ -71,20 +95,26 @@ impl<'a> PollContext<'a> {
         bus: &'a mut MessageBus,
         command_results: &'a [CommandResult],
         dynamic_invocations: &'a [DynamicCommandInvocation],
+        triggered_hotkeys: &'a [KeyBinding],
         exec_queue: &'a mut Vec<CommandExecRequest>,
         reg_queue: &'a mut Vec<DynCmdRegistration>,
         unreg_queue: &'a mut Vec<String>,
         notification_queue: &'a mut Vec<String>,
+        hotkey_reg_queue: &'a mut Vec<(KeyBinding, PluginKeyAction)>,
+        hotkey_unreg_queue: &'a mut Vec<KeyBinding>,
     ) -> Self {
         Self {
             shared,
             bus,
             command_results,
             dynamic_invocations,
+            triggered_hotkeys,
             exec_queue,
             reg_queue,
             unreg_queue,
             notification_queue,
+            hotkey_reg_queue,
+            hotkey_unreg_queue,
         }
     }
 
@@ -122,6 +152,16 @@ impl<'a> PollContext<'a> {
     /// calling this method.
     pub fn set_notification(&mut self, msg: impl Into<String>) {
         self.notification_queue.push(msg.into());
+    }
+
+    /// Register a hotkey binding (applied after poll returns).
+    pub fn register_hotkey(&mut self, key: impl Into<KeyBinding>, action: PluginKeyAction) {
+        self.hotkey_reg_queue.push((key.into(), action));
+    }
+
+    /// Unregister a hotkey binding (applied after poll returns).
+    pub fn unregister_hotkey(&mut self, key: impl Into<KeyBinding>) {
+        self.hotkey_unreg_queue.push(key.into());
     }
 }
 
@@ -174,6 +214,7 @@ pub struct PluginRegistrar {
     pub(crate) message_handler: Option<Box<dyn MessageHandler>>,
     pub(crate) script_handlers: Vec<(String, ScriptHandler)>,
     pub(crate) format_handlers: Vec<FormatHandler>,
+    pub(crate) hotkeys: Vec<(KeyBinding, PluginKeyAction)>,
 }
 
 impl PluginRegistrar {
@@ -186,6 +227,7 @@ impl PluginRegistrar {
             message_handler: None,
             script_handlers: Vec::new(),
             format_handlers: Vec::new(),
+            hotkeys: Vec::new(),
         }
     }
 
@@ -231,6 +273,15 @@ impl PluginRegistrar {
         self.format_handlers.push(handler);
     }
 
+    /// Register a keyboard shortcut.
+    ///
+    /// Plugin hotkeys are checked after the main application bindings.
+    /// For `Callback` actions, the closure runs during the next poll phase
+    /// with access to [`PollContext`].
+    pub fn register_hotkey(&mut self, key: impl Into<KeyBinding>, action: PluginKeyAction) {
+        self.hotkeys.push((key.into(), action));
+    }
+
     // =================================================================
     // Host-side drain methods
     // =================================================================
@@ -263,6 +314,11 @@ impl PluginRegistrar {
     /// Drain all registered format handlers.
     pub fn drain_format_handlers(&mut self) -> Vec<FormatHandler> {
         std::mem::take(&mut self.format_handlers)
+    }
+
+    /// Drain all registered hotkey bindings.
+    pub fn drain_hotkeys(&mut self) -> Vec<(KeyBinding, PluginKeyAction)> {
+        std::mem::take(&mut self.hotkeys)
     }
 }
 

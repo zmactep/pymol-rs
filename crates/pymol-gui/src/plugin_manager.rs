@@ -14,9 +14,10 @@ use pymol_cmd::CommandExecutor;
 use pymol_plugin::ffi::{ABI_VERSION, SDK_VERSION};
 use pymol_cmd::DynamicCommandInvocation;
 use pymol_plugin::registrar::{
-    CommandExecRequest, CommandResult, DynCmdRegistration,
-    MessageHandler, PluginMetadata, PluginRegistrar, PollContext,
+    CommandExecRequest, CommandResult, DynCmdRegistration, KeyBinding,
+    MessageHandler, PluginKeyAction, PluginMetadata, PluginRegistrar, PollContext,
 };
+use pymol_scene::KeyBindings;
 
 use pymol_framework::component::SharedContext;
 use pymol_framework::component_store::ComponentStore;
@@ -32,6 +33,8 @@ struct LoadedPlugin {
     message_handler: Option<Box<dyn MessageHandler>>,
     /// Set to `true` after a panic; the plugin will be skipped for all future calls.
     faulted: bool,
+    /// Keyboard shortcut bindings registered by this plugin.
+    hotkeys: KeyBindings<PluginKeyAction>,
 }
 
 /// Manages dynamically loaded plugins.
@@ -46,6 +49,11 @@ pub struct PluginManager {
     pending_unregistrations: Vec<String>,
     // Notification messages from plugins (cleared each poll cycle)
     notification_messages: Vec<String>,
+    // Hotkeys
+    /// Hotkey bindings triggered since last poll (filled by handle_key, drained by poll_all).
+    triggered_hotkeys: Vec<KeyBinding>,
+    pending_hotkey_registrations: Vec<(KeyBinding, PluginKeyAction)>,
+    pending_hotkey_unregistrations: Vec<KeyBinding>,
 }
 
 impl PluginManager {
@@ -58,6 +66,9 @@ impl PluginManager {
             pending_registrations: Vec::new(),
             pending_unregistrations: Vec::new(),
             notification_messages: Vec::new(),
+            triggered_hotkeys: Vec::new(),
+            pending_hotkey_registrations: Vec::new(),
+            pending_hotkey_unregistrations: Vec::new(),
         }
     }
 
@@ -195,12 +206,19 @@ impl PluginManager {
             layout.panels.push(panel_slot);
         }
 
+        // Register hotkeys
+        let mut hotkeys = KeyBindings::new();
+        for (key, action) in registrar.drain_hotkeys() {
+            hotkeys.bind(key, action);
+        }
+
         // Store plugin
         self.plugins.push(LoadedPlugin {
             _library: library,
             _metadata: metadata,
             message_handler: registrar.take_message_handler(),
             faulted: false,
+            hotkeys,
         });
 
         Ok(plugin_name)
@@ -253,20 +271,68 @@ impl PluginManager {
         // Swap out results so plugins can read them
         let results = std::mem::take(&mut self.command_results);
 
+        // Drain triggered hotkeys
+        let triggered = std::mem::take(&mut self.triggered_hotkeys);
+
         let mut exec_queue = Vec::new();
         let mut reg_queue = Vec::new();
         let mut unreg_queue = Vec::new();
         let mut notification_queue = Vec::new();
+        let mut hotkey_reg_queue = Vec::new();
+        let mut hotkey_unreg_queue = Vec::new();
 
+        // Phase 0: Execute triggered hotkey callbacks
+        if !triggered.is_empty() {
+            let mut ctx = PollContext::new(
+                shared,
+                bus,
+                &results,
+                &invocations,
+                &triggered,
+                &mut exec_queue,
+                &mut reg_queue,
+                &mut unreg_queue,
+                &mut notification_queue,
+                &mut hotkey_reg_queue,
+                &mut hotkey_unreg_queue,
+            );
+
+            for binding in &triggered {
+                for plugin in &mut self.plugins {
+                    if plugin.faulted {
+                        continue;
+                    }
+                    if let Some(PluginKeyAction::Callback(cb)) = plugin.hotkeys.get_mut(binding) {
+                        let result = catch_unwind(AssertUnwindSafe(|| {
+                            cb(&mut ctx);
+                        }));
+                        if let Err(panic_info) = result {
+                            log::error!(
+                                "Plugin '{}' panicked in hotkey callback: {}. Plugin disabled.",
+                                plugin._metadata.name,
+                                panic_payload_to_string(&panic_info),
+                            );
+                            plugin.faulted = true;
+                        }
+                        break; // first match wins
+                    }
+                }
+            }
+        }
+
+        // Phase 1: Regular plugin polling
         let mut ctx = PollContext::new(
             shared,
             bus,
             &results,
             &invocations,
+            &triggered,
             &mut exec_queue,
             &mut reg_queue,
             &mut unreg_queue,
             &mut notification_queue,
+            &mut hotkey_reg_queue,
+            &mut hotkey_unreg_queue,
         );
 
         for plugin in &mut self.plugins {
@@ -295,6 +361,8 @@ impl PluginManager {
         self.pending_registrations = reg_queue;
         self.pending_unregistrations = unreg_queue;
         self.notification_messages = notification_queue;
+        self.pending_hotkey_registrations = hotkey_reg_queue;
+        self.pending_hotkey_unregistrations = hotkey_unreg_queue;
     }
 
     /// Take pending command execution requests (Phase 2 input).
@@ -330,6 +398,56 @@ impl PluginManager {
     /// Get notification messages from plugins (set during the last poll cycle).
     pub fn notification_messages(&self) -> &[String] {
         &self.notification_messages
+    }
+
+    // =========================================================================
+    // Hotkeys
+    // =========================================================================
+
+    /// Look up a plugin hotkey action. First loaded plugin wins.
+    pub fn lookup_hotkey(&self, binding: &KeyBinding) -> Option<&PluginKeyAction> {
+        for plugin in &self.plugins {
+            if plugin.faulted {
+                continue;
+            }
+            if let Some(action) = plugin.hotkeys.get(binding) {
+                return Some(action);
+            }
+        }
+        None
+    }
+
+    /// Queue a hotkey binding as triggered (called from handle_key).
+    ///
+    /// The callback will be executed during the next poll phase.
+    pub fn trigger_hotkey(&mut self, binding: KeyBinding) {
+        self.triggered_hotkeys.push(binding);
+    }
+
+    /// Whether any hotkeys were triggered since last poll.
+    pub fn has_triggered_hotkeys(&self) -> bool {
+        !self.triggered_hotkeys.is_empty()
+    }
+
+    /// Apply pending hotkey registration/unregistration changes (Phase 3).
+    pub fn apply_hotkey_changes(&mut self) {
+        let registrations = std::mem::take(&mut self.pending_hotkey_registrations);
+        let unregistrations = std::mem::take(&mut self.pending_hotkey_unregistrations);
+
+        // Apply unregistrations — remove from all plugins
+        for key in &unregistrations {
+            for plugin in &mut self.plugins {
+                plugin.hotkeys.unbind(*key);
+            }
+        }
+
+        // Apply registrations — bind to the last loaded plugin
+        // (runtime registrations go to last plugin since we don't track which plugin requested it)
+        if let Some(plugin) = self.plugins.last_mut() {
+            for (key, action) in registrations {
+                plugin.hotkeys.bind(key, action);
+            }
+        }
     }
 }
 
