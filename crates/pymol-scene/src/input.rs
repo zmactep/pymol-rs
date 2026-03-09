@@ -52,6 +52,10 @@ pub struct InputState {
     pub zoom_sensitivity: f32,
     /// Clip sensitivity (units per pixel)
     pub clip_sensitivity: f32,
+    /// Pan sensitivity multiplier (dimensionless; 1.0 = PyMOL-equivalent behaviour).
+    /// Applied on top of screen_vertex_scale, which already accounts for camera
+    /// distance and viewport size so that the scene tracks the cursor exactly.
+    pub pan_sensitivity: f32,
 }
 
 impl Default for InputState {
@@ -67,6 +71,7 @@ impl Default for InputState {
             rotate_sensitivity: 0.005,
             zoom_sensitivity: 0.1,
             clip_sensitivity: 0.1,
+            pan_sensitivity: 1.0,
         }
     }
 }

@@ -53,7 +53,8 @@ impl App {
                 }
                 CameraDelta::Translate(v) => {
                     let vh = self.view.viewport_rect.map(|r| r.height()).unwrap_or(768.0);
-                    let scale = self.state.camera.screen_vertex_scale(vh);
+                    let scale = self.state.camera.screen_vertex_scale(vh)
+                        * self.viewport.input.pan_sensitivity;
                     self.state.camera.translate(v * scale);
                     self.scene_dirty = true;
                 }

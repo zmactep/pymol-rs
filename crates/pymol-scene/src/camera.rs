@@ -360,15 +360,19 @@ impl Camera {
     /// Translation is applied in camera space.
     pub fn translate(&mut self, delta: Vec3) {
         self.animation = None;
-        // Transform delta from camera space to world space
-        if let Some(rot_inv) = self.view.rotation.inverse() {
-            let world_delta = Vec3::new(
-                rot_inv.data[0] * delta.x + rot_inv.data[4] * delta.y + rot_inv.data[8] * delta.z,
-                rot_inv.data[1] * delta.x + rot_inv.data[5] * delta.y + rot_inv.data[9] * delta.z,
-                rot_inv.data[2] * delta.x + rot_inv.data[6] * delta.y + rot_inv.data[10] * delta.z,
-            );
-            self.view.origin = self.view.origin.clone() + world_delta;
-        }
+        // Transform delta from camera space to world space using R^T.
+        // For orthogonal rotation matrices R^-1 = R^T, so we use the transpose
+        // directly instead of calling inverse(). This avoids lin_alg's inverse()
+        // which can return None or a scaled result after numerical drift from
+        // accumulated rotation multiplications.
+        // Column-major layout: R^T * v uses R.data[i*4 + j] for row i, col j.
+        let r = &self.view.rotation;
+        let world_delta = Vec3::new(
+            r.data[0] * delta.x + r.data[1] * delta.y + r.data[2] * delta.z,
+            r.data[4] * delta.x + r.data[5] * delta.y + r.data[6] * delta.z,
+            r.data[8] * delta.x + r.data[9] * delta.y + r.data[10] * delta.z,
+        );
+        self.view.origin = self.view.origin.clone() + world_delta;
     }
 
     /// Zoom by changing the camera distance
