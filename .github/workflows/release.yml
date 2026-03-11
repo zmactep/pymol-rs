@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g., v0.1.0)'
+        description: "Release tag (e.g., v0.1.0)"
         required: false
         type: string
 
@@ -29,15 +29,15 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             name: macos-arm64
-            ext: ''
+            ext: ""
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: linux-x86_64
-            ext: ''
+            ext: ""
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             name: linux-arm64
-            ext: ''
+            ext: ""
 
     steps:
       - name: Checkout
@@ -96,19 +96,19 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             name: windows-x86_64
-            lib_glob: '*_plugin.dll'
+            lib_glob: "*_plugin.dll"
           - target: aarch64-apple-darwin
             os: macos-latest
             name: macos-arm64
-            lib_glob: 'lib*_plugin.dylib'
+            lib_glob: "lib*_plugin.dylib"
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: linux-x86_64
-            lib_glob: 'lib*_plugin.so'
+            lib_glob: "lib*_plugin.so"
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             name: linux-arm64
-            lib_glob: 'lib*_plugin.so'
+            lib_glob: "lib*_plugin.so"
 
     steps:
       - name: Checkout
@@ -138,7 +138,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - name: Build plugins
         run: cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin --target ${{ matrix.target }}
@@ -193,12 +193,12 @@ jobs:
       - name: Setup Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - name: Setup Python 3.14
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: "3.14"
           allow-prereleases: true
 
       - name: Build wheels
@@ -217,7 +217,7 @@ jobs:
           if-no-files-found: error
 
   build-macos-app:
-    name: Build macOS .app bundle
+    name: Build macOS DMG bundle
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -229,7 +229,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -237,22 +237,13 @@ jobs:
       - name: Install maturin
         run: uv tool install maturin
 
-      - name: Build full .app bundle
-        run: make app-full
-
-      - name: Create DMG
-        run: |
-          ln -sf /Applications target/app/Applications
-          hdiutil create -volname "PyMOL-RS" \
-            -srcfolder target/app \
-            -ov -format UDZO \
-            target/PyMOL-RS.dmg
-          rm -f target/app/Applications
+      - name: Build full .dmg bundle
+        run: make dmg-full
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: PyMOL-RS-macos-arm64.dmg
+          name: PyMOL-RS.dmg
           path: target/PyMOL-RS.dmg
           if-no-files-found: error
 
