@@ -156,6 +156,9 @@ pub struct Movie {
     /// Precomputed interpolated views for all frames between keyframes
     #[serde(skip)]
     precomputed_views: Vec<Option<SceneView>>,
+    /// Precomputed interpolated object transforms for all frames between keyframes
+    #[serde(skip)]
+    precomputed_object_transforms: ahash::AHashMap<String, Vec<Option<lin_alg::f32::Mat4>>>,
 }
 
 fn default_frame_delay() -> Duration {
@@ -190,6 +193,7 @@ impl Movie {
             rock_enabled: false,
             n_object_states: 1,
             precomputed_views: Vec::new(),
+            precomputed_object_transforms: AHashMap::new(),
         }
     }
 
@@ -580,14 +584,17 @@ impl Movie {
     }
 
     /// Store an object keyframe at the given frame index.
-    pub fn store_object_keyframe(&mut self, frame: usize, object: &str, state: Option<usize>) {
+    pub fn store_object_keyframe(
+        &mut self,
+        frame: usize,
+        object: &str,
+        state: Option<usize>,
+        transform: Option<lin_alg::f32::Mat4>,
+    ) {
         if frame < self.frames.len() {
             self.frames[frame].object_keyframes.insert(
                 object.to_string(),
-                ObjectKeyframe {
-                    transform: None,
-                    state,
-                },
+                ObjectKeyframe { transform, state },
             );
         }
     }
@@ -800,6 +807,189 @@ impl Movie {
         }
 
         self.precomputed_views = views;
+    }
+
+    /// Compute smooth interpolated object transforms for all frames between keyframes.
+    ///
+    /// Decomposes Mat4 keyframes into translation (Vec3) + rotation (Quat),
+    /// interpolates with Catmull-Rom + SLERP, and recomposes.
+    pub fn interpolate_object_keyframes(&mut self, loop_movie: bool) {
+        use lin_alg::f32::{Mat4, Vec3};
+
+        let n = self.frames.len();
+        if n == 0 {
+            self.precomputed_object_transforms.clear();
+            return;
+        }
+
+        // Collect all object names that have transform keyframes
+        let mut object_names: Vec<String> = Vec::new();
+        for frame in &self.frames {
+            for (name, kf) in &frame.object_keyframes {
+                if kf.transform.is_some() && !object_names.contains(name) {
+                    object_names.push(name.clone());
+                }
+            }
+        }
+
+        self.precomputed_object_transforms.clear();
+
+        for obj_name in &object_names {
+            // Collect keyframes: (frame_index, translation, quaternion)
+            let keyframes: Vec<(usize, Vec3, Quat)> = self
+                .frames
+                .iter()
+                .enumerate()
+                .filter_map(|(i, f)| {
+                    f.object_keyframes.get(obj_name).and_then(|kf| {
+                        kf.transform.as_ref().map(|m| {
+                            let translation = Vec3::new(m.data[3], m.data[7], m.data[11]);
+                            let q = Quat::from_mat4(m).normalized();
+                            (i, translation, q)
+                        })
+                    })
+                })
+                .collect();
+
+            if keyframes.is_empty() {
+                continue;
+            }
+
+            let mut transforms: Vec<Option<Mat4>> = vec![None; n];
+
+            // Single keyframe: all frames get that transform
+            if keyframes.len() == 1 {
+                let m = self.frames[keyframes[0].0]
+                    .object_keyframes
+                    .get(obj_name)
+                    .and_then(|kf| kf.transform.clone());
+                transforms = vec![m; n];
+                self.precomputed_object_transforms
+                    .insert(obj_name.clone(), transforms);
+                continue;
+            }
+
+            let kf_count = keyframes.len();
+
+            // Interpolate between consecutive keyframe pairs
+            for seg in 0..kf_count {
+                let next_seg = if seg + 1 < kf_count {
+                    seg + 1
+                } else if loop_movie {
+                    0
+                } else {
+                    break;
+                };
+
+                let (start_frame, ref start_pos, ref start_q) = keyframes[seg];
+                let (end_frame, ref end_pos, ref end_q) = keyframes[next_seg];
+
+                let span = if end_frame > start_frame {
+                    end_frame - start_frame
+                } else if loop_movie && next_seg == 0 {
+                    n - start_frame + end_frame
+                } else {
+                    continue;
+                };
+
+                if span == 0 {
+                    continue;
+                }
+
+                // Catmull-Rom tangent control points
+                let prev_seg = if seg > 0 {
+                    seg - 1
+                } else if loop_movie {
+                    kf_count - 1
+                } else {
+                    seg
+                };
+                let next_next_seg = if next_seg + 1 < kf_count {
+                    next_seg + 1
+                } else if loop_movie {
+                    0
+                } else {
+                    next_seg
+                };
+
+                let prev_pos = &keyframes[prev_seg].1;
+                let next_next_pos = &keyframes[next_next_seg].1;
+
+                let m0 = quat::catmull_rom_tangent_vec3(prev_pos, end_pos);
+                let m1 = quat::catmull_rom_tangent_vec3(start_pos, next_next_pos);
+
+                for step in 0..=span {
+                    let frame_idx = (start_frame + step) % n;
+                    let t = step as f32 / span as f32;
+
+                    let pos = quat::hermite_vec3(start_pos, &m0, end_pos, &m1, t);
+                    let rot = Quat::slerp(start_q, end_q, t).to_mat4();
+
+                    // Compose: rotation * translation
+                    let mut m = rot;
+                    m.data[3] = pos.x;
+                    m.data[7] = pos.y;
+                    m.data[11] = pos.z;
+
+                    transforms[frame_idx] = Some(m);
+                }
+            }
+
+            // Hold first keyframe for frames before it
+            let first_kf_frame = keyframes[0].0;
+            if let Some(ref first_transform) = self.frames[first_kf_frame]
+                .object_keyframes
+                .get(obj_name)
+                .and_then(|kf| kf.transform.clone())
+            {
+                for i in 0..first_kf_frame {
+                    if transforms[i].is_none() {
+                        transforms[i] = Some(first_transform.clone());
+                    }
+                }
+            }
+
+            // Hold last keyframe for frames after it
+            if !loop_movie {
+                let last_kf_frame = keyframes[kf_count - 1].0;
+                if let Some(ref last_transform) = self.frames[last_kf_frame]
+                    .object_keyframes
+                    .get(obj_name)
+                    .and_then(|kf| kf.transform.clone())
+                {
+                    for i in (last_kf_frame + 1)..n {
+                        if transforms[i].is_none() {
+                            transforms[i] = Some(last_transform.clone());
+                        }
+                    }
+                }
+            }
+
+            self.precomputed_object_transforms
+                .insert(obj_name.clone(), transforms);
+        }
+    }
+
+    /// Get the interpolated object transform for the current frame.
+    pub fn interpolated_object_transform(
+        &self,
+        object: &str,
+    ) -> Option<lin_alg::f32::Mat4> {
+        self.precomputed_object_transforms
+            .get(object)
+            .and_then(|transforms| transforms.get(self.current_frame))
+            .and_then(|t| t.clone())
+    }
+
+    /// Get all object names that have interpolated transforms for the current frame.
+    pub fn objects_with_transforms(&self) -> Vec<(String, lin_alg::f32::Mat4)> {
+        let mut result = Vec::new();
+        for (name, transforms) in &self.precomputed_object_transforms {
+            if let Some(Some(transform)) = transforms.get(self.current_frame) {
+                result.push((name.clone(), transform.clone()));
+            }
+        }
+        result
     }
 
     /// Check if precomputed interpolation data is available.

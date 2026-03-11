@@ -1,7 +1,7 @@
-//! Movie commands: mplay, mstop, mpause, mset, mview, mpng, madd, frame, forward, backward, rewind, ending, rock
+//! Movie commands: mplay, mstop, mpause, mset, mview, mpng, mproduce, madd, frame, forward, backward, rewind, ending, rock
 
 use crate::args::{ArgValue, ParsedCommand};
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
 /// Register movie commands
@@ -13,6 +13,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(MsetCommand);
     registry.register(MviewCommand);
     registry.register(MpngCommand);
+    registry.register(ProduceCommand);
     registry.register(MaddCommand);
     registry.register(FrameCommand);
     registry.register(ForwardCommand);
@@ -876,6 +877,112 @@ SEE ALSO
 // mpng command
 // ============================================================================
 
+/// Parsed frame rendering parameters shared by mpng and mproduce.
+struct FrameRenderParams {
+    first: usize,
+    last: usize,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+impl FrameRenderParams {
+    /// Parse first, last, width, height from command args.
+    /// `first_idx`/`last_idx`/`width_idx`/`height_idx` are positional arg indices.
+    fn parse(
+        args: &ParsedCommand,
+        total: usize,
+        first_idx: usize,
+        last_idx: usize,
+        width_idx: usize,
+        height_idx: usize,
+    ) -> Self {
+        let first = args
+            .get_int(first_idx)
+            .or_else(|| args.get_named_int("first"))
+            .map(|f| (f as usize).saturating_sub(1))
+            .unwrap_or(0);
+
+        let last = args
+            .get_int(last_idx)
+            .or_else(|| args.get_named_int("last"))
+            .map(|f| (f as usize).saturating_sub(1))
+            .unwrap_or(total - 1);
+
+        let width = args
+            .get_int(width_idx)
+            .or_else(|| args.get_named_int("width"))
+            .map(|w| w as u32);
+
+        let height = args
+            .get_int(height_idx)
+            .or_else(|| args.get_named_int("height"))
+            .map(|h| h as u32);
+
+        Self { first, last, width, height }
+    }
+
+    fn frame_count(&self) -> usize {
+        self.last - self.first + 1
+    }
+
+    /// Ensure width/height are even (required for H.264/VP9).
+    fn make_even(&mut self) {
+        self.width = self.width.map(|w| if w % 2 != 0 { w - 1 } else { w });
+        self.height = self.height.map(|h| if h % 2 != 0 { h - 1 } else { h });
+    }
+}
+
+/// Render movie frames to PNG files: `{prefix}0001.png`, `{prefix}0002.png`, ...
+///
+/// Frames are numbered starting from 1 relative to `first`.
+/// Creates the parent directory of `prefix` if it doesn't exist.
+fn render_frames_to_png(
+    ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
+    prefix: &str,
+    params: &FrameRenderParams,
+) -> CmdResult {
+    let parent = std::path::Path::new(prefix).parent();
+    if let Some(dir) = parent {
+        if !dir.as_os_str().is_empty() {
+            std::fs::create_dir_all(dir).map_err(|e| CmdError::InvalidArgument {
+                name: "prefix".to_string(),
+                reason: format!("Cannot create directory: {}", e),
+            })?;
+        }
+    }
+
+    for frame in params.first..=params.last {
+        let idx = frame - params.first + 1;
+        let path = format!("{}{:04}.png", prefix, idx);
+        ctx.viewer
+            .capture_frame_png(frame, std::path::Path::new(&path), params.width, params.height)
+            .map_err(|e| CmdError::InvalidArgument {
+                name: "render".to_string(),
+                reason: format!("Frame {}: {}", frame + 1, e),
+            })?;
+
+        if !ctx.quiet {
+            ctx.print(&format!(
+                " Ray: frame {} of {} ({}).",
+                idx, params.frame_count(), path
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate that the movie has frames, returning the total count.
+fn require_movie_frames(ctx: &CommandContext<'_, '_, dyn ViewerLike + '_>) -> Result<usize, CmdError> {
+    let total = ctx.viewer.movie_frame_count();
+    if total == 0 {
+        return Err(CmdError::InvalidArgument {
+            name: "movie".to_string(),
+            reason: "No movie frames. Use mset first.".to_string(),
+        });
+    }
+    Ok(total)
+}
+
 struct MpngCommand;
 
 impl Command for MpngCommand {
@@ -923,81 +1030,247 @@ SEE ALSO
             .get_str(0)
             .ok_or_else(|| CmdError::MissingArgument("prefix".to_string()))?;
 
-        let total = ctx.viewer.movie_frame_count();
-        if total == 0 {
-            return Err(CmdError::InvalidArgument {
-                name: "movie".to_string(),
-                reason: "No movie frames. Use mset first.".to_string(),
-            });
-        }
+        let total = require_movie_frames(ctx)?;
+        // Positional: prefix(0), first(1), last(2), preserve(3), width(4), height(5)
+        let params = FrameRenderParams::parse(args, total, 1, 2, 4, 5);
 
-        let first = args
-            .get_int(1)
-            .or_else(|| args.get_named_int("first"))
-            .map(|f| (f as usize).saturating_sub(1))
-            .unwrap_or(0);
-
-        let last = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("last"))
-            .map(|f| (f as usize).saturating_sub(1))
-            .unwrap_or(total - 1);
-
-        // skip arg index 3 (preserve)
-        let width = args
-            .get_int(4)
-            .or_else(|| args.get_named_int("width"))
-            .map(|w| w as u32);
-
-        let height = args
-            .get_int(5)
-            .or_else(|| args.get_named_int("height"))
-            .map(|h| h as u32);
-
-        // Create output directory if needed
-        let parent = std::path::Path::new(prefix).parent();
-        if let Some(dir) = parent {
-            if !dir.as_os_str().is_empty() {
-                std::fs::create_dir_all(dir).map_err(|e| CmdError::InvalidArgument {
-                    name: "prefix".to_string(),
-                    reason: format!("Cannot create directory: {}", e),
-                })?;
-            }
-        }
-
-        let frame_count = last - first + 1;
         if !ctx.quiet {
             ctx.print(&format!(
                 " Rendering {} frames to {}NNNN.png...",
-                frame_count, prefix
+                params.frame_count(), prefix
             ));
         }
 
-        for frame in first..=last {
-            let path = format!("{}{:04}.png", prefix, frame + 1);
-            ctx.viewer
-                .capture_frame_png(frame, std::path::Path::new(&path), width, height)
-                .map_err(|e| CmdError::InvalidArgument {
-                    name: "render".to_string(),
-                    reason: format!("Frame {}: {}", frame + 1, e),
-                })?;
-
-            if !ctx.quiet {
-                ctx.print(&format!(
-                    " Ray: frame {} of {} ({}).",
-                    frame - first + 1,
-                    frame_count,
-                    path
-                ));
-            }
-        }
+        render_frames_to_png(ctx, prefix, &params)?;
 
         if !ctx.quiet {
             ctx.print(&format!(
                 " {} frames rendered to {}NNNN.png.",
-                frame_count, prefix
+                params.frame_count(), prefix
             ));
         }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// mproduce command
+// ============================================================================
+
+struct ProduceCommand;
+
+impl Command for ProduceCommand {
+    fn name(&self) -> &str {
+        "mproduce"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "mproduce" exports a movie to a video file using ffmpeg.
+
+    Renders each frame to a temporary PNG sequence, then encodes:
+      - MP4/MOV: H.264 codec, yuv420p pixel format
+      - WebM: VP9 codec
+
+    Requires ffmpeg to be installed and available in $PATH.
+
+USAGE
+
+    mproduce filename [, first [, last [, preserve [, quality [, width [, height]]]]]]
+
+ARGUMENTS
+
+    filename = string: output file path (e.g., movie.mp4, movie.webm)
+    first = int: first frame to export (1-indexed, default: 1)
+    last = int: last frame to export (1-indexed, default: last frame)
+    preserve = int: keep temporary PNG files (0 or 1, default: 0)
+    quality = int: encoding quality 0-100 (default: 90)
+    width = int: frame width in pixels (default: viewport width)
+    height = int: frame height in pixels (default: viewport height)
+
+EXAMPLES
+
+    mproduce movie.mp4
+    mproduce movie.mp4, 1, 60, quality=95
+    mproduce movie.webm, width=1920, height=1080
+    mproduce movie.mov, width=1920, height=1080
+
+SEE ALSO
+
+    mpng, mset, mview, mplay
+"#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path]
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        use std::process::Command as ProcessCommand;
+
+        // Parse filename
+        let filename_raw = args
+            .get_str(0)
+            .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
+
+        let filename = super::io::expand_path(filename_raw);
+
+        // Validate extension
+        let ext = filename
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if !matches!(ext, "mp4" | "mov" | "webm") {
+            return Err(CmdError::InvalidArgument {
+                name: "filename".to_string(),
+                reason: format!(
+                    "Unsupported format \".{}\". Use .mp4, .mov, or .webm.",
+                    ext
+                ),
+            });
+        }
+
+        // Check ffmpeg availability
+        let ffmpeg_ok = ProcessCommand::new("ffmpeg")
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if ffmpeg_ok.is_err() || !ffmpeg_ok.unwrap().success() {
+            return Err(CmdError::InvalidArgument {
+                name: "ffmpeg".to_string(),
+                reason: "ffmpeg not found in $PATH. Install ffmpeg to produce videos.".to_string(),
+            });
+        }
+
+        let total = require_movie_frames(ctx)?;
+        // Positional: filename(0), first(1), last(2), preserve(3), quality(4), width(5), height(6)
+        let mut params = FrameRenderParams::parse(args, total, 1, 2, 5, 6);
+        params.make_even();
+
+        let preserve = args
+            .get_int(3)
+            .or_else(|| args.get_named_int("preserve"))
+            .unwrap_or(0)
+            != 0;
+
+        let quality = args
+            .get_int(4)
+            .or_else(|| args.get_named_int("quality"))
+            .unwrap_or(90)
+            .clamp(0, 100);
+
+        // Get FPS from settings
+        let fps = ctx
+            .viewer
+            .settings()
+            .get_float(pymol_settings::id::movie_fps);
+
+        // Create temp directory
+        let tmp_path = filename.with_extension("tmp");
+        if tmp_path.exists() && !preserve {
+            let _ = std::fs::remove_dir_all(&tmp_path);
+        }
+        std::fs::create_dir_all(&tmp_path).map_err(|e| CmdError::InvalidArgument {
+            name: "tmp_dir".to_string(),
+            reason: format!("Cannot create temp directory: {}", e),
+        })?;
+
+        let prefix = tmp_path.join("mov");
+        let prefix_str = prefix.display().to_string();
+
+        if !ctx.quiet {
+            ctx.print(&format!(
+                " mproduce: rendering {} frames...",
+                params.frame_count()
+            ));
+        }
+
+        render_frames_to_png(ctx, &prefix_str, &params)?;
+
+        if !ctx.quiet {
+            ctx.print(" mproduce: encoding with ffmpeg...");
+        }
+
+        // Build ffmpeg arguments based on output format
+        let input_pattern = format!("{}%04d.png", prefix_str);
+        let fps_str = format!("{:.3}", fps);
+
+        let mut ffmpeg_args: Vec<&str> = vec![
+            "-y",
+            "-f", "image2",
+            "-framerate", &fps_str,
+            "-i", &input_pattern,
+        ];
+
+        let crf_str;
+        if ext == "webm" {
+            // VP9: CRF = 65 - quality/2 (matching PyMOL reference)
+            crf_str = format!("{:.0}", 65.0 - (quality as f64 / 2.0));
+            ffmpeg_args.extend_from_slice(&[
+                "-c:v", "libvpx-vp9",
+                "-b:v", "0",
+                "-crf", &crf_str,
+            ]);
+        } else {
+            // H.264 for MP4/MOV
+            crf_str = if quality > 90 {
+                "10".to_string()
+            } else if quality > 80 {
+                "15".to_string()
+            } else {
+                "20".to_string()
+            };
+            ffmpeg_args.extend_from_slice(&[
+                "-crf", &crf_str,
+                "-pix_fmt", "yuv420p",
+            ]);
+        }
+
+        // Run ffmpeg
+        let output = ProcessCommand::new("ffmpeg")
+            .args(&ffmpeg_args)
+            .arg(filename.as_os_str())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_err(|e| CmdError::InvalidArgument {
+                name: "ffmpeg".to_string(),
+                reason: format!("Failed to run ffmpeg: {}", e),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !preserve {
+                let _ = std::fs::remove_dir_all(&tmp_path);
+            }
+            return Err(CmdError::InvalidArgument {
+                name: "ffmpeg".to_string(),
+                reason: format!(
+                    "ffmpeg exited with status {}:\n{}",
+                    output.status, stderr
+                ),
+            });
+        }
+
+        // Clean up temp dir
+        if !preserve {
+            let _ = std::fs::remove_dir_all(&tmp_path);
+        }
+
+        if !ctx.quiet {
+            ctx.print(&format!(
+                " mproduce: finished. Saved to \"{}\".",
+                filename.display()
+            ));
+        }
+
         Ok(())
     }
 }

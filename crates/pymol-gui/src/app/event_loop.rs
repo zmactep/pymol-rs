@@ -243,7 +243,7 @@ impl App {
     fn update_animations(&mut self, dt: f32) {
         // Movie frame advance
         if self.state.movie.update() {
-            // Sync display state of all objects to the new frame
+            // Sync display state, object transforms, and camera to the new frame
             let current_frame = self.state.movie.current_frame();
             let state_index = self.state.movie.frame_to_state(current_frame);
             for name in self.state.registry.names().map(|s| s.to_string()).collect::<Vec<_>>() {
@@ -251,6 +251,7 @@ impl App {
                     obj.set_display_state(state_index);
                 }
             }
+            self.state.apply_movie_object_transforms();
             if let Some(view) = self.state.movie.interpolated_view() {
                 self.state.camera.set_view(view);
             }

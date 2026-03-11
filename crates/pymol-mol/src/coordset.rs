@@ -508,6 +508,13 @@ impl CoordSet {
         }
     }
 
+    /// Return a clone with all coordinates transformed by the given matrix
+    pub fn transformed(&self, matrix: &Mat4) -> CoordSet {
+        let mut cs = self.clone();
+        cs.transform(matrix);
+        cs
+    }
+
     /// Apply a 4x4 homogeneous transformation matrix to specific atoms
     pub fn transform_atoms(&mut self, atoms: &[AtomIndex], matrix: &Mat4) {
         for &atom in atoms {

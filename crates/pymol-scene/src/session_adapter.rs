@@ -158,6 +158,7 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
         if let Some(view) = self.session.movie.interpolated_view() {
             self.session.camera.set_view(view);
         }
+        self.session.apply_movie_object_transforms();
         if let Some(scene_name) = self.session.movie.current_scene_name().map(|s| s.to_string()) {
             if let Some(scene) = self.session.scenes.get(&scene_name) {
                 scene.apply(&mut self.session.camera, &mut self.session.registry, false, 0.0);
@@ -201,4 +202,3 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
         self.default_size
     }
 }
-

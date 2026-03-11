@@ -3,7 +3,7 @@
 //! Wraps `ObjectMolecule` with render state and cached representations.
 
 use bitflags::bitflags;
-use lin_alg::f32::Vec3;
+use lin_alg::f32::{Mat4, Vec3};
 use pymol_mol::{ObjectMolecule, RepMask};
 use serde::{Deserialize, Serialize};
 use pymol_render::{
@@ -446,8 +446,14 @@ impl MoleculeObject {
             return;
         }
 
-        // Get the current coordinate set
+        // Get the current coordinate set, applying object TTT transform if present
+        let has_ttt = self.state.transform.data != Mat4::new_identity().data;
+        let transformed;
         let coord_set = match self.molecule.get_coord_set(self.display_state) {
+            Some(cs) if has_ttt => {
+                transformed = cs.transformed(&self.state.transform);
+                &transformed
+            }
             Some(cs) => cs,
             None => return,
         };

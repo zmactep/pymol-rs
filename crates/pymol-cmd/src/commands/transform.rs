@@ -9,8 +9,10 @@
 //! - Logical operators: `name CA and chain A`, `organic or solvent`
 //! - Special keywords: `backbone`, `sidechain`, `polymer`, `organic`
 
-use lin_alg::f32::Vec3;
+use lin_alg::f32::{Mat4, Vec3};
+use pymol_algos::linalg::left_multiply_mat4;
 use pymol_mol::{rotation_ttt, ttt_to_mat4, AtomIndex};
+use pymol_scene::{DirtyFlags, Object};
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
@@ -115,19 +117,49 @@ EXAMPLES
             vector
         };
 
-        // Apply translation using selection expressions
-        let (atom_count, obj_count) =
-            apply_selection_transform(ctx, selection, state, |mol, atoms, st| {
-                apply_translation_to_atoms(mol, st, atoms, &shift);
-            })?;
+        // When movie is active and selection is a whole object name,
+        // modify the object's TTT transform matrix instead of atom coordinates.
+        // This allows mview store/interpolation to animate the object.
+        let movie_active = !ctx.viewer.movie().is_empty();
+        let is_object = ctx.viewer.objects().contains(selection);
 
-        ctx.viewer.request_redraw();
+        if movie_active && is_object {
+            // Build translation matrix and compose onto object's TTT
+            let translation = Mat4 {
+                data: [
+                    1.0, 0.0, 0.0, shift.x,
+                    0.0, 1.0, 0.0, shift.y,
+                    0.0, 0.0, 1.0, shift.z,
+                    0.0, 0.0, 0.0, 1.0,
+                ],
+            };
+            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(selection) {
+                let current = mol_obj.state().transform.clone();
+                mol_obj.state_mut().set_transform(left_multiply_mat4(&translation, &current));
+                mol_obj.invalidate(DirtyFlags::COORDS);
+            }
+            ctx.viewer.request_redraw();
+            if !ctx.quiet {
+                ctx.print(&format!(
+                    " Translated object \"{}\" by [{:.3}, {:.3}, {:.3}] (object matrix)",
+                    selection, shift.x, shift.y, shift.z
+                ));
+            }
+        } else {
+            // Apply translation to atom coordinates directly
+            let (atom_count, obj_count) =
+                apply_selection_transform(ctx, selection, state, |mol, atoms, st| {
+                    apply_translation_to_atoms(mol, st, atoms, &shift);
+                })?;
 
-        if !ctx.quiet {
-            ctx.print(&format!(
-                " Translated {} atom(s) in {} object(s) by [{:.3}, {:.3}, {:.3}]",
-                atom_count, obj_count, shift.x, shift.y, shift.z
-            ));
+            ctx.viewer.request_redraw();
+
+            if !ctx.quiet {
+                ctx.print(&format!(
+                    " Translated {} atom(s) in {} object(s) by [{:.3}, {:.3}, {:.3}]",
+                    atom_count, obj_count, shift.x, shift.y, shift.z
+                ));
+            }
         }
 
         Ok(())

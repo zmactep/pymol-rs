@@ -16,7 +16,7 @@ use pymol_settings::GlobalSettings;
 
 use crate::camera::Camera;
 use crate::movie::{LoopMode, Movie};
-use crate::object::ObjectRegistry;
+use crate::object::{Object, ObjectRegistry};
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
 use crate::session::Session;
@@ -438,13 +438,8 @@ pub trait ViewerLike {
 
     /// Sync the movie's current frame to all objects' display states and camera.
     fn sync_movie_to_objects(&mut self) {
-        let (state_index, view) = {
-            let movie = self.movie();
-            let current_frame = movie.current_frame();
-            let state_index = movie.frame_to_state(current_frame);
-            let view = movie.interpolated_view();
-            (state_index, view)
-        };
+        let state_index = self.movie().frame_to_state(self.movie().current_frame());
+        let view = self.movie().interpolated_view();
 
         let names: Vec<String> = self.objects().names().map(|s| s.to_string()).collect();
         for name in &names {
@@ -452,6 +447,8 @@ pub trait ViewerLike {
                 obj.set_display_state(state_index);
             }
         }
+
+        self.session_mut().apply_movie_object_transforms();
 
         if let Some(view) = view {
             self.camera_mut().set_view(view);
@@ -529,7 +526,19 @@ pub trait ViewerLike {
 
     /// Store an object keyframe at the given frame
     fn movie_store_object(&mut self, frame: usize, object: &str, state: Option<usize>) {
-        self.movie_mut().store_object_keyframe(frame, object, state);
+        // Capture the object's current TTT transform matrix
+        let transform = self
+            .objects()
+            .get_molecule(object)
+            .map(|mol| mol.state().transform.clone());
+        self.movie_mut()
+            .store_object_keyframe(frame, object, state, transform);
+        // Auto-interpolate object transforms between keyframes
+        let loop_movie = self.settings().get_bool(pymol_settings::id::movie_loop);
+        if self.settings().get_bool(pymol_settings::id::movie_auto_interpolate) {
+            self.movie_mut().interpolate_object_keyframes(loop_movie);
+        }
+        self.request_redraw();
     }
 
     /// Clear camera keyframe(s). None = clear all.

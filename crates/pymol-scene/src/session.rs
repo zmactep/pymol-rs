@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::camera::Camera;
 use crate::movie::Movie;
-use crate::object::{ObjectRegistry, ObjectRegistrySnapshot};
+use crate::object::{DirtyFlags, Object, ObjectRegistry, ObjectRegistrySnapshot};
 use crate::raytrace::RaytraceInput;
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
@@ -185,6 +185,16 @@ impl Session {
         };
         session.apply_default_settings();
         session
+    }
+
+    /// Apply interpolated object transforms from the movie's current frame to the registry.
+    pub fn apply_movie_object_transforms(&mut self) {
+        for (name, transform) in self.movie.objects_with_transforms() {
+            if let Some(obj) = self.registry.get_molecule_mut(&name) {
+                obj.state_mut().set_transform(transform);
+                obj.invalidate(DirtyFlags::COORDS);
+            }
+        }
     }
 
     /// Apply default global settings (will be loaded from config file in the future)
