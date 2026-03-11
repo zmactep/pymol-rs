@@ -106,7 +106,8 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
         ],
 
         // UI settings
-        show_frame_rate | group_full_member_names | group_arrow_prefix => vec![
+        show_frame_rate | group_full_member_names | group_arrow_prefix |
+        transparent_panels => vec![
             SideEffectCategory::OrthoDirty,
         ],
 

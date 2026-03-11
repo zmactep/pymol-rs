@@ -6,7 +6,7 @@
 use crate::setting::{Setting, SettingLevel, SettingType, SettingValue};
 
 /// Total number of settings
-pub const SETTING_COUNT: usize = 808;
+pub const SETTING_COUNT: usize = 809;
 
 // =============================================================================
 // Setting ID Constants
@@ -860,6 +860,7 @@ pub mod id {
 
     // 807: Surface per-chain
     pub const surface_individual_chains: u16 = 807;
+    pub const transparent_panels: u16 = 808;
 }
 
 // =============================================================================
@@ -1778,6 +1779,8 @@ pub static SETTINGS: &[Setting] = &[
     s_float!(806, "skripkin_intensity", Global, 1.0, 0.0, 2.0),
     // 807: Surface individual chains
     s_bool!(807, "surface_individual_chains", Global, false),
+    // 808: Transparent docked panels
+    s_bool!(808, "transparent_panels", Global, false),
 ];
 
 /// Initialize a settings store with all default values

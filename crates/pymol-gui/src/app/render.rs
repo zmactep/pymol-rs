@@ -8,7 +8,56 @@ use pymol_scene::{setup_uniforms, Object};
 use pymol_select::SelectionResult;
 use winit::dpi::PhysicalSize;
 
+use pymol_render::GlobalUniforms;
+
 use super::App;
+
+/// Adjust projection matrices so the scene renders to the full surface while
+/// staying visually anchored to the central panel viewport.
+///
+/// When transparent panels are enabled the wgpu viewport/scissor is removed so
+/// the 3D scene extends behind the semi-transparent egui panels. Without
+/// correction, the scene would appear centered in the full window instead of the
+/// central panel. This function applies a scale + translate in clip space that
+/// maps central-panel NDC to full-surface NDC, preserving the scene position.
+fn apply_fullscreen_projection_correction(
+    uniforms: &mut GlobalUniforms,
+    viewport: &egui::Rect,
+    surface_width: f32,
+    surface_height: f32,
+) {
+    let sx = viewport.width() / surface_width;
+    let sy = viewport.height() / surface_height;
+    let tx = (2.0 * viewport.min.x + viewport.width()) / surface_width - 1.0;
+    let ty = 1.0 - (2.0 * viewport.min.y + viewport.height()) / surface_height;
+
+    // Column-major scale + translate matrix applied to clip coordinates.
+    // Because clip.w is untouched, ndc_out = scale * ndc_in + translate.
+    let correction: [[f32; 4]; 4] = [
+        [sx,  0.0, 0.0, 0.0],
+        [0.0, sy,  0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [tx,  ty,  0.0, 1.0],
+    ];
+
+    uniforms.view_proj = mul_mat4(correction, uniforms.view_proj);
+    uniforms.proj = mul_mat4(correction, uniforms.proj);
+}
+
+/// Multiply two column-major 4x4 matrices stored as `[[f32; 4]; 4]`.
+fn mul_mat4(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut out = [[0.0f32; 4]; 4];
+    for col in 0..4 {
+        for row in 0..4 {
+            out[col][row] =
+                a[0][row] * b[col][0]
+                + a[1][row] * b[col][1]
+                + a[2][row] * b[col][2]
+                + a[3][row] * b[col][3];
+        }
+    }
+    out
+}
 
 impl App {
     /// Initialize GPU resources
@@ -84,15 +133,25 @@ impl App {
 
         // Upload scene uniforms and set the active shading mode.
         let shading_mode = pymol_settings::ShadingMode::from_settings(&self.state.settings);
+        let transparent_panels = self.state.settings.get_bool(pymol_settings::id::transparent_panels);
         {
             let context = self.view.gpu.render_context.as_mut().unwrap();
             self.shading.set_mode(shading_mode, context);
-            let uniforms = setup_uniforms(
+            let mut uniforms = setup_uniforms(
                 &self.state.camera,
                 &self.state.settings,
                 self.state.clear_color,
                 (viewport_width, viewport_height),
             );
+
+            if transparent_panels {
+                if let Some(vp) = &self.view.viewport_rect {
+                    apply_fullscreen_projection_correction(
+                        &mut uniforms, vp, width as f32, height as f32,
+                    );
+                }
+            }
+
             context.update_uniforms(&uniforms);
         }
 
@@ -138,7 +197,7 @@ impl App {
         }
 
         // 3D scene pass (opaque + transparent).
-        self.render_molecules(&mut encoder, &output_view, &names);
+        self.render_molecules(&mut encoder, &output_view, &names, transparent_panels);
 
         // Post-process: silhouette edge detection.
         self.render_silhouettes(&mut encoder, &output_view, width, height);
@@ -306,6 +365,7 @@ impl App {
         encoder: &mut wgpu::CommandEncoder,
         output_view: &wgpu::TextureView,
         names: &[String],
+        transparent_panels: bool,
     ) {
         let context = self.view.gpu.render_context.as_ref().unwrap();
         let depth_view = self.view.gpu.depth_view.as_ref().unwrap();
@@ -339,20 +399,24 @@ impl App {
         });
 
         // Restrict 3D rendering to the central viewport area, clamped to surface bounds.
-        if let Some(vp) = &self.view.viewport_rect {
-            let (surf_w, surf_h) = self
-                .view
-                .gpu
-                .surface_config
-                .as_ref()
-                .map(|c| (c.width, c.height))
-                .unwrap_or((1u32, 1u32));
-            let vp_x = (vp.min.x.max(0.0) as u32).min(surf_w.saturating_sub(1));
-            let vp_y = (vp.min.y.max(0.0) as u32).min(surf_h.saturating_sub(1));
-            let vp_w = (vp.width().max(1.0) as u32).min(surf_w - vp_x);
-            let vp_h = (vp.height().max(1.0) as u32).min(surf_h - vp_y);
-            render_pass.set_viewport(vp_x as f32, vp_y as f32, vp_w as f32, vp_h as f32, 0.0, 1.0);
-            render_pass.set_scissor_rect(vp_x, vp_y, vp_w, vp_h);
+        // When transparent_panels is on, skip viewport/scissor — the projection matrix
+        // has been corrected to position the scene correctly on the full surface.
+        if !transparent_panels {
+            if let Some(vp) = &self.view.viewport_rect {
+                let (surf_w, surf_h) = self
+                    .view
+                    .gpu
+                    .surface_config
+                    .as_ref()
+                    .map(|c| (c.width, c.height))
+                    .unwrap_or((1u32, 1u32));
+                let vp_x = (vp.min.x.max(0.0) as u32).min(surf_w.saturating_sub(1));
+                let vp_y = (vp.min.y.max(0.0) as u32).min(surf_h.saturating_sub(1));
+                let vp_w = (vp.width().max(1.0) as u32).min(surf_w - vp_x);
+                let vp_h = (vp.height().max(1.0) as u32).min(surf_h - vp_y);
+                render_pass.set_viewport(vp_x as f32, vp_y as f32, vp_w as f32, vp_h as f32, 0.0, 1.0);
+                render_pass.set_scissor_rect(vp_x, vp_y, vp_w, vp_h);
+            }
         }
 
         for name in names {

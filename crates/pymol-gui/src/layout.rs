@@ -105,6 +105,11 @@ const FLOAT_ICON: &str = "\u{2197}"; // arrow upper-right
 /// Icon for the "dock back" button.
 const DOCK_ICON: &str = "\u{2199}"; // arrow lower-left
 
+/// Per-frame flag stored in egui data so `show_panel_shell` can read it
+/// without threading a parameter through every intermediate function.
+#[derive(Clone, Default)]
+struct TransparentPanels(bool);
+
 // ---------------------------------------------------------------------------
 // Public render entry point
 // ---------------------------------------------------------------------------
@@ -122,7 +127,11 @@ pub fn render_layout(
     store: &mut ComponentStore,
     shared: &SharedContext,
     bus: &mut MessageBus,
+    transparent_panels: bool,
 ) -> egui::Rect {
+    // Store the flag in egui's per-frame data for show_panel_shell to read.
+    egui_ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, TransparentPanels(transparent_panels)));
+
     // Collect panel descriptors so closures don't borrow layout.
     let descriptors: Vec<_> = layout
         .panels
@@ -179,6 +188,9 @@ pub fn render_layout(
 ///
 /// When `expanded`, the panel uses its configured size and is optionally resizable.
 /// When collapsed, it shrinks to a minimal tab strip.
+///
+/// Reads the `TransparentPanels` flag from egui's per-frame data to apply
+/// semi-transparent frames when the setting is active.
 fn show_panel_shell(
     egui_ctx: &egui::Context,
     orientation: Orientation,
@@ -187,13 +199,27 @@ fn show_panel_shell(
     expanded: bool,
     render_inner: impl FnOnce(&mut egui::Ui),
 ) {
+    let transparent = egui_ctx
+        .data(|d| d.get_temp::<TransparentPanels>(egui::Id::NULL))
+        .map_or(false, |t| t.0);
+
+    /// Build a semi-transparent version of the default panel frame.
+    fn transparent_frame(style: &egui::Style) -> egui::Frame {
+        let mut frame = egui::Frame::side_top_panel(style);
+        frame.fill = frame.fill.gamma_multiply(0.7);
+        frame
+    }
+
     match orientation {
         Orientation::Horizontal { is_top, size } => {
-            let panel = if is_top {
+            let mut panel = if is_top {
                 egui::TopBottomPanel::top(panel_id)
             } else {
                 egui::TopBottomPanel::bottom(panel_id)
             };
+            if transparent {
+                panel = panel.frame(transparent_frame(egui_ctx.style().as_ref()));
+            }
             if expanded {
                 panel
                     .resizable(resizable)
@@ -208,11 +234,14 @@ fn show_panel_shell(
             }
         }
         Orientation::Vertical { is_left, size } => {
-            let panel = if is_left {
+            let mut panel = if is_left {
                 egui::SidePanel::left(panel_id)
             } else {
                 egui::SidePanel::right(panel_id)
             };
+            if transparent {
+                panel = panel.frame(transparent_frame(egui_ctx.style().as_ref()));
+            }
             if expanded {
                 panel
                     .resizable(resizable)
