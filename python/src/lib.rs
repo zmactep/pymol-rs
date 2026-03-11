@@ -10,6 +10,7 @@ use pyo3::types::PyModule;
 mod backend;
 mod convert;
 mod error;
+pub mod iterate;
 
 pub mod color;
 pub mod io;

@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use pymol_cmd::{CommandExecutor, DynamicCommand};
 use pymol_render::ShadingManager;
-use pymol_scene::{KeyBinding, KeyBindings, MoleculeObject, Session};
+use pymol_scene::{KeyBinding, KeyBindings, MoleculeObject, Session, SessionAdapter};
 // Re-export SelectionEntry for use in UI
 pub use pymol_scene::SelectionEntry;
 
@@ -293,6 +293,31 @@ impl App {
                     });
                 }
                 self.plugin_manager.store_command_results(results);
+            }
+        }
+
+        // Phase 2b: Execute queued viewer mutations
+        {
+            let mutations = self.plugin_manager.take_pending_mutations();
+            if !mutations.is_empty() {
+                let default_size = self.view.viewport_rect
+                    .map(|r| (r.width().max(1.0) as u32, r.height().max(1.0) as u32))
+                    .unwrap_or((1024, 768));
+                let mut dirty_proxy = self.scene_dirty;
+                let mut adapter = SessionAdapter {
+                    session: &mut self.state,
+                    render_context: self.view.gpu.render_context.as_ref(),
+                    default_size,
+                    needs_redraw: &mut dirty_proxy,
+                    async_fetch_fn: None,
+                };
+                for mutation in mutations {
+                    mutation(&mut adapter);
+                }
+                drop(adapter);
+                if dirty_proxy {
+                    self.scene_dirty = true;
+                }
             }
         }
 

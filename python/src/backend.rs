@@ -3,13 +3,18 @@
 //! Provides direct access to a Session + CommandExecutor without IPC.
 //! Used when running Python scripts standalone (not embedded in the GUI).
 
+use std::ffi::CString;
+
 use pyo3::exceptions::{PyKeyError, PyRuntimeError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use pymol_cmd::CommandExecutor;
+use pymol_mol::AtomIndex;
 use pymol_scene::{Session, SessionAdapter, ViewportImage};
 use pymol_select::select;
 
+use crate::iterate::{apply_locals_to_atom, ensure_builtins, set_atom_locals};
 use crate::mol::PyObjectMolecule;
 
 /// Standalone backend — owns a Session and CommandExecutor.
@@ -109,6 +114,122 @@ impl StandaloneBackend {
             }
         }
         Ok(total)
+    }
+
+    /// Execute a Python expression for each atom matching a selection (read-only).
+    ///
+    /// The expression has access to atom properties as local variables:
+    /// name, resn, resv, resi, chain, segi, alt, elem, b, q, vdw,
+    /// partial_charge, formal_charge, ss, color, type, hetatm,
+    /// index, ID, rank, model, x, y, z.
+    #[pyo3(signature = (selection, expression, space=None))]
+    fn iterate(
+        &self,
+        py: Python<'_>,
+        selection: &str,
+        expression: &str,
+        space: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let globals = match space {
+            Some(s) => s.clone(),
+            None => PyDict::new(py),
+        };
+        ensure_builtins(py, &globals)?;
+
+        let code = CString::new(expression)
+            .map_err(|_| PyRuntimeError::new_err("Expression contains null byte"))?;
+
+        let names = self.get_names();
+        for name in &names {
+            if let Some(mol_obj) = self.session.registry.get_molecule(name) {
+                let mol = mol_obj.molecule();
+                let mask = select(mol, selection)
+                    .map_err(|e| PyRuntimeError::new_err(format!("Selection error: {}", e)))?;
+
+                let cs = mol.current_coord_set();
+                for idx in mask.raw_indices() {
+                    let atom = mol.get_atom(AtomIndex(idx as u32)).unwrap();
+                    let coord = cs
+                        .and_then(|c| c.get_atom_coord(AtomIndex(idx as u32)))
+                        .map(|v| (v.x, v.y, v.z));
+                    let locals = PyDict::new(py);
+                    set_atom_locals(&locals, atom, coord, idx, name)?;
+                    py.run(code.as_c_str(), Some(&globals), Some(&locals))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute a Python expression for each atom matching a selection,
+    /// allowing modification of atom properties.
+    ///
+    /// Mutable properties: name, resn, resv, chain, segi, alt, elem,
+    /// b, q, vdw, partial_charge, formal_charge, ss, color, type.
+    /// Coordinates (x, y, z) are read-only (use alter_state for coords).
+    #[pyo3(signature = (selection, expression, space=None))]
+    fn alter(
+        &mut self,
+        py: Python<'_>,
+        selection: &str,
+        expression: &str,
+        space: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let globals = match space {
+            Some(s) => s.clone(),
+            None => PyDict::new(py),
+        };
+        ensure_builtins(py, &globals)?;
+
+        let code = CString::new(expression)
+            .map_err(|_| PyRuntimeError::new_err("Expression contains null byte"))?;
+
+        let names = self.get_names();
+        for name in &names {
+            // First: select atoms (immutable borrow)
+            let indices: Vec<usize> = {
+                let Some(mol_obj) = self.session.registry.get_molecule(&name) else {
+                    continue;
+                };
+                let mol = mol_obj.molecule();
+                let mask = select(mol, selection)
+                    .map_err(|e| PyRuntimeError::new_err(format!("Selection error: {}", e)))?;
+                mask.raw_indices().collect()
+            };
+            if indices.is_empty() {
+                continue;
+            }
+
+            // Pre-read coordinates (immutable borrow)
+            let coords: Vec<Option<(f32, f32, f32)>> = {
+                let mol = self.session.registry.get_molecule(&name).unwrap().molecule();
+                let cs = mol.current_coord_set();
+                indices
+                    .iter()
+                    .map(|&idx| {
+                        cs.and_then(|c| c.get_atom_coord(AtomIndex(idx as u32)))
+                            .map(|v| (v.x, v.y, v.z))
+                    })
+                    .collect()
+            };
+
+            // Iterate: read atom, run expression, apply changes
+            let mol_obj = self.session.registry.get_molecule_mut(&name).unwrap();
+            for (i, &idx) in indices.iter().enumerate() {
+                let locals = PyDict::new(py);
+                {
+                    let atom = mol_obj.molecule().get_atom(AtomIndex(idx as u32)).unwrap();
+                    set_atom_locals(&locals, atom, coords[i], idx, &name)?;
+                }
+                py.run(code.as_c_str(), Some(&globals), Some(&locals))?;
+                {
+                    let atom = mol_obj.molecule_mut().get_atom_mut(AtomIndex(idx as u32)).unwrap();
+                    apply_locals_to_atom(&locals, atom)?;
+                }
+            }
+        }
+        self.needs_redraw = true;
+        Ok(())
     }
 
     /// Get the current viewport image as a numpy array (H, W, 4) uint8.

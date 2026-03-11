@@ -12,7 +12,10 @@ use std::sync::mpsc::Receiver;
 
 use pymol_plugin::prelude::*;
 
+use pymol_mol::AtomIndex;
+
 use crate::backend::SharedStateHandle;
+use crate::commands::apply_property_changes;
 use crate::worker::{
     EditorOutputHandle, OutputEntry, WorkItem, WorkOrigin, WorkResult, WorkerHandle,
 };
@@ -53,7 +56,10 @@ impl PythonHandler {
             match result.origin {
                 WorkOrigin::Command | WorkOrigin::Script => match &result.result {
                     Ok(output) if !output.is_empty() => {
-                        ctx.bus.print_info(output);
+                        let trimmed = output.trim_end_matches('\n');
+                        if !trimmed.is_empty() {
+                            ctx.bus.print_info(trimmed);
+                        }
                     }
                     Err(err) => {
                         ctx.bus.print_error(err);
@@ -127,6 +133,37 @@ impl PythonHandler {
         }
     }
 
+    /// Drain the alter buffer and queue a viewer mutation to apply atom changes.
+    fn drain_alter_queue(&mut self, ctx: &mut PollContext<'_>) {
+        let batches = {
+            let state = self.shared.lock().unwrap();
+            let mut buf = state.alter_buffer.lock().unwrap();
+            if buf.is_empty() {
+                return;
+            }
+            std::mem::take(&mut *buf)
+        };
+
+        ctx.queue_viewer_mutation(move |viewer| {
+            let mut total = 0usize;
+            for batch in &batches {
+                for change in batch {
+                    if let Some(mol_obj) = viewer.objects_mut().get_molecule_mut(&change.obj) {
+                        if let Some(atom) =
+                            mol_obj.molecule_mut().get_atom_mut(AtomIndex(change.idx))
+                        {
+                            apply_property_changes(atom, &change.changes);
+                            total += 1;
+                        }
+                    }
+                }
+            }
+            if total > 0 {
+                viewer.request_redraw();
+            }
+        });
+    }
+
     /// Drain queued viewport image set/clear and send via message bus.
     fn drain_image_queue(&self, ctx: &mut PollContext<'_>) {
         let pending = {
@@ -178,6 +215,9 @@ impl MessageHandler for PythonHandler {
 
         // Drain queued commands from Python
         self.drain_commands(ctx);
+
+        // Drain atom mutations from alter()
+        self.drain_alter_queue(ctx);
 
         // Drain queued viewport image changes
         self.drain_image_queue(ctx);

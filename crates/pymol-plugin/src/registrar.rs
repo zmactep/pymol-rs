@@ -9,11 +9,17 @@ use std::sync::Arc;
 
 use pymol_cmd::Command;
 pub use pymol_cmd::DynamicCommandInvocation;
-pub use pymol_cmd::{FormatHandler, PluginReaderFn, PluginWriterFn, ScriptHandler};
+pub use pymol_cmd::{FormatHandler, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
 use pymol_framework::component::{Component, SharedContext};
 use pymol_framework::layout::PanelConfig;
 use pymol_framework::message::{AppMessage, MessageBus};
 pub use pymol_scene::{KeyBinding, KeyCode};
+
+/// A boxed closure that mutates the viewer on the main thread.
+///
+/// Queued by plugins via [`PollContext::queue_viewer_mutation`] during `poll()`,
+/// then executed by the host in phase 2 with full mutable viewer access.
+pub type ViewerMutation = Box<dyn FnOnce(&mut dyn ViewerLike) + Send>;
 
 // =============================================================================
 // Polling types
@@ -84,6 +90,7 @@ pub struct PollContext<'a> {
     pub(crate) notification_queue: &'a mut Vec<String>,
     pub(crate) hotkey_reg_queue: &'a mut Vec<(KeyBinding, PluginKeyAction)>,
     pub(crate) hotkey_unreg_queue: &'a mut Vec<KeyBinding>,
+    pub(crate) mutation_queue: &'a mut Vec<ViewerMutation>,
 }
 
 impl<'a> PollContext<'a> {
@@ -102,6 +109,7 @@ impl<'a> PollContext<'a> {
         notification_queue: &'a mut Vec<String>,
         hotkey_reg_queue: &'a mut Vec<(KeyBinding, PluginKeyAction)>,
         hotkey_unreg_queue: &'a mut Vec<KeyBinding>,
+        mutation_queue: &'a mut Vec<ViewerMutation>,
     ) -> Self {
         Self {
             shared,
@@ -115,6 +123,7 @@ impl<'a> PollContext<'a> {
             notification_queue,
             hotkey_reg_queue,
             hotkey_unreg_queue,
+            mutation_queue,
         }
     }
 
@@ -162,6 +171,18 @@ impl<'a> PollContext<'a> {
     /// Unregister a hotkey binding (applied after poll returns).
     pub fn unregister_hotkey(&mut self, key: impl Into<KeyBinding>) {
         self.hotkey_unreg_queue.push(key.into());
+    }
+
+    /// Queue a mutation to be applied to the viewer on the main thread.
+    ///
+    /// The closure is executed by the host after `poll()` returns, during
+    /// phase 2, with full mutable access to the viewer. Use this for
+    /// operations that require modifying viewer state (e.g., atom properties).
+    pub fn queue_viewer_mutation(
+        &mut self,
+        f: impl FnOnce(&mut dyn ViewerLike) + Send + 'static,
+    ) {
+        self.mutation_queue.push(Box::new(f));
     }
 }
 

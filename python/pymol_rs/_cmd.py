@@ -211,6 +211,43 @@ class Cmd:
     reinit = reinitialize
 
     # =====================================================================
+    # Iteration
+    # =====================================================================
+
+    def iterate(self, selection, expression, space=None):
+        """Execute expression for each atom in selection (read-only).
+
+        Atom properties available as local variables:
+            name, resn, resv, resi, chain, segi, alt, elem,
+            b, q, vdw, partial_charge, formal_charge,
+            ss, color, type, hetatm, index, ID, rank, model,
+            x, y, z
+
+        Use ``space`` to accumulate data across atoms::
+
+            mylist = []
+            cmd.iterate("name CA", "mylist.append(b)", space=locals())
+        """
+        return self._backend.iterate(selection, expression, space or {})
+
+    def alter(self, selection, expression, space=None):
+        """Execute expression for each atom in selection (read-write).
+
+        Modifiable properties:
+            name, resn, resv, chain, segi, alt, elem,
+            b, q, vdw, partial_charge, formal_charge,
+            ss, color, type
+
+        Coordinates (x, y, z) are read-only — use alter_state for those.
+
+        Example::
+
+            cmd.alter("all", "b=0.0")
+            cmd.alter("chain A", "chain='B'")
+        """
+        return self._backend.alter(selection, expression, space or {})
+
+    # =====================================================================
     # General execution
     # =====================================================================
 

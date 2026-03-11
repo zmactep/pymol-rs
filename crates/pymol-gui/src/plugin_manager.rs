@@ -16,6 +16,7 @@ use pymol_cmd::DynamicCommandInvocation;
 use pymol_plugin::registrar::{
     CommandExecRequest, CommandResult, DynCmdRegistration, KeyBinding,
     MessageHandler, PluginKeyAction, PluginMetadata, PluginRegistrar, PollContext,
+    ViewerMutation,
 };
 use pymol_scene::KeyBindings;
 
@@ -54,6 +55,8 @@ pub struct PluginManager {
     triggered_hotkeys: Vec<KeyBinding>,
     pending_hotkey_registrations: Vec<(KeyBinding, PluginKeyAction)>,
     pending_hotkey_unregistrations: Vec<KeyBinding>,
+    // Viewer mutations queued by plugins
+    pending_mutations: Vec<ViewerMutation>,
 }
 
 impl PluginManager {
@@ -69,6 +72,7 @@ impl PluginManager {
             triggered_hotkeys: Vec::new(),
             pending_hotkey_registrations: Vec::new(),
             pending_hotkey_unregistrations: Vec::new(),
+            pending_mutations: Vec::new(),
         }
     }
 
@@ -280,6 +284,7 @@ impl PluginManager {
         let mut notification_queue = Vec::new();
         let mut hotkey_reg_queue = Vec::new();
         let mut hotkey_unreg_queue = Vec::new();
+        let mut mutation_queue = Vec::new();
 
         // Phase 0: Execute triggered hotkey callbacks
         if !triggered.is_empty() {
@@ -295,6 +300,7 @@ impl PluginManager {
                 &mut notification_queue,
                 &mut hotkey_reg_queue,
                 &mut hotkey_unreg_queue,
+                &mut mutation_queue,
             );
 
             for binding in &triggered {
@@ -333,6 +339,7 @@ impl PluginManager {
             &mut notification_queue,
             &mut hotkey_reg_queue,
             &mut hotkey_unreg_queue,
+            &mut mutation_queue,
         );
 
         for plugin in &mut self.plugins {
@@ -363,6 +370,7 @@ impl PluginManager {
         self.notification_messages = notification_queue;
         self.pending_hotkey_registrations = hotkey_reg_queue;
         self.pending_hotkey_unregistrations = hotkey_unreg_queue;
+        self.pending_mutations = mutation_queue;
     }
 
     /// Take pending command execution requests (Phase 2 input).
@@ -373,6 +381,11 @@ impl PluginManager {
     /// Store command results for delivery in the next poll cycle.
     pub fn store_command_results(&mut self, results: Vec<CommandResult>) {
         self.command_results = results;
+    }
+
+    /// Take pending viewer mutations (Phase 2 input, after commands).
+    pub fn take_pending_mutations(&mut self) -> Vec<ViewerMutation> {
+        std::mem::take(&mut self.pending_mutations)
     }
 
     /// Take pending dynamic command registrations (Phase 3 input).
