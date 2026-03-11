@@ -137,6 +137,7 @@ endef
 
 sign: app
 	@echo "── Signing $(APP_NAME).app ──"
+	@test -f $(ENV_FILE) || { echo "⚠ Signing skipped: $(ENV_FILE) not found"; exit 0; }
 	$(load-identity)
 	. ./$(ENV_FILE) && \
 	  codesign --force --options runtime \
@@ -146,6 +147,7 @@ sign: app
 
 sign-full: app-full
 	@echo "── Deep-signing $(APP_NAME).app ──"
+	@test -f $(ENV_FILE) || { echo "⚠ Signing skipped: $(ENV_FILE) not found"; exit 0; }
 	$(load-identity)
 	. ./$(ENV_FILE) && \
 	  IDENTITY="Developer ID Application: $$PYMOL_RS_APPLE_TEAMID" && \
