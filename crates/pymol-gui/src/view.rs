@@ -84,8 +84,12 @@ pub struct EguiIntegration {
 
 impl EguiIntegration {
     fn new() -> Self {
+        let ctx = egui::Context::default();
+        ctx.options_mut(|opts| {
+            opts.zoom_with_keyboard = false;
+        });
         Self {
-            ctx: egui::Context::default(),
+            ctx,
             state: None,
             renderer: None,
         }
