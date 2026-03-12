@@ -44,6 +44,8 @@ edition = "2021"
 authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
 repository = "https://github.com/zmactep/pymol-rs"
+homepage = "https://github.com/zmactep/pymol-rs"
+documentation = "https://github.com/zmactep/pymol-rs"
 
 [workspace.dependencies]
 # Internal crates

@@ -5,6 +5,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Shared application infrastructure for PyMOL-RS (messaging, components, layout)"
 
 [dependencies]

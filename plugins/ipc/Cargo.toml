@@ -2,6 +2,11 @@
 name = "ipc-plugin"
 version = "0.2.0"
 edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "PyMOL-RS IPC server plugin: Unix domain socket control"
 
 [lib]
