@@ -147,13 +147,18 @@ pub trait ViewerLike {
     }
 
     /// Zoom to fit a specific object while preserving rotation
+    ///
+    /// For groups, uses the combined extent of all children.
     fn zoom_on(&mut self, name: &str) {
-        if let Some(obj) = self.objects().get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera_mut().zoom_to(min, max);
-                self.set_viewport_image_internal(None);
-                self.request_redraw();
-            }
+        let extent = if self.objects().get_group(name).is_some() {
+            self.objects().group_extent(name)
+        } else {
+            self.objects().get(name).and_then(|o| o.extent())
+        };
+        if let Some((min, max)) = extent {
+            self.camera_mut().zoom_to(min, max);
+            self.set_viewport_image_internal(None);
+            self.request_redraw();
         }
     }
 
@@ -167,13 +172,18 @@ pub trait ViewerLike {
     }
 
     /// Center on a specific object without changing zoom or rotation
+    ///
+    /// For groups, uses the combined extent of all children.
     fn center_on(&mut self, name: &str) {
-        if let Some(obj) = self.objects().get(name) {
-            if let Some((min, max)) = obj.extent() {
-                self.camera_mut().center_to(min, max);
-                self.set_viewport_image_internal(None);
-                self.request_redraw();
-            }
+        let extent = if self.objects().get_group(name).is_some() {
+            self.objects().group_extent(name)
+        } else {
+            self.objects().get(name).and_then(|o| o.extent())
+        };
+        if let Some((min, max)) = extent {
+            self.camera_mut().center_to(min, max);
+            self.set_viewport_image_internal(None);
+            self.request_redraw();
         }
     }
 

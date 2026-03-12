@@ -406,7 +406,11 @@ EXAMPLES
             .collect();
 
         for obj_name in &object_names {
-            let _ = ctx.viewer.objects_mut().enable(obj_name, true);
+            if ctx.viewer.objects().get_group(obj_name).is_some() {
+                let _ = ctx.viewer.objects_mut().set_group_enabled(obj_name, true);
+            } else {
+                let _ = ctx.viewer.objects_mut().enable(obj_name, true);
+            }
         }
 
         // Enable matching selections
@@ -480,7 +484,11 @@ EXAMPLES
             .collect();
 
         for obj_name in &object_names {
-            let _ = ctx.viewer.objects_mut().enable(obj_name, false);
+            if ctx.viewer.objects().get_group(obj_name).is_some() {
+                let _ = ctx.viewer.objects_mut().set_group_enabled(obj_name, false);
+            } else {
+                let _ = ctx.viewer.objects_mut().enable(obj_name, false);
+            }
         }
 
         // Disable matching selections
@@ -548,7 +556,12 @@ EXAMPLES
         // Try object first
         if let Some(obj) = ctx.viewer.objects().get(name) {
             let currently_enabled = obj.is_enabled();
-            let _ = ctx.viewer.objects_mut().enable(name, !currently_enabled);
+            let is_group = obj.object_type() == pymol_scene::ObjectType::Group;
+            if is_group {
+                let _ = ctx.viewer.objects_mut().set_group_enabled(name, !currently_enabled);
+            } else {
+                let _ = ctx.viewer.objects_mut().enable(name, !currently_enabled);
+            }
             found = true;
 
             if !ctx.quiet {

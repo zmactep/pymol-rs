@@ -117,7 +117,7 @@ pub enum ActiveMenu {
     /// No menu open
     None,
     /// Actions menu for an object (zoom, orient, center, origin)
-    Actions { object: String },
+    Actions { object: String, is_group: bool },
     /// Show representations menu for an object
     Show { object: String },
     /// Hide representations menu for an object
@@ -253,20 +253,32 @@ impl ObjectListPanel {
         ui.vertical(|ui| {
             Self::render_all_row(ui, ui_state, registry, bus, &mut menu_button_clicked);
 
-            // Object rows
-            for name in registry.names() {
-                let is_enabled = registry
-                    .get(name)
-                    .map(|o| o.is_enabled())
-                    .unwrap_or(false);
-                Self::render_object_row(
-                    ui,
-                    ui_state,
-                    name,
-                    is_enabled,
-                    bus,
-                    &mut menu_button_clicked,
-                );
+            // Object rows (hierarchical: only top-level, groups render children)
+            for name in registry.top_level_names() {
+                if registry.get_group(name).is_some() {
+                    Self::render_group_row(
+                        ui,
+                        ui_state,
+                        registry,
+                        name,
+                        0,
+                        bus,
+                        &mut menu_button_clicked,
+                    );
+                } else {
+                    let is_enabled = registry
+                        .get(name)
+                        .map(|o| o.is_enabled())
+                        .unwrap_or(false);
+                    Self::render_object_row(
+                        ui,
+                        ui_state,
+                        name,
+                        is_enabled,
+                        bus,
+                        &mut menu_button_clicked,
+                    );
+                }
             }
 
             // Selection rows
@@ -337,7 +349,7 @@ impl ObjectListPanel {
             });
 
             // "all" uses the same button bar with empty name = commands apply to everything
-            Self::render_button_bar(ui, ui_state, "", false, menu_button_clicked);
+            Self::render_button_bar(ui, ui_state, "", false, false, menu_button_clicked);
         });
     }
 
@@ -348,11 +360,13 @@ impl ObjectListPanel {
         ui_state: &mut ObjectListUiState,
         target_name: &str,
         is_selection: bool,
+        is_group: bool,
         menu_button_clicked: &mut bool,
     ) {
         ui.with_layout(
             egui::Layout::right_to_left(egui::Align::Center),
             |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
                 // C - Color
                 let color_tooltip = if is_selection {
                     "Color selection"
@@ -430,6 +444,7 @@ impl ObjectListPanel {
                 } else {
                     ActiveMenu::Actions {
                         object: target_name.to_string(),
+                        is_group,
                     }
                 };
                 if menu_button(ui, "A", colors::ACTION, "Actions", ui_state, action_menu)
@@ -474,8 +489,156 @@ impl ObjectListPanel {
                     bus.execute_command(format!("zoom {}", name));
                 }
 
-                Self::render_button_bar(ui, ui_state, name, false, menu_button_clicked);
+                Self::render_button_bar(ui, ui_state, name, false, false, menu_button_clicked);
             });
+        });
+    }
+
+    /// Render a group row with expand/collapse and recursive children
+    fn render_group_row(
+        ui: &mut Ui,
+        ui_state: &mut ObjectListUiState,
+        registry: &ObjectRegistry,
+        name: &str,
+        indent_level: usize,
+        bus: &mut MessageBus,
+        menu_button_clicked: &mut bool,
+    ) {
+        let is_open = registry
+            .get_group(name)
+            .map(|g| g.is_open())
+            .unwrap_or(false);
+        let is_enabled = registry
+            .get(name)
+            .map(|o| o.is_enabled())
+            .unwrap_or(false);
+        let children: Vec<String> = registry
+            .get_group(name)
+            .map(|g| g.children().to_vec())
+            .unwrap_or_default();
+
+        ui.push_id(name, |ui| {
+            ui.horizontal(|ui| {
+                // Indentation for nested groups
+                if indent_level > 0 {
+                    ui.add_space(indent_level as f32 * 16.0);
+                }
+
+                // Group name
+                let name_color = if is_enabled {
+                    colors::ENABLED
+                } else {
+                    colors::DISABLED
+                };
+
+                let name_response = ui.add(
+                    egui::Label::new(
+                        RichText::new(name)
+                            .family(egui::FontFamily::Monospace)
+                            .color(name_color),
+                    )
+                    .sense(egui::Sense::click()),
+                );
+
+                if name_response.clicked() {
+                    bus.execute_command(format!("toggle {}", name));
+                }
+                if name_response.secondary_clicked() {
+                    bus.execute_command(format!("zoom {}", name));
+                }
+
+                // Expand/collapse triangle (after name)
+                let (rect, response) = ui.allocate_exact_size(
+                    Vec2::splat(ui.spacing().icon_width),
+                    egui::Sense::click(),
+                );
+                if response.clicked() {
+                    bus.execute_command(format!("group {}, action=toggle", name));
+                }
+                {
+                    let color = if response.hovered() {
+                        Color32::WHITE
+                    } else {
+                        Color32::GRAY
+                    };
+                    let center = rect.center();
+                    let half = rect.width() * 0.25;
+                    let points = if is_open {
+                        // Down-pointing triangle
+                        vec![
+                            Pos2::new(center.x - half, center.y - half * 0.5),
+                            Pos2::new(center.x + half, center.y - half * 0.5),
+                            Pos2::new(center.x, center.y + half * 0.5),
+                        ]
+                    } else {
+                        // Right-pointing triangle
+                        vec![
+                            Pos2::new(center.x - half * 0.5, center.y - half),
+                            Pos2::new(center.x + half * 0.5, center.y),
+                            Pos2::new(center.x - half * 0.5, center.y + half),
+                        ]
+                    };
+                    ui.painter()
+                        .add(egui::Shape::convex_polygon(points, color, egui::Stroke::NONE));
+                }
+
+                Self::render_button_bar(ui, ui_state, name, false, true, menu_button_clicked);
+            });
+
+            // Render children if open
+            if is_open {
+                for child_name in &children {
+                    if registry.get_group(child_name).is_some() {
+                        Self::render_group_row(
+                            ui,
+                            ui_state,
+                            registry,
+                            child_name,
+                            indent_level + 1,
+                            bus,
+                            menu_button_clicked,
+                        );
+                    } else {
+                        let child_enabled = registry
+                            .get(child_name)
+                            .map(|o| o.is_enabled())
+                            .unwrap_or(false);
+                        ui.horizontal(|ui| {
+                            ui.add_space((indent_level + 1) as f32 * 16.0);
+                            let name_color = if child_enabled {
+                                colors::ENABLED
+                            } else {
+                                colors::DISABLED
+                            };
+
+                            let name_response = ui.add(
+                                egui::Label::new(
+                                    RichText::new(child_name.as_str())
+                                        .family(egui::FontFamily::Monospace)
+                                        .color(name_color),
+                                )
+                                .sense(egui::Sense::click()),
+                            );
+
+                            if name_response.clicked() {
+                                bus.execute_command(format!("toggle {}", child_name));
+                            }
+                            if name_response.secondary_clicked() {
+                                bus.execute_command(format!("zoom {}", child_name));
+                            }
+
+                            Self::render_button_bar(
+                                ui,
+                                ui_state,
+                                child_name,
+                                false,
+                                false,
+                                menu_button_clicked,
+                            );
+                        });
+                    }
+                }
+            }
         });
     }
 
@@ -519,7 +682,7 @@ impl ObjectListPanel {
                     bus.execute_command(format!("toggle {}", name));
                 }
 
-                Self::render_button_bar(ui, ui_state, name, true, menu_button_clicked);
+                Self::render_button_bar(ui, ui_state, name, true, false, menu_button_clicked);
             });
         });
     }
@@ -586,8 +749,8 @@ impl ObjectListPanel {
 
                     match &ui_state.active_menu.clone() {
                         ActiveMenu::None => {}
-                        ActiveMenu::Actions { object } => {
-                            item_clicked = Self::render_actions_menu(ui, object, bus);
+                        ActiveMenu::Actions { object, is_group } => {
+                            item_clicked = Self::render_actions_menu(ui, object, *is_group, bus);
                         }
                         ActiveMenu::Show { object } => {
                             item_clicked =
@@ -624,8 +787,8 @@ impl ObjectListPanel {
     // Menu renderers
     // =========================================================================
 
-    /// Actions menu: zoom, orient, center, origin
-    fn render_actions_menu(ui: &mut Ui, name: &str, bus: &mut MessageBus) -> bool {
+    /// Actions menu: zoom, orient, center, origin (+ group actions for groups)
+    fn render_actions_menu(ui: &mut Ui, name: &str, is_group: bool, bus: &mut MessageBus) -> bool {
         if ui.button("zoom").clicked() {
             bus.execute_command(cmd_arg("zoom", name));
             return true;
@@ -642,6 +805,23 @@ impl ObjectListPanel {
             bus.execute_command(cmd_arg("origin", name));
             return true;
         }
+
+        if is_group {
+            ui.separator();
+            if ui.button("open").clicked() {
+                bus.execute_command(format!("group {}, action=open", name));
+                return true;
+            }
+            if ui.button("close").clicked() {
+                bus.execute_command(format!("group {}, action=close", name));
+                return true;
+            }
+            if ui.button("ungroup").clicked() {
+                bus.execute_command(format!("ungroup {}", name));
+                return true;
+            }
+        }
+
         false
     }
 

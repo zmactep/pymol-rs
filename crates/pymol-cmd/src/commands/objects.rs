@@ -8,6 +8,57 @@ use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLi
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
+/// Parse a members string into individual name patterns
+///
+/// Members can be space-separated or comma-separated.
+fn parse_members(members_str: &str) -> Vec<String> {
+    if members_str.is_empty() {
+        return Vec::new();
+    }
+    members_str
+        .split(|c: char| c == ' ' || c == ',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Resolve member patterns against the object registry
+///
+/// Expands glob patterns (e.g., `lig*`) using `registry.matching()`.
+fn resolve_members(registry: &pymol_scene::ObjectRegistry, patterns: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+    for pattern in patterns {
+        if pattern.contains('*') || pattern == "all" {
+            result.extend(
+                registry
+                    .matching(pattern)
+                    .into_iter()
+                    .map(|s| s.to_string()),
+            );
+        } else if registry.contains(pattern) {
+            result.push(pattern.clone());
+        }
+    }
+    result
+}
+
+/// Recursively collect all descendants of a group (children, grandchildren, etc.)
+///
+/// Results are added depth-first so children are deleted before their parents.
+fn collect_group_descendants(
+    registry: &pymol_scene::ObjectRegistry,
+    name: &str,
+    result: &mut Vec<String>,
+) {
+    if let Some(group) = registry.get_group(name) {
+        for child in group.children().to_vec() {
+            collect_group_descendants(registry, &child, result);
+            result.push(child);
+        }
+    }
+}
+
 /// Simple glob matching (prefix* and *suffix patterns)
 fn glob_match(pattern: &str, name: &str) -> bool {
     if pattern == "*" || pattern == "all" {
@@ -93,7 +144,16 @@ EXAMPLES
             .map(|s| s.to_string())
             .collect();
 
+        // Expand groups to include their descendants
+        let mut to_delete = Vec::new();
         for obj_name in &obj_matches {
+            collect_group_descendants(ctx.viewer.objects(), obj_name, &mut to_delete);
+            to_delete.push(obj_name.clone());
+        }
+        // Deduplicate (a child might already be in obj_matches)
+        to_delete.dedup();
+
+        for obj_name in &to_delete {
             ctx.viewer.objects_mut().remove(obj_name);
             deleted_objects += 1;
         }
@@ -516,23 +576,164 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
-        let _members = args
+        let members_str = args
             .get_str(1)
             .or_else(|| args.get_named_str("members"))
             .unwrap_or("");
 
-        let _action = args
+        let action = args
             .get_str(2)
             .or_else(|| args.get_named_str("action"))
-            .unwrap_or("add");
+            .unwrap_or("auto");
 
-        // TODO: Implement group functionality
-        // This would create/modify GroupObject instances
+        let member_patterns = parse_members(members_str);
 
-        if !ctx.quiet {
-            ctx.print(&format!(" Group \"{}\" (not yet fully implemented)", name));
+        match action {
+            "add" => {
+                let resolved = resolve_members(ctx.viewer.objects(), &member_patterns);
+                // Create group if it doesn't exist and no members were specified
+                if resolved.is_empty() && member_patterns.is_empty() {
+                    if !ctx.viewer.objects().contains(name) {
+                        use pymol_scene::GroupObject;
+                        ctx.viewer.objects_mut().add(GroupObject::new(name));
+                    }
+                }
+                for member in &resolved {
+                    ctx.viewer.objects_mut().add_to_group(name, member);
+                }
+                if !ctx.quiet {
+                    if resolved.is_empty() && member_patterns.is_empty() {
+                        ctx.print(&format!(" Created group \"{}\"", name));
+                    } else {
+                        ctx.print(&format!(" Added {} members to group \"{}\"", resolved.len(), name));
+                    }
+                }
+            }
+            "remove" => {
+                let resolved = resolve_members(ctx.viewer.objects(), &member_patterns);
+                for member in &resolved {
+                    if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                        group.remove_child(member);
+                    }
+                }
+                if !ctx.quiet {
+                    ctx.print(&format!(" Removed {} members from group \"{}\"", resolved.len(), name));
+                }
+            }
+            "open" => {
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.set_open(true);
+                } else {
+                    return Err(CmdError::ObjectNotFound(name.to_string()));
+                }
+                if !ctx.quiet {
+                    ctx.print(&format!(" Opened group \"{}\"", name));
+                }
+            }
+            "close" => {
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.set_open(false);
+                } else {
+                    return Err(CmdError::ObjectNotFound(name.to_string()));
+                }
+                if !ctx.quiet {
+                    ctx.print(&format!(" Closed group \"{}\"", name));
+                }
+            }
+            "toggle" => {
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.toggle_open();
+                } else {
+                    return Err(CmdError::ObjectNotFound(name.to_string()));
+                }
+                if !ctx.quiet {
+                    ctx.print(&format!(" Toggled group \"{}\"", name));
+                }
+            }
+            "auto" => {
+                if !member_patterns.is_empty() {
+                    // Has members → act like "add"
+                    let resolved = resolve_members(ctx.viewer.objects(), &member_patterns);
+                    for member in &resolved {
+                        ctx.viewer.objects_mut().add_to_group(name, member);
+                    }
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Added {} members to group \"{}\"", resolved.len(), name));
+                    }
+                } else if ctx.viewer.objects().get_group(name).is_some() {
+                    // Group exists, no members → toggle open/close
+                    if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                        group.toggle_open();
+                    }
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Toggled group \"{}\"", name));
+                    }
+                } else {
+                    // Create empty group
+                    use pymol_scene::GroupObject;
+                    ctx.viewer.objects_mut().add(GroupObject::new(name));
+                    if !ctx.quiet {
+                        ctx.print(&format!(" Created group \"{}\"", name));
+                    }
+                }
+            }
+            "empty" => {
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.clear();
+                } else {
+                    return Err(CmdError::ObjectNotFound(name.to_string()));
+                }
+                if !ctx.quiet {
+                    ctx.print(&format!(" Emptied group \"{}\"", name));
+                }
+            }
+            "purge" => {
+                // Collect children, clear group, delete all child objects
+                let children: Vec<String> = ctx
+                    .viewer
+                    .objects()
+                    .get_group(name)
+                    .map(|g| g.children().to_vec())
+                    .unwrap_or_default();
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.clear();
+                }
+                for child in &children {
+                    ctx.viewer.objects_mut().remove(child);
+                }
+                if !ctx.quiet {
+                    ctx.print(&format!(" Purged group \"{}\" ({} objects deleted)", name, children.len()));
+                }
+            }
+            "excise" => {
+                // Clear children (they become ungrouped), then delete the group
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.clear();
+                }
+                ctx.viewer.objects_mut().remove(name);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Excised group \"{}\"", name));
+                }
+            }
+            "ungroup" => {
+                // Same as ungroup command
+                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+                    group.clear();
+                }
+                ctx.viewer.objects_mut().remove(name);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Ungrouped \"{}\"", name));
+                }
+            }
+            _ => {
+                return Err(CmdError::InvalidArgument {
+                    name: "action".to_string(),
+                    reason: format!("Unknown group action: {}", action),
+                });
+            }
         }
 
+        ctx.viewer.request_redraw();
         Ok(())
     }
 }
@@ -574,10 +775,21 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
-        // TODO: Implement ungroup functionality
+        if ctx.viewer.objects().get_group(name).is_none() {
+            return Err(CmdError::ObjectNotFound(name.to_string()));
+        }
+
+        // Clear children (they become ungrouped, not deleted)
+        if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
+            group.clear();
+        }
+
+        // Delete the group object itself
+        ctx.viewer.objects_mut().remove(name);
+        ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            ctx.print(&format!(" Ungrouped \"{}\" (not yet implemented)", name));
+            ctx.print(&format!(" Ungrouped \"{}\"", name));
         }
 
         Ok(())

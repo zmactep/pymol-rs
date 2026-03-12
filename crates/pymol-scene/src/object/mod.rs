@@ -449,7 +449,10 @@ impl ObjectRegistry {
     }
 
     /// Remove an object by name
+    ///
+    /// Also removes the object from any group that contains it.
     pub fn remove(&mut self, name: &str) -> Option<Box<dyn Object>> {
+        self.remove_from_groups(name);
         self.render_order.retain(|n| n != name);
         let removed = self.objects.remove(name);
         if removed.is_some() {
@@ -685,6 +688,109 @@ impl ObjectRegistry {
         }
 
         Ok(())
+    }
+
+    /// Find the parent group of an object (if any)
+    ///
+    /// An object can be in at most one group. Returns the group name.
+    pub fn parent_group(&self, name: &str) -> Option<&str> {
+        for obj in self.objects.values() {
+            if obj.object_type() == ObjectType::Group {
+                // Safety: we just checked the type
+                let ptr = obj.as_ref() as *const dyn Object;
+                let group = unsafe { &*(ptr as *const GroupObject) };
+                if group.contains_child(name) {
+                    return Some(group.name());
+                }
+            }
+        }
+        None
+    }
+
+    /// Remove an object from any group that contains it
+    pub fn remove_from_groups(&mut self, name: &str) {
+        for obj in self.objects.values_mut() {
+            if obj.object_type() == ObjectType::Group {
+                // Safety: we just checked the type
+                let ptr = obj.as_mut() as *mut dyn Object;
+                let group = unsafe { &mut *(ptr as *mut GroupObject) };
+                group.remove_child(name);
+            }
+        }
+    }
+
+    /// Add an object to a group, creating the group if it doesn't exist
+    ///
+    /// The child is removed from any existing group first (an object can only
+    /// be in one group). Returns false if the child doesn't exist or if
+    /// trying to add an object to itself.
+    pub fn add_to_group(&mut self, group_name: &str, child_name: &str) -> bool {
+        if !self.objects.contains_key(child_name) {
+            return false;
+        }
+        if group_name == child_name {
+            return false;
+        }
+
+        // Remove from any existing group
+        self.remove_from_groups(child_name);
+
+        // Create group if needed
+        if !self.objects.contains_key(group_name) {
+            self.add(GroupObject::new(group_name));
+        }
+
+        if let Some(group) = self.get_group_mut(group_name) {
+            group.add_child(child_name.to_string());
+        } else {
+            return false;
+        }
+
+        self.reorder_children_after_group(group_name);
+        self.generation += 1;
+        true
+    }
+
+    /// Reorder render_order so group children appear immediately after their group
+    fn reorder_children_after_group(&mut self, group_name: &str) {
+        let children: Vec<String> = match self.get_group(group_name) {
+            Some(g) => g.children().to_vec(),
+            None => return,
+        };
+
+        // Remove children from render_order
+        self.render_order.retain(|n| !children.contains(n));
+
+        // Find group position and insert children right after
+        if let Some(pos) = self.render_order.iter().position(|n| n == group_name) {
+            for (i, child) in children.into_iter().enumerate() {
+                self.render_order.insert(pos + 1 + i, child);
+            }
+        }
+    }
+
+    /// Get names of top-level objects (not children of any group)
+    ///
+    /// Returns names in render order, excluding objects that are children
+    /// of a group. Used by the GUI to start tree iteration.
+    pub fn top_level_names(&self) -> Vec<&str> {
+        // Collect all children across all groups
+        let mut children_set = std::collections::HashSet::new();
+        for obj in self.objects.values() {
+            if obj.object_type() == ObjectType::Group {
+                // Safety: we just checked the type
+                let ptr = obj.as_ref() as *const dyn Object;
+                let group = unsafe { &*(ptr as *const GroupObject) };
+                for child in group.children() {
+                    children_set.insert(child.as_str());
+                }
+            }
+        }
+        self.render_order
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|name| !children_set.contains(name))
+            .collect()
     }
 
     /// Check if an object exists
@@ -1024,5 +1130,101 @@ mod tests {
 
         registry.enable("obj1", true).unwrap();
         assert_eq!(registry.enabled_objects().count(), 1);
+    }
+
+    #[test]
+    fn test_add_to_group() {
+        let mut registry = ObjectRegistry::new();
+        registry.add(MockObject::new("obj1"));
+        registry.add(MockObject::new("obj2"));
+        registry.add(MockObject::new("obj3"));
+
+        // Create group by adding to it
+        assert!(registry.add_to_group("grp", "obj1"));
+        assert!(registry.add_to_group("grp", "obj2"));
+
+        // Group should exist and contain children
+        let group = registry.get_group("grp").unwrap();
+        assert!(group.contains_child("obj1"));
+        assert!(group.contains_child("obj2"));
+        assert!(!group.contains_child("obj3"));
+
+        // Children should follow group in render order
+        let names: Vec<_> = registry.names().collect();
+        let grp_pos = names.iter().position(|n| *n == "grp").unwrap();
+        let obj1_pos = names.iter().position(|n| *n == "obj1").unwrap();
+        let obj2_pos = names.iter().position(|n| *n == "obj2").unwrap();
+        assert!(obj1_pos == grp_pos + 1);
+        assert!(obj2_pos == grp_pos + 2);
+    }
+
+    #[test]
+    fn test_add_to_group_prevents_self() {
+        let mut registry = ObjectRegistry::new();
+        registry.add(GroupObject::new("grp"));
+        assert!(!registry.add_to_group("grp", "grp"));
+    }
+
+    #[test]
+    fn test_add_to_group_moves_between_groups() {
+        let mut registry = ObjectRegistry::new();
+        registry.add(MockObject::new("obj1"));
+        registry.add(GroupObject::new("grp1"));
+        registry.add(GroupObject::new("grp2"));
+
+        registry.add_to_group("grp1", "obj1");
+        assert!(registry.get_group("grp1").unwrap().contains_child("obj1"));
+
+        // Move to different group
+        registry.add_to_group("grp2", "obj1");
+        assert!(!registry.get_group("grp1").unwrap().contains_child("obj1"));
+        assert!(registry.get_group("grp2").unwrap().contains_child("obj1"));
+    }
+
+    #[test]
+    fn test_parent_group() {
+        let mut registry = ObjectRegistry::new();
+        registry.add(MockObject::new("obj1"));
+        registry.add(MockObject::new("obj2"));
+
+        assert!(registry.parent_group("obj1").is_none());
+
+        registry.add_to_group("grp", "obj1");
+        assert_eq!(registry.parent_group("obj1"), Some("grp"));
+        assert!(registry.parent_group("obj2").is_none());
+    }
+
+    #[test]
+    fn test_remove_cleans_up_groups() {
+        let mut registry = ObjectRegistry::new();
+        registry.add(MockObject::new("obj1"));
+        registry.add_to_group("grp", "obj1");
+
+        assert!(registry.get_group("grp").unwrap().contains_child("obj1"));
+
+        registry.remove("obj1");
+        assert!(!registry.get_group("grp").unwrap().contains_child("obj1"));
+    }
+
+    #[test]
+    fn test_top_level_names() {
+        let mut registry = ObjectRegistry::new();
+        registry.add(MockObject::new("obj1"));
+        registry.add(MockObject::new("obj2"));
+        registry.add(MockObject::new("obj3"));
+
+        // All are top-level initially
+        assert_eq!(registry.top_level_names().len(), 3);
+
+        // Add obj1 and obj2 to a group
+        registry.add_to_group("grp", "obj1");
+        registry.add_to_group("grp", "obj2");
+
+        let top = registry.top_level_names();
+        assert!(top.contains(&"grp"));
+        assert!(top.contains(&"obj3"));
+        assert!(!top.contains(&"obj1"));
+        assert!(!top.contains(&"obj2"));
+        assert_eq!(top.len(), 2);
     }
 }
