@@ -581,7 +581,7 @@ fn parse_bool(input: &str) -> IResult<&str, ArgValue> {
 fn parse_unquoted_value(input: &str) -> IResult<&str, &str> {
     // Take characters until we hit a delimiter
     take_while1(|c: char| {
-        !matches!(c, ',' | ';' | '\n' | '\r' | '[' | ']')
+        !matches!(c, ',' | ';' | '\n' | '\r')
     })(input)
     .map(|(remaining, value)| (remaining, value.trim_end()))
 }

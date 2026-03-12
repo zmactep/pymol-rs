@@ -183,14 +183,20 @@ pub fn apply_locals_to_atom(locals: &Bound<'_, PyDict>, atom: &mut Atom) -> PyRe
     Ok(())
 }
 
-/// Ensure the globals dict has `__builtins__` so that `print()`, `range()`,
-/// etc. are available in `py.run()`.
-pub fn ensure_builtins(py: Python<'_>, globals: &Bound<'_, PyDict>) -> PyResult<()> {
-    if !globals.contains("__builtins__")? {
-        let builtins = py.import("builtins")?;
-        globals.set_item("__builtins__", builtins)?;
+/// Build the globals dict for `iterate`/`alter` expression evaluation.
+///
+/// Always uses `__main__.__dict__` as the base so that `stored`, `cmd`,
+/// and any user-defined variables are visible — matching real PyMOL.
+/// When a `space` dict is provided, its entries are merged on top.
+pub fn build_globals<'py>(
+    py: Python<'py>,
+    space: Option<&Bound<'py, PyDict>>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let globals = py.import("__main__")?.dict();
+    if let Some(s) = space {
+        globals.update(s.as_mapping())?;
     }
-    Ok(())
+    Ok(globals)
 }
 
 /// Convert a `SecondaryStructure` enum to the PyMOL-style single-letter code.

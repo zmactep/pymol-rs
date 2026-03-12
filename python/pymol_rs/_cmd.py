@@ -230,7 +230,7 @@ class Cmd:
             mylist = []
             cmd.iterate("name CA", "mylist.append(b)", space=locals())
         """
-        return self._backend.iterate(selection, expression, space or {})
+        return self._backend.iterate(selection, expression, space)
 
     def alter(self, selection, expression, space=None):
         """Execute expression for each atom in selection (read-write).
@@ -247,7 +247,7 @@ class Cmd:
             cmd.alter("all", "b=0.0")
             cmd.alter("chain A", "chain='B'")
         """
-        return self._backend.alter(selection, expression, space or {})
+        return self._backend.alter(selection, expression, space)
 
     # =====================================================================
     # General execution

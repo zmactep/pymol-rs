@@ -128,11 +128,7 @@ impl PluginBackend {
         expression: &str,
         space: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let globals = match space {
-            Some(s) => s.clone(),
-            None => PyDict::new(py),
-        };
-        ensure_builtins(py, &globals)?;
+        let globals = build_globals(py, space)?;
 
         let code = CString::new(expression).map_err(|_| {
             pyo3::exceptions::PyRuntimeError::new_err("Expression contains null byte")
@@ -176,11 +172,7 @@ impl PluginBackend {
         expression: &str,
         space: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let globals = match space {
-            Some(s) => s.clone(),
-            None => PyDict::new(py),
-        };
-        ensure_builtins(py, &globals)?;
+        let globals = build_globals(py, space)?;
 
         let code = CString::new(expression).map_err(|_| {
             pyo3::exceptions::PyRuntimeError::new_err("Expression contains null byte")
@@ -444,10 +436,18 @@ fn ss_to_str(ss: SecondaryStructure) -> &'static str {
     }
 }
 
-fn ensure_builtins(py: Python<'_>, globals: &Bound<'_, PyDict>) -> PyResult<()> {
-    if !globals.contains("__builtins__")? {
-        let builtins = py.import("builtins")?;
-        globals.set_item("__builtins__", builtins)?;
+/// Build the globals dict for `iterate`/`alter` expression evaluation.
+///
+/// Always uses `__main__.__dict__` as the base so that `stored`, `cmd`,
+/// and any user-defined variables are visible — matching real PyMOL.
+/// When a `space` dict is provided, its entries are merged on top.
+fn build_globals<'py>(
+    py: Python<'py>,
+    space: Option<&Bound<'py, PyDict>>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let globals = py.import("__main__")?.dict();
+    if let Some(s) = space {
+        globals.update(s.as_mapping())?;
     }
-    Ok(())
+    Ok(globals)
 }

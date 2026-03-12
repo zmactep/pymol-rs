@@ -14,7 +14,7 @@ use pymol_mol::AtomIndex;
 use pymol_scene::{Session, SessionAdapter, ViewportImage};
 use pymol_select::select;
 
-use crate::iterate::{apply_locals_to_atom, ensure_builtins, set_atom_locals};
+use crate::iterate::{apply_locals_to_atom, build_globals, set_atom_locals};
 use crate::mol::PyObjectMolecule;
 
 /// Standalone backend — owns a Session and CommandExecutor.
@@ -130,11 +130,7 @@ impl StandaloneBackend {
         expression: &str,
         space: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let globals = match space {
-            Some(s) => s.clone(),
-            None => PyDict::new(py),
-        };
-        ensure_builtins(py, &globals)?;
+        let globals = build_globals(py, space)?;
 
         let code = CString::new(expression)
             .map_err(|_| PyRuntimeError::new_err("Expression contains null byte"))?;
@@ -175,11 +171,7 @@ impl StandaloneBackend {
         expression: &str,
         space: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
-        let globals = match space {
-            Some(s) => s.clone(),
-            None => PyDict::new(py),
-        };
-        ensure_builtins(py, &globals)?;
+        let globals = build_globals(py, space)?;
 
         let code = CString::new(expression)
             .map_err(|_| PyRuntimeError::new_err("Expression contains null byte"))?;
