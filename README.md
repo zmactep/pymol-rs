@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/status-beta-blue.svg" alt="Status">
+  <img src="https://img.shields.io/badge/status-release-green.svg" alt="Status">
 </p>
 
 ---
@@ -29,8 +29,6 @@ PyMOL is the gold standard for molecular visualization — but it's 25 years of 
 | **Python** | Embedded CPython | PyO3 bindings (optional) |
 | **Memory safety** | Manual | Guaranteed at compile time |
 | **Cross-platform** | Build scripts per OS | Single `cargo build` |
-
-> **Beta status.** Core visualization, selection language, structural alignment, sessions, and Python API are fully functional. Electron density maps and movie export are on the roadmap.
 
 ## Quick Start
 
@@ -189,8 +187,7 @@ PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
 ## Roadmap
 
 - [ ] Electron density maps (isomesh / isosurface)
-- [ ] Movie export (video formats)
-- [ ] Object groups
+- [ ] Web-version using WebAssembly
 
 ## License
 
