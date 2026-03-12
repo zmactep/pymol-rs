@@ -13,7 +13,7 @@ fetch = ["dep:ureq"]
 fetch-async = ["dep:reqwest"]
 
 [dependencies]
-pymol-mol = { path = "../pymol-mol" }
+pymol-mol = { workspace = true }
 nom = { workspace = true }
 thiserror = { workspace = true }
 flate2 = { workspace = true }

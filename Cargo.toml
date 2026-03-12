@@ -47,20 +47,20 @@ repository = "https://github.com/zmactep/pymol-rs"
 
 [workspace.dependencies]
 # Internal crates
-pymol-settings = { path = "crates/pymol-settings" }
-pymol-color = { path = "crates/pymol-color" }
-pymol-mol = { path = "crates/pymol-mol" }
-pymol-select = { path = "crates/pymol-select" }
-pymol-io = { path = "crates/pymol-io" }
-pymol-render = { path = "crates/pymol-render" }
-pymol-raytracer = { path = "crates/pymol-raytracer" }
-pymol-scene = { path = "crates/pymol-scene" }
-pymol-cmd = { path = "crates/pymol-cmd" }
-pymol-gui = { path = "crates/pymol-gui" }
-pymol-algos = { path = "crates/pymol-algos" }
-pymol-session = { path = "crates/pymol-session" }
-pymol-framework = { path = "crates/pymol-framework" }
-pymol-plugin = { path = "crates/pymol-plugin" }
+pymol-settings = { version = "0.2.0", path = "crates/pymol-settings" }
+pymol-color = { version = "0.2.0", path = "crates/pymol-color" }
+pymol-mol = { version = "0.2.0", path = "crates/pymol-mol" }
+pymol-select = { version = "0.2.0", path = "crates/pymol-select" }
+pymol-io = { version = "0.2.0", path = "crates/pymol-io" }
+pymol-render = { version = "0.2.0", path = "crates/pymol-render" }
+pymol-raytracer = { version = "0.2.0", path = "crates/pymol-raytracer" }
+pymol-scene = { version = "0.2.0", path = "crates/pymol-scene" }
+pymol-cmd = { version = "0.2.0", path = "crates/pymol-cmd" }
+pymol-gui = { version = "0.2.0", path = "crates/pymol-gui" }
+pymol-algos = { version = "0.2.0", path = "crates/pymol-algos" }
+pymol-session = { version = "0.2.0", path = "crates/pymol-session" }
+pymol-framework = { version = "0.2.0", path = "crates/pymol-framework" }
+pymol-plugin = { version = "0.2.0", path = "crates/pymol-plugin" }
 
 # External dependencies
 bitflags = { version = "2", features = ["serde"] }
