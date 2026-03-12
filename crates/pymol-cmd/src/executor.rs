@@ -191,13 +191,17 @@ impl CommandExecutor {
             .get(&parsed.name)
             .ok_or_else(|| CmdError::UnknownCommand(parsed.name.clone()))?;
 
+        // Snapshot history for commands that need it (e.g. save .pml)
+        let history_snapshot: Vec<String> = self.history.iter().map(|s| s.to_string()).collect();
+
         // Execute and collect output
         let mut ctx = CommandContext::new(viewer)
             .with_quiet(quiet)
             .with_log(log)
             .with_registry(&self.registry)
             .with_script_handlers(&self.script_handlers)
-            .with_format_handlers(&self.format_handlers);
+            .with_format_handlers(&self.format_handlers)
+            .with_history(&history_snapshot);
         command.execute(&mut ctx, &parsed)?;
 
         // Return collected output

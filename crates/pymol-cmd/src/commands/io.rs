@@ -334,6 +334,24 @@ EXAMPLES
                     "BinaryCIF writing is not supported. Save as .cif instead.",
                 ));
             }
+            "pml" => {
+                let history = ctx.history().unwrap_or(&[]);
+                let mut file = std::fs::File::create(&path)
+                    .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+                use std::io::Write;
+                writeln!(file, "# PyMOL-RS command log")
+                    .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+                for cmd in history {
+                    writeln!(file, "{}", cmd)
+                        .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+                }
+                ctx.print(&format!(
+                    " Saved {} commands to \"{}\"",
+                    history.len(),
+                    filename
+                ));
+                return Ok(());
+            }
             _ => {}
         }
 

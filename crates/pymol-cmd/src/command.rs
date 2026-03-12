@@ -150,6 +150,8 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     script_handlers: Option<&'r AHashMap<String, ScriptHandler>>,
     /// Format handlers registered by plugins (extension -> handler)
     format_handlers: Option<&'r AHashMap<String, Arc<FormatHandler>>>,
+    /// Command history snapshot (for saving as .pml script)
+    history: Option<&'r [String]>,
 }
 
 impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
@@ -163,6 +165,7 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
             registry: None,
             script_handlers: None,
             format_handlers: None,
+            history: None,
         }
     }
 
@@ -209,6 +212,17 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
     /// Get a format handler for the given extension
     pub fn format_handler(&self, ext: &str) -> Option<&Arc<FormatHandler>> {
         self.format_handlers.and_then(|h| h.get(ext))
+    }
+
+    /// Set the command history snapshot
+    pub fn with_history(mut self, history: &'r [String]) -> Self {
+        self.history = Some(history);
+        self
+    }
+
+    /// Get the command history snapshot
+    pub fn history(&self) -> Option<&[String]> {
+        self.history
     }
 
     /// Print an info message (unless quiet mode is enabled)
