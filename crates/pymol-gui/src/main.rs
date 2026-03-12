@@ -49,6 +49,14 @@ fn main() {
         log::info!("Headless mode enabled");
     }
 
+    // When running inside a macOS .app bundle, the working directory is
+    // typically "/" or the bundle location — switch to the user's home.
+    if pymol_gui::bundle::bundle_contents_dir().is_some() {
+        if let Some(home) = dirs::home_dir() {
+            let _ = std::env::set_current_dir(&home);
+        }
+    }
+
     // Create the application
     let mut app = App::new(args.headless);
 
