@@ -128,60 +128,52 @@ app-full: release plugins icon python-release
 
 # ── Code Signing ──────────────────────────────────────────────────
 
-# Shared: load signing identity from .env
-define load-identity
-	@test -f $(ENV_FILE) || { echo "ERROR: $(ENV_FILE) not found"; exit 1; }
-	. ./$(ENV_FILE) && \
-	  test -n "$$PYMOL_RS_APPLE_TEAMID" || { echo "ERROR: PYMOL_RS_APPLE_TEAMID not set in $(ENV_FILE)"; exit 1; }
-endef
-
 sign: app
 	@echo "── Signing $(APP_NAME).app ──"
-	@test -f $(ENV_FILE) || { echo "⚠ Signing skipped: $(ENV_FILE) not found"; exit 0; }
-	$(load-identity)
-	. ./$(ENV_FILE) && \
-	  codesign --force --options runtime \
+	@if [ ! -f $(ENV_FILE) ]; then echo "⚠ Signing skipped: $(ENV_FILE) not found"; exit 0; fi; \
+	. ./$(ENV_FILE); \
+	if [ -z "$$PYMOL_RS_APPLE_TEAMID" ]; then echo "⚠ Signing skipped: PYMOL_RS_APPLE_TEAMID not set"; exit 0; fi; \
+	codesign --force --options runtime \
 	    --sign "Developer ID Application: $$PYMOL_RS_APPLE_TEAMID" $(APP_DIR) && \
-	  codesign --verify --verbose $(APP_DIR)
-	@echo "✓ Signed"
+	codesign --verify --verbose $(APP_DIR) && \
+	echo "✓ Signed"
 
 sign-full: app-full
 	@echo "── Deep-signing $(APP_NAME).app ──"
-	@test -f $(ENV_FILE) || { echo "⚠ Signing skipped: $(ENV_FILE) not found"; exit 0; }
-	$(load-identity)
-	. ./$(ENV_FILE) && \
-	  IDENTITY="Developer ID Application: $$PYMOL_RS_APPLE_TEAMID" && \
-	  find $(APP_DIR)/Contents/Resources/python \
-	       $(APP_DIR)/Contents/Resources/python-venv \
-	       $(APP_DIR)/Contents/PlugIns \
-	    -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null | \
-	    xargs -I{} codesign --force --options runtime --sign "$$IDENTITY" {} && \
-	  codesign --force --options runtime --sign "$$IDENTITY" \
-	    $(APP_DIR)/Contents/Resources/python/bin/python3 && \
-	  codesign --force --options runtime --sign "$$IDENTITY" $(APP_DIR) && \
-	  codesign --verify --verbose --deep $(APP_DIR)
-	@echo "✓ Signed (deep)"
+	@if [ ! -f $(ENV_FILE) ]; then echo "⚠ Signing skipped: $(ENV_FILE) not found"; exit 0; fi; \
+	. ./$(ENV_FILE); \
+	if [ -z "$$PYMOL_RS_APPLE_TEAMID" ]; then echo "⚠ Signing skipped: PYMOL_RS_APPLE_TEAMID not set"; exit 0; fi; \
+	IDENTITY="Developer ID Application: $$PYMOL_RS_APPLE_TEAMID"; \
+	find $(APP_DIR)/Contents/Resources/python \
+	     $(APP_DIR)/Contents/Resources/python-venv \
+	     $(APP_DIR)/Contents/PlugIns \
+	  -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null | \
+	  xargs -I{} codesign --force --options runtime --sign "$$IDENTITY" {} && \
+	codesign --force --options runtime --sign "$$IDENTITY" \
+	  $(APP_DIR)/Contents/Resources/python/bin/python3 && \
+	codesign --force --options runtime --sign "$$IDENTITY" $(APP_DIR) && \
+	codesign --verify --verbose --deep $(APP_DIR) && \
+	echo "✓ Signed (deep)"
 
 # ── Notarize & DMG ───────────────────────────────────────────────
 
 notarize:
 	@echo "── Notarizing $(APP_NAME).app ──"
-	@test -f $(ENV_FILE) || { echo "⚠ Notarization skipped: $(ENV_FILE) not found"; exit 0; }
-	@. ./$(ENV_FILE) && \
-	  test -n "$$PYMOL_RS_APPLE_EMAIL" && \
-	  test -n "$$PYMOL_RS_APPLE_TEAMID" && \
-	  test -n "$$PYMOL_RS_APPLE_APP_PASS" || { echo "⚠ Notarization skipped: missing credentials"; exit 0; }
-	@. ./$(ENV_FILE) && \
-	  ditto -c -k --keepParent $(APP_DIR) target/app/$(APP_NAME).zip && \
-	  xcrun notarytool submit target/app/$(APP_NAME).zip \
-	      --apple-id "$$PYMOL_RS_APPLE_EMAIL" \
-	      --team-id "$$PYMOL_RS_APPLE_TEAMID" \
-	      --password "$$PYMOL_RS_APPLE_APP_PASS" \
-	      --wait && \
-	  xcrun stapler staple $(APP_DIR) && \
-	  echo "✓ Notarized & stapled" || \
-	  echo "⚠ Notarization failed — continuing without it"
-	@rm -f target/app/$(APP_NAME).zip
+	@if [ ! -f $(ENV_FILE) ]; then echo "⚠ Notarization skipped: $(ENV_FILE) not found"; exit 0; fi; \
+	. ./$(ENV_FILE); \
+	if [ -z "$$PYMOL_RS_APPLE_EMAIL" ] || [ -z "$$PYMOL_RS_APPLE_TEAMID" ] || [ -z "$$PYMOL_RS_APPLE_APP_PASS" ]; then \
+	    echo "⚠ Notarization skipped: missing credentials in $(ENV_FILE)"; exit 0; \
+	fi; \
+	ditto -c -k --keepParent $(APP_DIR) target/app/$(APP_NAME).zip && \
+	xcrun notarytool submit target/app/$(APP_NAME).zip \
+	    --apple-id "$$PYMOL_RS_APPLE_EMAIL" \
+	    --team-id "$$PYMOL_RS_APPLE_TEAMID" \
+	    --password "$$PYMOL_RS_APPLE_APP_PASS" \
+	    --wait && \
+	xcrun stapler staple $(APP_DIR) && \
+	echo "✓ Notarized & stapled" || \
+	echo "⚠ Notarization failed — continuing without it"; \
+	rm -f target/app/$(APP_NAME).zip
 
 # Shared: create DMG from a clean staging directory (only .app + Applications link)
 define create-dmg
