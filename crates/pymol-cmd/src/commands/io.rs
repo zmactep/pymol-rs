@@ -771,7 +771,7 @@ DESCRIPTION
 
 USAGE
 
-    fetch code [, name [, type ]]
+    fetch code [, name [, type [, async ]]]
 
 ARGUMENTS
 
@@ -779,12 +779,15 @@ ARGUMENTS
     name = string: object name (default: PDB ID)
     type = string: file type to fetch (default: cif)
            Supported: "pdb", "cif" (or "mmcif")
+    async = 0/1: asynchronous fetch (default: 1)
+            When 0, forces synchronous (blocking) fetch
 
 EXAMPLES
 
     fetch 1ubq
     fetch 4hhb, name=hemoglobin
     fetch 1crn, type=pdb
+    fetch 1igt, async=0
 "#
     }
 
@@ -811,6 +814,9 @@ EXAMPLES
             })
             .unwrap_or_default();
 
+        // Parse async flag (default: true = non-blocking)
+        let use_async = args.get_named_bool_or("async", true);
+
         // Convert format to code for async API
         let format_code = match format {
             pymol_io::FetchFormat::Pdb => 1u8,
@@ -819,7 +825,7 @@ EXAMPLES
         };
 
         // Try async path first (GUI supports this)
-        if ctx.viewer.request_async_fetch(code, name, format_code) {
+        if use_async && ctx.viewer.request_async_fetch(code, name, format_code) {
             ctx.print(&format!(" Fetching {}...", code));
             return Ok(());
         }

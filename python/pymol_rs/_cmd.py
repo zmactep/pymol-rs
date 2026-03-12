@@ -41,13 +41,15 @@ class Cmd:
             cmd_str += f", format={format}"
         self._backend.execute(cmd_str, quiet)
 
-    def fetch(self, code, name=None, state=0, type_="cif", quiet=True):
+    def fetch(self, code, name=None, state=0, type_="cif", sync=False, quiet=True):
         """Fetch a structure from the PDB."""
         cmd_str = f"fetch {code}"
         if name:
             cmd_str += f", {name}"
         if type_ != "cif":
             cmd_str += f", type={type_}"
+        if sync:
+            cmd_str += ", async=0"
         self._backend.execute(cmd_str, quiet)
 
     # =====================================================================
