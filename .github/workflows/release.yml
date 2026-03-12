@@ -243,7 +243,7 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: PyMOL-RS.dmg
+          name: dmg
           path: target/PyMOL-RS.dmg
           if-no-files-found: error
 
@@ -267,12 +267,12 @@ jobs:
         run: |
           mkdir -p release
           # Move all archives (executables + plugins)
-          find artifacts -name 'pymol-rs-*.tar.gz' -exec mv {} release/ \;
-          find artifacts -name 'pymol-rs-*.zip' -exec mv {} release/ \;
+          find artifacts -type f -name 'pymol-rs-*.tar.gz' -exec mv {} release/ \;
+          find artifacts -type f -name 'pymol-rs-*.zip' -exec mv {} release/ \;
           # Move wheels
-          find artifacts -name '*.whl' -exec mv {} release/ \;
+          find artifacts -type f -name '*.whl' -exec mv {} release/ \;
           # Move DMG
-          find artifacts -name '*.dmg' -exec mv {} release/ \;
+          find artifacts -type f -name '*.dmg' -exec mv {} release/ \;
           ls -la release/
 
       - name: Determine tag
