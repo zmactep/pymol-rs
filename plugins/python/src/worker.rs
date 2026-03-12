@@ -281,8 +281,8 @@ fn install_backend(engine: &mut PythonEngine, shared: &SharedStateHandle) -> Res
 
     engine.set_backend(py_backend)?;
 
-    // Auto-import cmd into __main__ so it's available in the REPL
-    match engine.eval("from pymol_rs import cmd") {
+    // Auto-import cmd and stored into __main__ so it's available in the REPL
+    match engine.eval("from pymol_rs import cmd; from pymol_rs import stored") {
         Ok(_) => Ok("backend installed, cmd auto-imported".to_string()),
         Err(e) => {
             log::warn!("Python plugin: backend installed but auto-import cmd failed: {}", e);

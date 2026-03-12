@@ -10,27 +10,26 @@ The ``cmd`` object is created lazily on first access.
 
 import sys
 
+from ._cmd import Cmd
 from ._pymol_rs import (
-    # Types
-    ObjectMolecule,
     Atom,
     Bond,
-    Element,
-    CoordSet,
     Color,
-    SelectionResult,
+    CoordSet,
+    Element,
+    # Types
+    ObjectMolecule,
     # Exceptions
     PymolError,
     SelectionError,
+    SelectionResult,
+    color,
+    io,
     # Submodules
     mol,
-    io,
     selecting,
-    color,
     settings,
 )
-
-from ._cmd import Cmd
 
 __version__ = "0.2.0"
 
@@ -55,6 +54,17 @@ __all__ = [
 
 # Lazy cmd singleton
 _cmd = None
+
+
+class Store:
+    def __getattr__(self, name):
+        return self.__dict__.get(name, None)
+
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+
+
+stored = Store()
 
 
 def _get_cmd():
