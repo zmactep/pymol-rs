@@ -153,6 +153,10 @@ pub struct RaytraceSettings {
     pub ray_trace_disco_factor: f32,
     /// Edge detection: pixel radius adjustment factor (PyMOL default: 0.12)
     pub ray_trace_gain: f32,
+    /// Silhouette edge thickness in pixels (sampling distance)
+    pub silhouette_thickness: f32,
+    /// Silhouette depth discontinuity threshold
+    pub silhouette_depth_jump: f32,
 }
 
 /// Default light directions matching PyMOL settings
@@ -200,6 +204,8 @@ impl Default for RaytraceSettings {
             ray_trace_depth_factor: 0.1, // PyMOL default
             ray_trace_disco_factor: 0.05, // PyMOL default
             ray_trace_gain: 0.12, // PyMOL default
+            silhouette_thickness: 1.0, // matches silhouette_width default
+            silhouette_depth_jump: 0.03, // matches silhouette_depth_jump default
         }
     }
 }

@@ -4,35 +4,26 @@ use crate::error::RaytraceResult;
 use bytemuck::{Pod, Zeroable};
 
 /// Uniform parameters for edge detection shader
-/// 
-/// Uses normal-based edge detection algorithm:
-/// - slope_factor: Normal dot product threshold - edges detected when dot(N1, N2) < threshold
-///   Higher values = more sensitive (more edges), range [0, 1], PyMOL default 0.6
-/// - depth_factor: Depth discontinuity threshold - edges detected when |d1 - d2| > threshold
-///   Lower values = more sensitive (more edges), PyMOL default 0.1
-/// - disco_factor: Reserved for future use
-/// - gain: Controls edge line thickness - lower values = thicker lines, PyMOL default 0.12
+///
+/// Uses silhouette-style depth-only edge detection:
+/// - thickness: Sampling distance in pixels (higher = thicker outlines)
+/// - depth_jump: Depth discontinuity threshold (lower = more sensitive)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct EdgeParams {
     pub viewport: [f32; 2],
-    pub slope_factor: f32,
-    pub depth_factor: f32,
-    pub disco_factor: f32,
-    pub gain: f32,
-    pub _pad: [f32; 2],
+    pub thickness: f32,
+    pub depth_jump: f32,
+    pub _pad: [f32; 4],
 }
 
 impl Default for EdgeParams {
     fn default() -> Self {
         Self {
             viewport: [0.0, 0.0],
-            // Normal-based edge detection thresholds
-            slope_factor: 0.7,    // Normal dot product threshold (edges when dot < this)
-            depth_factor: 0.01,   // Depth difference threshold (normalized depth)
-            disco_factor: 0.05,   // Reserved
-            gain: 0.12,           // Line thickness control (PyMOL default)
-            _pad: [0.0; 2],
+            thickness: 4.0,    // Sampling distance in pixels
+            depth_jump: 0.03,  // Depth discontinuity threshold
+            _pad: [0.0; 4],
         }
     }
 }
@@ -88,20 +79,9 @@ impl EdgeDetectPipeline {
                     },
                     count: None,
                 },
-                // Normal texture (input)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
                 // Edge texture (output) - use R32Float for storage binding support
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
@@ -112,7 +92,7 @@ impl EdgeDetectPipeline {
                 },
                 // Edge params uniform
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,

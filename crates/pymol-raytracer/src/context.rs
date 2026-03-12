@@ -269,24 +269,12 @@ pub fn raytrace(
         });
         let edge_view = edge_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create edge params uniform using normal-based edge detection
-        //
-        // slope_factor: Normal dot product threshold for edge detection
-        //   PyMOL default 0.6 used directly - edges when dot(N1, N2) < threshold
-        //   Higher = more sensitive (more edges at smaller normal changes)
-        //
-        // depth_factor: Depth discontinuity threshold (scaled for normalized depth)
-        //   PyMOL default 0.1 scaled to ~0.01 for our [0,1] depth range
-        //
-        // gain: Controls edge line thickness (passed directly to shader)
-        //   PyMOL default 0.12 -> thin lines, lower values -> thicker lines
+        // Create edge params using silhouette-style depth-only detection
         let edge_params = EdgeParams {
             viewport: [render_width as f32, render_height as f32],
-            slope_factor: params.settings.ray_trace_slope_factor,           // Use directly as dot threshold
-            depth_factor: params.settings.ray_trace_depth_factor * 0.1,     // Scale for normalized depth
-            disco_factor: params.settings.ray_trace_disco_factor,           // Reserved
-            gain: params.settings.ray_trace_gain,                           // Pass directly
-            _pad: [0.0; 2],
+            thickness: params.settings.silhouette_thickness,
+            depth_jump: params.settings.silhouette_depth_jump,
+            _pad: [0.0; 4],
         };
         let edge_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Edge Params"),
@@ -305,14 +293,10 @@ pub fn raytrace(
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&normal_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
                     resource: wgpu::BindingResource::TextureView(&edge_view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: edge_params_buffer.as_entire_binding(),
                 },
             ],

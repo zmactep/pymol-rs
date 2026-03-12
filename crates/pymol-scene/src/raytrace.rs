@@ -320,6 +320,10 @@ pub fn raytrace_scene(
         (direct, reflect_scaled)
     };
 
+    // Silhouette settings for edge detection in ray trace modes 1-3
+    let silhouette_thickness = input.settings.get_float(pymol_settings::id::silhouette_width);
+    let silhouette_depth_jump = input.settings.get_float(pymol_settings::id::silhouette_depth_jump);
+
     let settings = RaytraceSettings {
         light_dirs,
         light_count,
@@ -346,6 +350,8 @@ pub fn raytrace_scene(
         ray_trace_depth_factor,
         ray_trace_disco_factor,
         ray_trace_gain,
+        silhouette_thickness,
+        silhouette_depth_jump,
         ..Default::default()
     };
 
