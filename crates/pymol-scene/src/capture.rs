@@ -5,7 +5,8 @@
 
 use std::path::Path;
 
-use pymol_color::{ElementColors, NamedColors};
+use pymol_color::{Color, ElementColors, NamedColors};
+use pymol_render::silhouette::SilhouettePipeline;
 use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
 use pymol_settings::GlobalSettings;
 
@@ -260,6 +261,29 @@ pub fn capture_png_to_file(
                 }
             }
         }
+    }
+
+    // Post-process: silhouette edge detection (matches GUI render loop)
+    if settings.get_bool(pymol_settings::id::silhouettes) {
+        let silhouette = SilhouettePipeline::new(device, texture_format);
+        let thickness = settings.get_float(pymol_settings::id::silhouette_width);
+        let depth_jump = settings.get_float(pymol_settings::id::silhouette_depth_jump);
+        let color_int = settings.get_color(pymol_settings::id::silhouette_color);
+        let color = Color::from_packed_rgb(color_int).to_rgba(1.0);
+
+        silhouette.render(
+            &mut encoder,
+            queue,
+            device,
+            &color_view,
+            &depth_view,
+            output_width,
+            output_height,
+            thickness,
+            depth_jump,
+            color,
+            None,
+        );
     }
 
     // Calculate buffer size with proper alignment
