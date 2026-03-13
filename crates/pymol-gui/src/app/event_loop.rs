@@ -8,7 +8,8 @@ use std::time::Instant;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::WindowEvent;
+use pymol_scene::ButtonState;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
@@ -162,19 +163,19 @@ impl App {
     fn preprocess_input(&mut self, event: &WindowEvent) {
         match event {
             WindowEvent::MouseInput { state, button, .. } => {
-                self.viewport.input.handle_mouse_button(*state, *button);
+                self.viewport.input.handle_mouse_button((*state).into(), (*button).into());
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.viewport.input.handle_mouse_motion((position.x, position.y));
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.viewport.input.handle_scroll(*delta);
+                self.viewport.input.handle_scroll((*delta).into());
             }
             WindowEvent::PinchGesture { delta, .. } => {
                 self.viewport.input.handle_pinch_zoom(*delta);
             }
             WindowEvent::ModifiersChanged(modifiers) => {
-                self.viewport.input.handle_modifiers(modifiers.state());
+                self.viewport.input.handle_modifiers(modifiers.state().into());
             }
             _ => {}
         }
@@ -283,17 +284,18 @@ impl App {
     }
 
     /// Detect click vs. drag for atom picking.
-    fn handle_click_detection(&mut self, state: ElementState, button: winit::event::MouseButton) {
+    fn handle_click_detection(&mut self, state: winit::event::ElementState, button: winit::event::MouseButton) {
         if button != winit::event::MouseButton::Left {
             return;
         }
 
+        let state: ButtonState = state.into();
         let mouse_pos = self.viewport.input.mouse_position();
-        if state == ElementState::Pressed {
+        if state == ButtonState::Pressed {
             if self.view.is_over_viewport(mouse_pos) {
                 self.viewport.click_start_pos = Some(mouse_pos);
             }
-        } else if state == ElementState::Released {
+        } else if state == ButtonState::Released {
             if let Some(start) = self.viewport.click_start_pos.take() {
                 let dx = (mouse_pos.0 - start.0).abs();
                 let dy = (mouse_pos.1 - start.1).abs();

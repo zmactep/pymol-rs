@@ -2193,7 +2193,6 @@ version = "0.2.1"
 dependencies = [
  "flate2",
  "lin_alg",
- "memmap2",
  "nom",
  "pymol-mol",
  "reqwest",

@@ -2,14 +2,15 @@
        python python-release python-dev \
        plugins plugins-install \
        icon app app-full \
-       sign sign-full notarize dmg dmg-full
+       sign sign-full notarize dmg dmg-full \
+       web-build web-dev web-clean
 
 # ── Variables ─────────────────────────────────────────────────────
 
 APP_NAME       := PyMOL-RS
 APP_DIR        := target/app/$(APP_NAME).app
 BUNDLE_ID      := me.yakovlev.pymol-rs
-VERSION        := 0.2.0
+VERSION        := 0.2.2
 ICON_SRC       := images/pymol-rs.png
 ICONSET        := target/app/AppIcon.iconset
 ICNS           := target/app/AppIcon.icns
@@ -42,6 +43,7 @@ run:
 clean:
 	cargo clean
 	rm -rf python/target target/wheels target/app target/dmg-stage target/$(APP_NAME).dmg
+	rm -rf web/pkg web/dist
 
 # ── Python ────────────────────────────────────────────────────────
 
@@ -196,6 +198,17 @@ dmg: sign
 dmg-full: sign-full
 	$(create-dmg)
 
+# ── Web ──────────────────────────────────────────────────────────
+
+web-build:
+	cd web && npm run build
+
+web-dev:
+	cd web && npm run dev
+
+web-clean:
+	rm -rf web/pkg web/dist web/node_modules
+
 # ── Help ──────────────────────────────────────────────────────────
 
 help:
@@ -215,6 +228,11 @@ help:
 	@echo "  app-full         Full .app (+ plugins + Python + venv)"
 	@echo "  sign / sign-full Code-sign the .app"
 	@echo "  dmg / dmg-full   Distributable DMG (signed + notarized)"
+	@echo ""
+	@echo "Web:"
+	@echo "  web-build        Build WASM + TypeScript bundle"
+	@echo "  web-dev          Dev server with hot reload"
+	@echo "  web-clean        Clean web build artifacts"
 	@echo ""
 	@echo "Signing credentials (.env):"
 	@echo "  PYMOL_RS_APPLE_TEAMID    Apple Developer Team ID"

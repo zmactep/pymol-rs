@@ -14,7 +14,7 @@ default = []
 egui = ["dep:egui"]
 
 [dependencies]
-pymol-cmd = { workspace = true }
+pymol-cmd = { workspace = true, default-features = false }
 pymol-mol = { workspace = true }
 pymol-scene = { workspace = true }
 pymol-color = { workspace = true }
@@ -23,5 +23,7 @@ pymol-settings = { workspace = true }
 egui = { workspace = true, optional = true }
 serde = { workspace = true }
 rmp-serde = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dirs = "5"
 log = { workspace = true }

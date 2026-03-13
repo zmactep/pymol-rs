@@ -1,10 +1,108 @@
 //! Input handling for camera control
 //!
 //! Handles mouse and keyboard input for interactive camera manipulation.
+//!
+//! Input types (`ButtonState`, `MouseButton`, `ScrollDelta`, `Modifiers`)
+//! are framework-agnostic. When the `windowing` feature is enabled,
+//! `From<winit::...>` conversions are provided automatically.
 
 use lin_alg::f32::Vec3;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta};
-use winit::keyboard::ModifiersState;
+
+// ---------------------------------------------------------------------------
+// Framework-agnostic input types
+// ---------------------------------------------------------------------------
+
+/// Whether a button was pressed or released.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonState {
+    Pressed,
+    Released,
+}
+
+/// Logical mouse button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Other(u16),
+}
+
+/// Scroll wheel / trackpad delta.
+#[derive(Debug, Clone, Copy)]
+pub enum ScrollDelta {
+    /// Line-based scroll (typical mouse wheel). `(horizontal, vertical)`.
+    LineDelta(f32, f32),
+    /// Pixel-based scroll (trackpad). `(x, y)` in physical pixels.
+    PixelDelta(f64, f64),
+}
+
+/// Modifier key flags.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    /// ⌘ on macOS, ⊞ on Windows.
+    pub logo: bool,
+}
+
+impl Modifiers {
+    pub const EMPTY: Self = Self { shift: false, ctrl: false, alt: false, logo: false };
+    pub const SHIFT: Self = Self { shift: true, ctrl: false, alt: false, logo: false };
+    pub const CONTROL: Self = Self { shift: false, ctrl: true, alt: false, logo: false };
+    pub const SUPER: Self = Self { shift: false, ctrl: false, alt: false, logo: true };
+}
+
+// ---------------------------------------------------------------------------
+// winit conversions (behind "windowing" feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "windowing")]
+mod winit_conversions {
+    use super::*;
+
+    impl From<winit::event::ElementState> for ButtonState {
+        fn from(s: winit::event::ElementState) -> Self {
+            match s {
+                winit::event::ElementState::Pressed => ButtonState::Pressed,
+                winit::event::ElementState::Released => ButtonState::Released,
+            }
+        }
+    }
+
+    impl From<winit::event::MouseButton> for MouseButton {
+        fn from(b: winit::event::MouseButton) -> Self {
+            match b {
+                winit::event::MouseButton::Left => MouseButton::Left,
+                winit::event::MouseButton::Right => MouseButton::Right,
+                winit::event::MouseButton::Middle => MouseButton::Middle,
+                winit::event::MouseButton::Other(n) => MouseButton::Other(n),
+                _ => MouseButton::Other(0),
+            }
+        }
+    }
+
+    impl From<winit::event::MouseScrollDelta> for ScrollDelta {
+        fn from(d: winit::event::MouseScrollDelta) -> Self {
+            match d {
+                winit::event::MouseScrollDelta::LineDelta(x, y) => ScrollDelta::LineDelta(x, y),
+                winit::event::MouseScrollDelta::PixelDelta(pos) => ScrollDelta::PixelDelta(pos.x, pos.y),
+            }
+        }
+    }
+
+    impl From<winit::keyboard::ModifiersState> for Modifiers {
+        fn from(m: winit::keyboard::ModifiersState) -> Self {
+            Self {
+                shift: m.shift_key(),
+                ctrl: m.control_key(),
+                alt: m.alt_key(),
+                logo: m.super_key(),
+            }
+        }
+    }
+}
 
 /// Camera movement delta
 #[derive(Debug, Clone)]
@@ -45,7 +143,7 @@ pub struct InputState {
     /// Accumulated pinch-zoom delta since last update
     pinch_zoom_delta: f32,
     /// Current modifier keys
-    modifiers: ModifiersState,
+    modifiers: Modifiers,
     /// Rotation sensitivity (radians per pixel)
     pub rotate_sensitivity: f32,
     /// Zoom sensitivity (factor per scroll unit)
@@ -67,7 +165,7 @@ impl Default for InputState {
             mouse_delta: (0.0, 0.0),
             scroll_delta: 0.0,
             pinch_zoom_delta: 0.0,
-            modifiers: ModifiersState::empty(),
+            modifiers: Modifiers::EMPTY,
             rotate_sensitivity: 0.005,
             zoom_sensitivity: 0.1,
             clip_sensitivity: 0.1,
@@ -83,8 +181,8 @@ impl InputState {
     }
 
     /// Handle a mouse button event
-    pub fn handle_mouse_button(&mut self, state: ElementState, button: MouseButton) {
-        let pressed = state == ElementState::Pressed;
+    pub fn handle_mouse_button(&mut self, state: ButtonState, button: MouseButton) {
+        let pressed = state == ButtonState::Pressed;
 
         // Reset delta when starting a new drag to prevent accumulated
         // passive mouse movement from being applied
@@ -115,10 +213,10 @@ impl InputState {
     }
 
     /// Handle mouse scroll
-    pub fn handle_scroll(&mut self, delta: MouseScrollDelta) {
+    pub fn handle_scroll(&mut self, delta: ScrollDelta) {
         let scroll = match delta {
-            MouseScrollDelta::LineDelta(_, y) => y,
-            MouseScrollDelta::PixelDelta(pos) => pos.y as f32 / 100.0,
+            ScrollDelta::LineDelta(_, y) => y,
+            ScrollDelta::PixelDelta(_, y) => y as f32 / 100.0,
         };
         self.scroll_delta += scroll;
     }
@@ -129,7 +227,7 @@ impl InputState {
     }
 
     /// Handle modifier key changes
-    pub fn handle_modifiers(&mut self, modifiers: ModifiersState) {
+    pub fn handle_modifiers(&mut self, modifiers: Modifiers) {
         self.modifiers = modifiers;
     }
 
@@ -150,25 +248,25 @@ impl InputState {
 
     /// Check if shift is held
     pub fn shift_held(&self) -> bool {
-        self.modifiers.shift_key()
+        self.modifiers.shift
     }
 
     /// Check if ctrl is held
     pub fn ctrl_held(&self) -> bool {
-        self.modifiers.control_key()
+        self.modifiers.ctrl
     }
 
     /// Check if ctrl or cmd (macOS) is held.
     ///
-    /// On macOS, winit maps ⌘ to `ModifiersState::SUPER`.
+    /// On macOS, ⌘ maps to the `logo` modifier.
     /// We treat both as the "pan" modifier to match PyMOL's Ctrl+drag behavior.
     pub fn ctrl_or_cmd_held(&self) -> bool {
-        self.modifiers.control_key() || self.modifiers.super_key()
+        self.modifiers.ctrl || self.modifiers.logo
     }
 
     /// Check if alt is held
     pub fn alt_held(&self) -> bool {
-        self.modifiers.alt_key()
+        self.modifiers.alt
     }
 
     /// Get current mouse position
@@ -184,7 +282,7 @@ impl InputState {
     /// The default mapping follows PyMOL conventions:
     /// - Left drag:             Rotate (X/Y rotation)
     /// - Ctrl+Left drag:        Pan XY (matches PyMOL three_button_viewing `move`)
-    /// - Cmd+Left drag (macOS): Pan XY (⌘ maps to SUPER in winit)
+    /// - Cmd+Left drag (macOS): Pan XY (⌘ maps to logo modifier)
     /// - Shift+Left drag:       Pan XY
     /// - Middle drag:           Pan XY
     /// - Right drag:            Zoom (Y)
@@ -212,7 +310,7 @@ impl InputState {
         // Handle mouse drag
         if dx.abs() > 0.001 || dy.abs() > 0.001 {
             if self.mouse_buttons[LEFT] {
-                if self.modifiers.shift_key() {
+                if self.modifiers.shift {
                     // Shift+Left: Pan (negate: moving origin opposite to drag direction)
                     deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
                 } else if self.ctrl_or_cmd_held() {
@@ -229,13 +327,13 @@ impl InputState {
                 // Middle: Pan
                 deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
             } else if self.mouse_buttons[RIGHT] {
-                if self.modifiers.shift_key() {
+                if self.modifiers.shift {
                     // Shift+Right: Clip planes
                     deltas.push(CameraDelta::Clip {
                         front: -dy * self.clip_sensitivity,
                         back: dy * self.clip_sensitivity,
                     });
-                } else if self.modifiers.control_key() {
+                } else if self.modifiers.ctrl {
                     // Ctrl+Right: Slab (move both clip planes together)
                     deltas.push(CameraDelta::Clip {
                         front: -dy * self.clip_sensitivity,
@@ -262,7 +360,7 @@ impl InputState {
         self.mouse_delta = (0.0, 0.0);
         self.scroll_delta = 0.0;
         self.pinch_zoom_delta = 0.0;
-        self.modifiers = ModifiersState::empty();
+        self.modifiers = Modifiers::EMPTY;
     }
 
     /// Check if any mouse button is pressed
@@ -287,10 +385,10 @@ mod tests {
     fn test_mouse_button_handling() {
         let mut state = InputState::new();
 
-        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
+        state.handle_mouse_button(ButtonState::Pressed, MouseButton::Left);
         assert!(state.left_pressed());
 
-        state.handle_mouse_button(ElementState::Released, MouseButton::Left);
+        state.handle_mouse_button(ButtonState::Released, MouseButton::Left);
         assert!(!state.left_pressed());
     }
 
@@ -312,7 +410,7 @@ mod tests {
         let mut state = InputState::new();
 
         // Press left button and move
-        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
+        state.handle_mouse_button(ButtonState::Pressed, MouseButton::Left);
         state.handle_mouse_motion((100.0, 100.0));
         state.handle_mouse_motion((110.0, 105.0));
 
@@ -332,7 +430,7 @@ mod tests {
         let mut state = InputState::new();
 
         // Scroll without any button pressed → SlabScale
-        state.handle_scroll(MouseScrollDelta::LineDelta(0.0, 1.0));
+        state.handle_scroll(ScrollDelta::LineDelta(0.0, 1.0));
 
         let deltas = state.take_camera_deltas();
         assert_eq!(deltas.len(), 1);
@@ -349,8 +447,8 @@ mod tests {
         let mut state = InputState::new();
 
         // Press left button, then scroll → should produce Zoom
-        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
-        state.handle_scroll(MouseScrollDelta::LineDelta(0.0, 1.0));
+        state.handle_mouse_button(ButtonState::Pressed, MouseButton::Left);
+        state.handle_scroll(ScrollDelta::LineDelta(0.0, 1.0));
 
         let deltas = state.take_camera_deltas();
         let has_zoom = deltas.iter().any(|d| matches!(d, CameraDelta::Zoom(_)));
@@ -369,8 +467,8 @@ mod tests {
         let mut state = InputState::new();
 
         // Simulate Ctrl+Left drag
-        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
-        state.handle_modifiers(ModifiersState::CONTROL);
+        state.handle_mouse_button(ButtonState::Pressed, MouseButton::Left);
+        state.handle_modifiers(Modifiers::CONTROL);
         state.handle_mouse_motion((100.0, 100.0));
         state.handle_mouse_motion((110.0, 105.0)); // dx=10, dy=5
 
@@ -391,8 +489,8 @@ mod tests {
     fn test_ctrl_left_drag_does_not_rotate() {
         let mut state = InputState::new();
 
-        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
-        state.handle_modifiers(ModifiersState::CONTROL);
+        state.handle_mouse_button(ButtonState::Pressed, MouseButton::Left);
+        state.handle_modifiers(Modifiers::CONTROL);
         state.handle_mouse_motion((100.0, 100.0));
         state.handle_mouse_motion((120.0, 120.0));
 
@@ -406,11 +504,10 @@ mod tests {
 
     #[test]
     fn test_super_left_drag_pans_on_macos() {
-        // On macOS, winit reports ⌘ as SUPER, not CONTROL
         let mut state = InputState::new();
 
-        state.handle_mouse_button(ElementState::Pressed, MouseButton::Left);
-        state.handle_modifiers(ModifiersState::SUPER);
+        state.handle_mouse_button(ButtonState::Pressed, MouseButton::Left);
+        state.handle_modifiers(Modifiers::SUPER);
         state.handle_mouse_motion((100.0, 100.0));
         state.handle_mouse_motion((110.0, 105.0));
 

@@ -29,6 +29,29 @@ use pymol_mol::RepMask;
 use pymol_settings::GlobalSettings;
 use serde::{Deserialize, Serialize};
 
+// On native targets, Object requires Send + Sync for thread safety.
+// On wasm32, wgpu's WebGPU backend types use RefCell (not Sync),
+// and threading is not used, so we relax the bounds.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send> MaybeSend for T {}
+
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T> MaybeSend for T {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSync: Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Sync> MaybeSync for T {}
+
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T> MaybeSync for T {}
+
 use crate::error::{SceneError, SceneResult};
 
 /// Object type enumeration
@@ -149,7 +172,7 @@ impl ObjectState {
 ///
 /// This trait defines the common interface for all objects that can be
 /// added to a scene, including molecules, maps, surfaces, etc.
-pub trait Object: Send + Sync {
+pub trait Object: MaybeSend + MaybeSync {
     /// Get the object name
     fn name(&self) -> &str;
 

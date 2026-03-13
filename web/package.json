@@ -1,0 +1,42 @@
+{
+  "name": "@pymol-rs/viewer",
+  "version": "0.2.2",
+  "description": "Embeddable WebGPU molecular visualization component powered by PyMOL-RS",
+  "type": "module",
+  "main": "dist/pymol-rs-viewer.js",
+  "module": "dist/pymol-rs-viewer.js",
+  "types": "dist/pymol-rs-viewer.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/pymol-rs-viewer.js",
+      "types": "./dist/pymol-rs-viewer.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "pkg"
+  ],
+  "scripts": {
+    "wasm:build": "wasm-pack build --target web --out-dir pkg",
+    "dev": "npm run wasm:build && vite",
+    "build": "npm run wasm:build && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.4",
+    "vite": "^6.0"
+  },
+  "keywords": [
+    "pymol",
+    "molecular-visualization",
+    "webgpu",
+    "wasm",
+    "web-component"
+  ],
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yakovlev/pymol-rs",
+    "directory": "web"
+  }
+}

@@ -19,7 +19,7 @@
 //! - `pymol-mol`: Molecular data structures
 //! - `pymol-color`: Color system
 //! - `pymol-settings`: Configuration
-//! - `winit`: Window and event handling
+//! - `winit`: Window and event handling (optional, behind `windowing` feature)
 
 mod camera;
 mod capture;
@@ -39,13 +39,14 @@ mod session_adapter;
 mod uniform;
 mod view;
 mod viewer_trait;
+#[cfg(feature = "windowing")]
 mod window;
 
 // Re-export main types
 pub use camera::{Camera, CameraAnimation, Projection, SceneView, normalize_matrix};
 pub use capture::capture_png_to_file;
 pub use error::{SceneError, SceneResult, ViewerError, WindowError};
-pub use input::{CameraDelta, InputState};
+pub use input::{ButtonState, CameraDelta, InputState, Modifiers, MouseButton, ScrollDelta};
 pub use keybindings::{KeyBinding, KeyBindings, KeyCode};
 pub use movie::{LoopMode, Movie, MovieFrame, ObjectKeyframe, PlaybackState, PlayDirection};
 pub use object::{DirtyFlags, GroupObject, Label, LabelAnchor, LabelObject, Measurement, MeasurementObject, MeasurementType, MoleculeObject, MoleculeObjectSnapshot, Object, ObjectRegistry, ObjectRegistrySnapshot, ObjectState, ObjectType};
@@ -58,6 +59,7 @@ pub use raytrace::{raytrace_scene, raytrace_to_file, RaytraceError, RaytraceInpu
 pub use uniform::setup_uniforms;
 pub use view::ViewManager;
 pub use viewer_trait::{ViewportImage, ViewerLike};
+#[cfg(feature = "windowing")]
 pub use window::Window;
 
 // Re-export types from dependencies that are part of the public API

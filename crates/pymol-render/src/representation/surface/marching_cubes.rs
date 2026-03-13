@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use super::grid::Grid3D;
@@ -511,9 +512,12 @@ pub fn extract_isosurface(grid: &Grid3D, isovalue: f32) -> MarchingCubesResult {
 pub fn extract_isosurface_smooth(grid: &Grid3D, isovalue: f32) -> MarchingCubesResult {
     let dims = grid.dims;
 
-    // Process z-slices in parallel — each slice produces independent vertex/index data
-    let slice_results: Vec<SliceMeshData> = (0..dims[2])
-        .into_par_iter()
+    // Process z-slices (in parallel when available) — each slice produces independent vertex/index data
+    #[cfg(feature = "parallel")]
+    let iter = (0..dims[2]).into_par_iter();
+    #[cfg(not(feature = "parallel"))]
+    let iter = 0..dims[2];
+    let slice_results: Vec<SliceMeshData> = iter
         .map(|z| {
             let mut positions = Vec::new();
             let mut normals = Vec::new();

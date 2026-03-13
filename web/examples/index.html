@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>PyMOL-RS Web Viewer</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                background: #0d1117;
+                color: #c9d1d9;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+
+            /* ================================================================
+       Toolbar (top bar, like File menu area in desktop app)
+       ================================================================ */
+            .toolbar {
+                height: 36px;
+                min-height: 36px;
+                background: #161b22;
+                border-bottom: 1px solid #30363d;
+                display: flex;
+                align-items: center;
+                padding: 0 12px;
+                gap: 10px;
+                font-size: 13px;
+            }
+
+            .toolbar-brand {
+                font-weight: 600;
+                color: #58a6ff;
+                font-size: 14px;
+                margin-right: 6px;
+            }
+
+            .toolbar-sep {
+                width: 1px;
+                height: 18px;
+                background: #30363d;
+            }
+
+            .toolbar .btn {
+                padding: 3px 12px;
+                background: #21262d;
+                border: 1px solid #30363d;
+                color: #c9d1d9;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: background 0.15s;
+            }
+            .toolbar .btn:hover {
+                background: #30363d;
+            }
+            .toolbar .btn-primary {
+                background: #238636;
+                border-color: #2ea043;
+            }
+            .toolbar .btn-primary:hover {
+                background: #2ea043;
+            }
+
+            .pdb-input {
+                padding: 3px 8px;
+                background: #0d1117;
+                border: 1px solid #30363d;
+                color: #c9d1d9;
+                border-radius: 4px;
+                font-size: 12px;
+                width: 64px;
+                text-transform: uppercase;
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            }
+            .pdb-input::placeholder {
+                color: #484f58;
+                text-transform: none;
+            }
+
+            .toolbar-status {
+                margin-left: auto;
+                font-size: 11px;
+                color: #484f58;
+            }
+
+            /* ================================================================
+       Main layout — mirrors desktop: top panel, center+right, bottom
+       ================================================================ */
+            #main {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+
+            /* ---- Top panel: REPL ---- */
+            #panel-top {
+                background: #161b22;
+                border-bottom: 1px solid #30363d;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                transition: height 0.15s ease;
+            }
+            #panel-top.expanded {
+                height: 150px;
+            }
+            #panel-top.collapsed {
+                height: 0;
+            }
+
+            /* ---- Middle row: viewport + right panel ---- */
+            #middle {
+                flex: 1;
+                display: flex;
+                overflow: hidden;
+            }
+
+            /* ---- 3D viewport ---- */
+            #viewer-container {
+                flex: 1;
+                position: relative;
+                background: #000;
+                min-width: 200px;
+            }
+
+            /* ---- Right panel: Object List ---- */
+            #panel-right {
+                background: #161b22;
+                border-left: 1px solid #30363d;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                transition: width 0.15s ease;
+            }
+            #panel-right.expanded {
+                width: 220px;
+            }
+            #panel-right.collapsed {
+                width: 0;
+            }
+
+            /* ---- Bottom panel: Sequence + Movie ---- */
+            #panel-bottom {
+                background: #161b22;
+                border-top: 1px solid #30363d;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                transition: height 0.15s ease;
+            }
+            #panel-bottom.expanded {
+                height: 120px;
+            }
+            #panel-bottom.collapsed {
+                height: 0;
+            }
+
+            /* ================================================================
+       Panel toggle tabs — clickable headers to expand/collapse
+       ================================================================ */
+            .panel-tab-bar {
+                display: flex;
+                background: #161b22;
+            }
+
+            /* Top tab sits above the top panel */
+            #top-tabs {
+                border-bottom: 1px solid #30363d;
+            }
+
+            /* Bottom tab sits below viewport, above bottom panel */
+            #bottom-tabs {
+                border-top: 1px solid #30363d;
+            }
+
+            /* Right tab sits between viewport and right panel */
+            #right-tabs {
+                flex-direction: column;
+                border-left: 1px solid #30363d;
+                writing-mode: vertical-rl;
+            }
+
+            .panel-tab {
+                padding: 3px 12px;
+                font-size: 10px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #484f58;
+                cursor: pointer;
+                user-select: none;
+                transition: color 0.15s;
+                border: none;
+                background: transparent;
+            }
+            .panel-tab:hover {
+                color: #8b949e;
+            }
+            .panel-tab.active {
+                color: #c9d1d9;
+            }
+
+            #right-tabs .panel-tab {
+                padding: 12px 3px;
+                text-orientation: mixed;
+            }
+
+            /* ================================================================
+       Panel content styles (shared across all panels)
+       ================================================================ */
+            .pymol-panel {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
+                overflow: hidden;
+            }
+
+            .panel-header,
+            .repl-header {
+                padding: 4px 10px;
+                font-size: 10px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #8b949e;
+                background: rgba(0, 0, 0, 0.2);
+                border-bottom: 1px solid #30363d;
+                user-select: none;
+                display: none; /* headers are redundant with tabs */
+            }
+
+            /* ---- REPL ---- */
+            .pymol-panel-repl {
+                flex: 1;
+                min-height: 0;
+            }
+
+            .repl-output {
+                flex: 1;
+                overflow-y: auto;
+                padding: 4px 10px;
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+
+            .repl-line {
+                white-space: pre-wrap;
+                word-break: break-all;
+            }
+            .repl-cmd {
+                color: #96d696;
+            }
+            .repl-info {
+                color: #58a6ff;
+            }
+            .repl-warning {
+                color: #d29922;
+            }
+            .repl-error {
+                color: #f85149;
+            }
+
+            .repl-input-row {
+                display: flex;
+                align-items: center;
+                border-top: 1px solid #30363d;
+                padding: 4px 10px;
+                gap: 6px;
+            }
+
+            .repl-prompt {
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+                font-size: 12px;
+                color: #96d696;
+                user-select: none;
+                font-weight: 600;
+            }
+
+            .repl-input {
+                flex: 1;
+                background: transparent;
+                border: none;
+                outline: none;
+                color: #c9d1d9;
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+                font-size: 12px;
+            }
+
+            /* ---- Object List ---- */
+            .pymol-panel-objects {
+                flex: 1;
+                overflow-y: auto;
+            }
+
+            .object-list {
+                flex: 1;
+                overflow-y: auto;
+            }
+
+            .object-row {
+                display: flex;
+                align-items: center;
+                padding: 3px 8px;
+                gap: 6px;
+                font-size: 12px;
+            }
+            .object-row:hover {
+                background: rgba(255, 255, 255, 0.03);
+            }
+
+            .obj-vis {
+                width: 20px;
+                height: 20px;
+                border: 1px solid #30363d;
+                background: transparent;
+                color: #c9d1d9;
+                cursor: pointer;
+                font-size: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 3px;
+                flex-shrink: 0;
+            }
+            .obj-vis.enabled {
+                background: #238636;
+                border-color: #2ea043;
+            }
+            .obj-vis.disabled {
+                color: #484f58;
+            }
+
+            .obj-name {
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: #58d68d;
+                font-size: 12px;
+            }
+
+            .obj-reps {
+                display: flex;
+                gap: 2px;
+            }
+
+            .rep-btn {
+                width: 18px;
+                height: 18px;
+                border: 1px solid #30363d;
+                background: transparent;
+                color: #484f58;
+                cursor: pointer;
+                font-size: 9px;
+                border-radius: 2px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .rep-btn:hover {
+                background: #238636;
+                color: #c9d1d9;
+                border-color: #2ea043;
+            }
+
+            /* ---- Sequence ---- */
+            .pymol-panel-sequence {
+                flex: 1;
+                overflow-y: auto;
+            }
+
+            .sequence-content {
+                overflow-y: auto;
+                flex: 1;
+            }
+
+            .seq-chain {
+                padding: 3px 10px;
+            }
+
+            .seq-chain-header {
+                font-size: 10px;
+                color: #58d68d;
+                margin-bottom: 1px;
+                font-weight: 600;
+                display: inline-block;
+                min-width: 80px;
+            }
+
+            .seq-residues {
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+                font-size: 11px;
+                line-height: 1.5;
+                word-break: break-all;
+                display: inline;
+            }
+
+            .seq-residue {
+                cursor: pointer;
+                padding: 0 0.5px;
+                border-radius: 2px;
+            }
+            .seq-residue:hover {
+                background: #238636;
+                color: white;
+            }
+            .seq-spacer {
+                display: inline-block;
+                width: 4px;
+            }
+
+            /* ---- Movie ---- */
+            .pymol-panel-movie {
+                flex: 1;
+            }
+
+            .movie-controls {
+                padding: 6px 10px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .movie-buttons {
+                display: flex;
+                gap: 2px;
+            }
+
+            .movie-btn {
+                width: 28px;
+                height: 24px;
+                border: 1px solid #30363d;
+                background: #21262d;
+                color: #c9d1d9;
+                cursor: pointer;
+                font-size: 11px;
+                border-radius: 3px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .movie-btn:hover {
+                background: #30363d;
+            }
+
+            .movie-timeline {
+                flex: 1;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .movie-slider {
+                flex: 1;
+                accent-color: #238636;
+            }
+
+            .movie-frame-label {
+                font-size: 11px;
+                color: #8b949e;
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+                white-space: nowrap;
+            }
+
+            /* ================================================================
+       Resize handles
+       ================================================================ */
+            .resize-handle-h {
+                height: 3px;
+                cursor: ns-resize;
+                background: transparent;
+                position: relative;
+                z-index: 10;
+            }
+            .resize-handle-h:hover {
+                background: #58a6ff40;
+            }
+
+            .resize-handle-v {
+                width: 3px;
+                cursor: ew-resize;
+                background: transparent;
+                position: relative;
+                z-index: 10;
+            }
+            .resize-handle-v:hover {
+                background: #58a6ff40;
+            }
+
+            /* ================================================================
+       Scrollbar
+       ================================================================ */
+            ::-webkit-scrollbar {
+                width: 6px;
+                height: 6px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #30363d;
+                border-radius: 3px;
+            }
+        </style>
+    </head>
+    <body>
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <span class="toolbar-brand">PyMOL-RS</span>
+            <div class="toolbar-sep"></div>
+            <input
+                class="pdb-input"
+                id="pdb-id"
+                type="text"
+                placeholder="PDB"
+                maxlength="4"
+            />
+            <button class="btn btn-primary" id="fetch-btn">Fetch</button>
+            <button class="btn" id="load-file-btn">Open File</button>
+            <input
+                type="file"
+                id="file-input"
+                accept=".pdb,.xyz,.mol2,.sdf,.cif"
+                hidden
+            />
+            <button class="btn" id="demo-btn">Demo</button>
+            <span class="toolbar-status" id="status"></span>
+        </div>
+
+        <!-- Top panel tabs -->
+        <div class="panel-tab-bar" id="top-tabs">
+            <button
+                class="panel-tab active"
+                data-panel="top"
+                data-target="panel-top"
+            >
+                REPL
+            </button>
+        </div>
+
+        <div id="main">
+            <!-- Top panel: REPL -->
+            <div id="panel-top" class="expanded"></div>
+            <div class="resize-handle-h" data-resize="top"></div>
+
+            <!-- Middle: viewport + right panel -->
+            <div id="middle">
+                <div id="viewer-container"></div>
+                <div class="resize-handle-v" data-resize="right"></div>
+                <div id="panel-right" class="expanded"></div>
+
+                <!-- Right panel tabs (vertical) -->
+                <div class="panel-tab-bar" id="right-tabs">
+                    <button
+                        class="panel-tab active"
+                        data-panel="right"
+                        data-target="panel-right"
+                    >
+                        Objects
+                    </button>
+                </div>
+            </div>
+
+            <!-- Bottom panel tabs -->
+            <div class="panel-tab-bar" id="bottom-tabs">
+                <button
+                    class="panel-tab active"
+                    data-panel="bottom"
+                    data-target="panel-bottom"
+                >
+                    Sequence
+                </button>
+            </div>
+
+            <!-- Bottom panel: Sequence -->
+            <div id="panel-bottom" class="expanded"></div>
+            <div class="resize-handle-h" data-resize="bottom"></div>
+        </div>
+
+        <script type="module">
+            import { PyMolRSViewer } from "../dist/pymol-rs-viewer.js";
+
+            const status = document.getElementById("status");
+            function setStatus(msg) {
+                status.textContent = msg;
+            }
+
+            // ---- Panel toggle tabs ----
+            document.querySelectorAll(".panel-tab").forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    const targetId = tab.dataset.target;
+                    const panel = document.getElementById(targetId);
+                    if (!panel) return;
+
+                    const isActive = tab.classList.contains("active");
+                    if (isActive) {
+                        tab.classList.remove("active");
+                        panel.classList.remove("expanded");
+                        panel.classList.add("collapsed");
+                    } else {
+                        tab.classList.add("active");
+                        panel.classList.remove("collapsed");
+                        panel.classList.add("expanded");
+                    }
+                });
+            });
+
+            // ---- Panel resize handles ----
+            document.querySelectorAll("[data-resize]").forEach((handle) => {
+                const dir = handle.dataset.resize;
+                let startPos, startSize, panel;
+
+                handle.addEventListener("mousedown", (e) => {
+                    e.preventDefault();
+                    if (dir === "top") {
+                        panel = document.getElementById("panel-top");
+                        startPos = e.clientY;
+                        startSize = panel.offsetHeight;
+                    } else if (dir === "bottom") {
+                        panel = document.getElementById("panel-bottom");
+                        startPos = e.clientY;
+                        startSize = panel.offsetHeight;
+                    } else if (dir === "right") {
+                        panel = document.getElementById("panel-right");
+                        startPos = e.clientX;
+                        startSize = panel.offsetWidth;
+                    }
+
+                    const onMove = (e) => {
+                        if (dir === "top") {
+                            const delta = e.clientY - startPos;
+                            panel.style.height =
+                                Math.max(40, startSize + delta) + "px";
+                        } else if (dir === "bottom") {
+                            const delta = startPos - e.clientY;
+                            panel.style.height =
+                                Math.max(40, startSize + delta) + "px";
+                        } else if (dir === "right") {
+                            const delta = startPos - e.clientX;
+                            panel.style.width =
+                                Math.max(120, startSize + delta) + "px";
+                        }
+                    };
+
+                    const onUp = () => {
+                        document.removeEventListener("mousemove", onMove);
+                        document.removeEventListener("mouseup", onUp);
+                    };
+
+                    document.addEventListener("mousemove", onMove);
+                    document.addEventListener("mouseup", onUp);
+                });
+            });
+
+            // ---- Main ----
+            async function main() {
+                setStatus("Initializing WebGPU...");
+
+                const viewer = new PyMolRSViewer(
+                    document.getElementById("viewer-container"),
+                    {
+                        layout: [
+                            { name: "repl", slot: "top" },
+                            { name: "objects", slot: "right" },
+                            { name: "sequence", slot: "bottom" },
+                        ],
+                        slots: {
+                            top: document.getElementById("panel-top"),
+                            right: document.getElementById("panel-right"),
+                            bottom: document.getElementById("panel-bottom"),
+                        },
+                    },
+                );
+
+                try {
+                    await viewer.init();
+                    setStatus("Ready");
+                } catch (e) {
+                    setStatus("Error: " + e.message);
+                    console.error(e);
+                    return;
+                }
+
+                // -- Fetch PDB by ID --
+                document
+                    .getElementById("fetch-btn")
+                    .addEventListener("click", async () => {
+                        const pdbId = document
+                            .getElementById("pdb-id")
+                            .value.trim()
+                            .toUpperCase();
+                        if (!pdbId || pdbId.length !== 4) {
+                            setStatus("Enter a 4-character PDB ID");
+                            return;
+                        }
+                        setStatus(`Fetching ${pdbId}...`);
+                        try {
+                            await viewer.loadUrl(
+                                `https://files.rcsb.org/download/${pdbId}.pdb`,
+                                { name: pdbId, format: "pdb" },
+                            );
+                            viewer.execute("as cartoon");
+                            setStatus(
+                                `Loaded ${pdbId} (${viewer.countAtoms("all")} atoms)`,
+                            );
+                        } catch (e) {
+                            setStatus("Fetch error: " + e.message);
+                        }
+                    });
+
+                document
+                    .getElementById("pdb-id")
+                    .addEventListener("keydown", (e) => {
+                        if (e.key === "Enter")
+                            document.getElementById("fetch-btn").click();
+                    });
+
+                // -- Open local file --
+                document
+                    .getElementById("load-file-btn")
+                    .addEventListener("click", () => {
+                        document.getElementById("file-input").click();
+                    });
+
+                document
+                    .getElementById("file-input")
+                    .addEventListener("change", async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setStatus(`Loading ${file.name}...`);
+                        const ext =
+                            file.name.split(".").pop()?.toLowerCase() || "pdb";
+                        const data = new Uint8Array(await file.arrayBuffer());
+                        const name = file.name.replace(/\.[^.]+$/, "");
+                        try {
+                            viewer.loadData(data, name, ext);
+                            setStatus(
+                                `Loaded ${name} (${viewer.countAtoms("all")} atoms)`,
+                            );
+                        } catch (e) {
+                            setStatus("Load error: " + e.message);
+                        }
+                    });
+
+                // -- Demo --
+                document
+                    .getElementById("demo-btn")
+                    .addEventListener("click", async () => {
+                        document.getElementById("pdb-id").value = "1CRN";
+                        document.getElementById("fetch-btn").click();
+                    });
+
+                window.viewer = viewer;
+            }
+
+            main().catch(console.error);
+        </script>
+    </body>
+</html>

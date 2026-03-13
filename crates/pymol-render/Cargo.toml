@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
 
+[features]
+default = ["parallel"]
+parallel = ["dep:rayon"]
+
 [dependencies]
 pymol-mol = { workspace = true }
 pymol-color = { workspace = true }
@@ -20,7 +24,7 @@ bytemuck = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
-rayon = { workspace = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

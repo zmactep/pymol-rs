@@ -10,6 +10,7 @@
 use super::distance_field::SurfaceAtom;
 use super::grid::SpatialHash;
 use super::sphere::{get_sphere, quality_to_level};
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 /// A surface dot with position, normal, and source atom
@@ -95,10 +96,12 @@ pub fn generate_surface_dots(
     let sphere_level = quality_to_level(config.quality);
     let sphere = get_sphere(sphere_level);
 
-    // Generate dots in parallel
-    let dots: Vec<SurfaceDot> = atoms
-        .par_iter()
-        .enumerate()
+    // Generate dots (in parallel when available)
+    #[cfg(feature = "parallel")]
+    let iter = atoms.par_iter().enumerate();
+    #[cfg(not(feature = "parallel"))]
+    let iter = atoms.iter().enumerate();
+    let dots: Vec<SurfaceDot> = iter
         .flat_map(|(atom_idx, atom)| {
             let mut atom_dots = Vec::with_capacity(sphere.num_dots() / 4); // Estimate ~25% exposed
             let mut nearby_buffer = Vec::with_capacity(64);

@@ -13,21 +13,21 @@ use pymol_mol::AtomIndex;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectionResult {
     /// Bitset where bit i is set if atom i is selected
-    bits: BitVec<u64, Lsb0>,
+    bits: BitVec<usize, Lsb0>,
 }
 
 impl SelectionResult {
     /// Create a new empty selection (no atoms selected)
     pub fn new(atom_count: usize) -> Self {
         SelectionResult {
-            bits: bitvec![u64, Lsb0; 0; atom_count],
+            bits: bitvec![usize, Lsb0; 0; atom_count],
         }
     }
 
     /// Create a selection with all atoms selected
     pub fn all(atom_count: usize) -> Self {
         SelectionResult {
-            bits: bitvec![u64, Lsb0; 1; atom_count],
+            bits: bitvec![usize, Lsb0; 1; atom_count],
         }
     }
 

@@ -11,3 +11,7 @@ CLAUDE.md
 .env
 .DS_Store
 BACKLOG.md
+node_modules
+dist
+pkg
+package-lock.json

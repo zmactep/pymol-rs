@@ -82,7 +82,7 @@ struct VertexOutput {
     @location(3) end_view: vec3<f32>,
     @location(4) ray_origin: vec3<f32>,
     @location(5) radius: f32,
-    @location(6) flags: u32,
+    @location(6) @interpolate(flat) flags: u32,
 }
 
 @vertex
@@ -353,7 +353,7 @@ fn compute_shadow_ao(world_pos: vec3<f32>) -> f32 {
             (f32(row) + uv.y) / f32(grid),
         );
 
-        let shadow_depth = textureSample(shadow_atlas, shadow_sampler, tile_uv).r;
+        let shadow_depth = textureSampleLevel(shadow_atlas, shadow_sampler, tile_uv, 0.0).r;
         let fragment_depth = ndc.z;
 
         if fragment_depth <= shadow_depth + shadow_params.bias {

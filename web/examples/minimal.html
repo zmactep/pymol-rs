@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>PyMOL-RS — Minimal Viewer</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                background: #000;
+                height: 100vh;
+            }
+            #viewer {
+                width: 100vw;
+                height: 100vh;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="viewer"></div>
+
+        <script type="module">
+            import { PyMolRSViewer } from "../dist/pymol-rs-viewer.js";
+
+            const viewer = new PyMolRSViewer(document.getElementById("viewer"));
+            await viewer.init();
+
+            await viewer.loadUrl("https://files.rcsb.org/download/1IGT.pdb", {
+                name: "1IGT",
+                format: "pdb",
+            });
+
+            viewer.execute(
+                `set_view (\\
+                   0.354715,    -0.635008,    -0.686252,\\
+                  -0.895315,    -0.019190,    -0.445020,\\
+                   0.269422,     0.772267,    -0.575340,\\
+                   0.000000,     0.000000,   645.155334,\\
+                   7.123241,   -15.970964,    -1.315302,\\
+                 566.530212,   802.404114,    14.000000 )`,
+            );
+            viewer.execute("bg_color white");
+            viewer.execute("set shading_mode, skripkin");
+            viewer.execute("set ambient, 0.7");
+            viewer.execute("set silhouettes, on");
+            viewer.execute("set silhouette_color, black");
+        </script>
+    </body>
+</html>

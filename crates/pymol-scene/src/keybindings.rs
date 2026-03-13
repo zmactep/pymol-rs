@@ -9,7 +9,36 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "windowing")]
 pub use winit::keyboard::KeyCode;
+
+#[cfg(not(feature = "windowing"))]
+pub use key_code::KeyCode;
+
+/// Fallback `KeyCode` enum when the `windowing` feature is disabled.
+///
+/// Contains the subset of key codes used by PyMOL-RS keybindings.
+#[cfg(not(feature = "windowing"))]
+mod key_code {
+    /// Keyboard key codes (subset used by PyMOL-RS).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[allow(dead_code)]
+    pub enum KeyCode {
+        Digit0, Digit1, Digit2, Digit3, Digit4,
+        Digit5, Digit6, Digit7, Digit8, Digit9,
+        KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH,
+        KeyI, KeyJ, KeyK, KeyL, KeyM, KeyN, KeyO, KeyP,
+        KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX,
+        KeyY, KeyZ,
+        F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+        Escape, Space, Enter, Backspace, Tab, Delete,
+        ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+        Home, End, PageUp, PageDown,
+        Minus, Equal, BracketLeft, BracketRight,
+        Comma, Period, Slash, Backslash, Semicolon, Quote,
+        Backquote,
+    }
+}
 
 /// Represents a keyboard shortcut with optional modifier keys
 ///

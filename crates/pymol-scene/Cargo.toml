@@ -9,6 +9,10 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Scene management, camera, and window handling for PyMOL-RS"
 
+[features]
+default = ["windowing"]
+windowing = ["dep:winit", "dep:pollster"]
+
 [dependencies]
 # Internal crates
 pymol-mol.workspace = true
@@ -22,12 +26,12 @@ pymol-io.workspace = true
 # External dependencies
 lin_alg.workspace = true
 wgpu.workspace = true
-winit.workspace = true
+winit = { workspace = true, optional = true }
 thiserror.workspace = true
 log.workspace = true
 ahash.workspace = true
 bitflags.workspace = true
 parking_lot.workspace = true
-pollster = "0.4"
+pollster = { version = "0.4", optional = true }
 image.workspace = true
 serde = { workspace = true }

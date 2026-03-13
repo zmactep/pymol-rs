@@ -81,6 +81,7 @@ pub enum WindowError {
     NotAvailable,
 
     /// winit OS error
+    #[cfg(feature = "windowing")]
     #[error("OS error: {0}")]
     OsError(#[from] winit::error::OsError),
 }

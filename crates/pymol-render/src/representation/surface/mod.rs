@@ -21,6 +21,7 @@ pub mod marching_cubes;
 pub mod sphere;
 pub mod triangulate;
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use crate::buffer::GrowableBuffer;
@@ -298,7 +299,11 @@ impl SurfaceRep {
         let alpha = 1.0 - transparency.clamp(0.0, 1.0);
         let positions: Vec<[f32; 3]> = self.vertices.iter().map(|v| v.position).collect();
         let colors = coloring::color_vertices(&positions, atom_colors);
-        self.vertices.par_iter_mut().zip(colors.par_iter()).for_each(|(v, c)| {
+        #[cfg(feature = "parallel")]
+        let iter = self.vertices.par_iter_mut().zip(colors.par_iter());
+        #[cfg(not(feature = "parallel"))]
+        let iter = self.vertices.iter_mut().zip(colors.iter());
+        iter.for_each(|(v, c)| {
             v.color = [c[0], c[1], c[2], alpha];
         });
         self.has_transparency = transparency > 0.0;

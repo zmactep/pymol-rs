@@ -4,6 +4,7 @@
 //! for various surface types (VdW, SAS, SES).
 
 use super::grid::{Grid3D, SpatialHash};
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 /// Surface type for distance field computation
@@ -172,18 +173,21 @@ fn compute_distance_field_sparse(
         grid_max,
     );
 
-    // Process in parallel by z-slices
-    let values: Vec<f32> = (0..vd[2])
-        .into_par_iter()
+    // Process by z-slices (in parallel when available)
+    #[cfg(feature = "parallel")]
+    let iter = (0..vd[2]).into_par_iter();
+    #[cfg(not(feature = "parallel"))]
+    let iter = 0..vd[2];
+    let values: Vec<f32> = iter
         .flat_map(|z| {
             let mut slice_values = Vec::with_capacity(vd[0] * vd[1]);
             let z_offset = z * vd[1] * vd[0];
-            
+
             for y in 0..vd[1] {
                 let row_offset = z_offset + y * vd[0];
                 for x in 0..vd[0] {
                     let idx = row_offset + x;
-                    
+
                     if active_mask[idx] {
                         // Compute exact distance for active cells using fast single-cell query
                         let pos = grid.vertex_position(x, y, z);
@@ -233,8 +237,11 @@ fn compute_distance_field_dense(
         grid_max,
     );
 
-    let values: Vec<f32> = (0..vd[2])
-        .into_par_iter()
+    #[cfg(feature = "parallel")]
+    let iter = (0..vd[2]).into_par_iter();
+    #[cfg(not(feature = "parallel"))]
+    let iter = 0..vd[2];
+    let values: Vec<f32> = iter
         .flat_map(|z| {
             let mut slice_values = Vec::with_capacity(vd[0] * vd[1]);
             for y in 0..vd[1] {

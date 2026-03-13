@@ -348,9 +348,13 @@ fn complete_path(input: &str, _cursor_pos: usize) -> CompletionResult {
 
             if name.to_lowercase().starts_with(&prefix.to_lowercase()) {
                 let mut suggestion = if path_portion.starts_with('~') {
-                    format!("~/{}", 
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let home = dirs::home_dir().unwrap_or_default();
+                    #[cfg(target_arch = "wasm32")]
+                    let home = std::path::PathBuf::new();
+                    format!("~/{}",
                         search_dir
-                            .strip_prefix(dirs::home_dir().unwrap_or_default())
+                            .strip_prefix(&home)
                             .unwrap_or(&search_dir)
                             .join(&name)
                             .display()
@@ -408,6 +412,7 @@ fn find_path_start(input: &str) -> usize {
 /// Expand tilde (~) to home directory
 fn expand_tilde(path: &str) -> String {
     if path.starts_with('~') {
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(home) = dirs::home_dir() {
             return path.replacen('~', &home.display().to_string(), 1);
         }

@@ -216,6 +216,50 @@ jobs:
           path: python/dist/*.whl
           if-no-files-found: error
 
+  build-web:
+    name: Build web libraries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build WASM + TypeScript bundle
+        working-directory: web
+        run: npm run build
+
+      - name: Package web bundle
+        run: |
+          mkdir -p staging
+          cp -r web/dist staging/
+          cp -r web/pkg staging/
+          cp web/package.json staging/
+          cd staging
+          tar -czvf ../pymol-rs-web.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pymol-rs-web
+          path: pymol-rs-web.tar.gz
+          if-no-files-found: error
+
   build-macos-app:
     name: Build macOS DMG bundle
     runs-on: macos-latest
@@ -249,7 +293,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-executables, build-plugins, build-wheels, build-macos-app]
+    needs: [build-executables, build-plugins, build-wheels, build-web, build-macos-app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
