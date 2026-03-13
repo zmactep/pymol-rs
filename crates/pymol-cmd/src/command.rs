@@ -214,6 +214,16 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         self.format_handlers.and_then(|h| h.get(ext))
     }
 
+    /// Get the full script handlers map (if available)
+    pub fn script_handlers_map(&self) -> Option<&AHashMap<String, ScriptHandler>> {
+        self.script_handlers
+    }
+
+    /// Get the full format handlers map (if available)
+    pub fn format_handlers_map(&self) -> Option<&AHashMap<String, Arc<FormatHandler>>> {
+        self.format_handlers
+    }
+
     /// Set the command history snapshot
     pub fn with_history(mut self, history: &'r [String]) -> Self {
         self.history = Some(history);
@@ -304,6 +314,15 @@ pub struct CommandRegistry {
     commands: AHashMap<String, Arc<dyn Command>>,
     /// Aliases mapping alias -> command name
     aliases: AHashMap<String, String>,
+}
+
+impl Clone for CommandRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            commands: self.commands.clone(),
+            aliases: self.aliases.clone(),
+        }
+    }
 }
 
 impl Default for CommandRegistry {

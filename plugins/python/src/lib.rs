@@ -45,8 +45,8 @@ pymol_plugin! {
 
         // Register commands
         reg.register_command(PythonCommand::new(worker_handle.clone()));
-        reg.register_command(IterateCommand::new(worker_handle.clone()));
-        reg.register_command(AlterCommand::new(worker_handle.clone()));
+        reg.register_command(IterateCommand::new(worker_handle.clone(), shared_state.clone()));
+        reg.register_command(AlterCommand::new(worker_handle.clone(), shared_state.clone()));
 
         // Register .py script handler (fire-and-forget: output via poll)
         let script_worker = worker_handle.clone();

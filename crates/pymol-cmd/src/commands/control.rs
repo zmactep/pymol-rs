@@ -5,6 +5,7 @@ use pymol_scene::{DirtyFlags, Session};
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
+use crate::executor::CommandExecutor;
 use crate::script::ScriptEngine;
 
 use super::io::expand_path;
@@ -369,7 +370,16 @@ EXAMPLES
 
         match ext {
             "pml" => {
-                let mut engine = ScriptEngine::new();
+                let executor = if let Some(registry) = ctx.registry() {
+                    CommandExecutor::with_registry(
+                        registry.clone(),
+                        ctx.script_handlers_map().cloned().unwrap_or_default(),
+                        ctx.format_handlers_map().cloned().unwrap_or_default(),
+                    )
+                } else {
+                    CommandExecutor::new()
+                };
+                let mut engine = ScriptEngine::with_executor(executor);
                 engine.run_pml(ctx.viewer, &path)
             }
             other => {

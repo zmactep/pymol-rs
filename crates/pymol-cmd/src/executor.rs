@@ -69,6 +69,25 @@ impl CommandExecutor {
         }
     }
 
+    /// Create an executor with a pre-populated registry and handlers.
+    ///
+    /// Used by the `run` command to create a script engine that inherits
+    /// plugin-registered commands and handlers from the calling context.
+    pub fn with_registry(
+        registry: CommandRegistry,
+        script_handlers: AHashMap<String, ScriptHandler>,
+        format_handlers: AHashMap<String, Arc<FormatHandler>>,
+    ) -> Self {
+        Self {
+            registry,
+            logger: CommandLogger::new(),
+            history: CommandHistory::new(),
+            echo: false,
+            script_handlers,
+            format_handlers,
+        }
+    }
+
     /// Get a reference to the command registry
     pub fn registry(&self) -> &CommandRegistry {
         &self.registry

@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use pymol_mol::{Element, SecondaryStructure};
 use pymol_plugin::prelude::*;
 
+use crate::backend::SharedStateHandle;
 use crate::worker::{WorkItem, WorkOrigin, WorkerHandle};
 
 // =============================================================================
@@ -136,6 +137,28 @@ pub fn apply_property_changes(atom: &mut Atom, changes: &HashMap<String, Propert
                 atom.residue = Arc::new(res);
             }
             _ => {} // Unknown property — ignore
+        }
+    }
+}
+
+// =============================================================================
+// Shared state sync
+// =============================================================================
+
+/// Sync molecule snapshots from the viewer into shared state.
+///
+/// Called before submitting `iterate`/`alter` work to the Python worker so
+/// the worker sees up-to-date molecule data, even when no GUI poll cycle
+/// has run (e.g., during .pml script execution).
+fn sync_shared_molecules(shared: &SharedStateHandle, viewer: &dyn ViewerLike) {
+    let mut state = shared.lock().unwrap();
+    state.names = viewer.objects().names().map(|s| s.to_string()).collect();
+    state.molecules.clear();
+    for name in viewer.objects().names() {
+        if let Some(mol_obj) = viewer.objects().get_molecule(name) {
+            state
+                .molecules
+                .push((name.to_string(), mol_obj.molecule().clone()));
         }
     }
 }
@@ -287,11 +310,12 @@ impl Command for PythonCommand {
 ///   iterate chain A, mylist.append(b)
 pub struct IterateCommand {
     worker: WorkerHandle,
+    shared: SharedStateHandle,
 }
 
 impl IterateCommand {
-    pub fn new(worker: WorkerHandle) -> Self {
-        Self { worker }
+    pub fn new(worker: WorkerHandle, shared: SharedStateHandle) -> Self {
+        Self { worker, shared }
     }
 }
 
@@ -305,6 +329,7 @@ impl Command for IterateCommand {
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
+        sync_shared_molecules(&self.shared, ctx.viewer);
         submit_atom_command(&self.worker, ctx, args, "iterate")
     }
 
@@ -338,11 +363,12 @@ impl Command for IterateCommand {
 ///   alter chain A, chain='B'
 pub struct AlterCommand {
     worker: WorkerHandle,
+    shared: SharedStateHandle,
 }
 
 impl AlterCommand {
-    pub fn new(worker: WorkerHandle) -> Self {
-        Self { worker }
+    pub fn new(worker: WorkerHandle, shared: SharedStateHandle) -> Self {
+        Self { worker, shared }
     }
 }
 
@@ -356,6 +382,7 @@ impl Command for AlterCommand {
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
+        sync_shared_molecules(&self.shared, ctx.viewer);
         submit_atom_command(&self.worker, ctx, args, "alter")
     }
 
