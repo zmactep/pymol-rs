@@ -181,7 +181,7 @@ EXAMPLES
                             compute_per_state_matrices(&cell, symop, &state_centers, tc, x, y, z);
 
                         // Skip if all matrices are identity (this is the original molecule)
-                        if matrices.iter().all(|m| is_identity_mat4(m)) {
+                        if matrices.iter().all(is_identity_mat4) {
                             continue;
                         }
 

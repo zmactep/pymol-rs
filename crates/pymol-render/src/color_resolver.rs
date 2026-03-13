@@ -199,8 +199,7 @@ mod tests {
         let resolver = ColorResolver::new(&named, &elements);
 
         // Create a carbon atom
-        let mut atom = Atom::default();
-        atom.element = Element::Carbon;
+        let mut atom = Atom { element: Element::Carbon, ..Default::default() };
         atom.repr.colors.base = -1; // By element
 
         let color = resolver.resolve_atom(&atom);
@@ -239,8 +238,7 @@ mod tests {
         let elements = ElementColors::default();
         let resolver = ColorResolver::new(&named, &elements);
 
-        let mut atom = Atom::default();
-        atom.element = Element::Carbon;
+        let mut atom = Atom { element: Element::Carbon, ..Default::default() };
         atom.repr.colors.base = -1; // By element
 
         // Priority 3: no override, no per-atom cartoon → uses base color (by element)

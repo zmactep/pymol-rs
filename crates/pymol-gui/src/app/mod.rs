@@ -263,7 +263,7 @@ impl App {
                 .map(|s| s.to_string())
                 .collect();
             let setting_names = pymol_settings::setting_names();
-            let setting_names_refs: Vec<&str> = setting_names.iter().copied().collect();
+            let setting_names_refs: Vec<&str> = setting_names.to_vec();
 
             let shared = pymol_framework::component::SharedContext {
                 registry: &self.state.registry,

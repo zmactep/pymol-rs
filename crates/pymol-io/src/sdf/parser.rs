@@ -119,8 +119,8 @@ impl<R: Read> SdfReader<R> {
             let (atom1, atom2, order) = parse_bond_line(&line, self.line_number)?;
 
             // Convert from 1-indexed to 0-indexed
-            let idx1 = pymol_mol::AtomIndex((atom1 - 1) as u32);
-            let idx2 = pymol_mol::AtomIndex((atom2 - 1) as u32);
+            let idx1 = pymol_mol::AtomIndex(atom1 - 1);
+            let idx2 = pymol_mol::AtomIndex(atom2 - 1);
 
             let _ = mol.add_bond_unchecked(idx1, idx2, order);
         }
@@ -128,12 +128,7 @@ impl<R: Read> SdfReader<R> {
         // Parse properties block (M lines)
         let mut charges: Vec<(u32, i8)> = Vec::new();
 
-        loop {
-            let line = match self.read_line()? {
-                Some(line) => line,
-                None => break,
-            };
-
+        while let Some(line) = self.read_line()? {
             if line.starts_with("M  END") {
                 break;
             }
@@ -169,26 +164,18 @@ impl<R: Read> SdfReader<R> {
         //   BetweenItems — $$$$ is the record separator; > starts a new item
         //   InItem       — blank line ends the item; everything else is a value
         let mut in_data_item = false;
-        loop {
-            let line = match self.read_line()? {
-                Some(line) => line,
-                None => break, // EOF without $$$$: treat as end of record
-            };
-
+        while let Some(line) = self.read_line()? {
             if in_data_item {
                 if line.trim().is_empty() {
                     in_data_item = false; // blank line terminates data item
                 }
                 // Non-blank lines are data values; $$$$ here is NOT a separator
-            } else {
-                if line.starts_with("$$$$") {
-                    break; // record separator (spec: line *beginning* with $$$$)
-                }
-                if line.starts_with('>') {
-                    in_data_item = true; // data header — values follow
-                }
-                // blank lines between items are legal, just skip
+            } else if line.starts_with("$$$$") {
+                break; // record separator (spec: line *beginning* with $$$$)
+            } else if line.starts_with('>') {
+                in_data_item = true; // data header — values follow
             }
+            // blank lines between items are legal, just skip
         }
 
         Ok(Some(mol))
@@ -242,7 +229,7 @@ fn parse_counts_line(line: &str) -> IoResult<(u32, u32, String)> {
     // Per the CTFile spec the version field occupies columns 34–39 (1-indexed),
     // i.e. bytes 33..39 (0-indexed). Checking with contains() anywhere in the
     // line risks false positives from data in obsolete fields.
-    let version = if line.get(33..39).map_or(false, |s| s.trim() == "V3000") {
+    let version = if line.get(33..39).is_some_and(|s| s.trim() == "V3000") {
         "V3000".to_string()
     } else {
         "V2000".to_string()

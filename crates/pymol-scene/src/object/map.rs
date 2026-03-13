@@ -269,8 +269,8 @@ impl MapObject {
 
                     // Calculate cube index based on which corners are inside
                     let mut cube_index = 0u8;
-                    for i in 0..8 {
-                        if cube_values[i] < level {
+                    for (i, &val) in cube_values.iter().enumerate() {
+                        if val < level {
                             cube_index |= 1 << i;
                         }
                     }

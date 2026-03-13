@@ -877,7 +877,7 @@ EXAMPLES
             ctx.viewer.zoom_on(name);
             ctx.viewer.update_movie_state_count();
 
-            return Ok(());
+            Ok(())
         }
 
         // No fetch implementation available

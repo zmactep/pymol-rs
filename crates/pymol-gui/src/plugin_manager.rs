@@ -256,7 +256,7 @@ impl PluginManager {
             !p.faulted
                 && p.message_handler
                     .as_ref()
-                    .map_or(false, |h| h.needs_poll())
+                    .is_some_and(|h| h.needs_poll())
         })
     }
 

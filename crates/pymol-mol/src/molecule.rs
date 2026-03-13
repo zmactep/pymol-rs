@@ -723,8 +723,8 @@ impl ObjectMolecule {
         // Update coordinate sets: extract coords for surviving atoms only
         for cs in &mut self.coord_sets {
             let mut new_coords = Vec::with_capacity(self.atoms.len() * 3);
-            for old_idx in 0..n_atoms {
-                if remove_set[old_idx] {
+            for (old_idx, &removed) in remove_set.iter().enumerate().take(n_atoms) {
+                if removed {
                     continue;
                 }
                 if let Some(v) = cs.get_atom_coord(AtomIndex(old_idx as u32)) {

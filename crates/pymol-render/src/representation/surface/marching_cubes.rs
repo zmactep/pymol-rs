@@ -3,9 +3,17 @@
 //! Implements the classic marching cubes algorithm to extract a triangulated
 //! surface from a 3D scalar field at a given isovalue.
 
+use std::collections::HashMap;
+
 use rayon::prelude::*;
 
 use super::grid::Grid3D;
+
+/// Per-slice mesh data: (positions, normals, indices)
+type SliceMeshData = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>);
+
+/// Vertex map for welding: quantized position -> (new index, accumulated normal, count)
+type VertexWeldMap = HashMap<(i32, i32, i32), (u32, [f32; 3], u32)>;
 
 /// Edge table for marching cubes
 /// Each entry is a bitmask indicating which edges are intersected
@@ -387,13 +395,7 @@ fn estimate_normal(grid: &Grid3D, x: usize, y: usize, z: usize) -> [f32; 3] {
         let nz = (z as i32 + dz).clamp(0, vd[2] as i32 - 1) as usize;
         let val = grid.get(nx, ny, nz);
         // Clamp extreme values to avoid gradient explosion
-        if val > MAX_VALID_DISTANCE {
-            MAX_VALID_DISTANCE
-        } else if val < -MAX_VALID_DISTANCE {
-            -MAX_VALID_DISTANCE
-        } else {
-            val
-        }
+        val.clamp(-MAX_VALID_DISTANCE, MAX_VALID_DISTANCE)
     };
     
     // Central differences - gradient points from low to high values (outward from surface)
@@ -510,7 +512,7 @@ pub fn extract_isosurface_smooth(grid: &Grid3D, isovalue: f32) -> MarchingCubesR
     let dims = grid.dims;
 
     // Process z-slices in parallel — each slice produces independent vertex/index data
-    let slice_results: Vec<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>)> = (0..dims[2])
+    let slice_results: Vec<SliceMeshData> = (0..dims[2])
         .into_par_iter()
         .map(|z| {
             let mut positions = Vec::new();
@@ -626,8 +628,6 @@ pub fn extract_isosurface_smooth(grid: &Grid3D, isovalue: f32) -> MarchingCubesR
 /// Weld vertices that are at the same position (within tolerance) and average their normals.
 /// This eliminates the faceted appearance caused by marching cubes creating duplicate vertices.
 pub fn weld_vertices(result: &MarchingCubesResult, tolerance: f32) -> MarchingCubesResult {
-    use std::collections::HashMap;
-    
     if result.positions.is_empty() {
         return MarchingCubesResult {
             positions: Vec::new(),
@@ -641,7 +641,7 @@ pub fn weld_vertices(result: &MarchingCubesResult, tolerance: f32) -> MarchingCu
     let inv_tolerance = 1.0 / tolerance;
     
     // Map from quantized position to (new_index, accumulated_normal, count)
-    let mut vertex_map: HashMap<(i32, i32, i32), (u32, [f32; 3], u32)> = HashMap::new();
+    let mut vertex_map: VertexWeldMap = HashMap::new();
     
     // Map from old index to new index
     let mut index_remap: Vec<u32> = Vec::with_capacity(result.positions.len());

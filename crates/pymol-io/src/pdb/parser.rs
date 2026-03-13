@@ -147,6 +147,7 @@ impl<R: Read> PdbReader<R> {
     }
 
     /// Build ObjectMolecule from parsed data
+    #[allow(clippy::too_many_arguments)]
     fn build_molecule(
         &self,
         atom_records: Vec<AtomRecord>,

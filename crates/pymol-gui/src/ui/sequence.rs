@@ -243,6 +243,7 @@ fn char_width(ui: &Ui) -> f32 {
 }
 
 /// Render the sequence of residues for one chain: ruler row + sequence row.
+#[allow(clippy::too_many_arguments)]
 fn render_chain_sequence(
     ui: &mut Ui,
     object_name: &str,
@@ -355,7 +356,7 @@ fn render_chain_sequence(
 
     // Detect hovered residue
     let hover_res_idx = if drag_start.is_none() && ctrl_held {
-        response.hover_pos().map(|pos| pointer_to_res_idx(pos))
+        response.hover_pos().map(pointer_to_res_idx)
     } else {
         None
     };
@@ -513,22 +514,22 @@ fn render_chain_sequence(
     response.context_menu(|ui| {
         let has_selection = !highlighted_resvs.is_empty();
 
-        if has_selection {
-            if ui.button("Copy selected sequence").clicked() {
-                let seq = chain_highlighted_sequence(chain, &highlighted_resvs);
-                if !seq.is_empty() {
-                    ui.ctx().output_mut(|o| {
-                        o.commands
-                            .push(egui::OutputCommand::CopyText(seq.clone()));
-                    });
-                    bus.print_info(format!(
-                        "Copied {} residues from chain {}",
-                        seq.len(),
-                        chain.chain_id
-                    ));
-                }
-                ui.close();
+        if has_selection
+            && ui.button("Copy selected sequence").clicked()
+        {
+            let seq = chain_highlighted_sequence(chain, &highlighted_resvs);
+            if !seq.is_empty() {
+                ui.ctx().output_mut(|o| {
+                    o.commands
+                        .push(egui::OutputCommand::CopyText(seq.clone()));
+                });
+                bus.print_info(format!(
+                    "Copied {} residues from chain {}",
+                    seq.len(),
+                    chain.chain_id
+                ));
             }
+            ui.close();
         }
 
         if ui.button("Copy full chain sequence").clicked() {

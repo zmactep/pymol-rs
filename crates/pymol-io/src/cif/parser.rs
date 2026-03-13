@@ -294,9 +294,7 @@ fn parse_atom_site_loop(
         }
 
         // Reset row
-        for cell in &mut row {
-            *cell = None;
-        }
+        row.fill(None);
 
         // Read one row — zero-copy borrows from tokens
         let mut n_read = 0;
@@ -500,12 +498,12 @@ fn parse_symmetry(tokens: &[Token], mut pos: usize, space_group: &mut Option<Str
                 pos += 1;
                 if let Some(token) = tokens.get(pos) {
                     if let Some(val) = token_value_str(token) {
-                        if field == "space_group_name_H-M" || field == "space_group_name_Hall" {
-                            if space_group.is_none() || field == "space_group_name_H-M" {
-                                let sg = val.trim().to_string();
-                                if !sg.is_empty() && sg != "?" {
-                                    *space_group = Some(sg);
-                                }
+                        if field == "space_group_name_H-M"
+                            || field == "space_group_name_Hall" && space_group.is_none()
+                        {
+                            let sg = val.trim().to_string();
+                            if !sg.is_empty() && sg != "?" {
+                                *space_group = Some(sg);
                             }
                         }
                     }
@@ -551,9 +549,7 @@ fn parse_ss_loop(
         }
 
         // Reset row
-        for cell in &mut row {
-            *cell = None;
-        }
+        row.fill(None);
 
         // Read one row — zero-copy
         let mut col = 0;

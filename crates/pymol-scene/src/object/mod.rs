@@ -631,7 +631,7 @@ impl ObjectRegistry {
 
         for child_name in &children {
             // Check if child is a group (recursive)
-            if let Some(_) = self.get_group(child_name) {
+            if self.get_group(child_name).is_some() {
                 if let Some((child_min, child_max)) = self.group_extent(child_name) {
                     min.x = min.x.min(child_min.x);
                     min.y = min.y.min(child_min.y);

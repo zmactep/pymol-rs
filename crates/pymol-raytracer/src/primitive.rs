@@ -170,6 +170,7 @@ pub struct GpuTriangle {
 
 impl GpuTriangle {
     /// Create a new triangle primitive with per-vertex normals
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         v0: [f32; 3],
         v1: [f32; 3],

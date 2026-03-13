@@ -216,6 +216,7 @@ impl GlobalUniforms {
     /// * `shininess` - Positional light specular exponent
     /// * `spec_direct` - Headlight specular intensity
     /// * `spec_direct_power` - Headlight specular exponent
+    #[allow(clippy::too_many_arguments)]
     pub fn set_lighting(
         &mut self,
         ambient: f32,
@@ -300,6 +301,7 @@ impl UniformsBuilder {
     }
 
     /// Set lighting parameters (PyMOL dual-light model)
+    #[allow(clippy::too_many_arguments)]
     pub fn lighting(
         mut self,
         ambient: f32,

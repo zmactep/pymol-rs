@@ -106,23 +106,19 @@ impl<'a> Vm<'a> {
     }
 
     fn top(&self) -> Result<&PickleValue, SessionError> {
-        for item in self.stack.iter().rev() {
-            if let StackItem::Value(v) = item {
-                return Ok(v);
-            }
-            return Err(SessionError::Pickle("mark at top of stack".into()));
+        match self.stack.last() {
+            Some(StackItem::Value(v)) => Ok(v),
+            Some(StackItem::Mark) => Err(SessionError::Pickle("mark at top of stack".into())),
+            None => Err(SessionError::Pickle("stack underflow".into())),
         }
-        Err(SessionError::Pickle("stack underflow".into()))
     }
 
     fn top_mut(&mut self) -> Result<&mut PickleValue, SessionError> {
-        for item in self.stack.iter_mut().rev() {
-            if let StackItem::Value(v) = item {
-                return Ok(v);
-            }
-            return Err(SessionError::Pickle("mark at top of stack".into()));
+        match self.stack.last_mut() {
+            Some(StackItem::Value(v)) => Ok(v),
+            Some(StackItem::Mark) => Err(SessionError::Pickle("mark at top of stack".into())),
+            None => Err(SessionError::Pickle("stack underflow".into())),
         }
-        Err(SessionError::Pickle("stack underflow".into()))
     }
 
     /// Pop items above the topmost mark, return them as Vec<PickleValue>.
@@ -683,6 +679,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_float_text() {
         let data = b"F3.14\n.";
         let val = read(data).unwrap();

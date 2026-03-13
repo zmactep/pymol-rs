@@ -45,6 +45,7 @@ use crate::uniform::compute_reflect_scale;
 ///     [0.0, 0.0, 0.0], (1024, 768),
 /// )?;
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub fn capture_png_to_file(
     path: &Path,
     width: Option<u32>,
@@ -291,7 +292,7 @@ pub fn capture_png_to_file(
     let bytes_per_pixel = 4u32; // RGBA8
     let unpadded_bytes_per_row = output_width * bytes_per_pixel;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bytes_per_row = (unpadded_bytes_per_row + align - 1) / align * align;
+    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
     let buffer_size = (padded_bytes_per_row * output_height) as u64;
 
     // Create output buffer

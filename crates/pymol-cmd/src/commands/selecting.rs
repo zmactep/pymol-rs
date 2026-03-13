@@ -233,42 +233,6 @@ EXAMPLES
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_expand_self_reference_basic() {
-        let result = expand_self_reference("sele or resi 24", "sele", "chain A");
-        assert_eq!(result, "(chain A) or resi 24");
-    }
-
-    #[test]
-    fn test_expand_self_reference_multiple() {
-        let result = expand_self_reference("sele and not sele", "sele", "chain A");
-        assert_eq!(result, "(chain A) and not (chain A)");
-    }
-
-    #[test]
-    fn test_expand_self_reference_no_match() {
-        let result = expand_self_reference("chain A or resi 24", "sele", "chain B");
-        assert_eq!(result, "chain A or resi 24");
-    }
-
-    #[test]
-    fn test_expand_self_reference_word_boundary() {
-        // "sele" should not match inside "selected"
-        let result = expand_self_reference("selected or resi 24", "sele", "chain A");
-        assert_eq!(result, "selected or resi 24");
-    }
-
-    #[test]
-    fn test_expand_self_reference_at_end() {
-        let result = expand_self_reference("resi 24 or sele", "sele", "chain A");
-        assert_eq!(result, "resi 24 or (chain A)");
-    }
-}
-
 // ============================================================================
 // deselect command
 // ============================================================================
@@ -435,5 +399,41 @@ EXAMPLES
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_self_reference_basic() {
+        let result = expand_self_reference("sele or resi 24", "sele", "chain A");
+        assert_eq!(result, "(chain A) or resi 24");
+    }
+
+    #[test]
+    fn test_expand_self_reference_multiple() {
+        let result = expand_self_reference("sele and not sele", "sele", "chain A");
+        assert_eq!(result, "(chain A) and not (chain A)");
+    }
+
+    #[test]
+    fn test_expand_self_reference_no_match() {
+        let result = expand_self_reference("chain A or resi 24", "sele", "chain B");
+        assert_eq!(result, "chain A or resi 24");
+    }
+
+    #[test]
+    fn test_expand_self_reference_word_boundary() {
+        // "sele" should not match inside "selected"
+        let result = expand_self_reference("selected or resi 24", "sele", "chain A");
+        assert_eq!(result, "selected or resi 24");
+    }
+
+    #[test]
+    fn test_expand_self_reference_at_end() {
+        let result = expand_self_reference("resi 24 or sele", "sele", "chain A");
+        assert_eq!(result, "resi 24 or (chain A)");
     }
 }

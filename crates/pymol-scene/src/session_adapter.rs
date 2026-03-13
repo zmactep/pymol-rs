@@ -21,6 +21,9 @@ use crate::session::Session;
 use crate::view::ViewManager;
 use crate::viewer_trait::{ViewportImage, ViewerLike};
 
+/// Callback type for async fetch operations (GUI sets this; headless leaves None).
+type AsyncFetchFn<'a> = Box<dyn Fn(&str, &str, u8) -> bool + 'a>;
+
 /// Adapter that wraps a [`Session`] to implement [`ViewerLike`] for command execution.
 ///
 /// Borrows a mutable reference to a `Session` (scene state) plus an optional
@@ -35,7 +38,7 @@ pub struct SessionAdapter<'a> {
     /// Redraw flag — set to true when a re-render is needed
     pub needs_redraw: &'a mut bool,
     /// Optional callback for async fetch (GUI sets this; headless leaves None)
-    pub async_fetch_fn: Option<Box<dyn Fn(&str, &str, u8) -> bool + 'a>>,
+    pub async_fetch_fn: Option<AsyncFetchFn<'a>>,
 }
 
 impl<'a> ViewerLike for SessionAdapter<'a> {

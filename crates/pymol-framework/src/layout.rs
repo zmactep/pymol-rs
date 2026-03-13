@@ -186,7 +186,7 @@ impl Layout {
             .panels
             .iter()
             .find(|p| p.component_id == id)
-            .map_or(false, |p| p.expanded);
+            .is_some_and(|p| p.expanded);
 
         if let Some(side) = side {
             if is_currently_expanded {
@@ -222,7 +222,7 @@ impl Layout {
         self.panels
             .iter()
             .find(|p| p.component_id == id)
-            .map_or(false, |p| p.expanded)
+            .is_some_and(|p| p.expanded)
     }
 
     /// Detach a docked panel into a floating window.

@@ -68,6 +68,12 @@ pub struct ShadingManager {
     pub active_mode: ShadingMode,
 }
 
+impl Default for ShadingManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShadingManager {
     pub fn new() -> Self {
         Self {

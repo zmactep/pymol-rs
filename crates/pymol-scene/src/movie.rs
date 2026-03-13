@@ -23,16 +23,11 @@ pub enum LoopMode {
 }
 
 /// Playback direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PlayDirection {
+    #[default]
     Forward,
     Backward,
-}
-
-impl Default for PlayDirection {
-    fn default() -> Self {
-        Self::Forward
-    }
 }
 
 /// Object-specific keyframe data
@@ -102,20 +97,15 @@ impl MovieFrame {
 }
 
 /// Movie playback state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PlaybackState {
     /// Movie is stopped at a specific frame
+    #[default]
     Stopped,
     /// Movie is playing
     Playing,
     /// Movie is paused
     Paused,
-}
-
-impl Default for PlaybackState {
-    fn default() -> Self {
-        Self::Stopped
-    }
 }
 
 /// Movie player for frame-based animation
@@ -487,8 +477,7 @@ impl Movie {
         self.last_frame_time = Some(now);
         self.interpolation_t = 0.0;
 
-        let frame_changed = self.advance_frame();
-        frame_changed
+        self.advance_frame()
     }
 
     /// Advance to the next frame based on direction and loop mode
@@ -789,9 +778,9 @@ impl Movie {
         // Fill frames before the first keyframe (hold first keyframe view)
         let first_kf_frame = keyframes[0].0;
         let first_view = keyframes[0].1.clone();
-        for i in 0..first_kf_frame {
-            if views[i].is_none() {
-                views[i] = Some(first_view.clone());
+        for view in views.iter_mut().take(first_kf_frame) {
+            if view.is_none() {
+                *view = Some(first_view.clone());
             }
         }
 
@@ -799,9 +788,9 @@ impl Movie {
         if !loop_movie {
             let last_kf_frame = keyframes[kf_count - 1].0;
             let last_view = keyframes[kf_count - 1].1.clone();
-            for i in (last_kf_frame + 1)..n {
-                if views[i].is_none() {
-                    views[i] = Some(last_view.clone());
+            for view in views.iter_mut().take(n).skip(last_kf_frame + 1) {
+                if view.is_none() {
+                    *view = Some(last_view.clone());
                 }
             }
         }
@@ -942,9 +931,9 @@ impl Movie {
                 .get(obj_name)
                 .and_then(|kf| kf.transform.clone())
             {
-                for i in 0..first_kf_frame {
-                    if transforms[i].is_none() {
-                        transforms[i] = Some(first_transform.clone());
+                for transform in transforms.iter_mut().take(first_kf_frame) {
+                    if transform.is_none() {
+                        *transform = Some(first_transform.clone());
                     }
                 }
             }
@@ -957,9 +946,9 @@ impl Movie {
                     .get(obj_name)
                     .and_then(|kf| kf.transform.clone())
                 {
-                    for i in (last_kf_frame + 1)..n {
-                        if transforms[i].is_none() {
-                            transforms[i] = Some(last_transform.clone());
+                    for transform in transforms.iter_mut().take(n).skip(last_kf_frame + 1) {
+                        if transform.is_none() {
+                            *transform = Some(last_transform.clone());
                         }
                     }
                 }

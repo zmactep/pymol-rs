@@ -413,6 +413,7 @@ impl Default for CartoonGeometrySettings {
 }
 
 /// Generate cartoon mesh from reference frames
+#[allow(clippy::needless_range_loop)]
 pub fn generate_cartoon_mesh(
     frames: &[FrameWithMetadata],
     settings: &CartoonGeometrySettings,
@@ -481,7 +482,7 @@ pub fn generate_cartoon_mesh(
         );
 
         // Check if profile type or vertex count changed - need to flush previous segment
-        let type_changed = current_profile_type.map_or(false, |t| t != profile.profile_type);
+        let type_changed = current_profile_type.is_some_and(|t| t != profile.profile_type);
         let len_changed = current_profile_len != 0 && current_profile_len != profile.len();
 
         if type_changed || len_changed {
@@ -832,11 +833,7 @@ fn apply_transition_blending(
     let mut nearest_distance = usize::MAX;
 
     for &trans_idx in transitions {
-        let distance = if frame_idx >= trans_idx {
-            frame_idx - trans_idx
-        } else {
-            trans_idx - frame_idx
-        };
+        let distance = frame_idx.abs_diff(trans_idx);
 
         if distance < nearest_distance && distance <= blend_range {
             nearest_distance = distance;
@@ -1043,7 +1040,8 @@ pub fn generate_face_strips(
 /// * `frame_start`..`frame_end` — range of frame indices to generate rings for (exclusive end)
 /// * `sheet_normal` — the normal from the sheet boundary frame, for consistent orientation
 /// * `expanding` — if false, scale goes 1.0→min (shrinking toward sheet);
-///                 if true, scale goes min→1.0 (expanding away from sheet)
+///   if true, scale goes min→1.0 (expanding away from sheet)
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 fn generate_sheet_connector(
     vertices: &mut Vec<MeshVertex>,
     indices: &mut Vec<u32>,
@@ -1463,7 +1461,7 @@ pub fn cap_tube_end(
             // Two triangles for the quad
             if is_start {
                 // Reverse winding for start cap
-                indices.push(start_idx + 0);
+                indices.push(start_idx);
                 indices.push(start_idx + 3);
                 indices.push(start_idx + 1);
 
@@ -1471,7 +1469,7 @@ pub fn cap_tube_end(
                 indices.push(start_idx + 2);
                 indices.push(start_idx + 1);
             } else {
-                indices.push(start_idx + 0);
+                indices.push(start_idx);
                 indices.push(start_idx + 1);
                 indices.push(start_idx + 3);
 
@@ -1520,6 +1518,7 @@ pub fn find_nucleic_ribbon_regions(frames: &[FrameWithMetadata]) -> Vec<(usize, 
 ///
 /// # Returns
 /// (vertices, indices) for the edge tubes
+#[allow(clippy::needless_range_loop)]
 pub fn generate_dumbbell_edge_tubes(
     frames: &[FrameWithMetadata],
     helix_regions: &[(usize, usize)],

@@ -68,10 +68,8 @@ impl<R: Read> Mol2Reader<R> {
         loop {
             match self.read_line()? {
                 Some(line) => {
-                    if line.starts_with("@<TRIPOS>") {
-                        if line.contains(section) {
-                            return Ok(true);
-                        }
+                    if line.starts_with("@<TRIPOS>") && line.contains(section) {
+                        return Ok(true);
                     }
                 }
                 None => return Ok(false),
@@ -82,19 +80,14 @@ impl<R: Read> Mol2Reader<R> {
     /// Read until end of section (next @<TRIPOS> or EOF)
     fn read_section_lines(&mut self) -> IoResult<Vec<String>> {
         let mut lines = Vec::new();
-        loop {
-            match self.peek_line()? {
-                Some(line) => {
-                    if line.starts_with("@<TRIPOS>") {
-                        break;
-                    }
-                    if let Some(line) = self.read_line()? {
-                        if !line.trim().is_empty() {
-                            lines.push(line);
-                        }
-                    }
+        while let Some(line) = self.peek_line()? {
+            if line.starts_with("@<TRIPOS>") {
+                break;
+            }
+            if let Some(line) = self.read_line()? {
+                if !line.trim().is_empty() {
+                    lines.push(line);
                 }
-                None => break,
             }
         }
         Ok(lines)
@@ -131,16 +124,11 @@ impl<R: Read> Mol2Reader<R> {
 
         // Skip remaining molecule info lines (mol_type, charge_type, etc.)
         // until we hit another section
-        loop {
-            match self.peek_line()? {
-                Some(line) => {
-                    if line.starts_with("@<TRIPOS>") {
-                        break;
-                    }
-                    self.read_line()?;
-                }
-                None => break,
+        while let Some(line) = self.peek_line()? {
+            if line.starts_with("@<TRIPOS>") {
+                break;
             }
+            self.read_line()?;
         }
 
         let mut mol = ObjectMolecule::with_capacity(&name, n_atoms, n_bonds);

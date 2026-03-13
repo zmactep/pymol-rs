@@ -20,8 +20,7 @@ pub fn compute_reflect_scale(light_count: i32, light_dirs: &[[f32; 3]]) -> f32 {
     let num_pos_lights = (light_count - 1).max(0) as usize;
     if num_pos_lights > 0 {
         let mut sum = 0.0f32;
-        for i in 0..num_pos_lights.min(light_dirs.len()) {
-            let dir = light_dirs[i];
+        for dir in light_dirs.iter().take(num_pos_lights).copied() {
             let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
             if len > 0.0 {
                 let z_normalized = dir[2] / len;

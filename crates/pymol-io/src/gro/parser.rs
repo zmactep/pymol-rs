@@ -310,7 +310,10 @@ GROningen MAchine for Chemical Simulation
         // Check coordinates are in Angstroms (nm × 10)
         let coord = mol.get_coord(AtomIndex::from(0usize), 0).unwrap();
         assert!((coord.x - 2.30).abs() < 0.01);
-        assert!((coord.y - 6.28).abs() < 0.01);
+        #[allow(clippy::approx_constant)]
+        {
+            assert!((coord.y - 6.28).abs() < 0.01);
+        }
         assert!((coord.z - 1.13).abs() < 0.01);
 
         // Check residue info

@@ -21,6 +21,12 @@ pub struct SkripkinPipeline {
     pub shadow_matrices: Vec<[[f32; 4]; 4]>,
 }
 
+impl Default for SkripkinPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SkripkinPipeline {
     pub fn new() -> Self {
         Self {
@@ -67,7 +73,7 @@ impl ShadingPipeline for SkripkinPipeline {
 
         self.ensure_pipelines(device);
 
-        let needs_new_atlas = self.shadow_atlas.as_ref().map_or(true, |a| {
+        let needs_new_atlas = self.shadow_atlas.as_ref().is_none_or(|a| {
             a.direction_count != n_directions || a.tile_size != tile_size
         });
         if needs_new_atlas {

@@ -391,7 +391,7 @@ pub fn smooth_orientations(segment: &mut BackboneSegment, cycles: u32) {
             let mut avg = o_prev + o_curr * 2.0 + o_next;
             let len_sq = avg.magnitude_squared();
             if len_sq > 1e-6 {
-                avg = avg / len_sq.sqrt();
+                avg /= len_sq.sqrt();
             }
 
             new_orientations.push(avg);
@@ -453,6 +453,7 @@ pub fn apply_pymol_smoothing(segment: &mut BackboneSegment, settings: &CartoonSm
 ///   1. Average positions with window [-1, 1]
 ///   2. Average orientations with window [-1, 1]
 ///   3. Remove tangent component from orientations (make perpendicular)
+#[allow(clippy::needless_range_loop)]
 fn flatten_sheets(segment: &mut BackboneSegment, flat_cycles: u32) {
     let len = segment.guide_points.len();
     if len < 3 {
@@ -484,7 +485,7 @@ fn flatten_sheets(segment: &mut BackboneSegment, flat_cycles: u32) {
             for b in (first + f)..=(last.saturating_sub(f)).min(len - 1) {
                 let mut sum = Vec3::new(0.0, 0.0, 0.0);
                 for e in (b.saturating_sub(f))..=(b + f).min(len - 1) {
-                    sum = sum + segment.guide_points[e].position;
+                    sum += segment.guide_points[e].position;
                 }
                 tmp_positions[b] = sum / (2 * f + 1) as f32;
             }
@@ -498,7 +499,7 @@ fn flatten_sheets(segment: &mut BackboneSegment, flat_cycles: u32) {
             for b in (first + f)..=(last.saturating_sub(f)).min(len - 1) {
                 let mut sum = Vec3::new(0.0, 0.0, 0.0);
                 for e in (b.saturating_sub(f))..=(b + f).min(len - 1) {
-                    sum = sum + segment.guide_points[e].orientation;
+                    sum += segment.guide_points[e].orientation;
                 }
                 tmp_orientations[b] = sum / (2 * f + 1) as f32;
             }
@@ -571,6 +572,7 @@ fn compute_local_tangent(segment: &BackboneSegment, idx: usize) -> Vec3 {
 /// - Inner loop: smooth_cycles iterations per window size
 /// - Averages positions and orientations within the window
 /// - Normalizes orientations after smoothing
+#[allow(clippy::needless_range_loop)]
 fn smooth_loops(segment: &mut BackboneSegment, smooth_first: u32, smooth_last: u32, smooth_cycles: u32) {
     let len = segment.guide_points.len();
     if len < 3 {
@@ -603,7 +605,7 @@ fn smooth_loops(segment: &mut BackboneSegment, smooth_first: u32, smooth_last: u
                 for b in (first + f)..=(last.saturating_sub(f)).min(len - 1) {
                     let mut sum = Vec3::new(0.0, 0.0, 0.0);
                     for e in (b.saturating_sub(f))..=(b + f).min(len - 1) {
-                        sum = sum + segment.guide_points[e].position;
+                        sum += segment.guide_points[e].position;
                     }
                     tmp[b] = sum / (2 * f + 1) as f32;
                 }
@@ -617,7 +619,7 @@ fn smooth_loops(segment: &mut BackboneSegment, smooth_first: u32, smooth_last: u
                 for b in (first + f)..=(last.saturating_sub(f)).min(len - 1) {
                     let mut sum = Vec3::new(0.0, 0.0, 0.0);
                     for e in (b.saturating_sub(f))..=(b + f).min(len - 1) {
-                        sum = sum + segment.guide_points[e].orientation;
+                        sum += segment.guide_points[e].orientation;
                     }
                     tmp[b] = sum / (2 * f + 1) as f32;
                 }
@@ -728,6 +730,7 @@ fn smooth_helices(segment: &mut BackboneSegment, _smooth_cycles: u32) {
 /// 2. Generate alternative inverted orientations (but NOT for helices)
 /// 3. Forward iterate through pairs to select optimal orientation
 /// 4. Detect and soften kinks where dot(prev,curr) * dot(curr,next) < -0.10
+#[allow(clippy::needless_range_loop)]
 fn refine_normals(segment: &mut BackboneSegment) {
     let len = segment.guide_points.len();
     if len < 3 {
@@ -783,7 +786,7 @@ fn refine_normals(segment: &mut BackboneSegment) {
         let mut prev_perp = prev_orient - tangent * prev_orient.dot(tangent);
         let prev_len = prev_perp.magnitude();
         if prev_len > 1e-6 {
-            prev_perp = prev_perp / prev_len;
+            prev_perp /= prev_len;
         }
 
         // Try both candidate orientations and select the one most aligned with previous
@@ -798,10 +801,10 @@ fn refine_normals(segment: &mut BackboneSegment) {
         let len1 = cand1_perp.magnitude();
 
         if len0 > 1e-6 {
-            cand0_perp = cand0_perp / len0;
+            cand0_perp /= len0;
         }
         if len1 > 1e-6 {
-            cand1_perp = cand1_perp / len1;
+            cand1_perp /= len1;
         }
 
         // Select the candidate with higher dot product with previous
@@ -828,7 +831,7 @@ fn refine_normals(segment: &mut BackboneSegment) {
             // Kink detected - soften by averaging with neighbors
             let mut avg = prev + next;
             // Add small amount of current to avoid division issues
-            avg = avg + curr * 0.001;
+            avg += curr * 0.001;
 
             // Remove tangent component
             avg = avg - tangent * avg.dot(tangent);
@@ -846,12 +849,12 @@ fn refine_normals(segment: &mut BackboneSegment) {
 
                 let smooth_len = smoothed.magnitude();
                 if smooth_len > 1e-6 {
-                    smoothed = smoothed / smooth_len;
+                    smoothed /= smooth_len;
                 }
 
                 // Calculate blend factor based on kink severity
                 let dp = 2.0 * (-0.10 - dot_prev_curr * dot_curr_next);
-                let blend = dp.min(1.0).max(0.0);
+                let blend = dp.clamp(0.0, 1.0);
 
                 // Mix current with smoothed based on kink severity
                 let result = curr * (1.0 - blend) + smoothed * blend;

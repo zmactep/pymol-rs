@@ -542,7 +542,7 @@ fn detect_hydrogen_bonds(
                     let d = b_pos - n_pos;
                     let len = d.magnitude();
                     if len > 1e-6 {
-                        avg_dir = avg_dir + d * (1.0 / len);
+                        avg_dir += d * (1.0 / len);
                         count += 1;
                     }
                 }
@@ -579,7 +579,7 @@ fn detect_hydrogen_bonds(
 
         for &a0 in &neighbors {
             // Exclude adjacent residues (within 2 positions in the padded array)
-            let dist_idx = if a0 > a1 { a0 - a1 } else { a1 - a0 };
+            let dist_idx = a0.abs_diff(a1);
             if dist_idx <= 2 {
                 continue;
             }
@@ -897,10 +897,10 @@ fn assign_helices(res: &mut [ResidueData]) {
     }
 
     // Promote HelixPending → Helix and add H-bond flags so cap extension works
-    for a in SS_BREAK_SIZE..n_res.saturating_sub(SS_BREAK_SIZE) {
-        if res[a].real && res[a].ss == SsState::HelixPending {
-            res[a].flags |= HELIX_HBOND_FLAGS;
-            res[a].ss = SsState::Helix;
+    for r in res.iter_mut().take(n_res.saturating_sub(SS_BREAK_SIZE)).skip(SS_BREAK_SIZE) {
+        if r.real && r.ss == SsState::HelixPending {
+            r.flags |= HELIX_HBOND_FLAGS;
+            r.ss = SsState::Helix;
         }
     }
 

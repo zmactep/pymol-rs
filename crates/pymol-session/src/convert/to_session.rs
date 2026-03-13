@@ -240,10 +240,8 @@ fn convert_molecule(
     }
 
     // Coordinate sets
-    for pse_cs in &pse_mol.coord_sets {
-        if let Some(cs) = pse_cs {
-            mol.add_coord_set(convert_coord_set(cs, pse_mol.atoms.len()));
-        }
+    for cs in pse_mol.coord_sets.iter().flatten() {
+        mol.add_coord_set(convert_coord_set(cs, pse_mol.atoms.len()));
     }
 
     // Unique settings
@@ -294,20 +292,19 @@ fn convert_atom(pse: &PseAtom, color_mapper: &mut PseColorMapper, named_colors: 
         _ => SecondaryStructure::Loop,
     };
 
-    let mut atom = Atom::default();
-    atom.name = Arc::from(pse.name.as_str());
-    atom.element = element;
-    atom.residue = residue;
-    atom.alt = pse.alt.chars().next().unwrap_or(' ');
-    atom.b_factor = pse.b as f32;
-    atom.occupancy = pse.q as f32;
-    atom.vdw = pse.vdw as f32;
-    atom.partial_charge = pse.partial_charge as f32;
-    atom.formal_charge = pse.formal_charge as i8;
-    atom.ss_type = ss_type;
-    atom.id = pse.id as i32;
-    atom.state.hetatm = pse.hetatm;
-    atom.repr = AtomRepresentation {
+    let mut atom = Atom {
+        name: Arc::from(pse.name.as_str()),
+        element,
+        residue,
+        alt: pse.alt.chars().next().unwrap_or(' '),
+        b_factor: pse.b as f32,
+        occupancy: pse.q as f32,
+        vdw: pse.vdw as f32,
+        partial_charge: pse.partial_charge as f32,
+        formal_charge: pse.formal_charge as i8,
+        ss_type,
+        id: pse.id as i32,
+        repr: AtomRepresentation {
         colors: AtomColors::with_base(color_mapper.map(pse.color, named_colors)),
         visible_reps: RepMask(pse.visible_reps),
         text_type: pse.text_type.clone(),
@@ -315,7 +312,10 @@ fn convert_atom(pse: &PseAtom, color_mapper: &mut PseColorMapper, named_colors: 
         unique_id: if pse.unique_id != 0 { Some(pse.unique_id as i32) } else { None },
         has_setting: pse.unique_id != 0,
         ..Default::default()
+    },
+        ..Default::default()
     };
+    atom.state.hetatm = pse.hetatm;
     atom
 }
 

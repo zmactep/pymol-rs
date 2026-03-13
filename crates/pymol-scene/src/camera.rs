@@ -23,8 +23,8 @@ pub enum Projection {
 ///
 /// PyMOL stores the view as a flat array of 25 floats:
 /// - [0..16]: 4x4 rotation matrix (column-major)
-/// - [16..19]: Position (camera position relative to origin)
-/// - [19..22]: Origin (center of rotation in model space)
+/// - `[16..19]`: Position (camera position relative to origin)
+/// - `[19..22]`: Origin (center of rotation in model space)
 /// - [22]: Front clipping plane distance
 /// - [23]: Back clipping plane distance
 /// - [24]: Field of view (degrees)
@@ -71,9 +71,7 @@ impl SceneView {
         let mut arr = [0.0f32; 25];
 
         // Copy rotation matrix (column-major)
-        for i in 0..16 {
-            arr[i] = self.rotation.data[i];
-        }
+        arr[..16].copy_from_slice(&self.rotation.data);
 
         // Position
         arr[16] = self.position.x;
@@ -118,10 +116,10 @@ impl SceneView {
     /// The view matrix transforms from world space to camera space.
     pub fn view_matrix(&self) -> Mat4 {
         // Create translation to origin
-        let translate_to_origin = Mat4::new_translation(-self.origin.clone());
+        let translate_to_origin = Mat4::new_translation(-self.origin);
 
         // Create translation for camera position
-        let translate_position = Mat4::new_translation(-self.position.clone());
+        let translate_position = Mat4::new_translation(-self.position);
 
         // View = position_translate * rotation * origin_translate
         translate_position * self.rotation.clone() * translate_to_origin
@@ -165,9 +163,9 @@ impl SceneView {
                     + rot_inv.data[6] * self.position.y
                     + rot_inv.data[10] * self.position.z,
             );
-            self.origin.clone() - pos
+            self.origin - pos
         } else {
-            self.origin.clone() - self.position.clone()
+            self.origin - self.position
         }
     }
 }
@@ -372,7 +370,7 @@ impl Camera {
             r.data[4] * delta.x + r.data[5] * delta.y + r.data[6] * delta.z,
             r.data[8] * delta.x + r.data[9] * delta.y + r.data[10] * delta.z,
         );
-        self.view.origin = self.view.origin.clone() + world_delta;
+        self.view.origin += world_delta;
     }
 
     /// Zoom by changing the camera distance
@@ -814,8 +812,6 @@ fn orthonormalize_rotation(m: &mut Mat4) {
     // Extract basis vectors
     let mut x = Vec3::new(m.data[0], m.data[1], m.data[2]);
     let mut y = Vec3::new(m.data[4], m.data[5], m.data[6]);
-    let z; // Will be computed from cross product
-
     // Normalize x
     x = x.to_normalized();
 
@@ -825,7 +821,7 @@ fn orthonormalize_rotation(m: &mut Mat4) {
     y = y.to_normalized();
 
     // z = x cross y (ensures right-handed)
-    z = Vec3::new(
+    let z = Vec3::new(
         x.y * y.z - x.z * y.y,
         x.z * y.x - x.x * y.z,
         x.x * y.y - x.y * y.x,

@@ -97,6 +97,7 @@ impl<'a> PollContext<'a> {
     /// Create a new poll context.
     ///
     /// This is used by the host to build the context before calling `poll()`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         shared: &'a SharedContext<'a>,
         bus: &'a mut MessageBus,

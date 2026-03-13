@@ -1047,7 +1047,7 @@ SEE ALSO
         // Check for explicit position first
         if let Some(position_arg) = args.get_named("position") {
             let position = parse_position_from_arg(position_arg)?;
-            ctx.viewer.camera_mut().view_mut().origin = position.clone();
+            ctx.viewer.camera_mut().view_mut().origin = position;
             ctx.viewer.request_redraw();
 
             if !ctx.quiet {
@@ -1074,7 +1074,7 @@ SEE ALSO
                     (min.y + max.y) * 0.5,
                     (min.z + max.z) * 0.5,
                 );
-                ctx.viewer.camera_mut().view_mut().origin = center.clone();
+                ctx.viewer.camera_mut().view_mut().origin = center;
                 ctx.viewer.request_redraw();
 
                 if !ctx.quiet {
@@ -1098,7 +1098,7 @@ SEE ALSO
                         (min.y + max.y) * 0.5,
                         (min.z + max.z) * 0.5,
                     );
-                    ctx.viewer.camera_mut().view_mut().origin = center.clone();
+                    ctx.viewer.camera_mut().view_mut().origin = center;
                     ctx.viewer.request_redraw();
 
                     if !ctx.quiet {
@@ -1130,7 +1130,7 @@ SEE ALSO
                             (min.y + max.y) * 0.5,
                             (min.z + max.z) * 0.5,
                         );
-                        ctx.viewer.camera_mut().view_mut().origin = center.clone();
+                        ctx.viewer.camera_mut().view_mut().origin = center;
                         ctx.viewer.request_redraw();
 
                         if !ctx.quiet {
@@ -1152,7 +1152,7 @@ SEE ALSO
                 (min.y + max.y) * 0.5,
                 (min.z + max.z) * 0.5,
             );
-            ctx.viewer.camera_mut().view_mut().origin = center.clone();
+            ctx.viewer.camera_mut().view_mut().origin = center;
             ctx.viewer.request_redraw();
             if !ctx.quiet {
                 ctx.print(&format!(
@@ -1177,7 +1177,7 @@ fn parse_position_from_arg(arg: &crate::args::ArgValue) -> Result<Vec3, CmdError
     match arg {
         ArgValue::List(items) if items.len() >= 3 => {
             let x = items
-                .get(0)
+                .first()
                 .and_then(|v| v.as_float())
                 .ok_or_else(|| CmdError::invalid_arg("position", "invalid x coordinate"))?
                 as f32;

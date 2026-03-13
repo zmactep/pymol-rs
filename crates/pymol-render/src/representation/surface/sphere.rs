@@ -40,7 +40,7 @@ impl SphereTessellation {
 }
 
 /// Golden ratio constant for icosahedron construction
-const PHI: f32 = 1.618033988749895;
+const PHI: f32 = 1.618_034;
 
 /// Generate the base icosahedron (12 vertices, 20 faces)
 fn create_icosahedron() -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {

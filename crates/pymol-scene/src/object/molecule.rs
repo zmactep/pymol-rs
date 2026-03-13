@@ -35,6 +35,7 @@ bitflags! {
 /// Cached representations for a molecule
 ///
 /// These are lazily built and cached until invalidated.
+#[derive(Default)]
 struct RepresentationCache {
     spheres: Option<SphereRep>,
     sticks: Option<StickRep>,
@@ -50,22 +51,6 @@ struct RepresentationCache {
     hover_indicator: Option<SelectionIndicatorRep>,
 }
 
-impl Default for RepresentationCache {
-    fn default() -> Self {
-        Self {
-            spheres: None,
-            sticks: None,
-            lines: None,
-            dots: None,
-            cartoon: None,
-            ribbon: None,
-            surface: None,
-            mesh: None,
-            selection_indicator: None,
-            hover_indicator: None,
-        }
-    }
-}
 
 impl RepresentationCache {
     /// Clear all cached representations
@@ -161,8 +146,7 @@ impl MoleculeObject {
         for atom in molecule.atoms() {
             obj_reps = obj_reps.union(atom.repr.visible_reps);
         }
-        let mut state = ObjectState::default();
-        state.visible_reps = obj_reps;
+        let state = ObjectState { visible_reps: obj_reps, ..Default::default() };
         Self {
             molecule,
             state,
@@ -824,9 +808,9 @@ impl MoleculeObject {
         let vis = &self.state.visible_reps;
 
         // Mesh-based representations (cartoon, ribbon, surface) use mesh shadow pipeline
-        let has_mesh = (vis.is_visible(RepMask::CARTOON) && self.representations.cartoon.as_ref().map_or(false, |r| !r.is_empty()))
-            || (vis.is_visible(RepMask::RIBBON) && self.representations.ribbon.as_ref().map_or(false, |r| !r.is_empty()))
-            || (vis.is_visible(RepMask::SURFACE) && self.representations.surface.as_ref().map_or(false, |r| !r.is_empty()));
+        let has_mesh = (vis.is_visible(RepMask::CARTOON) && self.representations.cartoon.as_ref().is_some_and(|r| !r.is_empty()))
+            || (vis.is_visible(RepMask::RIBBON) && self.representations.ribbon.as_ref().is_some_and(|r| !r.is_empty()))
+            || (vis.is_visible(RepMask::SURFACE) && self.representations.surface.as_ref().is_some_and(|r| !r.is_empty()));
 
         if has_mesh {
             render_pass.set_pipeline(&shadow_pipelines.mesh_pipeline);
@@ -856,9 +840,9 @@ impl MoleculeObject {
         }
 
         // Sphere-based representations use sphere shadow pipeline
-        let has_spheres = vis.is_visible(RepMask::SPHERES) && self.representations.spheres.as_ref().map_or(false, |r| !r.is_empty());
+        let has_spheres = vis.is_visible(RepMask::SPHERES) && self.representations.spheres.as_ref().is_some_and(|r| !r.is_empty());
         let has_stick_caps = vis.is_visible(RepMask::STICKS)
-            && self.representations.sticks.as_ref().map_or(false, |s| s.sphere_count() > 0);
+            && self.representations.sticks.as_ref().is_some_and(|s| s.sphere_count() > 0);
 
         if has_spheres || has_stick_caps {
             render_pass.set_pipeline(&shadow_pipelines.sphere_pipeline);

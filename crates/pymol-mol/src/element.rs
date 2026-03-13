@@ -283,7 +283,7 @@ static ELEMENT_DATA: &[ElementData] = &[
     ElementData { name: "magnesium", symbol: "Mg", vdw: 1.73, mass: 24.305 },       // 12
     ElementData { name: "aluminum", symbol: "Al", vdw: 2.00, mass: 26.981538 },     // 13
     ElementData { name: "silicon", symbol: "Si", vdw: 2.10, mass: 28.0855 },        // 14
-    ElementData { name: "phosphorus", symbol: "P", vdw: 1.80, mass: 30.973761 },    // 15
+    ElementData { name: "phosphorus", symbol: "P", vdw: 1.80, mass: 30.973_76 },    // 15
     ElementData { name: "sulfur", symbol: "S", vdw: 1.80, mass: 32.065 },           // 16
     ElementData { name: "chlorine", symbol: "Cl", vdw: 1.75, mass: 35.453 },        // 17
     ElementData { name: "argon", symbol: "Ar", vdw: 1.88, mass: 39.948 },           // 18
@@ -293,7 +293,7 @@ static ELEMENT_DATA: &[ElementData] = &[
     ElementData { name: "titanium", symbol: "Ti", vdw: 1.80, mass: 47.867 },        // 22
     ElementData { name: "vanadium", symbol: "V", vdw: 1.80, mass: 50.9415 },        // 23
     ElementData { name: "chromium", symbol: "Cr", vdw: 1.80, mass: 51.9961 },       // 24
-    ElementData { name: "manganese", symbol: "Mn", vdw: 1.73, mass: 54.938049 },    // 25
+    ElementData { name: "manganese", symbol: "Mn", vdw: 1.73, mass: 54.938_05 },    // 25
     ElementData { name: "iron", symbol: "Fe", vdw: 1.80, mass: 55.845 },            // 26
     ElementData { name: "cobalt", symbol: "Co", vdw: 1.80, mass: 58.9332 },         // 27
     ElementData { name: "nickel", symbol: "Ni", vdw: 1.63, mass: 58.6934 },         // 28
@@ -337,7 +337,7 @@ static ELEMENT_DATA: &[ElementData] = &[
     ElementData { name: "dysprosium", symbol: "Dy", vdw: 1.80, mass: 162.5 },       // 66
     ElementData { name: "holmium", symbol: "Ho", vdw: 1.80, mass: 164.93032 },      // 67
     ElementData { name: "erbium", symbol: "Er", vdw: 1.80, mass: 167.259 },         // 68
-    ElementData { name: "thulium", symbol: "Tm", vdw: 1.80, mass: 168.93421 },      // 69
+    ElementData { name: "thulium", symbol: "Tm", vdw: 1.80, mass: 168.934_2 },      // 69
     ElementData { name: "ytterbium", symbol: "Yb", vdw: 1.80, mass: 173.04 },       // 70
     ElementData { name: "lutetium", symbol: "Lu", vdw: 1.80, mass: 174.967 },       // 71
     ElementData { name: "hafnium", symbol: "Hf", vdw: 1.80, mass: 178.49 },         // 72
@@ -432,7 +432,7 @@ impl Element {
     pub fn from_atomic_number(n: u8) -> Option<Self> {
         if (n as usize) < ELEMENT_COUNT {
             // SAFETY: All values 0-118 are valid Element discriminants
-            Some(unsafe { std::mem::transmute(n) })
+            Some(unsafe { std::mem::transmute::<u8, Element>(n) })
         } else {
             None
         }

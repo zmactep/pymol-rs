@@ -127,8 +127,8 @@ impl ScriptEngine {
             }
 
             // Handle @ include syntax
-            if line.starts_with('@') {
-                let include_path = line[1..].trim();
+            if let Some(stripped) = line.strip_prefix('@') {
+                let include_path = stripped.trim();
                 let full_path = if let Some(base) = base_dir {
                     base.join(include_path)
                 } else {

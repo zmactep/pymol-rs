@@ -67,6 +67,7 @@ pub struct InterpolatedPoint {
 /// - smooth(1) = 1
 /// - smooth'(0) = 0
 /// - smooth'(1) = 0
+///
 /// Alias for the shared smooth function, for backward compatibility
 #[inline]
 pub fn sigmoid_blend(x: f32, power: f32) -> f32 {

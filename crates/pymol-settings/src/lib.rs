@@ -117,6 +117,6 @@ mod tests {
         restored.from_session_list(&list);
 
         assert_eq!(restored.get_float(id::ambient), 0.3);
-        assert_eq!(restored.get_bool(id::orthoscopic), true);
+        assert!(restored.get_bool(id::orthoscopic));
     }
 }

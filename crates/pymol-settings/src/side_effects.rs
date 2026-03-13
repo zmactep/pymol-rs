@@ -13,6 +13,9 @@ use ahash::AHashMap;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Type alias for the category handler map to reduce type complexity.
+type CategoryHandlerMap = RwLock<AHashMap<SideEffectCategory, Vec<Arc<dyn Fn() + Send + Sync>>>>;
+
 use crate::setting::SettingValue;
 
 // =============================================================================
@@ -167,7 +170,7 @@ pub struct SideEffectRegistry {
     /// Handlers that receive all setting changes
     global: RwLock<Vec<Arc<dyn SettingSideEffect>>>,
     /// Category handlers
-    category_handlers: RwLock<AHashMap<SideEffectCategory, Vec<Arc<dyn Fn() + Send + Sync>>>>,
+    category_handlers: CategoryHandlerMap,
 }
 
 impl SideEffectRegistry {

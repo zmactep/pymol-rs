@@ -257,12 +257,12 @@ EXAMPLES
         // Parse origin (default: view origin)
         let origin = if let Some(origin_vec) = args
             .get_named("origin")
-            .and_then(|v| parse_vector_from_arg(v))
+            .and_then(parse_vector_from_arg)
         {
             origin_vec
         } else {
             // Use view origin as default
-            ctx.viewer.camera().current_view().origin.clone()
+            ctx.viewer.camera().current_view().origin
         };
 
         // Transform axis from camera coordinates if needed
@@ -279,7 +279,7 @@ EXAMPLES
         };
 
         // Build the TTT matrix for rotation about origin
-        let ttt = rotation_ttt(rot_axis, angle, origin.clone());
+        let ttt = rotation_ttt(rot_axis, angle, origin);
 
         // Apply rotation using selection expressions
         let (atom_count, obj_count) =
@@ -443,7 +443,7 @@ fn parse_vector_from_arg(arg: &crate::args::ArgValue) -> Option<Vec3> {
 
     match arg {
         ArgValue::List(items) if items.len() >= 3 => {
-            let x = items.get(0)?.as_float()? as f32;
+            let x = items.first()?.as_float()? as f32;
             let y = items.get(1)?.as_float()? as f32;
             let z = items.get(2)?.as_float()? as f32;
             Some(Vec3::new(x, y, z))
@@ -511,14 +511,12 @@ fn parse_matrix(args: &ParsedCommand, pos: usize) -> Result<[f32; 16], CmdError>
     }
 
     // Try named argument
-    if let Some(arg) = args.get_named("matrix") {
-        if let crate::args::ArgValue::List(items) = arg {
-            if items.len() >= 16 {
-                for (i, item) in items.iter().take(16).enumerate() {
-                    matrix[i] = item.as_float().unwrap_or(0.0) as f32;
-                }
-                return Ok(matrix);
+    if let Some(crate::args::ArgValue::List(items)) = args.get_named("matrix") {
+        if items.len() >= 16 {
+            for (i, item) in items.iter().take(16).enumerate() {
+                matrix[i] = item.as_float().unwrap_or(0.0) as f32;
             }
+            return Ok(matrix);
         }
     }
 
@@ -671,18 +669,18 @@ fn apply_translation_to_atoms(
         0 => {
             // All states
             for i in 0..num_states {
-                mol.translate_atoms(i, atoms, delta.clone());
+                mol.translate_atoms(i, atoms, *delta);
             }
         }
         -1 => {
             // Fallback: resolved to display_state in apply_selection_transform
-            mol.translate_atoms(0, atoms, delta.clone());
+            mol.translate_atoms(0, atoms, *delta);
         }
         s if s > 0 => {
             // Specific state (1-indexed in PyMOL, 0-indexed internally)
             let state_idx = (s - 1) as usize;
             if state_idx < num_states {
-                mol.translate_atoms(state_idx, atoms, delta.clone());
+                mol.translate_atoms(state_idx, atoms, *delta);
             }
         }
         _ => {}

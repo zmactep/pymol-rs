@@ -165,6 +165,7 @@ impl SilhouettePipeline {
     /// Call this after the main scene render pass has completed.
     /// The `color_view` should be the same color attachment used by the main pass.
     /// The `depth_view` should be the depth texture from the main pass.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,

@@ -44,7 +44,7 @@ impl App {
         // Build SharedContext for components
         let all_command_names: Vec<String> = self.executor.registry().all_names().map(|s| s.to_string()).collect();
         let setting_names = pymol_settings::setting_names();
-        let setting_names_refs: Vec<&str> = setting_names.iter().copied().collect();
+        let setting_names_refs: Vec<&str> = setting_names.to_vec();
         let cmd_registry = self.executor.registry();
 
         // Update image overlay texture if there's a viewport image
@@ -70,7 +70,7 @@ impl App {
             movie: &self.state.movie,
             viewport_image: self.state.viewport_image.as_ref(),
             command_names: &all_command_names,
-            command_registry: &cmd_registry,
+            command_registry: cmd_registry,
             setting_names: &setting_names_refs,
         };
 

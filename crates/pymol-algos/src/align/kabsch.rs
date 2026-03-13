@@ -322,7 +322,7 @@ mod tests {
         let b = vec![[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]];
         let r = rmsd(&a, &b);
         // sqrt((0 + 1) / 2) = sqrt(0.5) ≈ 0.707
-        assert!((r - 0.7071).abs() < 0.01);
+        assert!((r - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01);
     }
 
     #[test]

@@ -229,18 +229,18 @@ fn compute_round_helix_orientations(gps: &mut [GuidePoint], tv: &[Vec3]) {
                     t0 = normalize_safe(t0);
                     let mut t1 = gps[i3].position - gps[i2].position;
                     t1 = normalize_safe(t1);
-                    t0 = t0 + t1;
+                    t0 += t1;
 
                     if let Some(i4) = v4 {
                         t1 = gps[i4].position - gps[i3].position;
                         t1 = normalize_safe(t1);
-                        t0 = t0 + t1;
+                        t0 += t1;
                     }
                     if let Some(i5) = v5 {
                         if let Some(i4) = v4 {
                             t1 = gps[i5].position - gps[i4].position;
                             t1 = normalize_safe(t1);
-                            t0 = t0 + t1;
+                            t0 += t1;
                         }
                     }
                     t0 = normalize_safe(t0);
@@ -261,11 +261,10 @@ fn compute_round_helix_orientations(gps: &mut [GuidePoint], tv: &[Vec3]) {
                     }
 
                     // Check for goofy flip on short tight helices
-                    if v4.is_some() && v5.is_some() && a >= 4 {
-                        if gps[a - 3].orientation.dot(gps[a - 4].orientation) < -0.8 {
-                            gps[a - 4].orientation = gps[a - 4].orientation * -1.0;
+                    if v4.is_some() && v5.is_some() && a >= 4
+                        && gps[a - 3].orientation.dot(gps[a - 4].orientation) < -0.8 {
+                            gps[a - 4].orientation *= -1.0;
                         }
-                    }
                 }
             }
 
@@ -324,6 +323,7 @@ fn compute_round_helix_orientations(gps: &mut [GuidePoint], tv: &[Vec3]) {
 /// 2. Generate alternative inverted orientations (NOT for helices)
 /// 3. Forward iterate: pick orientation with highest dot product with previous
 /// 4. Soften kinks where dot(prev,curr) * dot(curr,next) < -0.10
+#[allow(clippy::needless_range_loop)]
 fn refine_normals(gps: &mut [GuidePoint], tv: &[Vec3], nv: &[Vec3]) {
     let n = gps.len();
     if n < 3 {
@@ -407,7 +407,7 @@ fn refine_normals(gps: &mut [GuidePoint], tv: &[Vec3], nv: &[Vec3]) {
             // Average neighbors + tiny bit of current
             let mut t0 = next + prev;
             let t1 = curr * 0.001;
-            t0 = t0 + t1;
+            t0 += t1;
 
             // Remove tangent component
             t0 = t0 - tangent * t0.dot(tangent);
@@ -451,6 +451,7 @@ fn refine_normals(gps: &mut [GuidePoint], tv: &[Vec3], nv: &[Vec3]) {
 ///
 /// Matches RepCartoonFlattenSheets: iterative window averaging of positions
 /// and orientations, then removing tangent component from orientations.
+#[allow(clippy::needless_range_loop)]
 fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
     let n = gps.len();
     if n < 3 {
@@ -472,7 +473,7 @@ fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
             for b in (first + f)..=(last.saturating_sub(f)) {
                 let mut sum = Vec3::new(0.0, 0.0, 0.0);
                 for e in (b - f)..=(b + f) {
-                    sum = sum + gps[e].position;
+                    sum += gps[e].position;
                 }
                 tmp_pos[b] = sum / (2 * f + 1) as f32;
             }
@@ -484,7 +485,7 @@ fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
             for b in (first + f)..=(last.saturating_sub(f)) {
                 let mut sum = Vec3::new(0.0, 0.0, 0.0);
                 for e in (b - f)..=(b + f) {
-                    sum = sum + gps[e].orientation;
+                    sum += gps[e].orientation;
                 }
                 tmp_orient[b] = sum / (2 * f + 1) as f32;
             }
@@ -512,6 +513,7 @@ fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
 /// Matches RepCartoonSmoothLoops: identifies loop regions (ss == NONE/Loop),
 /// extends them by 1 residue into adjacent SS regions if within same segment,
 /// then applies windowed averaging.
+#[allow(clippy::needless_range_loop)]
 fn smooth_loops(
     gps: &mut [GuidePoint],
     smooth_first: u32,
@@ -529,9 +531,7 @@ fn smooth_loops(
 
     for (mut first, mut last) in runs {
         // PyMOL extends loop regions by 1 into adjacent segments
-        if first > 0 {
-            first -= 1;
-        }
+        first = first.saturating_sub(1);
         if last < n - 1 {
             last += 1;
         }
@@ -544,7 +544,7 @@ fn smooth_loops(
                 for b in (first + f)..=(last.saturating_sub(f)) {
                     let mut sum = Vec3::new(0.0, 0.0, 0.0);
                     for e in (b - f)..=(b + f) {
-                        sum = sum + gps[e].position;
+                        sum += gps[e].position;
                     }
                     tmp[b] = sum / (2 * f + 1) as f32;
                 }
@@ -556,7 +556,7 @@ fn smooth_loops(
                 for b in (first + f)..=(last.saturating_sub(f)) {
                     let mut sum = Vec3::new(0.0, 0.0, 0.0);
                     for e in (b - f)..=(b + f) {
-                        sum = sum + gps[e].orientation;
+                        sum += gps[e].orientation;
                     }
                     tmp[b] = sum / (2 * f + 1) as f32;
                 }
@@ -578,11 +578,9 @@ fn find_sheet_runs(gps: &[GuidePoint]) -> Vec<(usize, usize)> {
             if first.is_none() {
                 first = Some(a);
             }
-        } else {
-            if let Some(f) = first {
-                runs.push((f, a - 1));
-                first = None;
-            }
+        } else if let Some(f) = first {
+            runs.push((f, a - 1));
+            first = None;
         }
     }
     if let Some(f) = first {
@@ -602,11 +600,9 @@ fn find_loop_runs(gps: &[GuidePoint]) -> Vec<(usize, usize)> {
             if first.is_none() {
                 first = Some(a);
             }
-        } else {
-            if let Some(f) = first {
-                runs.push((f, a - 1));
-                first = None;
-            }
+        } else if let Some(f) = first {
+            runs.push((f, a - 1));
+            first = None;
         }
     }
     if let Some(f) = first {
@@ -631,6 +627,7 @@ struct ExtrudePoint {
 /// For each pair of guide atoms, generates `sampling` interpolated points.
 /// The first invocation (n_p==0) also generates a starting point (total: sampling+1
 /// for the first pair, sampling for subsequent pairs).
+#[allow(clippy::too_many_arguments)]
 fn cartoon_generate_sample(
     buffer: &mut Vec<ExtrudePoint>,
     n_p: &mut usize,
@@ -746,7 +743,7 @@ fn cartoon_generate_refine(
     for _ in 0..refine_cycles {
         // For b in 0..sampling-1: smooth positions along t0
         // p0 = buffer[start - 1 + b], p1 = buffer[start + b], p2 = buffer[start + 1 + b]
-        for b in 0..sampling - 1 {
+        for (b, tmp_val) in tmp.iter_mut().enumerate().take(sampling - 1) {
             let idx0 = start - 1 + b;
             let idx1 = start + b;
             let idx2 = start + 1 + b;
@@ -757,12 +754,12 @@ fn cartoon_generate_refine(
 
             let f3 = (f2 + f0) / 2.0;
             // Move p1 along t0 by (f3 - f1)
-            tmp[b] = buffer[idx1].position + t0 * (f3 - f1);
+            *tmp_val = buffer[idx1].position + t0 * (f3 - f1);
         }
 
         // Apply
-        for b in 0..sampling - 1 {
-            buffer[start + b].position = tmp[b];
+        for (b, tmp_val) in tmp.iter().enumerate().take(sampling - 1) {
+            buffer[start + b].position = *tmp_val;
         }
     }
 }
@@ -958,16 +955,14 @@ fn extrude_run(
                     for sign in [-1.0_f32, 1.0_f32] {
                         let mut edge_ring_starts: Vec<usize> = Vec::new();
 
-                        for i in start..=end {
-                            let fm = &frames[i];
+                        for (frame_in_region, fm) in frames[start..=end].iter().enumerate() {
                             let ring_start = all_vertices.len();
                             edge_ring_starts.push(ring_start);
 
-                            let frame_in_region = i - start;
                             let taper_factor = if frame_in_region < taper_frames {
                                 smooth(frame_in_region as f32 / taper_frames as f32, 2.0)
                             } else if frame_in_region > sub_n {
-                                smooth((end - i) as f32 / taper_frames as f32, 2.0)
+                                smooth((region_len - 1 - frame_in_region) as f32 / taper_frames as f32, 2.0)
                             } else {
                                 1.0
                             };
@@ -1279,7 +1274,7 @@ fn generate_per_run_mesh(
         };
 
         // Type changed from previous pair — flush the accumulated run
-        let type_changed = cur_car.map_or(false, |c| c != pair_car);
+        let type_changed = cur_car.is_some_and(|c| c != pair_car);
 
         if type_changed && n_p > 0 {
             extrude_run(

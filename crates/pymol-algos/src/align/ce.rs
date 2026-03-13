@@ -511,10 +511,10 @@ mod tests {
         let coords = make_helix(5, [0.0, 0.0, 0.0]);
         let dm = calc_dm(&coords);
         assert_eq!(dm.len(), 5);
-        for i in 0..5 {
-            assert_eq!(dm[i][i], 0.0);
+        for (i, row) in dm.iter().enumerate().take(5) {
+            assert_eq!(row[i], 0.0);
             for j in 0..5 {
-                assert!((dm[i][j] - dm[j][i]).abs() < 1e-6);
+                assert!((row[j] - dm[j][i]).abs() < 1e-6);
             }
         }
     }
@@ -596,14 +596,13 @@ mod tests {
         let helix = make_helix(20, [0.0, 0.0, 0.0]);
         let strand = make_strand(20, [0.0, 0.0, 0.0]);
         let result = ce_align(&helix, &strand, &CeParams::default());
-        match result {
-            Ok(r) => assert!(
+        if let Ok(r) = result {
+            assert!(
                 r.z_score < 5.0,
                 "Z-score should be low for dissimilar, got {}",
                 r.z_score
-            ),
-            Err(_) => {} // Also acceptable
-        }
+            );
+        } // Err is also acceptable
     }
 
     #[test]

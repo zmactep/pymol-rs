@@ -600,7 +600,7 @@ mod tests {
             mol.add_atom(atom);
         }
 
-        let coords = CoordSet::from_vec3(&vec![Vec3::new(0.0, 0.0, 0.0); 5]);
+        let coords = CoordSet::from_vec3(&[Vec3::new(0.0, 0.0, 0.0); 5]);
         mol.add_coord_set(coords);
 
         let mut output = Vec::new();

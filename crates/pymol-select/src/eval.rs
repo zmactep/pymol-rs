@@ -764,10 +764,10 @@ fn eval_bysegment(ctx: &EvalContext, inner: &SelectionExpr) -> EvalResult<Select
         let mut selected_segis: Vec<String> = Vec::new();
 
         for (local_idx, atom) in mol.atoms().enumerate() {
-            if inner_result.contains_index(offset + local_idx) {
-                if !selected_segis.contains(&atom.residue.segi) {
-                    selected_segis.push(atom.residue.segi.clone());
-                }
+            if inner_result.contains_index(offset + local_idx)
+                && !selected_segis.contains(&atom.residue.segi)
+            {
+                selected_segis.push(atom.residue.segi.clone());
             }
         }
 
@@ -884,10 +884,10 @@ fn eval_like(
     let mut target_resns: Vec<String> = Vec::new();
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
-            if right_result.contains_index(offset + local_idx) {
-                if !target_resns.contains(&atom.residue.resn) {
-                    target_resns.push(atom.residue.resn.clone());
-                }
+            if right_result.contains_index(offset + local_idx)
+                && !target_resns.contains(&atom.residue.resn)
+            {
+                target_resns.push(atom.residue.resn.clone());
             }
         }
     }
@@ -895,10 +895,10 @@ fn eval_like(
     // Select atoms from left with matching residue names
     for (mol, offset) in ctx.molecules_with_offsets() {
         for (local_idx, atom) in mol.atoms().enumerate() {
-            if left_result.contains_index(offset + local_idx) {
-                if target_resns.contains(&atom.residue.resn) {
-                    result.set_index(offset + local_idx);
-                }
+            if left_result.contains_index(offset + local_idx)
+                && target_resns.contains(&atom.residue.resn)
+            {
+                result.set_index(offset + local_idx);
             }
         }
     }

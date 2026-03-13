@@ -201,7 +201,7 @@ fn show_panel_shell(
 ) {
     let transparent = egui_ctx
         .data(|d| d.get_temp::<TransparentPanels>(egui::Id::NULL))
-        .map_or(false, |t| t.0);
+        .is_some_and(|t| t.0);
 
     /// Build a semi-transparent version of the default panel frame.
     fn transparent_frame(style: &egui::Style) -> egui::Frame {
@@ -359,7 +359,7 @@ fn render_tabbed_group(
             let active_floatable = tabs
                 .iter()
                 .find(|(id, _)| *id == active_id)
-                .map_or(false, |(_, f)| *f);
+                .is_some_and(|(_, f)| *f);
 
             show_tab_bar(ui, &tabs, &active_id, active_floatable, store, bus);
             ui.separator();

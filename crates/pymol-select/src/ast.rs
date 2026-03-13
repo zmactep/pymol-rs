@@ -65,7 +65,7 @@ impl std::fmt::Display for CompareOp {
 /// Specification for slash macro notation
 ///
 /// Format: `/model/segi/chain/resn`resi/name`alt`
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MacroSpec {
     /// Model/object name (None = any)
     pub model: Option<Pattern>,
@@ -83,25 +83,12 @@ pub struct MacroSpec {
     pub alt: Option<Pattern>,
 }
 
-impl Default for MacroSpec {
-    fn default() -> Self {
-        MacroSpec {
-            model: None,
-            segi: None,
-            chain: None,
-            resn: None,
-            resi: None,
-            name: None,
-            alt: None,
-        }
-    }
-}
-
 /// A selection expression AST node
 ///
 /// This enum represents all possible selection expressions in PyMOL's
 /// selection language. The AST is built by the parser and evaluated
 /// by the evaluator.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectionExpr {
     // =========================================================================
@@ -427,7 +414,7 @@ impl SelectionExpr {
     }
 
     /// Create a NOT expression
-    pub fn not(self) -> SelectionExpr {
+    pub fn negate(self) -> SelectionExpr {
         SelectionExpr::Not(Box::new(self))
     }
 
@@ -541,7 +528,7 @@ mod tests {
         let combined = expr1.or(expr2);
         assert!(matches!(combined, SelectionExpr::Or(_, _)));
 
-        let negated = SelectionExpr::All.not();
+        let negated = SelectionExpr::All.negate();
         assert!(matches!(negated, SelectionExpr::Not(_)));
     }
 

@@ -108,12 +108,10 @@ fn parse_text_field(input: &str) -> IResult<&str, Token<'_>> {
     let mut end_pos = 0;
     let mut found = false;
     for (i, c) in input.char_indices() {
-        if c == '\n' {
-            if input.get(i + 1..i + 2) == Some(";") {
-                end_pos = i;
-                found = true;
-                break;
-            }
+        if c == '\n' && input.get(i + 1..i + 2) == Some(";") {
+            end_pos = i;
+            found = true;
+            break;
         }
     }
 

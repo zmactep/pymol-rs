@@ -165,6 +165,7 @@ mod tests {
         mol.add_atom(h2);
 
         // Coordinates in Angstroms
+        #[allow(clippy::approx_constant)]
         let coords = CoordSet::from_vec3(&[
             Vec3::new(2.30, 6.28, 1.13),
             Vec3::new(1.37, 6.28, 1.50),

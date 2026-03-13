@@ -498,11 +498,12 @@ impl Default for Atom {
 impl Atom {
     /// Create a new atom with the given name and element
     pub fn new(name: impl Into<String>, element: Element) -> Self {
-        let mut atom = Atom::default();
-        atom.name = Arc::from(name.into());
-        atom.element = element;
-        atom.vdw = element.vdw_radius();
-        atom
+        Atom {
+            name: Arc::from(name.into()),
+            element,
+            vdw: element.vdw_radius(),
+            ..Default::default()
+        }
     }
 
     /// Create a new atom from element symbol

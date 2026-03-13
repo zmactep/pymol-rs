@@ -16,7 +16,7 @@ fn parse_members(members_str: &str) -> Vec<String> {
         return Vec::new();
     }
     members_str
-        .split(|c: char| c == ' ' || c == ',')
+        .split([' ', ','])
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
@@ -189,9 +189,9 @@ EXAMPLES
 
         if !ctx.quiet {
             match (deleted_objects, deleted_selections) {
-                (o, 0) if o == 1 => ctx.print(&format!(" Deleted \"{}\"", name)),
+                (1, 0) => ctx.print(&format!(" Deleted \"{}\"", name)),
                 (o, 0) => ctx.print(&format!(" Deleted {} objects matching \"{}\"", o, name)),
-                (0, s) if s == 1 => ctx.print(&format!(" Deleted selection \"{}\"", name)),
+                (0, 1) => ctx.print(&format!(" Deleted selection \"{}\"", name)),
                 (0, s) => ctx.print(&format!(" Deleted {} selections matching \"{}\"", s, name)),
                 (o, s) => ctx.print(&format!(" Deleted {} objects and {} selections matching \"{}\"", o, s, name)),
             }
@@ -592,11 +592,12 @@ EXAMPLES
             "add" => {
                 let resolved = resolve_members(ctx.viewer.objects(), &member_patterns);
                 // Create group if it doesn't exist and no members were specified
-                if resolved.is_empty() && member_patterns.is_empty() {
-                    if !ctx.viewer.objects().contains(name) {
-                        use pymol_scene::GroupObject;
-                        ctx.viewer.objects_mut().add(GroupObject::new(name));
-                    }
+                if resolved.is_empty()
+                    && member_patterns.is_empty()
+                    && !ctx.viewer.objects().contains(name)
+                {
+                    use pymol_scene::GroupObject;
+                    ctx.viewer.objects_mut().add(GroupObject::new(name));
                 }
                 for member in &resolved {
                     ctx.viewer.objects_mut().add_to_group(name, member);

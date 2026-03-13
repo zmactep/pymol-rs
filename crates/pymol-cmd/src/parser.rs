@@ -50,7 +50,7 @@ fn normalize_continuations(input: &str) -> String {
                     // Skip \ and newline (line continuation)
                     chars.next();
                     // Also skip any leading whitespace on next line
-                    while chars.peek().map_or(false, |c| *c == ' ' || *c == '\t') {
+                    while chars.peek().is_some_and(|c| *c == ' ' || *c == '\t') {
                         chars.next();
                     }
                     continue;
@@ -58,7 +58,7 @@ fn normalize_continuations(input: &str) -> String {
                     // Skip \ followed by whitespace (collapsed continuation)
                     chars.next();
                     // Skip any additional whitespace
-                    while chars.peek().map_or(false, |c| *c == ' ' || *c == '\t') {
+                    while chars.peek().is_some_and(|c| *c == ' ' || *c == '\t') {
                         chars.next();
                     }
                     continue;
@@ -157,7 +157,7 @@ pub fn parse_commands(input: &str) -> Result<Vec<ParsedCommand>, ParseError> {
     }
 
     let mut commands = Vec::new();
-    let mut current: &str = &input;
+    let mut current: &str = input;
 
     while !current.is_empty() {
         // Skip leading whitespace and semicolons
@@ -337,7 +337,7 @@ fn parse_arg_value(input: &str) -> IResult<&str, ArgValue> {
         // Try bracketed list
         parse_list,
         // Try quoted string
-        map(parse_quoted_string, |s| ArgValue::String(s)),
+        map(parse_quoted_string, ArgValue::String),
         // Try number
         parse_number,
         // Try boolean keywords

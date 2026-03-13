@@ -112,9 +112,10 @@ fn atom_sel(name: &str) -> &str {
 // =============================================================================
 
 /// What menu is currently showing
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub enum ActiveMenu {
     /// No menu open
+    #[default]
     None,
     /// Actions menu for an object (zoom, orient, center, origin)
     Actions { object: String, is_group: bool },
@@ -130,15 +131,10 @@ pub enum ActiveMenu {
     SelectionActions { selection: String },
 }
 
-impl Default for ActiveMenu {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
 /// Submenu state for nested menus (Show > as, Color > by rep)
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub enum SubMenuState {
+    #[default]
     None,
     /// Show > as (show_as submenu)
     ShowAs,
@@ -148,11 +144,6 @@ pub enum SubMenuState {
     ColorByRepColors { rep: String, setting: String },
 }
 
-impl Default for SubMenuState {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Object list UI state (egui-specific: menu popups and anchor positions)
 pub struct ObjectListUiState {
@@ -710,17 +701,17 @@ impl ObjectListPanel {
         }
 
         // Close on click outside all menu areas
-        if !menu_button_clicked {
-            if ui.input(|i| i.pointer.any_click()) {
-                let pointer_in_menu = ui
-                    .input(|i| i.pointer.interact_pos())
-                    .map_or(false, |pos| {
-                        ui_state.menu_rects.iter().any(|r| r.contains(pos))
-                    });
-                if !pointer_in_menu {
-                    ui_state.active_menu = ActiveMenu::None;
-                    ui_state.submenu = SubMenuState::None;
-                }
+        if !menu_button_clicked
+            && ui.input(|i| i.pointer.any_click())
+        {
+            let pointer_in_menu = ui
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|pos| {
+                    ui_state.menu_rects.iter().any(|r| r.contains(pos))
+                });
+            if !pointer_in_menu {
+                ui_state.active_menu = ActiveMenu::None;
+                ui_state.submenu = SubMenuState::None;
             }
         }
     }

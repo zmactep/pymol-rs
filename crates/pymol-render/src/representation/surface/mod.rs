@@ -455,11 +455,11 @@ impl SurfaceRep {
 
         // Build mesh vertices
         self.vertices.reserve(result.positions.len());
-        for i in 0..result.positions.len() {
+        for ((position, normal), color) in result.positions.iter().zip(&result.normals).zip(&colors) {
             self.vertices.push(MeshVertex {
-                position: result.positions[i],
-                normal: result.normals[i],
-                color: colors[i],
+                position: *position,
+                normal: *normal,
+                color: *color,
             });
         }
 
@@ -640,8 +640,8 @@ mod tests {
         rep.build_from_atoms(&atoms, &colors);
 
         assert!(!rep.is_empty(), "Surface should have triangles");
-        assert!(rep.vertices.len() > 0);
-        assert!(rep.indices.len() > 0);
+        assert!(!rep.vertices.is_empty());
+        assert!(!rep.indices.is_empty());
         assert_eq!(rep.indices.len() % 3, 0, "Indices should be triangle triplets");
     }
 
@@ -725,8 +725,8 @@ mod tests {
 
         // Should produce some triangles
         assert!(!rep.is_empty(), "Dot-based surface should have triangles");
-        assert!(rep.vertices.len() > 0, "Should have vertices");
-        assert!(rep.indices.len() > 0, "Should have indices");
+        assert!(!rep.vertices.is_empty(), "Should have vertices");
+        assert!(!rep.indices.is_empty(), "Should have indices");
         assert_eq!(rep.indices.len() % 3, 0, "Indices should be triangle triplets");
     }
 

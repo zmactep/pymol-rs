@@ -260,11 +260,11 @@ fn jacobi_rotate(a: &mut [[f64; 3]; 3], v: &mut [[f64; 3]; 3], p: usize, q: usiz
     a[q][r] = a[r][q];
 
     // Accumulate eigenvectors: V' = V · G
-    for i in 0..3 {
-        let vip = v[i][p];
-        let viq = v[i][q];
-        v[i][p] = c * vip - s * viq;
-        v[i][q] = s * vip + c * viq;
+    for row in v.iter_mut().take(3) {
+        let vip = row[p];
+        let viq = row[q];
+        row[p] = c * vip - s * viq;
+        row[q] = s * vip + c * viq;
     }
 }
 
@@ -301,13 +301,13 @@ mod tests {
         // For column-major: MᵀM should be I (columns are orthonormal)
         let mt = transpose(m);
         let prod = mat_mul(&mt, m);
-        for i in 0..3 {
-            for j in 0..3 {
+        for (i, prod_row) in prod.iter().enumerate() {
+            for (j, &val) in prod_row.iter().enumerate() {
                 let expected = if i == j { 1.0 } else { 0.0 };
                 assert!(
-                    (prod[i][j] - expected).abs() < 1e-4,
+                    (val - expected).abs() < 1e-4,
                     "{} not orthogonal: (MᵀM)[{}][{}] = {}, expected {}",
-                    label, i, j, prod[i][j], expected
+                    label, i, j, val, expected
                 );
             }
         }

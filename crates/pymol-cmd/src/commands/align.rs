@@ -136,7 +136,7 @@ EXAMPLES
                 align_by_sequence(ctx, mobile_sel, target_sel, &params, &scoring)
             }
             "ce" => align_by_ce(ctx, mobile_sel, target_sel, &params, args),
-            "kabsch" | _ => align_by_kabsch(ctx, mobile_sel, target_sel, &params),
+            _ => align_by_kabsch(ctx, mobile_sel, target_sel, &params),
         }
     }
 }

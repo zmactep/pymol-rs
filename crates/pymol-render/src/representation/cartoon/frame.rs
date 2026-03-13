@@ -186,8 +186,8 @@ pub fn generate_frames(
         let mut avg_orientations: Vec<(usize, usize, Vec3)> = Vec::new();
         for &(start, end) in &sheet_runs {
             let mut sum = Vec3::new(0.0, 0.0, 0.0);
-            for i in start..=end {
-                sum = sum + consistent_orientations[i];
+            for item in consistent_orientations.iter().take(end + 1).skip(start) {
+                sum += *item;
             }
             let avg = normalize_safe(sum);
             avg_orientations.push((start, end, avg));

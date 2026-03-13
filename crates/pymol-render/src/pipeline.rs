@@ -20,16 +20,13 @@ pub enum PipelineType {
 
 /// Blend modes for rendering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum BlendMode {
+    #[default]
     Opaque,
     Transparent,
 }
 
-impl Default for BlendMode {
-    fn default() -> Self {
-        BlendMode::Opaque
-    }
-}
 
 /// Get the blend state for a given blend mode
 pub fn get_blend_state(mode: BlendMode) -> Option<wgpu::BlendState> {

@@ -77,6 +77,7 @@ impl CommandHistory {
     }
 
     /// Get the next command in history (going forward)
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&str> {
         match self.position {
             None => None,

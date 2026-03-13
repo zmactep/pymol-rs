@@ -7,7 +7,7 @@ use std::fmt;
 /// A command argument value
 ///
 /// Arguments can be strings, numbers, booleans, lists, or None (for omitted optional args).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ArgValue {
     /// String value (may be a selection, filename, object name, etc.)
     String(String),
@@ -20,13 +20,8 @@ pub enum ArgValue {
     /// List of values (e.g., coordinates [1.0, 2.0, 3.0])
     List(Vec<ArgValue>),
     /// No value (omitted optional argument)
+    #[default]
     None,
-}
-
-impl Default for ArgValue {
-    fn default() -> Self {
-        ArgValue::None
-    }
 }
 
 impl fmt::Display for ArgValue {
@@ -324,8 +319,8 @@ mod tests {
         assert_eq!(i.as_int(), Some(42));
         assert_eq!(i.as_float(), Some(42.0));
 
-        let f = ArgValue::Float(3.14);
-        assert_eq!(f.as_float(), Some(3.14));
+        let f = ArgValue::Float(3.125);
+        assert_eq!(f.as_float(), Some(3.125));
         assert_eq!(f.as_int(), Some(3));
 
         let b = ArgValue::Bool(true);

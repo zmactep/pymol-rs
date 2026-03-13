@@ -13,10 +13,11 @@ use pymol_settings::GlobalSettings;
 ///
 /// For memory efficiency, uses identity mapping when all atoms have coordinates
 /// (the common case), and sparse mapping only when some atoms are missing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 enum CoordMapping {
     /// Identity mapping: coord_idx == atom_idx for all indices
     /// No arrays needed - just need to know the count
+    #[default]
     Dense,
     /// Sparse mapping: only some atoms have coordinates
     Sparse {
@@ -27,11 +28,6 @@ enum CoordMapping {
     },
 }
 
-impl Default for CoordMapping {
-    fn default() -> Self {
-        CoordMapping::Dense
-    }
-}
 
 /// Iterator over (AtomIndex, Vec3) pairs from a CoordSet
 pub struct CoordAtomIter<'a> {

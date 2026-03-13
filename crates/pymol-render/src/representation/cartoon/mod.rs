@@ -60,6 +60,7 @@ use self::spline::InterpolationSettings;
 ///
 /// The caller provides representation-specific settings (setting IDs, geometry config,
 /// rep mask) and this function handles the common processing loop.
+#[allow(clippy::too_many_arguments)]
 pub fn build_cartoon_geometry(
     molecule: &ObjectMolecule,
     coord_set: &CoordSet,
