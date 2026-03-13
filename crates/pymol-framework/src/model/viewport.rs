@@ -5,7 +5,7 @@
 
 use pymol_scene::{InputState, Picker, PickHit};
 
-use crate::model::sequence::ResidueRef;
+use super::sequence::ResidueRef;
 
 /// Viewport model: 3D molecular viewer interaction state.
 pub struct ViewportModel {

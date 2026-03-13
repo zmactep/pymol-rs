@@ -3,10 +3,9 @@
 //! Bundles [`SequenceModel`] + [`SequenceUiState`] + view into a single
 //! self-contained component.
 
-use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::component::{Component, EguiComponent, SharedContext};
 use pymol_framework::message::MessageBus;
-use crate::model::SequenceModel;
-use crate::ui::sequence::SequenceUiState;
+use pymol_framework::model::{SequenceModel, SequenceUiState};
 use crate::ui::SequencePanel;
 
 /// Self-contained sequence viewer component.
@@ -38,7 +37,9 @@ impl Component for SequenceComponent {
     fn title(&self) -> &str {
         "Sequence"
     }
+}
 
+impl EguiComponent for SequenceComponent {
     fn show(&mut self, ui: &mut egui::Ui, ctx: &SharedContext, bus: &mut MessageBus) {
         let has_sele = ctx.selections.contains("sele");
         SequencePanel::show(

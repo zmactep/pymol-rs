@@ -7,7 +7,7 @@
 pub use pymol_framework::layout::*;
 
 use pymol_framework::component::SharedContext;
-use pymol_framework::component_store::ComponentStore;
+use crate::component_store::ComponentStore;
 use pymol_framework::message::{AppMessage, MessageBus};
 
 // ---------------------------------------------------------------------------

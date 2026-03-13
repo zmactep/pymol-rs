@@ -2,8 +2,8 @@
 //!
 //! Dynamic registry of UI components, keyed by component ID.
 
-use crate::component::{Component, SharedContext};
-use crate::message::{AppMessage, MessageBus};
+use pymol_framework::component::{Component, EguiComponent, SharedContext};
+use pymol_framework::message::{AppMessage, MessageBus};
 
 /// Dynamic registry of UI components.
 ///
@@ -11,7 +11,7 @@ use crate::message::{AppMessage, MessageBus};
 /// generically (iteration, layout dispatch) or by concrete type via
 /// [`get`](Self::get) / [`get_mut`](Self::get_mut) with downcasting.
 pub struct ComponentStore {
-    components: Vec<Box<dyn Component>>,
+    components: Vec<Box<dyn EguiComponent>>,
 }
 
 impl ComponentStore {
@@ -22,12 +22,12 @@ impl ComponentStore {
     }
 
     /// Register a component. Panics on duplicate IDs.
-    pub fn add(&mut self, component: impl Component + 'static) {
+    pub fn add(&mut self, component: impl EguiComponent + 'static) {
         self.add_boxed(Box::new(component));
     }
 
     /// Register a boxed component. Panics on duplicate IDs.
-    pub fn add_boxed(&mut self, component: Box<dyn Component>) {
+    pub fn add_boxed(&mut self, component: Box<dyn EguiComponent>) {
         let id = component.id();
         assert!(
             !self.components.iter().any(|c| c.id() == id),
@@ -73,7 +73,7 @@ impl ComponentStore {
     pub fn show_in_panel(
         &mut self,
         id: &str,
-        f: impl FnOnce(&mut dyn Component, &SharedContext, &mut MessageBus),
+        f: impl FnOnce(&mut dyn EguiComponent, &SharedContext, &mut MessageBus),
         shared: &SharedContext,
         bus: &mut MessageBus,
     ) {

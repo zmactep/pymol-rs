@@ -36,7 +36,7 @@ pub use log;
 /// needed to implement commands, components, and message handlers.
 pub mod prelude {
     // Framework types
-    pub use pymol_framework::component::{Component, SharedContext};
+    pub use pymol_framework::component::{Component, EguiComponent, SharedContext};
     pub use pymol_framework::layout::{PanelConfig, Slot};
     pub use pymol_framework::message::{AppMessage, MessageBus};
     pub use pymol_framework::topics::{publish, subscribe};

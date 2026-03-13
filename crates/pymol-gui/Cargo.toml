@@ -15,7 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
-pymol-framework = { workspace = true }
+pymol-framework = { workspace = true, features = ["egui"] }
 pymol-plugin = { workspace = true }
 pymol-scene = { workspace = true }
 pymol-cmd = { workspace = true }

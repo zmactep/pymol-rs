@@ -9,11 +9,19 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Shared application infrastructure for PyMOL-RS (messaging, components, layout)"
 
+[features]
+default = []
+egui = ["dep:egui"]
+
 [dependencies]
 pymol-cmd = { workspace = true }
+pymol-mol = { workspace = true }
 pymol-scene = { workspace = true }
 pymol-color = { workspace = true }
-egui = { workspace = true }
+pymol-settings = { workspace = true }
+# Note: pymol-settings and dirs are needed for the completion module
+egui = { workspace = true, optional = true }
 serde = { workspace = true }
 rmp-serde = { workspace = true }
+dirs = "5"
 log = { workspace = true }

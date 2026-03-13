@@ -4,7 +4,7 @@
 
 use egui::{Color32, RichText, ScrollArea, Ui};
 
-use crate::model::{OutputModel, OutputKind};
+use pymol_framework::model::{OutputModel, OutputKind};
 
 /// Output panel that displays log messages
 pub struct OutputPanel;

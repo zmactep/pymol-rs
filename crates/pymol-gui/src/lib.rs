@@ -15,10 +15,10 @@
 pub mod app;
 pub mod async_tasks;
 pub mod bundle;
+pub mod component_store;
 pub mod components;
 pub mod fetch;
 pub mod layout;
-pub mod model;
 pub mod plugin_manager;
 pub mod ui;
 pub mod view;
@@ -26,7 +26,7 @@ pub mod view;
 pub use app::App;
 pub use async_tasks::{AsyncTask, TaskContext, TaskResult, TaskRunner};
 pub use pymol_framework::component::{Component, SharedContext};
-pub use pymol_framework::component_store::ComponentStore;
+pub use component_store::ComponentStore;
 pub use components::{
     MovieComponent, ObjectListComponent, ReplComponent, SequenceComponent,
 };
@@ -34,8 +34,8 @@ pub use fetch::{FetchResult, FetchTask};
 pub use layout::Layout;
 pub use plugin_manager::PluginManager;
 
-// Re-export model types
-pub use model::{CommandLineModel, OutputModel, OutputKind, OutputMessage};
+// Re-export model types from framework
+pub use pymol_framework::model::{CommandLineModel, OutputModel, OutputKind, OutputMessage};
 
 // Re-export UI state types
 pub use ui::{CommandLineUiState, ObjectListUiState, SequenceUiState};

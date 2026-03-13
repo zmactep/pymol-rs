@@ -1,7 +1,7 @@
 //! Concrete Component Implementations
 //!
 //! Each module bundles a domain model, egui-specific UI state, and view logic
-//! into a single struct that implements [`Component`](crate::component::Component).
+//! into a single struct that implements [`Component`] and [`EguiComponent`].
 
 pub mod movie;
 pub mod object_list;
@@ -13,12 +13,12 @@ pub use object_list::ObjectListComponent;
 pub use repl::ReplComponent;
 pub use sequence::SequenceComponent;
 
-use pymol_framework::component::Component;
+use pymol_framework::component::EguiComponent;
 
 /// Create the default set of UI components.
 ///
 /// Add new components here rather than in `App::new()`.
-pub fn default_components() -> Vec<Box<dyn Component>> {
+pub fn default_components() -> Vec<Box<dyn EguiComponent>> {
     vec![
         Box::new(ReplComponent::new()),
         Box::new(SequenceComponent::new()),

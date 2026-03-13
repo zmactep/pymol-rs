@@ -76,6 +76,40 @@ pub struct SeqObject {
     pub chains: Vec<SeqChain>,
 }
 
+/// Sequence panel interaction state (no egui dependency).
+///
+/// Tracks drag selection and hover state for the sequence viewer.
+pub struct SequenceUiState {
+    /// Active drag start: (object_index, chain_index, start_residue_index)
+    pub drag_start: Option<(usize, usize, usize)>,
+    /// Current drag end residue index (updated each frame while dragging)
+    pub drag_end: Option<usize>,
+    /// Current sequence hover state for change detection
+    pub current_hover: Option<ResidueRef>,
+}
+
+impl Default for SequenceUiState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SequenceUiState {
+    pub fn new() -> Self {
+        Self {
+            drag_start: None,
+            drag_end: None,
+            current_hover: None,
+        }
+    }
+
+    /// Clear any active drag state (called on dock/float transition).
+    pub fn clear_drag(&mut self) {
+        self.drag_start = None;
+        self.drag_end = None;
+    }
+}
+
 /// Sequence model: cached sequence data and highlighted residues.
 pub struct SequenceModel {
     /// Cached sequence data per object

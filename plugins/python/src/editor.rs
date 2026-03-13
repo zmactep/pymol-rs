@@ -165,7 +165,9 @@ impl Component for PythonEditorComponent {
     fn title(&self) -> &str {
         "Python"
     }
+}
 
+impl EguiComponent for PythonEditorComponent {
     fn show(&mut self, ui: &mut Ui, _ctx: &SharedContext, _bus: &mut MessageBus) {
         // Drain any results from the worker thread
         self.drain_results();

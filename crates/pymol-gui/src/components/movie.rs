@@ -3,7 +3,7 @@
 //! Wraps [`MoviePanel`] view into a self-contained component.
 //! This component has no model — it reads movie state from [`SharedContext`].
 
-use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::component::{Component, EguiComponent, SharedContext};
 use pymol_framework::message::MessageBus;
 use crate::ui::MoviePanel;
 
@@ -30,7 +30,9 @@ impl Component for MovieComponent {
     fn title(&self) -> &str {
         "Movie"
     }
+}
 
+impl EguiComponent for MovieComponent {
     fn show(&mut self, ui: &mut egui::Ui, ctx: &SharedContext, bus: &mut MessageBus) {
         MoviePanel::show(ui, ctx.movie, bus);
     }

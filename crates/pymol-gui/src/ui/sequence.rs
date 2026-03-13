@@ -12,11 +12,14 @@ use pymol_scene::ObjectRegistry;
 use pymol_select::build_sele_command;
 
 use pymol_framework::message::MessageBus;
-use crate::model::sequence::{
+use pymol_framework::model::sequence::{
     ResidueRef, ResidueKind, SeqChain, SeqObject, SequenceModel,
     chain_highlighted_sequence, chain_to_sequence, collect_all_sequences,
     compress_resi_list,
 };
+
+// Re-export SequenceUiState from framework for backwards compatibility
+pub use pymol_framework::model::SequenceUiState;
 
 /// Pale magenta — standard DNA/RNA nucleotides
 const NUCLEOTIDE_COLOR: Color32 = Color32::from_rgb(205, 150, 205);
@@ -26,42 +29,6 @@ const NONCANONICAL_COLOR: Color32 = Color32::from_rgb(230, 160, 60);
 
 /// Dim gray — non-polymer HETATM ligands
 const LIGAND_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
-
-// =============================================================================
-// UI State
-// =============================================================================
-
-/// Sequence panel UI state (egui-specific: drag, hover)
-pub struct SequenceUiState {
-    /// Active drag start: (object_index, chain_index, start_residue_index)
-    pub drag_start: Option<(usize, usize, usize)>,
-    /// Current drag end residue index (updated each frame while dragging)
-    pub drag_end: Option<usize>,
-    /// Current sequence hover state for change detection
-    pub current_hover: Option<ResidueRef>,
-}
-
-impl Default for SequenceUiState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SequenceUiState {
-    pub fn new() -> Self {
-        Self {
-            drag_start: None,
-            drag_end: None,
-            current_hover: None,
-        }
-    }
-
-    /// Clear any active drag state (called on dock/float transition).
-    pub fn clear_drag(&mut self) {
-        self.drag_start = None;
-        self.drag_end = None;
-    }
-}
 
 // =============================================================================
 // View
@@ -568,7 +535,7 @@ fn render_chain_sequence(
 }
 
 /// Resolve a residue's display color from its color index
-fn resolve_residue_color(residue: &crate::model::SeqResidue, named_colors: &NamedColors) -> Color32 {
+fn resolve_residue_color(residue: &pymol_framework::model::SeqResidue, named_colors: &NamedColors) -> Color32 {
     if residue.color_index >= 0 {
         if let Some(color) = named_colors.get_by_index(residue.color_index as u32) {
             return Color32::from_rgb(

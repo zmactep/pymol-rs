@@ -2,12 +2,18 @@
 //!
 //! Defines the [`Component`] trait for self-contained UI panels and
 //! [`SharedContext`] for read-only access to application state.
+//!
+//! The base [`Component`] trait is UI-framework agnostic. Rendering is handled
+//! by backend-specific extension traits (e.g. [`EguiComponent`] behind the
+//! `egui` feature flag).
 
 use pymol_cmd::CommandRegistry;
 use pymol_color::NamedColors;
 use pymol_scene::{Camera, Movie, ObjectRegistry, SelectionManager, ViewportImage};
 
-use crate::message::{AppMessage, MessageBus};
+use crate::message::AppMessage;
+#[cfg(feature = "egui")]
+use crate::message::MessageBus;
 
 /// Read-only snapshot of application state, shared with all components.
 ///
@@ -32,13 +38,13 @@ pub struct SharedContext<'a> {
 
 /// A self-contained UI component (panel).
 ///
-/// Each component owns its domain model and egui-specific UI state.
+/// Each component owns its domain model and UI state.
 /// It reads shared application state via [`SharedContext`] and writes
 /// actions via [`MessageBus`].
 ///
 /// # Design
 ///
-/// - `show()` is the main render method, called by the layout engine
+/// - Rendering is handled by backend-specific traits (e.g. [`EguiComponent`])
 /// - `on_message()` lets components react to dispatched messages
 /// - The 3D viewport is intentionally **not** a Component (it needs
 ///   wgpu rendering and CentralPanel placement)
@@ -48,9 +54,6 @@ pub trait Component: std::any::Any {
 
     /// Display name for panel headers and tabs.
     fn title(&self) -> &str;
-
-    /// Render the component's UI into the given region.
-    fn show(&mut self, ui: &mut egui::Ui, ctx: &SharedContext, bus: &mut MessageBus);
 
     /// React to a dispatched message. Called once per message after dispatch.
     ///
@@ -69,4 +72,14 @@ pub trait Component: std::any::Any {
 
     /// Called when the component's panel loses focus (e.g. tab deselected).
     fn on_blur(&mut self) {}
+}
+
+/// Extension trait for components that render via egui.
+///
+/// Enabled with the `egui` feature flag. Desktop applications and plugins
+/// implement this trait; web frontends use their own rendering layer.
+#[cfg(feature = "egui")]
+pub trait EguiComponent: Component {
+    /// Render the component's UI into the given egui region.
+    fn show(&mut self, ui: &mut egui::Ui, ctx: &SharedContext, bus: &mut MessageBus);
 }

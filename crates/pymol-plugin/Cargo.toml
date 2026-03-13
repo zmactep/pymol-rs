@@ -10,7 +10,7 @@ documentation.workspace = true
 description = "Plugin SDK for PyMOL-RS — register commands, components, and message handlers"
 
 [dependencies]
-pymol-framework = { workspace = true }
+pymol-framework = { workspace = true, features = ["egui"] }
 pymol-cmd = { workspace = true }
 pymol-scene = { workspace = true }
 pymol-mol = { workspace = true }

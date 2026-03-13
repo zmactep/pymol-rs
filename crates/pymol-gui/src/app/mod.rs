@@ -19,12 +19,12 @@ use pymol_scene::{KeyBinding, KeyBindings, MoleculeObject, Session, SessionAdapt
 // Re-export SelectionEntry for use in UI
 pub use pymol_scene::SelectionEntry;
 
-use pymol_framework::component_store::ComponentStore;
+use crate::component_store::ComponentStore;
 use pymol_framework::message::MessageBus;
 
 use crate::async_tasks::{TaskContext, TaskRunner};
 use crate::layout::{Layout, pymol_classic};
-use crate::model::ViewportModel;
+use pymol_framework::model::ViewportModel;
 use crate::plugin_manager::PluginManager;
 use crate::view::AppView;
 

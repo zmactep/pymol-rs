@@ -3,10 +3,10 @@
 //! Combines the output log and command line into a single panel.
 //! Output is displayed above, command input below — always shown together.
 
-use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::component::{Component, EguiComponent, SharedContext};
 use pymol_framework::message::{AppMessage, MessageBus};
-use crate::model::{CommandLineModel, OutputModel};
-use crate::ui::command::CommandLineUiState;
+use pymol_framework::model::{CommandLineModel, OutputModel};
+use pymol_framework::completion::CommandLineState;
 use crate::ui::completion::CompletionContext;
 use crate::ui::{CommandLinePanel, OutputPanel};
 
@@ -14,7 +14,7 @@ use crate::ui::{CommandLinePanel, OutputPanel};
 pub struct ReplComponent {
     pub output: OutputModel,
     pub command_line: CommandLineModel,
-    pub command_line_ui: CommandLineUiState,
+    pub command_line_ui: CommandLineState,
 }
 
 impl ReplComponent {
@@ -22,7 +22,7 @@ impl ReplComponent {
         Self {
             output: OutputModel::new(),
             command_line: CommandLineModel::new(),
-            command_line_ui: CommandLineUiState::new(),
+            command_line_ui: CommandLineState::new(),
         }
     }
 }
@@ -42,6 +42,18 @@ impl Component for ReplComponent {
         "REPL"
     }
 
+    fn on_message(&mut self, msg: &AppMessage) {
+        match msg {
+            AppMessage::PrintInfo(text) => self.output.print_info(text),
+            AppMessage::PrintWarning(text) => self.output.print_warning(text),
+            AppMessage::PrintError(text) => self.output.print_error(text),
+            AppMessage::PrintCommand(text) => self.output.print_command(text),
+            _ => {}
+        }
+    }
+}
+
+impl EguiComponent for ReplComponent {
     fn show(&mut self, ui: &mut egui::Ui, ctx: &SharedContext, bus: &mut MessageBus) {
         // Output log fills available space minus the command line row
         let available = ui.available_height();
@@ -90,15 +102,5 @@ impl Component for ReplComponent {
             &completion_ctx,
             bus,
         );
-    }
-
-    fn on_message(&mut self, msg: &AppMessage) {
-        match msg {
-            AppMessage::PrintInfo(text) => self.output.print_info(text),
-            AppMessage::PrintWarning(text) => self.output.print_warning(text),
-            AppMessage::PrintError(text) => self.output.print_error(text),
-            AppMessage::PrintCommand(text) => self.output.print_command(text),
-            _ => {}
-        }
     }
 }

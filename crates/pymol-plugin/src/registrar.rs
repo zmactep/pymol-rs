@@ -10,7 +10,7 @@ use std::sync::Arc;
 use pymol_cmd::Command;
 pub use pymol_cmd::DynamicCommandInvocation;
 pub use pymol_cmd::{FormatHandler, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
-use pymol_framework::component::{Component, SharedContext};
+use pymol_framework::component::{EguiComponent, SharedContext};
 use pymol_framework::layout::PanelConfig;
 use pymol_framework::message::{AppMessage, MessageBus};
 pub use pymol_scene::{KeyBinding, KeyCode};
@@ -232,7 +232,7 @@ pub trait MessageHandler: Send {
 pub struct PluginRegistrar {
     pub(crate) metadata: Option<PluginMetadata>,
     pub(crate) commands: Vec<Box<dyn Command>>,
-    pub(crate) components: Vec<(Box<dyn Component>, PanelConfig)>,
+    pub(crate) components: Vec<(Box<dyn EguiComponent>, PanelConfig)>,
     pub(crate) message_handler: Option<Box<dyn MessageHandler>>,
     pub(crate) script_handlers: Vec<(String, ScriptHandler)>,
     pub(crate) format_handlers: Vec<FormatHandler>,
@@ -264,7 +264,7 @@ impl PluginRegistrar {
     }
 
     /// Register a GUI component with its panel configuration.
-    pub fn register_component(&mut self, comp: impl Component + 'static, config: PanelConfig) {
+    pub fn register_component(&mut self, comp: impl EguiComponent + 'static, config: PanelConfig) {
         self.components.push((Box::new(comp), config));
     }
 
@@ -319,7 +319,7 @@ impl PluginRegistrar {
     }
 
     /// Drain all registered components with their panel configurations.
-    pub fn drain_components(&mut self) -> Vec<(Box<dyn Component>, PanelConfig)> {
+    pub fn drain_components(&mut self) -> Vec<(Box<dyn EguiComponent>, PanelConfig)> {
         std::mem::take(&mut self.components)
     }
 

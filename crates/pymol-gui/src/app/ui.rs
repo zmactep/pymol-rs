@@ -8,7 +8,7 @@ use pymol_select::SelectionResult;
 
 use pymol_framework::component::SharedContext;
 use pymol_framework::message::AppMessage;
-use crate::model::ResidueRef;
+use pymol_framework::model::ResidueRef;
 use crate::ui::{DragDropOverlay, NotificationOverlay};
 use crate::layout::render_layout;
 

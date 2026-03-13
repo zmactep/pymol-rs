@@ -21,7 +21,7 @@ use pymol_plugin::registrar::{
 use pymol_scene::KeyBindings;
 
 use pymol_framework::component::SharedContext;
-use pymol_framework::component_store::ComponentStore;
+use crate::component_store::ComponentStore;
 use pymol_framework::message::{AppMessage, MessageBus};
 
 use crate::layout::Layout;
