@@ -238,7 +238,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: web
-        run: npm ci
+        run: npm install
 
       - name: Build WASM + TypeScript bundle
         working-directory: web
@@ -293,7 +293,14 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-executables, build-plugins, build-wheels, build-web, build-macos-app]
+    needs:
+      [
+        build-executables,
+        build-plugins,
+        build-wheels,
+        build-web,
+        build-macos-app,
+      ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
