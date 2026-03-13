@@ -8,7 +8,7 @@
 //! - Positional and named arguments
 //! - PyMOL selection syntax
 //! - Script (.pml) file execution
-//! - Command logging and history
+//! - Command history
 //!
 //! # Example
 //!
@@ -35,7 +35,6 @@
 //! - **CommandRegistry**: Maps command names to implementations
 //! - **CommandExecutor**: Dispatches and executes commands
 //! - **ScriptEngine**: Executes .pml script files
-//! - **CommandLogger**: Records commands for replay
 
 mod args;
 mod command;
@@ -44,7 +43,6 @@ mod dynamic;
 mod error;
 mod executor;
 mod history;
-mod logger;
 mod parser;
 mod script;
 
@@ -55,7 +53,6 @@ pub use dynamic::{DynamicCommand, DynamicCommandInvocation};
 pub use error::{CmdError, CmdResult, ParseError};
 pub use executor::{CommandExecutor, CommandOutput};
 pub use history::CommandHistory;
-pub use logger::{CommandLogger, LogFormat};
 pub use parser::{join_continued_lines, parse_command, parse_commands};
 pub use script::ScriptEngine;
 

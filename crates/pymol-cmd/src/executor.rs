@@ -2,7 +2,6 @@
 //!
 //! Dispatches and executes commands against a ViewerLike implementation.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use ahash::AHashMap;
@@ -10,7 +9,6 @@ use ahash::AHashMap;
 use crate::command::{CommandContext, CommandRegistry, FormatHandler, ScriptHandler, OutputMessage, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
-use crate::logger::CommandLogger;
 use crate::parser::{parse_command, parse_commands};
 
 /// Result of command execution including any output messages
@@ -34,16 +32,12 @@ impl CommandOutput {
 
 /// Command executor
 ///
-/// Manages command execution, logging, and history.
+/// Manages command execution and history.
 pub struct CommandExecutor {
     /// Command registry
     registry: CommandRegistry,
-    /// Command logger (optional)
-    logger: CommandLogger,
     /// Command history
     history: CommandHistory,
-    /// Whether to echo commands
-    echo: bool,
     /// Script handlers registered by plugins (extension -> handler for `run` command)
     script_handlers: AHashMap<String, ScriptHandler>,
     /// Format handlers registered by plugins (extension -> handler for `load`/`save`)
@@ -61,9 +55,7 @@ impl CommandExecutor {
     pub fn new() -> Self {
         Self {
             registry: CommandRegistry::with_builtins(),
-            logger: CommandLogger::new(),
             history: CommandHistory::new(),
-            echo: false,
             script_handlers: AHashMap::new(),
             format_handlers: AHashMap::new(),
         }
@@ -80,9 +72,7 @@ impl CommandExecutor {
     ) -> Self {
         Self {
             registry,
-            logger: CommandLogger::new(),
             history: CommandHistory::new(),
-            echo: false,
             script_handlers,
             format_handlers,
         }
@@ -106,16 +96,6 @@ impl CommandExecutor {
     /// Get a mutable reference to the command history
     pub fn history_mut(&mut self) -> &mut CommandHistory {
         &mut self.history
-    }
-
-    /// Get a reference to the logger
-    pub fn logger(&self) -> &CommandLogger {
-        &self.logger
-    }
-
-    /// Get a mutable reference to the logger
-    pub fn logger_mut(&mut self) -> &mut CommandLogger {
-        &mut self.logger
     }
 
     /// Register a script handler for a specific extension.
@@ -158,7 +138,7 @@ impl CommandExecutor {
     /// executor.do_(&mut viewer, "zoom")?;
     /// ```
     pub fn do_(&mut self, viewer: &mut dyn ViewerLike, cmd: &str) -> CmdResult {
-        self.do_with_options(viewer, cmd, true, false).map(|_| ())
+        self.do_with_options(viewer, cmd, false).map(|_| ())
     }
 
     /// Execute a command with options, returning any output messages
@@ -166,7 +146,6 @@ impl CommandExecutor {
     /// # Arguments
     /// * `viewer` - The viewer to execute against (implements ViewerLike)
     /// * `cmd` - The command string
-    /// * `log` - Whether to log the command
     /// * `quiet` - Whether to suppress output
     ///
     /// # Returns
@@ -175,7 +154,6 @@ impl CommandExecutor {
         &mut self,
         viewer: &mut dyn ViewerLike,
         cmd: &str,
-        log: bool,
         quiet: bool,
     ) -> Result<CommandOutput, CmdError> {
         let cmd = cmd.trim();
@@ -188,18 +166,8 @@ impl CommandExecutor {
             return Ok(CommandOutput::new());
         }
 
-        // Echo command if enabled
-        if self.echo && !quiet {
-            log::info!("PyMOL> {}", cmd);
-        }
-
         // Add to history
         self.history.push(cmd.to_string());
-
-        // Log command
-        if log && self.logger.is_active() {
-            self.logger.log(cmd);
-        }
 
         // Parse the command
         let parsed = parse_command(cmd)?;
@@ -210,17 +178,13 @@ impl CommandExecutor {
             .get(&parsed.name)
             .ok_or_else(|| CmdError::UnknownCommand(parsed.name.clone()))?;
 
-        // Snapshot history for commands that need it (e.g. save .pml)
-        let history_snapshot: Vec<String> = self.history.iter().map(|s| s.to_string()).collect();
-
         // Execute and collect output
         let mut ctx = CommandContext::new(viewer)
             .with_quiet(quiet)
-            .with_log(log)
             .with_registry(&self.registry)
             .with_script_handlers(&self.script_handlers)
             .with_format_handlers(&self.format_handlers)
-            .with_history(&history_snapshot);
+            .with_history(&self.history);
         command.execute(&mut ctx, &parsed)?;
 
         // Return collected output
@@ -252,15 +216,6 @@ impl CommandExecutor {
         Ok(())
     }
 
-    /// Open a log file
-    pub fn log_open(&mut self, path: &Path) -> CmdResult {
-        self.logger.log_open(path)
-    }
-
-    /// Close the log file
-    pub fn log_close(&mut self) -> CmdResult {
-        self.logger.log_close()
-    }
 }
 
 /// Format a parsed command back to a string (for logging)

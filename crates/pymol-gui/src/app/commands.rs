@@ -67,7 +67,7 @@ impl App {
         // Temporarily take the executor out to avoid a borrow conflict
         // (adapter already borrows self.state mutably).
         let mut executor = std::mem::replace(&mut self.executor, pymol_cmd::CommandExecutor::new());
-        let result = executor.do_with_options(&mut adapter, cmd, true, false);
+        let result = executor.do_with_options(&mut adapter, cmd, false);
         self.executor = executor;
 
         // Drop the adapter so we can read dirty_proxy

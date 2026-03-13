@@ -154,15 +154,6 @@ impl ScriptEngine {
         Ok(())
     }
 
-    /// Execute a single command through the engine
-    pub fn do_(&mut self, viewer: &mut dyn ViewerLike, cmd: &str) -> CmdResult {
-        self.executor.do_(viewer, cmd)
-    }
-
-    /// Execute multiple commands through the engine
-    pub fn do_multi(&mut self, viewer: &mut dyn ViewerLike, cmds: &str) -> CmdResult {
-        self.executor.do_multi(viewer, cmds)
-    }
 }
 
 #[cfg(test)]

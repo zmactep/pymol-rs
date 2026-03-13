@@ -335,19 +335,25 @@ EXAMPLES
                 ));
             }
             "pml" => {
-                let history = ctx.history().unwrap_or(&[]);
                 let mut file = std::fs::File::create(&path)
                     .map_err(|e| CmdError::FileFormat(e.to_string()))?;
                 use std::io::Write;
                 writeln!(file, "# PyMOL-RS command log")
                     .map_err(|e| CmdError::FileFormat(e.to_string()))?;
-                for cmd in history {
-                    writeln!(file, "{}", cmd)
-                        .map_err(|e| CmdError::FileFormat(e.to_string()))?;
-                }
+                let count = if let Some(history) = ctx.history() {
+                    let mut n = 0;
+                    for cmd in history.iter() {
+                        writeln!(file, "{}", cmd)
+                            .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+                        n += 1;
+                    }
+                    n
+                } else {
+                    0
+                };
                 ctx.print(&format!(
                     " Saved {} commands to \"{}\"",
-                    history.len(),
+                    count,
                     filename
                 ));
                 return Ok(());

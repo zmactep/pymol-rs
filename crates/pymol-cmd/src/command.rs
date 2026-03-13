@@ -8,6 +8,8 @@ use std::sync::Arc;
 use ahash::AHashMap;
 use pymol_mol::ObjectMolecule;
 
+use crate::history::CommandHistory;
+
 /// A script handler registered by a plugin for a specific file extension.
 ///
 /// Used by the `run` command to dispatch non-.pml files to the appropriate handler.
@@ -140,8 +142,6 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     pub viewer: &'v mut V,
     /// Whether to suppress output messages
     pub quiet: bool,
-    /// Whether to log this command
-    pub log: bool,
     /// Collected output messages (for GUI display)
     output_buffer: Vec<OutputMessage>,
     /// Optional reference to command registry (for help lookups)
@@ -150,8 +150,8 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     script_handlers: Option<&'r AHashMap<String, ScriptHandler>>,
     /// Format handlers registered by plugins (extension -> handler)
     format_handlers: Option<&'r AHashMap<String, Arc<FormatHandler>>>,
-    /// Command history snapshot (for saving as .pml script)
-    history: Option<&'r [String]>,
+    /// Command history (for saving as .pml script)
+    history: Option<&'r CommandHistory>,
 }
 
 impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
@@ -160,7 +160,6 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         Self {
             viewer,
             quiet: false,
-            log: true,
             output_buffer: Vec::new(),
             registry: None,
             script_handlers: None,
@@ -172,12 +171,6 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
     /// Set the quiet flag
     pub fn with_quiet(mut self, quiet: bool) -> Self {
         self.quiet = quiet;
-        self
-    }
-
-    /// Set the log flag
-    pub fn with_log(mut self, log: bool) -> Self {
-        self.log = log;
         self
     }
 
@@ -224,14 +217,14 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         self.format_handlers
     }
 
-    /// Set the command history snapshot
-    pub fn with_history(mut self, history: &'r [String]) -> Self {
+    /// Set the command history reference
+    pub fn with_history(mut self, history: &'r CommandHistory) -> Self {
         self.history = Some(history);
         self
     }
 
-    /// Get the command history snapshot
-    pub fn history(&self) -> Option<&[String]> {
+    /// Get the command history
+    pub fn history(&self) -> Option<&CommandHistory> {
         self.history
     }
 
@@ -437,19 +430,6 @@ impl CommandRegistry {
     /// Check if the registry is empty
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty()
-    }
-
-    /// Remove a command
-    pub fn remove(&mut self, name: &str) -> Option<Arc<dyn Command>> {
-        // Remove aliases pointing to this command
-        self.aliases.retain(|_, v| v != name);
-        self.commands.remove(name)
-    }
-
-    /// Clear all commands
-    pub fn clear(&mut self) {
-        self.commands.clear();
-        self.aliases.clear();
     }
 
     /// Get all command names (including aliases) that expect a specific argument hint

@@ -64,7 +64,7 @@ impl StandaloneBackend {
             async_fetch_fn: None,
         };
         self.executor
-            .do_with_options(&mut adapter, command, true, silent)
+            .do_with_options(&mut adapter, command, silent)
             .map(|_| ())
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
