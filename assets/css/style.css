@@ -883,6 +883,15 @@ footer {
     height: 100%;
     object-fit: cover;
 }
+#skripkin-viewer {
+    position: absolute;
+    inset: 0;
+}
+#skripkin-viewer canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+}
 .showcase-render::before {
     content: "";
     position: absolute;
@@ -963,6 +972,12 @@ footer {
     max-width: 480px;
     margin: 0 auto 2.5rem;
     position: relative;
+}
+.cta-hint {
+    font-size: 0.9rem !important;
+    font-style: italic;
+    opacity: 0.7;
+    margin-top: -1rem !important;
 }
 .cta-actions {
     display: flex;
