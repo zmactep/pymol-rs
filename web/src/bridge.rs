@@ -268,20 +268,28 @@ impl WebViewer {
 
     /// Load molecular data from bytes.
     ///
-    /// `format` should be one of: "pdb", "xyz" (more formats coming soon)
+    /// `format` should be one of: "pdb", "xyz", "cif", "mmcif", "bcif"
     #[wasm_bindgen]
     pub fn load_data(&mut self, data: &[u8], name: &str, format: &str) -> Result<(), JsValue> {
-        let data_str =
-            std::str::from_utf8(data).map_err(|_| JsValue::from_str("Data is not valid UTF-8"))?;
-
-        let mol = match format.to_lowercase().as_str() {
-            "pdb" => pymol_io::pdb::read_pdb_str(data_str),
-            "xyz" => pymol_io::xyz::read_xyz_str(data_str),
+        let fmt = format.to_lowercase();
+        let mol = match fmt.as_str() {
+            // Binary formats — parse directly from bytes
+            "bcif" => pymol_io::bcif::read_bcif_bytes(data),
+            // Text formats — require UTF-8
             _ => {
-                return Err(JsValue::from_str(&format!(
-                    "Direct loading not yet supported for: {}. Use execute() instead.",
-                    format
-                )))
+                let data_str = std::str::from_utf8(data)
+                    .map_err(|_| JsValue::from_str("Data is not valid UTF-8"))?;
+                match fmt.as_str() {
+                    "pdb" => pymol_io::pdb::read_pdb_str(data_str),
+                    "xyz" => pymol_io::xyz::read_xyz_str(data_str),
+                    "cif" | "mmcif" => pymol_io::cif::read_cif_str(data_str),
+                    _ => {
+                        return Err(JsValue::from_str(&format!(
+                            "Direct loading not yet supported for: {}. Use execute() instead.",
+                            fmt
+                        )))
+                    }
+                }
             }
         };
 

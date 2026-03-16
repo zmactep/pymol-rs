@@ -1556,7 +1556,7 @@ checksum = "b5a041e753da8b807c9255f28de81879c78c876392ff2469cde94799b2896b9d"
 
 [[package]]
 name = "pymol-algos"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "lin_alg",
  "phf",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-cmd"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "image",
@@ -1586,7 +1586,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-color"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "serde",
@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-framework"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "dirs 5.0.1",
  "log",
@@ -1610,7 +1610,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-io"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "flate2",
  "lin_alg",
@@ -1623,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-mol"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "bitflags 2.11.0",
@@ -1637,7 +1637,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-raytracer"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytemuck",
  "lin_alg",
@@ -1651,7 +1651,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-render"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "bytemuck",
  "lin_alg",
@@ -1668,7 +1668,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-scene"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "bitflags 2.11.0",
@@ -1692,7 +1692,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-select"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "bitvec",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-session"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "flate2",
@@ -1722,7 +1722,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-settings"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "parking_lot",
@@ -1732,7 +1732,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-web"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
