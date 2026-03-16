@@ -17,7 +17,6 @@ lin_alg = { workspace = true }
 bytemuck = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
-rayon = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

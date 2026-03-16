@@ -45,3 +45,10 @@ console_error_panic_hook = "0.1"
 
 # getrandom needs wasm_js backend on wasm32 (used transitively via ahash)
 getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = "z"        # optimize for size
+lto = "fat"            # full link-time optimization
+codegen-units = 1      # single codegen unit for better LTO
+strip = true           # strip debug symbols
+panic = "abort"        # smaller panic handler

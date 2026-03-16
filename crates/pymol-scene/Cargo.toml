@@ -10,13 +10,15 @@ documentation.workspace = true
 description = "Scene management, camera, and window handling for PyMOL-RS"
 
 [features]
-default = ["windowing"]
+default = ["windowing", "png-export", "parallel"]
 windowing = ["dep:winit", "dep:pollster"]
+png-export = ["dep:image"]
+parallel = ["pymol-render/parallel"]
 
 [dependencies]
 # Internal crates
 pymol-mol.workspace = true
-pymol-render.workspace = true
+pymol-render = { workspace = true, default-features = false }
 pymol-raytracer.workspace = true
 pymol-select.workspace = true
 pymol-color.workspace = true
@@ -33,5 +35,5 @@ ahash.workspace = true
 bitflags.workspace = true
 parking_lot.workspace = true
 pollster = { version = "0.4", optional = true }
-image.workspace = true
+image = { workspace = true, optional = true }
 serde = { workspace = true }

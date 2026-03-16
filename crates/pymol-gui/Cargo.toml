@@ -17,14 +17,14 @@ path = "src/main.rs"
 # Internal crates
 pymol-framework = { workspace = true, features = ["egui"] }
 pymol-plugin = { workspace = true }
-pymol-scene = { workspace = true }
-pymol-cmd = { workspace = true, features = ["fetch", "fetch-async"] }
+pymol-scene = { workspace = true, features = ["windowing", "png-export", "parallel"] }
+pymol-cmd = { workspace = true, features = ["fetch", "fetch-async", "native-io"] }
 pymol-mol = { workspace = true }
 pymol-io = { workspace = true, features = ["fetch-async"] }
 pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
 pymol-color = { workspace = true }
-pymol-render = { workspace = true }
+pymol-render = { workspace = true, features = ["parallel"] }
 pymol-raytracer = { workspace = true }
 
 # Plugin loading

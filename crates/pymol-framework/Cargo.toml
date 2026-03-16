@@ -16,7 +16,7 @@ egui = ["dep:egui"]
 [dependencies]
 pymol-cmd = { workspace = true, default-features = false }
 pymol-mol = { workspace = true }
-pymol-scene = { workspace = true }
+pymol-scene = { workspace = true, default-features = false }
 pymol-color = { workspace = true }
 pymol-settings = { workspace = true }
 # Note: pymol-settings and dirs are needed for the completion module

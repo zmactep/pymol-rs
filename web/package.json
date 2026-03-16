@@ -17,7 +17,7 @@
     "pkg"
   ],
   "scripts": {
-    "wasm:build": "wasm-pack build --target web --out-dir pkg",
+    "wasm:build": "wasm-pack build --target web --out-dir pkg --no-opt",
     "dev": "npm run wasm:build && vite",
     "build": "npm run wasm:build && vite build",
     "preview": "vite preview"

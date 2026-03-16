@@ -2244,7 +2244,6 @@ dependencies = [
  "log",
  "pymol-color",
  "pymol-mol",
- "rayon",
  "thiserror 2.0.18",
  "wgpu",
 ]

@@ -18,9 +18,16 @@ use super::selecting::evaluate_selection;
 
 /// Expand shell-style paths: ~ to home directory, $VAR to environment variables
 pub fn expand_path(path: &str) -> PathBuf {
-    match shellexpand::full(path) {
-        Ok(expanded) => PathBuf::from(expanded.as_ref()),
-        Err(_) => PathBuf::from(path), // Fall back to original if expansion fails
+    #[cfg(feature = "native-io")]
+    {
+        match shellexpand::full(path) {
+            Ok(expanded) => PathBuf::from(expanded.as_ref()),
+            Err(_) => PathBuf::from(path),
+        }
+    }
+    #[cfg(not(feature = "native-io"))]
+    {
+        PathBuf::from(path)
     }
 }
 
@@ -558,17 +565,33 @@ EXAMPLES
             }
         } else if let Some(vp_img) = ctx.viewer.get_viewport_image() {
             // Export stored viewport image overlay
-            use image::RgbaImage;
+            #[cfg(feature = "native-io")]
+            {
+                use image::RgbaImage;
 
-            let img = RgbaImage::from_raw(vp_img.width, vp_img.height, vp_img.data.clone())
-                .ok_or_else(|| CmdError::execution("Invalid viewport image data".to_string()))?;
+                let img =
+                    RgbaImage::from_raw(vp_img.width, vp_img.height, vp_img.data.clone())
+                        .ok_or_else(|| {
+                            CmdError::execution("Invalid viewport image data".to_string())
+                        })?;
 
-            img.save(&path)
-                .map_err(|e| CmdError::execution(format!("Failed to save PNG: {}", e)))?;
+                img.save(&path)
+                    .map_err(|e| CmdError::execution(format!("Failed to save PNG: {}", e)))?;
 
-            if !quiet {
-                ctx.print(&format!(" ({}x{})", vp_img.width, vp_img.height));
-                ctx.print(&format!(" Saved viewport image to \"{}\"", path.display()));
+                if !quiet {
+                    ctx.print(&format!(" ({}x{})", vp_img.width, vp_img.height));
+                    ctx.print(&format!(
+                        " Saved viewport image to \"{}\"",
+                        path.display()
+                    ));
+                }
+            }
+            #[cfg(not(feature = "native-io"))]
+            {
+                let _ = vp_img;
+                return Err(CmdError::execution(
+                    "PNG export not available in this build".to_string(),
+                ));
             }
         } else {
             // Capture rasterized screenshot

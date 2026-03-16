@@ -364,11 +364,25 @@ pub fn capture_png_to_file(
     }
 
     // Save as PNG using image crate
-    let img: image::RgbaImage = image::ImageBuffer::from_raw(output_width, output_height, pixels)
-        .ok_or_else(|| ViewerError::GpuInitFailed("Failed to create image buffer".to_string()))?;
+    #[cfg(feature = "png-export")]
+    {
+        let img: image::RgbaImage =
+            image::ImageBuffer::from_raw(output_width, output_height, pixels)
+                .ok_or_else(|| {
+                    ViewerError::GpuInitFailed("Failed to create image buffer".to_string())
+                })?;
 
-    img.save(path)
-        .map_err(|e| ViewerError::IoError(format!("Failed to save PNG: {}", e)))?;
+        img.save(path)
+            .map_err(|e| ViewerError::IoError(format!("Failed to save PNG: {}", e)))?;
+    }
+    #[cfg(not(feature = "png-export"))]
+    {
+        let _ = (path, output_width, output_height, pixels);
+        return Err(ViewerError::IoError(
+            "PNG export not available in this build".to_string(),
+        ));
+    }
 
+    #[cfg(feature = "png-export")]
     Ok(())
 }

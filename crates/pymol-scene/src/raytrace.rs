@@ -386,14 +386,25 @@ pub fn raytrace_to_file(
     let (image_data, final_width, final_height) = raytrace_scene(input, width, height, antialias)?;
 
     // Save to PNG
-    image::save_buffer(
-        path,
-        &image_data,
-        final_width,
-        final_height,
-        image::ColorType::Rgba8,
-    )
-    .map_err(|e| RaytraceError::ImageSaveFailed(e.to_string()))?;
+    #[cfg(feature = "png-export")]
+    {
+        image::save_buffer(
+            path,
+            &image_data,
+            final_width,
+            final_height,
+            image::ColorType::Rgba8,
+        )
+        .map_err(|e| RaytraceError::ImageSaveFailed(e.to_string()))?;
+    }
+    #[cfg(not(feature = "png-export"))]
+    {
+        let _ = (path, &image_data, final_width, final_height);
+        return Err(RaytraceError::ImageSaveFailed(
+            "PNG export not available in this build".to_string(),
+        ));
+    }
 
+    #[cfg(feature = "png-export")]
     Ok((final_width, final_height))
 }
