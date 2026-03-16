@@ -1767,7 +1767,7 @@ pub static SETTINGS: &[Setting] = &[
     s_color!(797, "cell_color", ObjectState, -1),
     // 798-801: Silhouette settings
     s_bool!(798, "silhouettes", Global, false),
-    s_float!(799, "silhouette_width", Global, 4.0, 0.5, 10.0),
+    s_float!(799, "silhouette_width", Global, 1.0, 0.5, 10.0),
     s_color!(800, "silhouette_color", ObjectState, -1),
     s_float!(801, "silhouette_depth_jump", Global, 0.03, 0.001, 0.5),
     // 802-806: Shading mode & multi-directional shadow AO
