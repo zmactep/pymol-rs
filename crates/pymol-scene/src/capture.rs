@@ -156,7 +156,11 @@ pub fn capture_png_to_file(
                         r: clear_color[0] as f64,
                         g: clear_color[1] as f64,
                         b: clear_color[2] as f64,
-                        a: 1.0,
+                        a: if settings.get_bool(pymol_settings::id::opaque_background) {
+                            1.0
+                        } else {
+                            0.0
+                        },
                     }),
                     store: wgpu::StoreOp::Store,
                 },
