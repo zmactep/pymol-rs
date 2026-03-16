@@ -10,7 +10,7 @@ class p {
     this.container = e, this.canvas = document.createElement("canvas"), this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8), this.canvas.style.width = "100%", this.canvas.style.height = "100%", this.canvas.style.display = "block", this.canvas.tabIndex = 0, e.appendChild(this.canvas);
   }
   async init() {
-    const e = await import("./pymol_web-CSY7lvO0.js");
+    const e = await import("./pymol_web-DZbtLDqN.js");
     await e.default(), this.syncCanvasSize();
     const t = await e.WebViewer.create(this.canvas.id);
     return this.wasm = t, this.bindEvents(), this.startLoop(), t;

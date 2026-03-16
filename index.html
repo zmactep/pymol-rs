@@ -596,20 +596,21 @@
 
             const viewer = new PyMolRSViewer(document.getElementById("skripkin-viewer"));
             await viewer.init();
+            viewer.execute("bg_color 0a0b0f")
 
             await viewer.loadUrl("./assets/pdb/1GVF.pdb", {
                 name: "1gvf",
                 format: "pdb",
             });
 
-            viewer.execute("bg_color 0a0b0f")
             viewer.execute("as cartoon");
             viewer.execute("color chain");
             viewer.execute("symexp sym, 1gvf, 1gvf, 1, 1");
             viewer.execute("center");
             viewer.execute("orient");
+            viewer.execute("zoom name CA, buffer=-48")
             viewer.execute("set shading_mode, skripkin");
-            viewer.execute("set ambient, 0.7");
+            viewer.execute("set ambient, 0.8");
             viewer.execute("set silhouettes, on");
             viewer.execute("set silhouette_width, 1");
             viewer.execute("set silhouette_color, black");
