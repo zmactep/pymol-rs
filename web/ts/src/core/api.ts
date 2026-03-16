@@ -112,7 +112,11 @@ export class PyMolRSViewer {
     const data = new Uint8Array(await resp.arrayBuffer());
 
     const urlPath = new URL(url, location.href).pathname;
-    const fileName = urlPath.split("/").pop() ?? "structure";
+    let fileName = urlPath.split("/").pop() ?? "structure";
+    // Strip .gz suffix — gzip is handled transparently by the WASM layer
+    if (fileName.toLowerCase().endsWith(".gz")) {
+      fileName = fileName.slice(0, -3);
+    }
     const name = options?.name ?? fileName.replace(/\.[^.]+$/, "");
     const format = options?.format ?? fileName.split(".").pop()?.toLowerCase() ?? "pdb";
 

@@ -269,8 +269,25 @@ impl WebViewer {
     /// Load molecular data from bytes.
     ///
     /// `format` should be one of: "pdb", "xyz", "cif", "mmcif", "bcif"
+    ///
+    /// Gzip-compressed data is automatically detected and decompressed.
     #[wasm_bindgen]
     pub fn load_data(&mut self, data: &[u8], name: &str, format: &str) -> Result<(), JsValue> {
+        // Decompress gzip if detected (magic bytes 0x1f 0x8b)
+        let decompressed;
+        let data = if data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+            use std::io::Read;
+            let mut decoder = pymol_io::compress::gzip_reader(data);
+            let mut buf = Vec::new();
+            decoder.read_to_end(&mut buf).map_err(|e| {
+                JsValue::from_str(&format!("Gzip decompression failed: {}", e))
+            })?;
+            decompressed = buf;
+            decompressed.as_slice()
+        } else {
+            data
+        };
+
         let fmt = format.to_lowercase();
         let mol = match fmt.as_str() {
             // Binary formats — parse directly from bytes
