@@ -456,9 +456,15 @@ impl Camera {
         self.view.clip_back = distance + radius + radius;
     }
 
-    /// Zoom to fit the bounding box while preserving the current rotation
-    pub fn zoom_to(&mut self, bbox_min: Vec3, bbox_max: Vec3) {
+    /// Zoom to fit the bounding box while preserving the current rotation.
+    ///
+    /// `buffer` expands the bounding box by this many angstroms in each direction.
+    pub fn zoom_to(&mut self, bbox_min: Vec3, bbox_max: Vec3, buffer: f32) {
         self.animation = None;
+
+        // Apply buffer to expand bounding box
+        let bbox_min = Vec3::new(bbox_min.x - buffer, bbox_min.y - buffer, bbox_min.z - buffer);
+        let bbox_max = Vec3::new(bbox_max.x + buffer, bbox_max.y + buffer, bbox_max.z + buffer);
 
         // Calculate center
         let center = Vec3::new(
@@ -475,6 +481,19 @@ impl Camera {
         );
         let radius = (extent.x * extent.x + extent.y * extent.y + extent.z * extent.z).sqrt() * 0.5;
 
+        self.apply_zoom(center, radius);
+    }
+
+    /// Zoom to fit a sphere defined by center and radius (used for `complete=1` mode).
+    ///
+    /// `buffer` is added to the radius.
+    pub fn zoom_to_sphere(&mut self, center: Vec3, radius: f32, buffer: f32) {
+        self.animation = None;
+        self.apply_zoom(center, radius + buffer);
+    }
+
+    /// Shared zoom logic: positions camera to frame a sphere of given radius at center.
+    fn apply_zoom(&mut self, center: Vec3, radius: f32) {
         // Set origin to center
         self.view.origin = center;
 

@@ -185,7 +185,7 @@ EXAMPLES
                     ctx.print(&format!(" Loaded PSE session \"{}\" ({} objects)", filename, n_objs));
                 }
                 // Zoom to show everything
-                ctx.viewer.zoom_all();
+                ctx.viewer.zoom_all(0.0);
                 ctx.viewer.update_movie_state_count();
                 return Ok(());
             }
@@ -249,7 +249,7 @@ EXAMPLES
         }
 
         // Zoom to loaded molecule (preserves rotation)
-        ctx.viewer.zoom_on(&object_name);
+        ctx.viewer.zoom_on(&object_name, 0.0);
         ctx.viewer.update_movie_state_count();
 
         Ok(())
@@ -874,7 +874,7 @@ EXAMPLES
             ctx.print(&format!(" Fetched {} as \"{}\"", code, name));
 
             // Zoom to fetched molecule (preserves rotation)
-            ctx.viewer.zoom_on(name);
+            ctx.viewer.zoom_on(name, 0.0);
             ctx.viewer.update_movie_state_count();
 
             Ok(())

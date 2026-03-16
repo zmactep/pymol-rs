@@ -291,7 +291,7 @@ impl WebViewer {
                 self.session.registry.add(mol_obj);
                 // Zoom to fit
                 if let Some((min, max)) = self.session.registry.extent() {
-                    self.session.camera.zoom_to(min, max);
+                    self.session.camera.zoom_to(min, max, 0.0);
                 }
                 self.needs_redraw = true;
                 Ok(())

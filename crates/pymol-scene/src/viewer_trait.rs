@@ -138,9 +138,9 @@ pub trait ViewerLike {
     // =========================================================================
 
     /// Zoom to fit all objects while preserving rotation
-    fn zoom_all(&mut self) {
+    fn zoom_all(&mut self, buffer: f32) {
         if let Some((min, max)) = self.objects().extent() {
-            self.camera_mut().zoom_to(min, max);
+            self.camera_mut().zoom_to(min, max, buffer);
             self.set_viewport_image_internal(None);
             self.request_redraw();
         }
@@ -149,14 +149,14 @@ pub trait ViewerLike {
     /// Zoom to fit a specific object while preserving rotation
     ///
     /// For groups, uses the combined extent of all children.
-    fn zoom_on(&mut self, name: &str) {
+    fn zoom_on(&mut self, name: &str, buffer: f32) {
         let extent = if self.objects().get_group(name).is_some() {
             self.objects().group_extent(name)
         } else {
             self.objects().get(name).and_then(|o| o.extent())
         };
         if let Some((min, max)) = extent {
-            self.camera_mut().zoom_to(min, max);
+            self.camera_mut().zoom_to(min, max, buffer);
             self.set_viewport_image_internal(None);
             self.request_redraw();
         }

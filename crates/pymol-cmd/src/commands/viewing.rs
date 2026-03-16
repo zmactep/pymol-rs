@@ -57,6 +57,50 @@ fn selection_extent(
     }
 }
 
+/// Compute the center and max radius of atoms matching a selection expression.
+///
+/// Returns the bounding-box center and the maximum distance from that center
+/// to any selected atom. Used for `complete=1` zoom mode.
+fn selection_max_radius(
+    viewer: &dyn ViewerLike,
+    selection: &str,
+) -> CmdResult<Option<(Vec3, f32)>> {
+    let Some((min, max)) = selection_extent(viewer, selection)? else {
+        return Ok(None);
+    };
+
+    let center = Vec3::new(
+        (min.x + max.x) * 0.5,
+        (min.y + max.y) * 0.5,
+        (min.z + max.z) * 0.5,
+    );
+
+    let selection_results = evaluate_selection(viewer, selection)?;
+    let mut max_dist_sq: f32 = 0.0;
+
+    for (obj_name, selected) in &selection_results {
+        if selected.count() > 0 {
+            if let Some(mol_obj) = viewer.objects().get_molecule(obj_name) {
+                let mol = mol_obj.molecule();
+                let state = mol.current_state;
+                for idx in selected.indices() {
+                    if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
+                        let dx = coord.x - center.x;
+                        let dy = coord.y - center.y;
+                        let dz = coord.z - center.z;
+                        let dist_sq = dx * dx + dy * dy + dz * dz;
+                        if dist_sq > max_dist_sq {
+                            max_dist_sq = dist_sq;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Some((center, max_dist_sq.sqrt())))
+}
+
 /// Collect all 3D coordinates of atoms matching a selection expression.
 fn collect_selection_coords(
     viewer: &dyn ViewerLike,
@@ -158,15 +202,21 @@ EXAMPLES
             .or_else(|| args.get_named_str("selection"))
             .unwrap_or("all");
 
-        let _buffer = args
+        let buffer = args
             .get_float(1)
             .or_else(|| args.get_named_float("buffer"))
-            .unwrap_or(0.0);
+            .unwrap_or(0.0) as f32;
 
         let _state = args
             .get_int(2)
             .or_else(|| args.get_named_int("state"))
             .unwrap_or(0);
+
+        let complete = args
+            .get_int(3)
+            .or_else(|| args.get_named_int("complete"))
+            .unwrap_or(0)
+            != 0;
 
         let _animate = args
             .get_float(4)
@@ -175,7 +225,7 @@ EXAMPLES
 
         // For "all", zoom to all objects (preserves rotation)
         if selection == "all" || selection == "*" {
-            ctx.viewer.zoom_all();
+            ctx.viewer.zoom_all(buffer);
             if !ctx.quiet {
                 ctx.print(" Zoomed to all objects");
             }
@@ -184,7 +234,7 @@ EXAMPLES
 
         // Try to zoom to a specific object by name
         if ctx.viewer.objects().contains(selection) {
-            ctx.viewer.zoom_on(selection);
+            ctx.viewer.zoom_on(selection, buffer);
             if !ctx.quiet {
                 ctx.print(&format!(" Zoomed to \"{}\"", selection));
             }
@@ -197,7 +247,7 @@ EXAMPLES
         if !matches.is_empty() {
             // For now, zoom on first match
             if let Some(name) = matches.first() {
-                ctx.viewer.zoom_on(name);
+                ctx.viewer.zoom_on(name, buffer);
                 if !ctx.quiet {
                     ctx.print(&format!(" Zoomed to \"{}\"", name));
                 }
@@ -206,8 +256,19 @@ EXAMPLES
         }
 
         // Try as selection expression (resi 28, chain A, name CA, etc.)
-        if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
-            ctx.viewer.camera_mut().zoom_to(min, max);
+        if complete {
+            // complete=1: use true bounding sphere (max distance from center to any atom)
+            if let Some((center, radius)) = selection_max_radius(ctx.viewer, selection)? {
+                ctx.viewer.camera_mut().zoom_to_sphere(center, radius, buffer);
+                ctx.viewer.set_viewport_image(None);
+                ctx.viewer.request_redraw();
+                if !ctx.quiet {
+                    ctx.print(&format!(" Zoomed to \"{}\"", selection));
+                }
+                return Ok(());
+            }
+        } else if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
+            ctx.viewer.camera_mut().zoom_to(min, max, buffer);
             ctx.viewer.set_viewport_image(None);
             ctx.viewer.request_redraw();
             if !ctx.quiet {
@@ -490,7 +551,7 @@ EXAMPLES
 
         // 9. Zoom to fit the selection
         if let Some((min, max)) = selection_extent(ctx.viewer, selection)? {
-            ctx.viewer.camera_mut().zoom_to(min, max);
+            ctx.viewer.camera_mut().zoom_to(min, max, 0.0);
         }
 
         ctx.viewer.set_viewport_image(None);
