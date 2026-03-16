@@ -10,7 +10,7 @@ class p {
     this.container = e, this.canvas = document.createElement("canvas"), this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8), this.canvas.style.width = "100%", this.canvas.style.height = "100%", this.canvas.style.display = "block", this.canvas.tabIndex = 0, e.appendChild(this.canvas);
   }
   async init() {
-    const e = await import("./pymol_web-DZbtLDqN.js");
+    const e = await import("./pymol_web-BVYFpk_l.js");
     await e.default(), this.syncCanvasSize();
     const t = await e.WebViewer.create(this.canvas.id);
     return this.wasm = t, this.bindEvents(), this.startLoop(), t;
@@ -310,7 +310,10 @@ class x {
     var h;
     const s = await fetch(e);
     if (!s.ok) throw new Error(`Fetch failed: ${s.status} ${s.statusText}`);
-    const i = new Uint8Array(await s.arrayBuffer()), o = new URL(e, location.href).pathname.split("/").pop() ?? "structure", c = (t == null ? void 0 : t.name) ?? o.replace(/\.[^.]+$/, ""), l = (t == null ? void 0 : t.format) ?? ((h = o.split(".").pop()) == null ? void 0 : h.toLowerCase()) ?? "pdb";
+    const i = new Uint8Array(await s.arrayBuffer());
+    let o = new URL(e, location.href).pathname.split("/").pop() ?? "structure";
+    o.toLowerCase().endsWith(".gz") && (o = o.slice(0, -3));
+    const c = (t == null ? void 0 : t.name) ?? o.replace(/\.[^.]+$/, ""), l = (t == null ? void 0 : t.format) ?? ((h = o.split(".").pop()) == null ? void 0 : h.toLowerCase()) ?? "pdb";
     this.loadData(i, c, l);
   }
   // ---------------------------------------------------------------------------
@@ -359,7 +362,7 @@ class x {
     this.panels.clear(), this.core.destroy();
   }
 }
-function E(r = "pymol-rs-viewer") {
+function _(r = "pymol-rs-viewer") {
   customElements.get(r) || customElements.define(
     r,
     class extends HTMLElement {
@@ -386,5 +389,5 @@ function E(r = "pymol-rs-viewer") {
 }
 export {
   x as PyMolRSViewer,
-  E as registerElement
+  _ as registerElement
 };
