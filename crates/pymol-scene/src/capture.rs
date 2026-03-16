@@ -7,13 +7,13 @@ use std::path::Path;
 
 use pymol_color::{Color, ElementColors, NamedColors};
 use pymol_render::silhouette::SilhouettePipeline;
-use pymol_render::{ColorResolver, GlobalUniforms, RenderContext};
+use pymol_render::{ColorResolver, RenderContext};
 use pymol_settings::GlobalSettings;
 
 use crate::camera::Camera;
 use crate::error::ViewerError;
 use crate::object::{Object, ObjectRegistry};
-use crate::uniform::compute_reflect_scale;
+use crate::uniform::setup_uniforms;
 
 /// Capture the current scene to a PNG file
 ///
@@ -113,98 +113,18 @@ pub fn capture_png_to_file(
     });
     let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    // Update uniforms for the capture resolution
-    let mut uniforms = GlobalUniforms::new();
-
     // Temporarily update camera aspect ratio for correct projection
     let original_aspect = camera.aspect();
     camera.set_aspect(output_width as f32 / output_height as f32);
 
-    uniforms.set_camera(camera.view_matrix(), camera.projection_matrix());
-    uniforms.set_background(clear_color);
-    uniforms.set_viewport(output_width as f32, output_height as f32);
-
-    let camera_pos = camera.world_position();
-    uniforms.camera_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.0];
-
-    // Multi-light support (PyMOL light_count setting)
-    let light_count = settings.get_int(pymol_settings::id::light_count);
-
-    // spec_count controls how many positional lights contribute specular
-    // -1 (default) means all positional lights contribute specular
-    let spec_count = settings.get_int(pymol_settings::id::spec_count);
-
-    // Gather light directions from settings (light, light2, ..., light9)
-    let light_setting_ids = [
-        pymol_settings::id::light,
-        pymol_settings::id::light2,
-        pymol_settings::id::light3,
-        pymol_settings::id::light4,
-        pymol_settings::id::light5,
-        pymol_settings::id::light6,
-        pymol_settings::id::light7,
-        pymol_settings::id::light8,
-        pymol_settings::id::light9,
-    ];
-
-    let light_dirs: Vec<[f32; 3]> = light_setting_ids
-        .iter()
-        .map(|&id| settings.get_float3(id))
-        .collect();
-
-    uniforms.set_lights(light_count, spec_count, &light_dirs);
-
-    // Lighting settings
-    let ambient = settings.get_float(pymol_settings::id::ambient);
-    let direct = settings.get_float(pymol_settings::id::direct);
-    let reflect = settings.get_float(pymol_settings::id::reflect);
-    let specular = settings.get_float(pymol_settings::id::specular);
-    let shininess = settings.get_float(pymol_settings::id::shininess);
-    let spec_direct = settings.get_float(pymol_settings::id::spec_direct);
-    let spec_direct_power = settings.get_float(pymol_settings::id::spec_direct_power);
-
-    // PyMOL brightness consistency adjustments:
-    // 1. Scale reflect based on light directions to maintain consistent brightness
-    // 2. When light_count < 2, redirect reflect energy to direct (headlight)
-    let reflect_scale = compute_reflect_scale(light_count, &light_dirs);
-    let reflect_scaled = reflect * reflect_scale;
-
-    let (direct_adjusted, reflect_final) = if light_count < 2 {
-        // No positional lights - add reflect to direct (PyMOL behavior)
-        ((direct + reflect_scaled).min(1.0), 0.0)
-    } else {
-        (direct, reflect_scaled)
-    };
-
-    uniforms.set_lighting(
-        ambient,
-        direct_adjusted,
-        reflect_final,
-        specular,
-        shininess,
-        spec_direct,
-        spec_direct_power,
+    // Setup uniforms using the shared helper that dispatches by shading mode
+    // (Classic vs Skripkin). This ensures the exported image matches on-screen shading.
+    let uniforms = setup_uniforms(
+        camera,
+        settings,
+        clear_color,
+        (output_width as f32, output_height as f32),
     );
-
-    // Clip planes
-    let current_view = camera.current_view();
-    uniforms.set_clip_planes(current_view.clip_front, current_view.clip_back);
-
-    // Fog parameters
-    let depth_cue_enabled = settings.get_bool(pymol_settings::id::depth_cue);
-    let fog_density = settings.get_float(pymol_settings::id::fog);
-    if depth_cue_enabled && fog_density > 0.0 {
-        let fog_start_ratio = settings.get_float(pymol_settings::id::fog_start);
-        let fog_start_actual = (current_view.clip_back - current_view.clip_front) * fog_start_ratio + current_view.clip_front;
-        let fog_end_actual = if (fog_density - 1.0).abs() < 0.001 {
-            current_view.clip_back
-        } else {
-            fog_start_actual + (current_view.clip_back - fog_start_actual) / fog_density
-        };
-        uniforms.set_fog(fog_start_actual, fog_end_actual, fog_density, clear_color);
-        uniforms.set_depth_cue(1.0);
-    }
-
     context.update_uniforms(&uniforms);
 
     // Restore original aspect ratio
