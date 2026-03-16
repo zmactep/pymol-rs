@@ -59,6 +59,8 @@ make release && make run
 | Release build | `make release` |
 | Debug build | `make debug` |
 | Python wheel | `make python` (requires [maturin](https://github.com/PyO3/maturin)) |
+| Plugins | `make plugins` |
+| Web widget | `make web-build` |
 | Tests | `make test` |
 
 ## What works
@@ -108,7 +110,50 @@ def highlight(selection):
     cmd.color("yellow", selection)
 
 cmd.extend("highlight", highlight)
-cmd.show_gui()
+```
+
+## Web Version
+
+PyMOL-RS runs in the browser via WebAssembly + WebGPU. The viewer is published as an npm package `@pymol-rs/viewer` and can be embedded in any web page.
+
+**JavaScript API:**
+```html
+<script type="module">
+  import { PyMolRSViewer } from "@pymol-rs/viewer";
+
+  const viewer = new PyMolRSViewer(document.getElementById("viewer"));
+  await viewer.init();
+
+  await viewer.loadUrl("https://models.rcsb.org/1IGT.bcif.gz", {
+    name: "1IGT",
+    format: "bcif",
+  });
+
+  viewer.execute("show cartoon");
+  viewer.execute("color green, chain A");
+</script>
+```
+
+**Web Component** — register `<pymol-rs-viewer>` as a custom element:
+```html
+<script type="module">
+  import { registerElement } from "@pymol-rs/viewer";
+  registerElement();
+</script>
+
+<pymol-rs-viewer
+  src="https://models.rcsb.org/1IGT.bcif.gz"
+  panels="repl,objects,sequence"
+  command="show cartoon; color green, chain A">
+</pymol-rs-viewer>
+```
+
+**Build from source:**
+```bash
+cd web
+npm install
+npm run build     # production build → dist/
+npm run dev       # dev server with hot reload
 ```
 
 ## Architecture
@@ -187,7 +232,6 @@ PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
 ## Roadmap
 
 - [ ] Electron density maps (isomesh / isosurface)
-- [ ] Web-version using WebAssembly
 
 ## License
 
