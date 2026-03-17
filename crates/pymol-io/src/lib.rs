@@ -63,6 +63,7 @@ pub mod gro;
 pub mod mol2;
 pub mod pdb;
 pub mod sdf;
+#[cfg(feature = "traj")]
 pub mod traj;
 pub mod traits;
 pub(crate) mod units;
@@ -75,9 +76,11 @@ pub mod fetch;
 // Re-exports
 pub use error::{IoError, IoResult};
 pub use traits::{
-    create_reader, create_trajectory_reader, create_writer, FileFormat, MoleculeReader,
-    MoleculeWriter, ReadOptions, TrajectoryReadOptions, TrajectoryReader, WriteOptions,
+    create_reader, create_writer, FileFormat, MoleculeReader, MoleculeWriter, ReadOptions,
+    TrajectoryReadOptions, TrajectoryReader, WriteOptions,
 };
+#[cfg(feature = "traj")]
+pub use traits::create_trajectory_reader;
 
 // Fetch re-exports
 #[cfg(any(feature = "fetch", feature = "fetch-async"))]
@@ -187,6 +190,7 @@ pub fn write_all_format(
     mol_writer.flush()
 }
 
+#[cfg(feature = "traj")]
 /// Read trajectory frames from a file, auto-detecting the format
 pub fn read_trajectory(
     path: &Path,
@@ -196,6 +200,7 @@ pub fn read_trajectory(
     read_trajectory_format(path, format, opts)
 }
 
+#[cfg(feature = "traj")]
 /// Read trajectory frames from a file with a specific format
 pub fn read_trajectory_format(
     path: &Path,

@@ -45,6 +45,7 @@ fn apply_dss(mol: &mut ObjectMolecule) {
 /// Register I/O commands
 pub fn register(registry: &mut CommandRegistry) {
     registry.register(LoadCommand);
+    #[cfg(feature = "traj")]
     registry.register(LoadTrajCommand);
     registry.register(SaveCommand);
     registry.register(PngCommand);
@@ -278,9 +279,11 @@ EXAMPLES
 // load_traj command
 // ============================================================================
 
+#[cfg(feature = "traj")]
 /// Load trajectory coordinates onto an existing molecular object
 struct LoadTrajCommand;
 
+#[cfg(feature = "traj")]
 impl Command for LoadTrajCommand {
     fn name(&self) -> &str {
         "load_traj"

@@ -291,6 +291,7 @@ pub fn create_reader<R: Read + 'static>(
 }
 
 /// Create a trajectory reader for the given format from a Read source
+#[cfg(feature = "traj")]
 pub fn create_trajectory_reader<R: Read + 'static>(
     reader: R,
     format: FileFormat,
