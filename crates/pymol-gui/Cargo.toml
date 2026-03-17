@@ -18,7 +18,7 @@ path = "src/main.rs"
 pymol-framework = { workspace = true, features = ["egui"] }
 pymol-plugin = { workspace = true }
 pymol-scene = { workspace = true, features = ["windowing", "png-export", "parallel"] }
-pymol-cmd = { workspace = true, features = ["fetch", "fetch-async", "native-io"] }
+pymol-cmd = { workspace = true, features = ["fetch", "fetch-async", "native-io", "traj"] }
 pymol-mol = { workspace = true }
 pymol-io = { workspace = true, features = ["fetch-async"] }
 pymol-select = { workspace = true }

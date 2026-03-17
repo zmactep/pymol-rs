@@ -11,6 +11,7 @@ description = "File format parsers and writers for molecular structures"
 
 [features]
 default = []
+traj = ["dep:molly", "dep:byteorder"]
 fetch = ["dep:ureq"]
 fetch-async = ["dep:reqwest"]
 
@@ -22,8 +23,10 @@ flate2 = { workspace = true }
 lin_alg = { workspace = true }
 serde = { workspace = true }
 rmp-serde = { workspace = true }
-byteorder = "1"
-molly = "0.6"
+
+# Optional traj dependencies
+byteorder = { version = "1", optional = true }
+molly = { version = "0.6", optional = true }
 
 # Optional fetch dependencies
 ureq = { version = "3", optional = true }

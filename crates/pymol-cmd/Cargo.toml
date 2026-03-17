@@ -10,10 +10,11 @@ documentation.workspace = true
 description = "PyMOL command parsing and execution system"
 
 [features]
-default = ["fetch-async", "fetch", "native-io"]
+default = ["fetch-async", "fetch", "native-io", "traj"]
 fetch = ["pymol-io/fetch"]
 fetch-async = ["pymol-io/fetch-async"]
 native-io = ["dep:shellexpand", "dep:image"]
+traj = ["pymol-io/traj"]
 
 [dependencies]
 # Internal crates
