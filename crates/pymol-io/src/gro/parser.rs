@@ -13,9 +13,7 @@ use pymol_mol::{Atom, AtomResidue, CoordSet, ObjectMolecule, Symmetry};
 use crate::error::{IoError, IoResult};
 use crate::pdb::infer_element_from_name;
 use crate::traits::MoleculeReader;
-
-/// Nanometers to Angstroms conversion factor
-const NM_TO_ANGSTROM: f32 = 10.0;
+use crate::units::NM_TO_ANGSTROM;
 
 /// GRO file reader
 pub struct GroReader<R> {

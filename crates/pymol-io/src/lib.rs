@@ -63,7 +63,9 @@ pub mod gro;
 pub mod mol2;
 pub mod pdb;
 pub mod sdf;
+pub mod traj;
 pub mod traits;
+pub(crate) mod units;
 pub mod xyz;
 
 // Fetch module (requires feature)
@@ -73,8 +75,8 @@ pub mod fetch;
 // Re-exports
 pub use error::{IoError, IoResult};
 pub use traits::{
-    create_reader, create_writer, FileFormat, MoleculeReader, MoleculeWriter, ReadOptions,
-    WriteOptions,
+    create_reader, create_trajectory_reader, create_writer, FileFormat, MoleculeReader,
+    MoleculeWriter, ReadOptions, TrajectoryReadOptions, TrajectoryReader, WriteOptions,
 };
 
 // Fetch re-exports
@@ -117,6 +119,9 @@ pub fn read_file_format(path: &Path, format: FileFormat) -> IoResult<ObjectMolec
         FileFormat::Cif => cif::read_cif(path),
         FileFormat::Bcif => bcif::read_bcif(path),
         FileFormat::Gro => gro::read_gro(path),
+        FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(
+            "Trajectory-only format; use load_traj instead".to_string(),
+        )),
         FileFormat::Unknown => Err(IoError::UnknownFormat(
             path.to_string_lossy().into_owned(),
         )),
@@ -139,6 +144,9 @@ pub fn read_all_format(path: &Path, format: FileFormat) -> IoResult<Vec<ObjectMo
         FileFormat::Cif => cif::read_cif(path).map(|m| vec![m]),
         FileFormat::Bcif => bcif::read_bcif(path).map(|m| vec![m]),
         FileFormat::Gro => gro::read_gro(path).map(|m| vec![m]),
+        FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(
+            "Trajectory-only format; use load_traj instead".to_string(),
+        )),
         FileFormat::Unknown => Err(IoError::UnknownFormat(
             path.to_string_lossy().into_owned(),
         )),
@@ -179,6 +187,26 @@ pub fn write_all_format(
     mol_writer.flush()
 }
 
+/// Read trajectory frames from a file, auto-detecting the format
+pub fn read_trajectory(
+    path: &Path,
+    opts: &TrajectoryReadOptions,
+) -> IoResult<Vec<pymol_mol::CoordSet>> {
+    let format = detect::detect_from_path(path);
+    read_trajectory_format(path, format, opts)
+}
+
+/// Read trajectory frames from a file with a specific format
+pub fn read_trajectory_format(
+    path: &Path,
+    format: FileFormat,
+    opts: &TrajectoryReadOptions,
+) -> IoResult<Vec<pymol_mol::CoordSet>> {
+    let file = compress::open_file(path)?;
+    let mut reader = create_trajectory_reader(file, format)?;
+    reader.read_frames(opts)
+}
+
 /// Parse a molecule from a string with the given format
 pub fn parse_str(content: &str, format: FileFormat) -> IoResult<ObjectMolecule> {
     match format {
@@ -201,6 +229,9 @@ pub fn parse_str(content: &str, format: FileFormat) -> IoResult<ObjectMolecule> 
             "bCIF is a binary format; use read_file instead".to_string(),
         )),
         FileFormat::Gro => gro::read_gro_str(content),
+        FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(
+            "Trajectory formats are binary; use load_traj with a file path".to_string(),
+        )),
         FileFormat::Unknown => Err(IoError::UnknownFormat("string input".to_string())),
     }
 }

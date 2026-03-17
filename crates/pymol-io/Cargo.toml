@@ -22,6 +22,8 @@ flate2 = { workspace = true }
 lin_alg = { workspace = true }
 serde = { workspace = true }
 rmp-serde = { workspace = true }
+byteorder = "1"
+molly = "0.6"
 
 # Optional fetch dependencies
 ureq = { version = "3", optional = true }

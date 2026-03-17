@@ -5,7 +5,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use pymol_mol::ObjectMolecule;
+use pymol_mol::{CoordSet, ObjectMolecule};
 
 use crate::error::{IoError, IoResult};
 
@@ -26,6 +26,10 @@ pub enum FileFormat {
     Xyz,
     /// GROMACS GRO format
     Gro,
+    /// GROMACS XTC trajectory format
+    Xtc,
+    /// GROMACS TRR trajectory format
+    Trr,
     /// Unknown format
     Unknown,
 }
@@ -41,6 +45,8 @@ impl FileFormat {
             "bcif" => FileFormat::Bcif,
             "xyz" => FileFormat::Xyz,
             "gro" => FileFormat::Gro,
+            "xtc" => FileFormat::Xtc,
+            "trr" => FileFormat::Trr,
             _ => FileFormat::Unknown,
         }
     }
@@ -75,6 +81,8 @@ impl FileFormat {
             FileFormat::Bcif => "bcif",
             FileFormat::Xyz => "xyz",
             FileFormat::Gro => "gro",
+            FileFormat::Xtc => "xtc",
+            FileFormat::Trr => "trr",
             FileFormat::Unknown => "",
         }
     }
@@ -89,8 +97,14 @@ impl FileFormat {
             FileFormat::Bcif => "BinaryCIF",
             FileFormat::Xyz => "XYZ",
             FileFormat::Gro => "GRO",
+            FileFormat::Xtc => "XTC",
+            FileFormat::Trr => "TRR",
             FileFormat::Unknown => "Unknown",
         }
+    }
+    /// Whether this format is trajectory-only (no topology)
+    pub fn is_trajectory_only(&self) -> bool {
+        matches!(self, FileFormat::Xtc | FileFormat::Trr)
     }
 }
 
@@ -224,6 +238,37 @@ impl WriteOptions {
     }
 }
 
+/// Options for reading trajectory frames
+#[derive(Debug, Clone)]
+pub struct TrajectoryReadOptions {
+    /// First frame to read (0-based, default: 0)
+    pub start: usize,
+    /// Last frame to read (exclusive, default: all)
+    pub stop: Option<usize>,
+    /// Read every Nth frame (default: 1)
+    pub interval: usize,
+}
+
+impl Default for TrajectoryReadOptions {
+    fn default() -> Self {
+        TrajectoryReadOptions {
+            start: 0,
+            stop: None,
+            interval: 1,
+        }
+    }
+}
+
+/// Trait for reading trajectory files (coordinate-only formats like XTC, TRR)
+///
+/// Unlike `MoleculeReader`, trajectory readers produce only coordinate sets
+/// without topology (atoms, bonds). They are meant to be loaded onto an
+/// existing molecular object via the `load_traj` command.
+pub trait TrajectoryReader {
+    /// Read frames from the trajectory, returning CoordSets
+    fn read_frames(&mut self, opts: &TrajectoryReadOptions) -> IoResult<Vec<CoordSet>>;
+}
+
 /// Create a reader for the given format from a Read source
 pub fn create_reader<R: Read + 'static>(
     reader: R,
@@ -237,7 +282,26 @@ pub fn create_reader<R: Read + 'static>(
         FileFormat::Cif => Ok(Box::new(crate::cif::CifReader::new(reader))),
         FileFormat::Bcif => Ok(Box::new(crate::bcif::BcifReader::new(reader))),
         FileFormat::Gro => Ok(Box::new(crate::gro::GroReader::new(reader))),
+        FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(format!(
+            "{} is a trajectory-only format; use load_traj instead",
+            format.name()
+        ))),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
+    }
+}
+
+/// Create a trajectory reader for the given format from a Read source
+pub fn create_trajectory_reader<R: Read + 'static>(
+    reader: R,
+    format: FileFormat,
+) -> IoResult<Box<dyn TrajectoryReader>> {
+    match format {
+        FileFormat::Xtc => Ok(Box::new(crate::traj::xtc::XtcReader::new(reader))),
+        FileFormat::Trr => Ok(Box::new(crate::traj::trr::TrrReader::new(reader))),
+        _ => Err(IoError::Unsupported(format!(
+            "{} is not a trajectory format",
+            format.name()
+        ))),
     }
 }
 
@@ -254,6 +318,10 @@ pub fn create_writer<W: Write + 'static>(
         FileFormat::Cif => Ok(Box::new(crate::cif::CifWriter::new(writer))),
         FileFormat::Bcif => Err(IoError::Unsupported("BinaryCIF writing not supported".to_string())),
         FileFormat::Gro => Ok(Box::new(crate::gro::GroWriter::new(writer))),
+        FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(format!(
+            "{} writing is not supported",
+            format.name()
+        ))),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
 }

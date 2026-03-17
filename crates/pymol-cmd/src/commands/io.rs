@@ -45,6 +45,7 @@ fn apply_dss(mol: &mut ObjectMolecule) {
 /// Register I/O commands
 pub fn register(registry: &mut CommandRegistry) {
     registry.register(LoadCommand);
+    registry.register(LoadTrajCommand);
     registry.register(SaveCommand);
     registry.register(PngCommand);
     registry.register(CdCommand);
@@ -147,6 +148,8 @@ EXAMPLES
                 "xyz" => FileFormat::Xyz,
                 "cif" | "mmcif" => FileFormat::Cif,
                 "gro" => FileFormat::Gro,
+                "xtc" => FileFormat::Xtc,
+                "trr" => FileFormat::Trr,
                 _ => FileFormat::Unknown,
             });
 
@@ -212,6 +215,14 @@ EXAMPLES
         // Detect format
         let builtin_format = format.unwrap_or_else(|| FileFormat::from_path(&path));
 
+        // Reject trajectory-only formats (no topology)
+        if builtin_format.is_trajectory_only() {
+            return Err(CmdError::execution(format!(
+                "{} is a trajectory-only format with no topology. Use 'load_traj' instead.",
+                builtin_format.name()
+            )));
+        }
+
         // Load molecular file
         let mut mol = if builtin_format != FileFormat::Unknown {
             // Built-in format
@@ -257,6 +268,186 @@ EXAMPLES
 
         // Zoom to loaded molecule (preserves rotation)
         ctx.viewer.zoom_on(&object_name, 0.0);
+        ctx.viewer.update_movie_state_count();
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// load_traj command
+// ============================================================================
+
+/// Load trajectory coordinates onto an existing molecular object
+struct LoadTrajCommand;
+
+impl Command for LoadTrajCommand {
+    fn name(&self) -> &str {
+        "load_traj"
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "load_traj" loads trajectory coordinates from a file onto an
+    existing molecular object. The trajectory must have the same
+    number of atoms as the target object.
+
+USAGE
+
+    load_traj filename [, object [, start [, stop [, interval [, format [, append]]]]]]
+
+ARGUMENTS
+
+    filename = string: trajectory file path (XTC, TRR)
+    object = string: target object name (default: first molecule)
+    start = integer: first frame to load, 1-based (default: 1)
+    stop = integer: last frame to load, 1-based (default: all)
+    interval = integer: load every Nth frame (default: 1)
+    format = string: file format (auto-detected if omitted)
+    append = bool: append loaded states to existed (default: false)
+
+EXAMPLES
+
+    load protein.gro
+    load_traj trajectory.xtc, protein
+    load_traj long_sim.xtc, protein, start=1, stop=1000, interval=10
+    load_traj trajectory.trr, protein
+"#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path, ArgHint::Object]
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        // Get filename (required)
+        let filename = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("filename"))
+            .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
+
+        // Get object name (optional, defaults to first loaded molecule)
+        let object_name = args
+            .get_str(1)
+            .or_else(|| args.get_named_str("object"));
+
+        // PyMOL uses 1-based frame numbers; convert to 0-based
+        let start = args
+            .get_int(2)
+            .or_else(|| args.get_named_int("start"))
+            .map(|s| (s.max(1) - 1) as usize)
+            .unwrap_or(0);
+
+        let stop = args
+            .get_int(3)
+            .or_else(|| args.get_named_int("stop"))
+            .map(|s| s.max(0) as usize);
+
+        let interval = args
+            .get_int(4)
+            .or_else(|| args.get_named_int("interval"))
+            .map(|i| i.max(1) as usize)
+            .unwrap_or(1);
+
+        let append = args
+            .get_bool(5)
+            .unwrap_or(args.get_named_bool_or("append", false));
+
+        let quiet = args
+            .get_named_bool("quiet")
+            .unwrap_or(false);
+
+        // Resolve target object name
+        let target_name = if let Some(name) = object_name {
+            name.to_string()
+        } else {
+            // Find first molecule object
+            let mut first_mol = None;
+            for name in ctx.viewer.objects().names() {
+                if ctx.viewer.objects().get_molecule(name).is_some() {
+                    first_mol = Some(name.to_string());
+                    break;
+                }
+            }
+            first_mol.ok_or_else(|| {
+                CmdError::execution("No molecule objects loaded. Load a structure first.")
+            })?
+        };
+
+        // Validate target exists and get atom count
+        let expected_atoms = {
+            let mol_obj = ctx
+                .viewer
+                .objects()
+                .get_molecule(&target_name)
+                .ok_or_else(|| CmdError::ObjectNotFound(target_name.clone()))?;
+            mol_obj.molecule().atom_count()
+        };
+
+        // Detect format
+        let path = expand_path(filename);
+        let format = args
+            .get_named_str("format")
+            .map(|s| match s.to_lowercase().as_str() {
+                "xtc" => FileFormat::Xtc,
+                "trr" => FileFormat::Trr,
+                _ => FileFormat::from_path(&path),
+            })
+            .unwrap_or_else(|| FileFormat::from_path(&path));
+
+        // Read trajectory frames
+        let opts = pymol_io::TrajectoryReadOptions {
+            start,
+            stop,
+            interval,
+        };
+
+        let frames = pymol_io::read_trajectory_format(&path, format, &opts)
+            .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+
+        if frames.is_empty() {
+            return Err(CmdError::execution("No frames found in trajectory"));
+        }
+
+        // Validate atom count
+        let traj_atoms = frames[0].len();
+        if traj_atoms != expected_atoms {
+            return Err(CmdError::execution(format!(
+                "Atom count mismatch: object '{}' has {} atoms, trajectory has {}",
+                target_name, expected_atoms, traj_atoms
+            )));
+        }
+
+        // Replace existing coordinates with trajectory frames
+        let n_frames = frames.len();
+        let mol_obj = ctx
+            .viewer
+            .objects_mut()
+            .get_molecule_mut(&target_name)
+            .ok_or_else(|| CmdError::ObjectNotFound(target_name.clone()))?;
+
+        if !append {
+            mol_obj.molecule_mut().clear_coord_sets();
+        }
+        for cs in frames {
+            mol_obj.molecule_mut().add_coord_set(cs);
+        }
+
+        let total_states = mol_obj.molecule().state_count();
+
+        if !quiet {
+            ctx.print(&format!(
+                " Loaded {} frames from \"{}\" onto \"{}\" ({} total states)",
+                n_frames, filename, target_name, total_states
+            ));
+        }
+
         ctx.viewer.update_movie_state_count();
 
         Ok(())

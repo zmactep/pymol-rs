@@ -9,9 +9,7 @@ use pymol_mol::ObjectMolecule;
 
 use crate::error::IoResult;
 use crate::traits::MoleculeWriter;
-
-/// Angstroms to nanometers conversion factor
-const ANGSTROM_TO_NM: f32 = 0.1;
+use crate::units::ANGSTROM_TO_NM;
 
 /// GRO file writer
 pub struct GroWriter<W> {

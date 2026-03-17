@@ -382,6 +382,12 @@ impl ObjectMolecule {
         index
     }
 
+    /// Remove all coordinate sets
+    pub fn clear_coord_sets(&mut self) {
+        self.coord_sets.clear();
+        self.current_state = 0;
+    }
+
     /// Get a coordinate set by state index
     #[inline]
     pub fn get_coord_set(&self, state: usize) -> Option<&CoordSet> {
