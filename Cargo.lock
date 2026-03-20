@@ -3926,6 +3926,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "toolbar-plugin"
+version = "0.2.2"
+dependencies = [
+ "egui",
+ "image",
+ "pymol-plugin",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

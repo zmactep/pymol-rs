@@ -18,6 +18,7 @@ members = [
     "plugins/hello",
     "plugins/ipc",
     "plugins/python",
+    "plugins/toolbar",
 ]
 default-members = [
     "crates/pymol-settings",
