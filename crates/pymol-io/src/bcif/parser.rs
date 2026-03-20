@@ -116,17 +116,26 @@ impl CategoryColumns {
 fn parse_data_block(block: BcifDataBlock) -> IoResult<ObjectMolecule> {
     let mut mol = ObjectMolecule::new(&block.header);
     let mut ss_ranges: Vec<SecondaryStructureRange> = Vec::new();
+    let mut space_group: Option<String> = None;
 
     for category in &block.categories {
         match category.name.as_str() {
             "_atom_site" => parse_atom_site(category, &mut mol)?,
             "_cell" => parse_cell(category, &mut mol)?,
+            "_symmetry" => parse_symmetry_category(category, &mut space_group)?,
             "_struct_conf" => parse_ss(category, SsCategory::StructConf, &mut ss_ranges)?,
             "_struct_sheet_range" => {
                 parse_ss(category, SsCategory::StructSheetRange, &mut ss_ranges)?;
             }
             "_entry" => parse_entry(category, &mut mol)?,
             _ => {}
+        }
+    }
+
+    // Apply space group from _symmetry category
+    if let Some(sg) = space_group {
+        if let Some(ref mut sym) = mol.symmetry {
+            sym.space_group = sg;
         }
     }
 
@@ -367,6 +376,30 @@ fn parse_ss(
                 start_seq: start,
                 end_seq: end,
             });
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_symmetry_category(
+    category: &BcifCategory,
+    space_group: &mut Option<String>,
+) -> IoResult<()> {
+    let cols = CategoryColumns::decode_selected(
+        category,
+        &["space_group_name_H-M", "space_group_name_Hall"],
+    )?;
+
+    if let Some(sg) = cols.str_at("space_group_name_H-M", 0) {
+        let sg = sg.trim().to_string();
+        if !sg.is_empty() {
+            *space_group = Some(sg);
+        }
+    } else if let Some(sg) = cols.str_at("space_group_name_Hall", 0) {
+        let sg = sg.trim().to_string();
+        if !sg.is_empty() {
+            *space_group = Some(sg);
         }
     }
 
