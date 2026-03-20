@@ -15,6 +15,12 @@ export interface ObjectInfo {
   enabled: boolean;
 }
 
+export interface SelectionInfo {
+  name: string;
+  expression: string;
+  visible: boolean;
+}
+
 export interface SequenceChain {
   object_name: string;
   chain_id: string;

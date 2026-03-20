@@ -7,6 +7,7 @@ import { ViewerEvents } from "./events.js";
 import type {
   CommandOutput,
   ObjectInfo,
+  SelectionInfo,
   SequenceChain,
   MovieState,
   ViewerOptions,
@@ -149,6 +150,12 @@ export class PyMolRSViewer {
     const wasm = this.core.wasmViewer;
     if (!wasm) return { frame_count: 0, current_frame: 0, is_playing: false };
     return wasm.get_movie_state() as MovieState;
+  }
+
+  getSelectionList(): SelectionInfo[] {
+    const wasm = this.core.wasmViewer;
+    if (!wasm) return [];
+    return wasm.get_selection_list() as SelectionInfo[];
   }
 
   countAtoms(selection = "all"): number {

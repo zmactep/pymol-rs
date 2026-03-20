@@ -52,6 +52,13 @@ struct SequenceResidue {
 }
 
 #[derive(Serialize)]
+struct SelectionInfo {
+    name: String,
+    expression: String,
+    visible: bool,
+}
+
+#[derive(Serialize)]
 struct MovieState {
     frame_count: usize,
     current_frame: usize,
@@ -412,6 +419,23 @@ impl WebViewer {
             is_playing: self.session.movie.is_playing(),
         };
         serde_wasm_bindgen::to_value(&state).unwrap_or(JsValue::NULL)
+    }
+
+    /// Get all named selections as JSON array.
+    #[wasm_bindgen]
+    pub fn get_selection_list(&self) -> JsValue {
+        let mut list: Vec<SelectionInfo> = self
+            .session
+            .selections
+            .iter()
+            .map(|(name, entry)| SelectionInfo {
+                name: name.clone(),
+                expression: entry.expression.clone(),
+                visible: entry.visible,
+            })
+            .collect();
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        serde_wasm_bindgen::to_value(&list).unwrap_or(JsValue::NULL)
     }
 
     /// Count atoms matching a selection expression.

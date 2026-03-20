@@ -150,6 +150,32 @@
   color: var(--pymol-text);
 }
 
+/* ---- Selections in Object List ---- */
+
+.object-list-separator {
+  border: none;
+  border-top: 1px solid var(--pymol-border);
+  margin: 4px 8px;
+}
+
+.selection-name {
+  color: #ff55ff;
+  font-family: var(--pymol-mono);
+}
+
+.selection-row .obj-vis.enabled {
+  background: #80288080;
+}
+
+.selection-row .selection-vis.disabled + .selection-name {
+  color: #803080;
+}
+
+.selection-delete:hover {
+  background: var(--pymol-error) !important;
+  color: white !important;
+}
+
 /* ---- Sequence ---- */
 
 .pymol-panel-sequence {

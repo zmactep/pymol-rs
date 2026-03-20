@@ -68,6 +68,48 @@ export class ObjectListPanel {
       row.appendChild(reps);
       this.list.appendChild(row);
     }
+
+    // Named selections
+    const selections = this.viewer.getSelectionList();
+    if (selections.length > 0) {
+      const sep = document.createElement("hr");
+      sep.className = "object-list-separator";
+      this.list.appendChild(sep);
+
+      for (const sel of selections) {
+        const row = document.createElement("div");
+        row.className = "object-row selection-row";
+
+        // Visibility toggle
+        const vis = document.createElement("button");
+        vis.className = `obj-vis selection-vis ${sel.visible ? "enabled" : "disabled"}`;
+        vis.textContent = sel.visible ? "V" : "-";
+        vis.title = sel.visible ? "Hide indicators" : "Show indicators";
+        vis.addEventListener("click", () => {
+          this.viewer.execute(`toggle ${sel.name}`);
+        });
+
+        // Name in parentheses (PyMOL convention)
+        const label = document.createElement("span");
+        label.className = "obj-name selection-name";
+        label.textContent = `(${sel.name})`;
+        label.title = sel.expression;
+
+        // Delete button
+        const del = document.createElement("button");
+        del.className = "rep-btn selection-delete";
+        del.textContent = "X";
+        del.title = "Delete selection";
+        del.addEventListener("click", () => {
+          this.viewer.execute(`deselect ${sel.name}`);
+        });
+
+        row.appendChild(vis);
+        row.appendChild(label);
+        row.appendChild(del);
+        this.list.appendChild(row);
+      }
+    }
   }
 
   destroy(): void {

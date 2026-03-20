@@ -28,8 +28,23 @@ pub fn render_frame(
     );
     gpu.render_context.update_uniforms(&uniforms);
 
-    // Prepare GPU geometry for all objects
+    // Update selection indicators
     let names: Vec<String> = session.registry.names().map(|s| s.to_string()).collect();
+    let selection_results = session.selections.evaluate_visible(&session.registry, Default::default());
+    let selection_width = session.settings.get_float(pymol_settings::id::selection_width).max(6.0);
+
+    for name in &names {
+        if let Some(mol_obj) = session.registry.get_molecule_mut(name) {
+            let sele_for_obj = selection_results.iter().find(|(n, _)| n == name).map(|(_, s)| s);
+            if let Some(sel) = sele_for_obj {
+                mol_obj.set_selection_indicator_with_size(sel, &gpu.render_context, Some(selection_width));
+            } else {
+                mol_obj.clear_selection_indicator();
+            }
+        }
+    }
+
+    // Prepare GPU geometry for all objects
     let mut geometry_changed = false;
 
     for name in &names {
