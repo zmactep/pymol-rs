@@ -39,6 +39,13 @@ export interface MovieState {
   is_playing: boolean;
 }
 
+export interface LabelInfo {
+  x: number;
+  y: number;
+  text: string;
+  kind: "atom" | "measurement";
+}
+
 export type PanelSlot = "top" | "right" | "bottom";
 
 export interface PanelPlacement {

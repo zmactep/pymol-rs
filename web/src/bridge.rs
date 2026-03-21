@@ -65,6 +65,14 @@ struct MovieState {
     is_playing: bool,
 }
 
+#[derive(Serialize)]
+struct LabelInfo {
+    x: f32,
+    y: f32,
+    text: String,
+    kind: &'static str,
+}
+
 // ---------------------------------------------------------------------------
 // WebViewer
 // ---------------------------------------------------------------------------
@@ -452,5 +460,65 @@ impl WebViewer {
             }
         }
         Ok(total)
+    }
+
+    /// Get projected screen-space labels for overlay rendering.
+    ///
+    /// Returns a JSON array of `{ x, y, text, kind }` where coordinates
+    /// are in physical pixels (divide by `devicePixelRatio` for CSS pixels).
+    #[wasm_bindgen]
+    pub fn get_labels(&self) -> JsValue {
+        let viewport = (0.0, 0.0, self.width as f32, self.height as f32);
+        let mut labels = Vec::new();
+
+        for name in self.session.registry.names() {
+            if let Some(mol_obj) = self.session.registry.get_molecule(name) {
+                if !mol_obj.is_enabled() {
+                    continue;
+                }
+                for (pos, text) in mol_obj.collect_labels() {
+                    if let Some((sx, sy)) = self.session.camera.project_to_screen(pos, viewport) {
+                        if sx >= 0.0
+                            && sx <= self.width as f32
+                            && sy >= 0.0
+                            && sy <= self.height as f32
+                        {
+                            labels.push(LabelInfo {
+                                x: sx,
+                                y: sy,
+                                text: text.to_string(),
+                                kind: "atom",
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        for name in self.session.registry.names() {
+            if let Some(meas_obj) = self.session.registry.get_measurement(name) {
+                if !meas_obj.is_enabled() {
+                    continue;
+                }
+                for (pos, text) in meas_obj.collect_labels() {
+                    if let Some((sx, sy)) = self.session.camera.project_to_screen(pos, viewport) {
+                        if sx >= 0.0
+                            && sx <= self.width as f32
+                            && sy >= 0.0
+                            && sy <= self.height as f32
+                        {
+                            labels.push(LabelInfo {
+                                x: sx,
+                                y: sy,
+                                text: text.to_string(),
+                                kind: "measurement",
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        serde_wasm_bindgen::to_value(&labels).unwrap_or(JsValue::NULL)
     }
 }

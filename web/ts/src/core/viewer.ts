@@ -3,15 +3,24 @@
  */
 
 import type { WebViewer } from "../../../pkg/pymol_web.js";
+import type { LabelInfo } from "./types.js";
 import { MOD_SHIFT, MOD_CTRL, MOD_ALT, MOD_META } from "./types.js";
+import { LabelOverlay } from "./labels.js";
 
 export class ViewerCore {
   private wasm: WebViewer | null = null;
   private canvas: HTMLCanvasElement;
   private animFrameId = 0;
   private resizeObserver: ResizeObserver | null = null;
+  private labelOverlay: LabelOverlay;
 
   constructor(private container: HTMLElement) {
+    // Ensure container is a positioning context for the label overlay
+    const computedPos = getComputedStyle(container).position;
+    if (computedPos === "static") {
+      container.style.position = "relative";
+    }
+
     this.canvas = document.createElement("canvas");
     this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8);
     this.canvas.style.width = "100%";
@@ -19,6 +28,8 @@ export class ViewerCore {
     this.canvas.style.display = "block";
     this.canvas.tabIndex = 0; // focusable for keyboard events
     container.appendChild(this.canvas);
+
+    this.labelOverlay = new LabelOverlay(container);
   }
 
   async init(): Promise<WebViewer> {
@@ -48,6 +59,7 @@ export class ViewerCore {
       this.animFrameId = 0;
     }
     this.resizeObserver?.disconnect();
+    this.labelOverlay.destroy();
     this.canvas.remove();
     this.wasm = null;
   }
@@ -65,6 +77,11 @@ export class ViewerCore {
 
       if (this.wasm.needs_redraw()) {
         this.wasm.render_frame();
+        const labels = this.wasm.get_labels() as LabelInfo[] | null;
+        this.labelOverlay.update(
+          labels ?? [],
+          window.devicePixelRatio || 1,
+        );
       }
     };
     this.animFrameId = requestAnimationFrame(loop);
