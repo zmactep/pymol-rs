@@ -117,11 +117,20 @@ pub fn infer_element_from_name(name: &str) -> Element {
         // or both are uppercase letters that form a valid element
         if let Some(elem) = Element::from_symbol(&two_letter) {
             // For common atoms like CA (calcium vs C-alpha), prefer single letter
-            // if the atom name looks like a protein atom name
+            // if the atom name looks like a protein atom name.
+            // Check both exact 2-letter names (e.g. "CA") and names with trailing
+            // digits (e.g. "ND1", "CD2", "CE1", "NE2", "CG1", "OD1", "NH1").
+            let base = if name.len() > 2 && name[2..].chars().all(|c| c.is_ascii_digit()) {
+                &name[..2]
+            } else {
+                name
+            };
             let is_common_protein_name = matches!(
-                name.trim(),
-                "CA" | "CB" | "CG" | "CD" | "CE" | "CZ" | "CH" | "NE" | "NH" | "NZ" | "OG" | "OH"
-                    | "OE" | "OD" | "SD" | "SG"
+                base,
+                "CA" | "CB" | "CG" | "CD" | "CE" | "CZ" | "CH"
+                    | "ND" | "NE" | "NH" | "NZ"
+                    | "OG" | "OH" | "OE" | "OD"
+                    | "SD" | "SG"
             );
             if !is_common_protein_name {
                 return elem;
