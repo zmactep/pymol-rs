@@ -19,6 +19,7 @@ traj = ["pymol-io/traj"]
 [dependencies]
 # Internal crates
 pymol-scene = { workspace = true, default-features = false }
+pymol-render = { workspace = true }
 pymol-select = { workspace = true }
 pymol-io = { workspace = true }
 pymol-settings = { workspace = true }

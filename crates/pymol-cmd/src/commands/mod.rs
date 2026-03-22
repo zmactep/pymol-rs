@@ -7,6 +7,7 @@ pub mod control;
 pub mod crystal;
 pub mod display;
 pub mod io;
+pub mod map;
 pub mod measuring;
 pub mod movie;
 pub mod objects;
@@ -58,4 +59,7 @@ pub fn register_all(registry: &mut CommandRegistry) {
 
     // Measurement commands (distance, angle, dihedral)
     measuring::register(registry);
+
+    // Map commands (isomesh, isodot, isosurface)
+    map::register(registry);
 }

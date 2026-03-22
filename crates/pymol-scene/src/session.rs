@@ -144,6 +144,9 @@ impl Session {
             if let Some(mol_obj) = self.registry.get_molecule_mut(name) {
                 mol_obj.prepare_render(context, color_resolver, &self.settings);
             }
+            if let Some(map_obj) = self.registry.get_map_mut(name) {
+                map_obj.prepare_render(context);
+            }
         }
     }
 

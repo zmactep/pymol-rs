@@ -30,6 +30,8 @@ pub enum PyFileFormat {
     Xtc,
     /// GROMACS TRR trajectory format
     Trr,
+    /// CCP4/MRC map format
+    Ccp4,
     /// Unknown format
     Unknown,
 }
@@ -46,6 +48,7 @@ impl From<pymol_io::FileFormat> for PyFileFormat {
             pymol_io::FileFormat::Gro => PyFileFormat::Gro,
             pymol_io::FileFormat::Xtc => PyFileFormat::Xtc,
             pymol_io::FileFormat::Trr => PyFileFormat::Trr,
+            pymol_io::FileFormat::Ccp4 => PyFileFormat::Ccp4,
             pymol_io::FileFormat::Unknown => PyFileFormat::Unknown,
         }
     }
@@ -63,6 +66,7 @@ impl From<PyFileFormat> for pymol_io::FileFormat {
             PyFileFormat::Gro => pymol_io::FileFormat::Gro,
             PyFileFormat::Xtc => pymol_io::FileFormat::Xtc,
             PyFileFormat::Trr => pymol_io::FileFormat::Trr,
+            PyFileFormat::Ccp4 => pymol_io::FileFormat::Ccp4,
             PyFileFormat::Unknown => pymol_io::FileFormat::Unknown,
         }
     }
@@ -81,6 +85,7 @@ impl PyFileFormat {
             PyFileFormat::Gro => "FileFormat.Gro",
             PyFileFormat::Xtc => "FileFormat.Xtc",
             PyFileFormat::Trr => "FileFormat.Trr",
+            PyFileFormat::Ccp4 => "FileFormat.Ccp4",
             PyFileFormat::Unknown => "FileFormat.Unknown",
         }
     }

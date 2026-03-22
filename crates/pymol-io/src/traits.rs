@@ -30,6 +30,8 @@ pub enum FileFormat {
     Xtc,
     /// GROMACS TRR trajectory format
     Trr,
+    /// CCP4/MRC electron density map
+    Ccp4,
     /// Unknown format
     Unknown,
 }
@@ -47,6 +49,7 @@ impl FileFormat {
             "gro" => FileFormat::Gro,
             "xtc" => FileFormat::Xtc,
             "trr" => FileFormat::Trr,
+            "ccp4" | "map" | "mrc" => FileFormat::Ccp4,
             _ => FileFormat::Unknown,
         }
     }
@@ -83,6 +86,7 @@ impl FileFormat {
             FileFormat::Gro => "gro",
             FileFormat::Xtc => "xtc",
             FileFormat::Trr => "trr",
+            FileFormat::Ccp4 => "ccp4",
             FileFormat::Unknown => "",
         }
     }
@@ -99,12 +103,18 @@ impl FileFormat {
             FileFormat::Gro => "GRO",
             FileFormat::Xtc => "XTC",
             FileFormat::Trr => "TRR",
+            FileFormat::Ccp4 => "CCP4",
             FileFormat::Unknown => "Unknown",
         }
     }
     /// Whether this format is trajectory-only (no topology)
     pub fn is_trajectory_only(&self) -> bool {
         matches!(self, FileFormat::Xtc | FileFormat::Trr)
+    }
+
+    /// Whether this format contains volumetric map data (not molecules)
+    pub fn is_map_format(&self) -> bool {
+        matches!(self, FileFormat::Ccp4)
     }
 }
 
@@ -286,6 +296,9 @@ pub fn create_reader<R: Read + 'static>(
             "{} is a trajectory-only format; use load_traj instead",
             format.name()
         ))),
+        FileFormat::Ccp4 => Err(IoError::Unsupported(
+            "CCP4 is a map format; use load to create a map object".to_string(),
+        )),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
 }
@@ -323,6 +336,9 @@ pub fn create_writer<W: Write + 'static>(
             "{} writing is not supported",
             format.name()
         ))),
+        FileFormat::Ccp4 => Err(IoError::Unsupported(
+            "CCP4 map writing is not supported".to_string(),
+        )),
         FileFormat::Unknown => Err(IoError::UnknownFormat("Unknown format".to_string())),
     }
 }

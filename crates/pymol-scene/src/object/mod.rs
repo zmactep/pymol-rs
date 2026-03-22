@@ -17,7 +17,7 @@ mod surface;
 pub use cgo::CgoObject;
 pub use group::GroupObject;
 pub use label::{Label, LabelAnchor, LabelObject};
-pub use map::MapObject;
+pub use map::{MapData, MapDisplayMode, MapObject};
 pub use measurement::{Measurement, MeasurementObject, MeasurementType};
 pub use molecule::{DirtyFlags, MoleculeObject};
 pub use surface::SurfaceObject;
