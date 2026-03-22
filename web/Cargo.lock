@@ -930,6 +930,7 @@ dependencies = [
  "pymol-mol",
  "pymol-select",
  "pymol-settings",
+ "serde",
  "thiserror 2.0.18",
  "wgpu",
 ]

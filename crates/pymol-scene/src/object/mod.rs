@@ -266,8 +266,8 @@ pub struct ObjectRegistry {
 
 /// Serializable snapshot of the object registry.
 ///
-/// Captures molecule objects and group objects (the two types that carry
-/// domain data). Render-only objects (surface, cgo, label, map) are
+/// Captures molecule, group, and map objects (the types that carry
+/// domain data). Render-only objects (surface, cgo, label) are
 /// omitted because they are transient GPU caches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectRegistrySnapshot {
@@ -275,6 +275,9 @@ pub struct ObjectRegistrySnapshot {
     pub molecules: Vec<(String, MoleculeObjectSnapshot)>,
     /// Group objects (name -> data)
     pub groups: Vec<(String, GroupObject)>,
+    /// Map objects (name -> data)
+    #[serde(default)]
+    pub maps: Vec<(String, MapObjectSnapshot)>,
     /// Render order
     pub render_order: Vec<String>,
     /// Object states for all objects (name -> state)
@@ -300,11 +303,35 @@ pub struct MoleculeObjectSnapshot {
     pub surface_quality: i32,
 }
 
+/// Serializable snapshot of a MapObject (without render caches).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapObjectSnapshot {
+    /// Map data for each state
+    pub states: Vec<MapData>,
+    /// Visual state
+    pub state: ObjectState,
+    /// Current display state index
+    pub current_state: usize,
+    /// Isocontour level
+    pub level: f32,
+    /// Display mode
+    pub display_mode: MapDisplayMode,
+    /// Mesh color (RGBA)
+    pub mesh_color: [f32; 4],
+    /// Carve radius
+    pub carve_radius: f32,
+    /// Carve positions
+    pub carve_positions: Option<Vec<[f32; 3]>>,
+    /// Per-object settings
+    pub settings: Option<GlobalSettings>,
+}
+
 impl ObjectRegistry {
     /// Create a serializable snapshot of this registry.
     pub fn to_snapshot(&self) -> ObjectRegistrySnapshot {
         let mut molecules = Vec::new();
         let mut groups = Vec::new();
+        let mut maps = Vec::new();
         let mut object_states = Vec::new();
 
         for name in &self.render_order {
@@ -330,8 +357,26 @@ impl ObjectRegistry {
                             groups.push((name.clone(), group.clone()));
                         }
                     }
+                    ObjectType::Map => {
+                        if let Some(map_obj) = self.get_map(name) {
+                            maps.push((
+                                name.clone(),
+                                MapObjectSnapshot {
+                                    states: map_obj.states().to_vec(),
+                                    state: map_obj.state().clone(),
+                                    current_state: map_obj.current_state(),
+                                    level: map_obj.level(),
+                                    display_mode: map_obj.display_mode(),
+                                    mesh_color: map_obj.mesh_color(),
+                                    carve_radius: map_obj.carve_radius(),
+                                    carve_positions: map_obj.carve_positions().cloned(),
+                                    settings: map_obj.settings().cloned(),
+                                },
+                            ));
+                        }
+                    }
                     _ => {
-                        // Surface, CGO, Label, Map objects are transient
+                        // Surface, CGO, Label objects are transient
                     }
                 }
             }
@@ -340,6 +385,7 @@ impl ObjectRegistry {
         ObjectRegistrySnapshot {
             molecules,
             groups,
+            maps,
             render_order: self.render_order.clone(),
             object_states,
             next_id: self.next_id,
@@ -371,6 +417,29 @@ impl ObjectRegistry {
         // Add groups
         for (name, group) in snapshot.groups {
             registry.objects.insert(name, Box::new(group));
+        }
+
+        // Add maps
+        for (name, snap) in snapshot.maps {
+            let mut map_obj = MapObject::empty(&name);
+            for map_data in snap.states {
+                map_obj.add_state(map_data);
+            }
+            *map_obj.state_mut() = snap.state;
+            if snap.current_state > 0 {
+                map_obj.set_current_state(snap.current_state);
+            }
+            map_obj.set_level(snap.level);
+            map_obj.set_display_mode(snap.display_mode);
+            map_obj.set_mesh_color(snap.mesh_color);
+            map_obj.set_carve_radius(snap.carve_radius);
+            if let Some(positions) = snap.carve_positions {
+                map_obj.set_carve_positions(positions);
+            }
+            if let Some(settings) = snap.settings {
+                map_obj.set_settings(settings);
+            }
+            registry.objects.insert(name, Box::new(map_obj));
         }
 
         // Restore render order (only names that exist)
