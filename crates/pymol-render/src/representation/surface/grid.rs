@@ -3,10 +3,12 @@
 //! Provides spatial data structures for distance field computation and
 //! marching cubes isosurface extraction.
 
+use serde::{Deserialize, Serialize};
+
 /// 3D grid for scalar field storage
 ///
 /// Supports both uniform and per-axis (anisotropic) spacing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grid3D {
     /// Grid origin (minimum corner in world coordinates)
     pub origin: [f32; 3],

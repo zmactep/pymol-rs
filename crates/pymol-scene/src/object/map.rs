@@ -7,11 +7,12 @@ use lin_alg::f32::Vec3;
 use pymol_mol::Symmetry;
 use pymol_render::{Grid3D, MeshRep, MeshVertex, RenderContext, Representation};
 use pymol_settings::GlobalSettings;
+use serde::{Deserialize, Serialize};
 
 use super::{Object, ObjectState, ObjectType};
 
 /// Data for a single map state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MapData {
     /// 3D grid storing density values
     pub grid: Grid3D,
@@ -50,7 +51,7 @@ impl MapData {
 }
 
 /// Display mode for map objects
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum MapDisplayMode {
     /// Wireframe mesh at isovalue
     #[default]
@@ -237,6 +238,39 @@ impl MapObject {
     pub fn clear_carve_positions(&mut self) {
         self.carve_positions = None;
         self.dirty = true;
+    }
+
+    /// Get all map states
+    pub fn states(&self) -> &[MapData] {
+        &self.states
+    }
+
+    /// Get the current state index
+    pub fn current_state(&self) -> usize {
+        self.current_state
+    }
+
+    /// Set the current state index
+    pub fn set_current_state(&mut self, state: usize) {
+        if state < self.states.len() && self.current_state != state {
+            self.current_state = state;
+            self.dirty = true;
+        }
+    }
+
+    /// Get carve positions
+    pub fn carve_positions(&self) -> Option<&Vec<[f32; 3]>> {
+        self.carve_positions.as_ref()
+    }
+
+    /// Get per-object settings
+    pub fn settings(&self) -> Option<&GlobalSettings> {
+        self.settings.as_ref()
+    }
+
+    /// Set per-object settings
+    pub fn set_settings(&mut self, settings: GlobalSettings) {
+        self.settings = Some(settings);
     }
 
     /// Check if dirty

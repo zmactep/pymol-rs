@@ -20,6 +20,7 @@ pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
 wgpu = { workspace = true }
 lin_alg = { workspace = true }
+serde = { workspace = true }
 bytemuck = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
