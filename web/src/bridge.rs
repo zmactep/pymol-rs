@@ -285,7 +285,7 @@ impl WebViewer {
     /// Load molecular or map data from bytes.
     ///
     /// `format` should be one of: "pdb", "xyz", "cif", "mmcif", "bcif",
-    /// "ccp4", "map", "mrc"
+    /// "ccp4", "map", "mrc", "prs"
     ///
     /// Gzip-compressed data is automatically detected and decompressed.
     #[wasm_bindgen]
@@ -306,6 +306,16 @@ impl WebViewer {
         };
 
         let fmt = format.to_lowercase();
+
+        // PRS session — replaces the entire session
+        if fmt == "prs" {
+            let session: Session = rmp_serde::from_slice(data)
+                .map_err(|e| JsValue::from_str(&format!("PRS parse error: {}", e)))?;
+            self.session = session;
+            self.session.registry.mark_all_dirty();
+            self.needs_redraw = true;
+            return Ok(());
+        }
 
         // CCP4/MRC density maps — binary format, returns MapObject
         if matches!(fmt.as_str(), "ccp4" | "map" | "mrc") {
