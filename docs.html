@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Documentation — PyMOL-RS</title>
+        <meta
+            name="description"
+            content="Interactive documentation for PyMOL-RS: structural biology, visualization, selections, rendering, and more."
+        />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="assets/css/style.css" />
+        <link rel="stylesheet" href="assets/css/docs.css" />
+    </head>
+    <body>
+        <!-- NAV -->
+        <nav>
+            <div class="nav-inner">
+                <a href="index.html" class="nav-logo"
+                    ><img
+                        src="assets/images/pymol-rs.png"
+                        alt="PyMOL-RS logo"
+                        class="nav-logo-img"
+                    /><span>PyMOL<span>-RS</span></span></a
+                >
+                <ul class="nav-links">
+                    <li><a href="index.html#features">Features</a></li>
+                    <li><a href="index.html#architecture">Architecture</a></li>
+                    <li><a href="docs.html">Docs</a></li>
+                    <li>
+                        <a
+                            href="https://github.com/zmactep/pymol-rs"
+                            class="btn-nav"
+                            >GitHub ↗</a
+                        >
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- DOCS HUB -->
+        <div class="docs-hub">
+            <div class="docs-hero">
+                <h1>Documentation</h1>
+                <p>
+                    Interactive guides to molecular visualization with PyMOL-RS
+                    — run commands directly in the browser while you learn.
+                </p>
+            </div>
+
+            <div class="docs-hub-grid">
+                <a href="docs/structural-biology-101.html" class="docs-hub-card green">
+                    <div class="feature-icon" style="background: rgba(93, 232, 160, 0.12)">🧬</div>
+                    <div class="feature-title">Structural biology 101</div>
+                    <div class="feature-desc">
+                        Amino acids, nucleic acids, PDB format, structure
+                        databases, and how to explore them in 3D.
+                    </div>
+                </a>
+
+                <div class="docs-hub-card cyan inactive">
+                    <div class="feature-icon" style="background: rgba(77, 216, 232, 0.12)">🚀</div>
+                    <div class="feature-title">Quick start with PyMOL-RS</div>
+                    <div class="feature-desc">
+                        Installation, loading structures, basic visualization,
+                        and supported file formats.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+
+                <div class="docs-hub-card magenta inactive">
+                    <div class="feature-icon" style="background: rgba(232, 93, 160, 0.12)">🎯</div>
+                    <div class="feature-title">Selections</div>
+                    <div class="feature-desc">
+                        Selectors, boolean operators, distance and expansion
+                        operators, slash-macro syntax.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+
+                <div class="docs-hub-card orange inactive">
+                    <div class="feature-icon" style="background: rgba(232, 168, 93, 0.12)">🎨</div>
+                    <div class="feature-title">Advanced shading</div>
+                    <div class="feature-desc">
+                        Representations, lighting and materials, coloring,
+                        and publication-quality rendering.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+
+                <div class="docs-hub-card blue inactive">
+                    <div class="feature-icon" style="background: rgba(93, 141, 232, 0.12)">💎</div>
+                    <div class="feature-title">Ray tracing</div>
+                    <div class="feature-desc">
+                        High-quality ray-traced images, shadows, ambient
+                        occlusion, and export settings.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+
+                <div class="docs-hub-card orange inactive">
+                    <div class="feature-icon" style="background: rgba(232, 168, 93, 0.12)">🎬</div>
+                    <div class="feature-title">Movie making</div>
+                    <div class="feature-desc">
+                        Keyframe movies, scene-based animations, video
+                        export, and scripting complex sequences.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+
+                <div class="docs-hub-card cyan inactive">
+                    <div class="feature-icon" style="background: rgba(77, 216, 232, 0.12)">🐍</div>
+                    <div class="feature-title">Python plugin</div>
+                    <div class="feature-desc">
+                        Writing and running Python scripts, accessing the
+                        PyMOL-RS API from Python.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+
+                <div class="docs-hub-card blue inactive">
+                    <div class="feature-icon" style="background: rgba(93, 141, 232, 0.12)">🧩</div>
+                    <div class="feature-title">Plugins creation</div>
+                    <div class="feature-desc">
+                        Custom commands, GUI panels, file format handlers,
+                        and plugin distribution.
+                    </div>
+                    <span class="coming-soon">Coming soon</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <footer>
+            <div class="footer-inner">
+                <div class="footer-left">
+                    PyMOL-RS &copy; 2026 &middot;
+                    <a href="https://github.com/zmactep">Pavel Yakovlev</a>
+                    &middot; BSD 3-Clause
+                    <div class="footer-trademark">
+                        PyMOL&reg; is a registered trademark of
+                        Schr&ouml;dinger, LLC. This project is an independent
+                        open-source reimplementation and is not affiliated with,
+                        endorsed by, or connected to Schr&ouml;dinger, Inc. in
+                        any way.
+                    </div>
+                </div>
+                <ul class="footer-links">
+                    <li>
+                        <a href="https://github.com/zmactep/pymol-rs">GitHub</a>
+                    </li>
+                    <li><a href="docs.html">Docs</a></li>
+                    <li>
+                        <a href="https://github.com/zmactep/pymol-rs/releases"
+                            >Releases</a
+                        >
+                    </li>
+                </ul>
+            </div>
+        </footer>
+
+        <script src="js/nav-scroll.js"></script>
+    </body>
+</html>
