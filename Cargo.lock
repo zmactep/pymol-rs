@@ -2755,6 +2755,7 @@ dependencies = [
  "pymol-settings",
  "serde",
  "thiserror 2.0.18",
+ "web-time",
  "wgpu",
  "winit",
 ]

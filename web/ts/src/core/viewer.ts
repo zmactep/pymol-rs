@@ -69,11 +69,16 @@ export class ViewerCore {
   // ---------------------------------------------------------------------------
 
   private startLoop(): void {
-    const loop = () => {
+    let lastTime = performance.now();
+    const loop = (now: number) => {
       this.animFrameId = requestAnimationFrame(loop);
       if (!this.wasm) return;
 
+      const dt = Math.min((now - lastTime) / 1000.0, 0.1);
+      lastTime = now;
+
       this.wasm.process_input();
+      this.wasm.update_animations(dt);
 
       if (this.wasm.needs_redraw()) {
         this.wasm.render_frame();
