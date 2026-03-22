@@ -33,6 +33,7 @@ struct OutputMsg {
 #[derive(Serialize)]
 struct ObjectInfo {
     name: String,
+    object_type: &'static str,
     atom_count: usize,
     enabled: bool,
 }
@@ -281,9 +282,10 @@ impl WebViewer {
         serde_wasm_bindgen::to_value(&output).unwrap_or(JsValue::NULL)
     }
 
-    /// Load molecular data from bytes.
+    /// Load molecular or map data from bytes.
     ///
-    /// `format` should be one of: "pdb", "xyz", "cif", "mmcif", "bcif"
+    /// `format` should be one of: "pdb", "xyz", "cif", "mmcif", "bcif",
+    /// "ccp4", "map", "mrc"
     ///
     /// Gzip-compressed data is automatically detected and decompressed.
     #[wasm_bindgen]
@@ -304,6 +306,24 @@ impl WebViewer {
         };
 
         let fmt = format.to_lowercase();
+
+        // CCP4/MRC density maps — binary format, returns MapObject
+        if matches!(fmt.as_str(), "ccp4" | "map" | "mrc") {
+            let ccp4 = pymol_io::ccp4::read_ccp4_from(std::io::Cursor::new(data))
+                .map_err(|e| JsValue::from_str(&format!("CCP4 parse error: {}", e)))?;
+            let grid = pymol_render::Grid3D::from_dims(
+                ccp4.origin, ccp4.spacing, ccp4.dims, ccp4.values,
+            );
+            let map_data = pymol_scene::MapData::new(grid);
+            let map_obj = pymol_scene::MapObject::from_map_data(name, map_data);
+            self.session.registry.add(map_obj);
+            if let Some((min, max)) = self.session.registry.extent() {
+                self.session.camera.zoom_to(min, max, 0.0);
+            }
+            self.needs_redraw = true;
+            return Ok(());
+        }
+
         let mol = match fmt.as_str() {
             // Binary formats — parse directly from bytes
             "bcif" => pymol_io::bcif::read_bcif_bytes(data),
@@ -362,13 +382,22 @@ impl WebViewer {
         if let Some(mol_obj) = self.session.registry.get_molecule(name) {
             let info = ObjectInfo {
                 name: name.to_string(),
+                object_type: "molecule",
                 atom_count: mol_obj.molecule().atom_count(),
                 enabled: mol_obj.is_enabled(),
             };
-            serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL)
-        } else {
-            JsValue::NULL
+            return serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL);
         }
+        if let Some(map_obj) = self.session.registry.get_map(name) {
+            let info = ObjectInfo {
+                name: name.to_string(),
+                object_type: "map",
+                atom_count: 0,
+                enabled: map_obj.is_enabled(),
+            };
+            return serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL);
+        }
+        JsValue::NULL
     }
 
     /// Get sequence data for all loaded molecules as JSON.
@@ -391,9 +420,14 @@ impl WebViewer {
                     }
                     last_resv = Some((chain.clone(), resv));
 
-                    let one_letter = pymol_mol::three_to_one(&atom.residue.resn)
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| "?".to_string());
+                    // Skip water and ions (like the desktop sequence builder)
+                    if pymol_mol::is_water(&atom.residue.resn)
+                        || pymol_mol::is_ion(&atom.residue.resn)
+                    {
+                        continue;
+                    }
+
+                    let one_letter = pymol_mol::residue_to_char(&atom.residue.resn).to_string();
 
                     chain_map
                         .entry(chain.clone())

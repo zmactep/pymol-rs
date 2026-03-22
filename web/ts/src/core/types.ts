@@ -11,6 +11,7 @@ export interface OutputMessage {
 
 export interface ObjectInfo {
   name: string;
+  object_type: "molecule" | "map";
   atom_count: number;
   enabled: boolean;
 }
