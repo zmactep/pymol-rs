@@ -1014,6 +1014,7 @@ dependencies = [
  "pymol-scene",
  "pymol-select",
  "pymol-settings",
+ "rmp-serde",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
