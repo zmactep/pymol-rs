@@ -846,6 +846,7 @@ dependencies = [
  "pymol-color",
  "pymol-io",
  "pymol-mol",
+ "pymol-render",
  "pymol-scene",
  "pymol-select",
  "pymol-session",

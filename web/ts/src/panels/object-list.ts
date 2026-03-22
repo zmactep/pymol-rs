@@ -47,25 +47,29 @@ export class ObjectListPanel {
       // Name
       const label = document.createElement("span");
       label.className = "obj-name";
-      label.textContent = `${name} (${info.atom_count})`;
-
-      // Representation buttons
-      const reps = document.createElement("span");
-      reps.className = "obj-reps";
-      for (const rep of REPS) {
-        const btn = document.createElement("button");
-        btn.className = "rep-btn";
-        btn.textContent = rep.charAt(0).toUpperCase();
-        btn.title = rep;
-        btn.addEventListener("click", () => {
-          this.viewer.execute(`show ${rep}, ${name}`);
-        });
-        reps.appendChild(btn);
-      }
+      label.textContent = info.object_type === "map"
+        ? `${name} (map)`
+        : `${name} (${info.atom_count})`;
 
       row.appendChild(vis);
       row.appendChild(label);
-      row.appendChild(reps);
+
+      // Representation buttons (molecule-only)
+      if (info.object_type !== "map") {
+        const reps = document.createElement("span");
+        reps.className = "obj-reps";
+        for (const rep of REPS) {
+          const btn = document.createElement("button");
+          btn.className = "rep-btn";
+          btn.textContent = rep.charAt(0).toUpperCase();
+          btn.title = rep;
+          btn.addEventListener("click", () => {
+            this.viewer.execute(`show ${rep}, ${name}`);
+          });
+          reps.appendChild(btn);
+        }
+        row.appendChild(reps);
+      }
       this.list.appendChild(row);
     }
 

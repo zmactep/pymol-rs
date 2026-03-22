@@ -61,6 +61,15 @@ pub fn render_frame(
     }
 
     for name in &names {
+        if let Some(map_obj) = session.registry.get_map_mut(name) {
+            if map_obj.is_dirty() {
+                geometry_changed = true;
+            }
+            map_obj.prepare_render(&gpu.render_context);
+        }
+    }
+
+    for name in &names {
         if let Some(meas_obj) = session.registry.get_measurement_mut(name) {
             meas_obj.prepare_render(&gpu.render_context);
         }
@@ -148,6 +157,13 @@ pub fn render_frame(
             if let Some(meas_obj) = session.registry.get_measurement(name) {
                 if meas_obj.is_enabled() {
                     meas_obj.render(&mut render_pass, &gpu.render_context);
+                }
+            }
+        }
+        for name in &names {
+            if let Some(map_obj) = session.registry.get_map(name) {
+                if map_obj.is_enabled() {
+                    map_obj.render(&mut render_pass, &gpu.render_context);
                 }
             }
         }
