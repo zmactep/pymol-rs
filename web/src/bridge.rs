@@ -148,6 +148,49 @@ impl WebViewer {
         self.needs_redraw
     }
 
+    /// Advance movie playback, rock animation, and camera interpolation.
+    ///
+    /// Call this once per frame before `needs_redraw()`.
+    /// `dt` is the elapsed time in seconds since the last frame.
+    #[wasm_bindgen]
+    pub fn update_animations(&mut self, dt: f32) {
+        // Movie frame advance
+        if self.session.movie.update() {
+            let current_frame = self.session.movie.current_frame();
+            let state_index = self.session.movie.frame_to_state(current_frame);
+            for name in self
+                .session
+                .registry
+                .names()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+            {
+                if let Some(obj) = self.session.registry.get_molecule_mut(&name) {
+                    obj.set_display_state(state_index);
+                }
+            }
+            self.session.apply_movie_object_transforms();
+            if let Some(view) = self.session.movie.interpolated_view() {
+                self.session.camera.set_view(view);
+            }
+            self.needs_redraw = true;
+        }
+
+        // Rock animation (Y-axis oscillation)
+        if self.session.movie.is_rock_enabled() {
+            let amplitude = 45.0_f32.to_radians();
+            let speed = 5.0;
+            let rock_delta = self.session.movie.update_rock(dt, amplitude, speed);
+            self.session.camera.rotate_y(rock_delta * dt);
+            self.needs_redraw = true;
+        }
+
+        // Camera animation (zoom/pan/rotate lerp)
+        if self.session.camera.update(dt) {
+            self.needs_redraw = true;
+        }
+    }
+
     /// Handle canvas resize.
     #[wasm_bindgen]
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -359,6 +402,7 @@ impl WebViewer {
             Ok(molecule) => {
                 let mol_obj = MoleculeObject::with_name(molecule, name);
                 self.session.registry.add(mol_obj);
+                self.update_movie_state_count();
                 // Zoom to fit
                 if let Some((min, max)) = self.session.registry.extent() {
                     self.session.camera.zoom_to(min, max, 0.0);
@@ -564,5 +608,21 @@ impl WebViewer {
         }
 
         serde_wasm_bindgen::to_value(&labels).unwrap_or(JsValue::NULL)
+    }
+}
+
+// Non-exported helpers
+impl WebViewer {
+    /// Update movie state count from the max across all loaded objects.
+    fn update_movie_state_count(&mut self) {
+        let max_states = self
+            .session
+            .registry
+            .names()
+            .filter_map(|name| self.session.registry.get_molecule(name))
+            .map(|obj| obj.n_states())
+            .max()
+            .unwrap_or(1);
+        self.session.movie.set_n_object_states(max_states);
     }
 }

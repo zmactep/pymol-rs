@@ -5,7 +5,7 @@
 
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use crate::camera::SceneView;
 use crate::quat::{self, Quat};
