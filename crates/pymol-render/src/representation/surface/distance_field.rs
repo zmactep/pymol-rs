@@ -78,7 +78,7 @@ pub fn compute_distance_field(
     // The narrowband extends slightly beyond the effective radius to ensure marching cubes
     // gets accurate values where the surface might pass
     // Minimum of 1.5Å ensures reliability with 3.0Å spatial hash cells
-    let narrowband = (grid.spacing * 2.0).max(1.5);
+    let narrowband = (grid.min_spacing() * 2.0).max(1.5);
     let active_mask = build_active_mask(grid, atoms, &radii, narrowband);
     
     // Count active cells for logging/debugging
@@ -106,18 +106,18 @@ fn build_active_mask(
     
     let spacing = grid.spacing;
     let origin = grid.origin;
-    
+
     // For each atom, mark grid cells within (radius + narrowband) as active
     for (atom, &radius) in atoms.iter().zip(effective_radii.iter()) {
         let influence_radius = radius + narrowband;
-        
+
         // Calculate bounding box of affected cells
-        let min_x = ((atom.position[0] - influence_radius - origin[0]) / spacing).floor() as i32;
-        let max_x = ((atom.position[0] + influence_radius - origin[0]) / spacing).ceil() as i32;
-        let min_y = ((atom.position[1] - influence_radius - origin[1]) / spacing).floor() as i32;
-        let max_y = ((atom.position[1] + influence_radius - origin[1]) / spacing).ceil() as i32;
-        let min_z = ((atom.position[2] - influence_radius - origin[2]) / spacing).floor() as i32;
-        let max_z = ((atom.position[2] + influence_radius - origin[2]) / spacing).ceil() as i32;
+        let min_x = ((atom.position[0] - influence_radius - origin[0]) / spacing[0]).floor() as i32;
+        let max_x = ((atom.position[0] + influence_radius - origin[0]) / spacing[0]).ceil() as i32;
+        let min_y = ((atom.position[1] - influence_radius - origin[1]) / spacing[1]).floor() as i32;
+        let max_y = ((atom.position[1] + influence_radius - origin[1]) / spacing[1]).ceil() as i32;
+        let min_z = ((atom.position[2] - influence_radius - origin[2]) / spacing[2]).floor() as i32;
+        let max_z = ((atom.position[2] + influence_radius - origin[2]) / spacing[2]).ceil() as i32;
         
         // Clamp to grid bounds
         let min_x = min_x.max(0) as usize;
@@ -154,16 +154,16 @@ fn compute_distance_field_sparse(
     let vd = grid.vertex_dims();
     let grid_min = grid.origin;
     let grid_max = [
-        grid.origin[0] + (vd[0] - 1) as f32 * grid.spacing,
-        grid.origin[1] + (vd[1] - 1) as f32 * grid.spacing,
-        grid.origin[2] + (vd[2] - 1) as f32 * grid.spacing,
+        grid.origin[0] + (vd[0] - 1) as f32 * grid.spacing[0],
+        grid.origin[1] + (vd[1] - 1) as f32 * grid.spacing[1],
+        grid.origin[2] + (vd[2] - 1) as f32 * grid.spacing[2],
     ];
-    
+
     // Extend radii by narrowband for spatial hash insertion
     // This ensures atoms are found when querying any active cell
     // Minimum of 1.5Å ensures single-cell queries work reliably
     // (half the spatial hash cell size of 3.0Å)
-    let narrowband = (grid.spacing * 2.0).max(1.5);
+    let narrowband = (grid.min_spacing() * 2.0).max(1.5);
     let extended_radii: Vec<f32> = radii.iter().map(|r| r + narrowband).collect();
     
     let spatial_hash = SpatialHash::new(
@@ -219,15 +219,15 @@ fn compute_distance_field_dense(
     let vd = grid.vertex_dims();
     let grid_min = grid.origin;
     let grid_max = [
-        grid.origin[0] + (vd[0] - 1) as f32 * grid.spacing,
-        grid.origin[1] + (vd[1] - 1) as f32 * grid.spacing,
-        grid.origin[2] + (vd[2] - 1) as f32 * grid.spacing,
+        grid.origin[0] + (vd[0] - 1) as f32 * grid.spacing[0],
+        grid.origin[1] + (vd[1] - 1) as f32 * grid.spacing[1],
+        grid.origin[2] + (vd[2] - 1) as f32 * grid.spacing[2],
     ];
-    
+
     // Extend radii to ensure atoms are found for all grid cells
     // Minimum of 1.5Å ensures single-cell queries work reliably
     // (half the spatial hash cell size of 3.0Å)
-    let margin = (grid.spacing * 2.0).max(1.5);
+    let margin = (grid.min_spacing() * 2.0).max(1.5);
     let extended_radii: Vec<f32> = radii.iter().map(|r| r + margin).collect();
     
     let spatial_hash = SpatialHash::new(

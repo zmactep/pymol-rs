@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use pymol_io::FileFormat;
 use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_mol::ObjectMolecule;
-use pymol_scene::MoleculeObject;
+use pymol_render::Grid3D;
+use pymol_scene::{MapData, MapObject, MoleculeObject};
 use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
@@ -151,6 +152,7 @@ EXAMPLES
                 "gro" => FileFormat::Gro,
                 "xtc" => FileFormat::Xtc,
                 "trr" => FileFormat::Trr,
+                "ccp4" | "map" | "mrc" => FileFormat::Ccp4,
                 _ => FileFormat::Unknown,
             });
 
@@ -222,6 +224,40 @@ EXAMPLES
                 "{} is a trajectory-only format with no topology. Use 'load_traj' instead.",
                 builtin_format.name()
             )));
+        }
+
+        // Handle CCP4/MRC map files as MapObject (not MoleculeObject)
+        if builtin_format.is_map_format() {
+            let ccp4 = pymol_io::ccp4::read_ccp4(&path)
+                .map_err(|e| CmdError::FileFormat(e.to_string()))?;
+
+            if !quiet {
+                ctx.print(&format!(
+                    " CCP4 map: {}x{}x{} grid, spacing ({:.2}, {:.2}, {:.2}) Å",
+                    ccp4.dims[0] + 1, ccp4.dims[1] + 1, ccp4.dims[2] + 1,
+                    ccp4.spacing[0], ccp4.spacing[1], ccp4.spacing[2]
+                ));
+                ctx.print(&format!(
+                    " Density: mean {:.4}, rms {:.4} (normalized to sigma)",
+                    ccp4.stats.dmean, ccp4.stats.rms
+                ));
+                ctx.print(&format!(
+                    " Origin: ({:.2}, {:.2}, {:.2})",
+                    ccp4.origin[0], ccp4.origin[1], ccp4.origin[2]
+                ));
+            }
+
+            let grid = Grid3D::from_dims(ccp4.origin, ccp4.spacing, ccp4.dims, ccp4.values);
+            let map_data = MapData::new(grid);
+            let map_obj = MapObject::from_map_data(&object_name, map_data);
+            ctx.viewer.objects_mut().add(map_obj);
+
+            if !quiet {
+                ctx.print(&format!(" Loaded map \"{}\" as \"{}\"", filename, object_name));
+            }
+
+            ctx.viewer.zoom_on(&object_name, 0.0);
+            return Ok(());
         }
 
         // Load molecular file

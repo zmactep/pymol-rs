@@ -55,6 +55,7 @@
 //! - `fetch-async` - Enable asynchronous fetching from RCSB PDB (uses `reqwest`)
 
 pub mod bcif;
+pub mod ccp4;
 pub mod cif;
 pub mod compress;
 pub mod detect;
@@ -125,6 +126,9 @@ pub fn read_file_format(path: &Path, format: FileFormat) -> IoResult<ObjectMolec
         FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(
             "Trajectory-only format; use load_traj instead".to_string(),
         )),
+        FileFormat::Ccp4 => Err(IoError::Unsupported(
+            "CCP4 is a map format; use ccp4::read_ccp4 instead".to_string(),
+        )),
         FileFormat::Unknown => Err(IoError::UnknownFormat(
             path.to_string_lossy().into_owned(),
         )),
@@ -149,6 +153,9 @@ pub fn read_all_format(path: &Path, format: FileFormat) -> IoResult<Vec<ObjectMo
         FileFormat::Gro => gro::read_gro(path).map(|m| vec![m]),
         FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(
             "Trajectory-only format; use load_traj instead".to_string(),
+        )),
+        FileFormat::Ccp4 => Err(IoError::Unsupported(
+            "CCP4 is a map format; use ccp4::read_ccp4 instead".to_string(),
         )),
         FileFormat::Unknown => Err(IoError::UnknownFormat(
             path.to_string_lossy().into_owned(),
@@ -236,6 +243,9 @@ pub fn parse_str(content: &str, format: FileFormat) -> IoResult<ObjectMolecule> 
         FileFormat::Gro => gro::read_gro_str(content),
         FileFormat::Xtc | FileFormat::Trr => Err(IoError::Unsupported(
             "Trajectory formats are binary; use load_traj with a file path".to_string(),
+        )),
+        FileFormat::Ccp4 => Err(IoError::Unsupported(
+            "CCP4 is a binary map format; use ccp4::read_ccp4 with a file path".to_string(),
         )),
         FileFormat::Unknown => Err(IoError::UnknownFormat("string input".to_string())),
     }

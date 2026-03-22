@@ -354,6 +354,15 @@ impl App {
             }
         }
 
+        for name in names {
+            if let Some(map_obj) = self.state.registry.get_map_mut(name) {
+                if map_obj.is_dirty() {
+                    geometry_changed = true;
+                }
+                map_obj.prepare_render(context);
+            }
+        }
+
         if geometry_changed {
             self.shading.invalidate_shadows();
         }
@@ -432,6 +441,15 @@ impl App {
             if let Some(meas_obj) = self.state.registry.get_measurement(name) {
                 if meas_obj.is_enabled() {
                     meas_obj.render(&mut render_pass, context);
+                }
+            }
+        }
+
+        // Render map objects (isomesh, isodot, isosurface)
+        for name in names {
+            if let Some(map_obj) = self.state.registry.get_map(name) {
+                if map_obj.is_enabled() {
+                    map_obj.render(&mut render_pass, context);
                 }
             }
         }

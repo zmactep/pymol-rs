@@ -3,13 +3,15 @@
 //! Provides spatial data structures for distance field computation and
 //! marching cubes isosurface extraction.
 
-/// 3D uniform grid for scalar field storage
+/// 3D grid for scalar field storage
+///
+/// Supports both uniform and per-axis (anisotropic) spacing.
 #[derive(Debug, Clone)]
 pub struct Grid3D {
     /// Grid origin (minimum corner in world coordinates)
     pub origin: [f32; 3],
-    /// Grid cell spacing (uniform in all dimensions)
-    pub spacing: f32,
+    /// Grid cell spacing per axis (x, y, z)
+    pub spacing: [f32; 3],
     /// Grid dimensions (number of cells in x, y, z)
     pub dims: [usize; 3],
     /// Scalar field values at grid vertices
@@ -18,7 +20,7 @@ pub struct Grid3D {
 }
 
 impl Grid3D {
-    /// Create a new grid from bounding box and spacing
+    /// Create a new grid from bounding box and uniform spacing
     ///
     /// The grid will encompass the bounding box with the given padding.
     pub fn from_bounds(min: [f32; 3], max: [f32; 3], spacing: f32, padding: f32) -> Self {
@@ -46,10 +48,34 @@ impl Grid3D {
 
         Self {
             origin: padded_min,
-            spacing,
+            spacing: [spacing, spacing, spacing],
             dims,
             values: vec![f32::MAX; vertex_count],
         }
+    }
+
+    /// Create a grid from explicit dimensions and per-axis spacing
+    ///
+    /// Used for volumetric data (CCP4 maps) with potentially anisotropic spacing.
+    /// `dims` is the number of cells; vertex count is `dims[i] + 1`.
+    pub fn from_dims(
+        origin: [f32; 3],
+        spacing: [f32; 3],
+        dims: [usize; 3],
+        values: Vec<f32>,
+    ) -> Self {
+        Self {
+            origin,
+            spacing,
+            dims,
+            values,
+        }
+    }
+
+    /// Get the minimum (uniform) spacing value
+    #[inline]
+    pub fn min_spacing(&self) -> f32 {
+        self.spacing[0].min(self.spacing[1]).min(self.spacing[2])
     }
 
     /// Get the number of vertices in each dimension
@@ -77,9 +103,9 @@ impl Grid3D {
     #[inline]
     pub fn vertex_position(&self, x: usize, y: usize, z: usize) -> [f32; 3] {
         [
-            self.origin[0] + x as f32 * self.spacing,
-            self.origin[1] + y as f32 * self.spacing,
-            self.origin[2] + z as f32 * self.spacing,
+            self.origin[0] + x as f32 * self.spacing[0],
+            self.origin[1] + y as f32 * self.spacing[1],
+            self.origin[2] + z as f32 * self.spacing[2],
         ]
     }
 

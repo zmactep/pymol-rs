@@ -41,9 +41,9 @@ impl MapData {
         let vd = self.grid.vertex_dims();
         let min = self.grid.origin;
         let max = [
-            min[0] + (vd[0] - 1) as f32 * self.grid.spacing,
-            min[1] + (vd[1] - 1) as f32 * self.grid.spacing,
-            min[2] + (vd[2] - 1) as f32 * self.grid.spacing,
+            min[0] + (vd[0] - 1) as f32 * self.grid.spacing[0],
+            min[1] + (vd[1] - 1) as f32 * self.grid.spacing[1],
+            min[2] + (vd[2] - 1) as f32 * self.grid.spacing[2],
         ];
         (min, max)
     }
@@ -57,6 +57,8 @@ pub enum MapDisplayMode {
     Isomesh,
     /// Solid surface at isovalue
     Isosurface,
+    /// Dot cloud at isovalue crossings
+    Isodot,
     /// Volume rendering (not yet implemented)
     Volume,
 }
@@ -82,6 +84,8 @@ pub struct MapObject {
     mesh_color: [f32; 4],
     /// Carve around selection radius (0 = no carve)
     carve_radius: f32,
+    /// Positions to carve around (atoms from selection)
+    carve_positions: Option<Vec<[f32; 3]>>,
     /// Per-object settings
     settings: Option<GlobalSettings>,
     /// Cached mesh representation
@@ -102,6 +106,7 @@ impl MapObject {
             display_mode: MapDisplayMode::default(),
             mesh_color: [0.0, 0.5, 1.0, 1.0], // Blue
             carve_radius: 0.0,
+            carve_positions: None,
             settings: None,
             cached_mesh: None,
             dirty: true,
@@ -119,6 +124,7 @@ impl MapObject {
             display_mode: MapDisplayMode::default(),
             mesh_color: [0.0, 0.5, 1.0, 1.0],
             carve_radius: 0.0,
+            carve_positions: None,
             settings: None,
             cached_mesh: None,
             dirty: true,
@@ -136,6 +142,7 @@ impl MapObject {
             display_mode: MapDisplayMode::default(),
             mesh_color: [0.0, 0.5, 1.0, 1.0],
             carve_radius: 0.0,
+            carve_positions: None,
             settings: None,
             cached_mesh: None,
             dirty: true,
@@ -220,6 +227,18 @@ impl MapObject {
         }
     }
 
+    /// Set positions to carve around
+    pub fn set_carve_positions(&mut self, positions: Vec<[f32; 3]>) {
+        self.carve_positions = Some(positions);
+        self.dirty = true;
+    }
+
+    /// Clear carve positions
+    pub fn clear_carve_positions(&mut self) {
+        self.carve_positions = None;
+        self.dirty = true;
+    }
+
     /// Check if dirty
     pub fn is_dirty(&self) -> bool {
         self.dirty
@@ -237,20 +256,239 @@ impl MapObject {
 
     /// Build the mesh from the grid using marching cubes
     fn build_mesh(&mut self) {
-        // Extract isosurface first (needs immutable borrow of grid)
-        let result = match self.states.get(self.current_state) {
+        // Optionally carve the grid before extraction
+        let carved_grid;
+        let grid_ref = match self.states.get(self.current_state) {
             Some(data) => {
-                Self::extract_isosurface(&data.grid, self.level, self.mesh_color)
+                if let (Some(positions), radius) = (&self.carve_positions, self.carve_radius) {
+                    if radius > 0.0 {
+                        carved_grid = Some(Self::carve_grid(&data.grid, positions, radius));
+                        carved_grid.as_ref().unwrap()
+                    } else {
+                        &data.grid
+                    }
+                } else {
+                    &data.grid
+                }
             }
             None => {
-                (Vec::new(), Vec::new())
+                let mesh = self.cached_mesh.get_or_insert_with(MeshRep::new);
+                mesh.set_mesh(Vec::new(), Vec::new());
+                self.dirty = false;
+                return;
             }
         };
 
-        // Now set the mesh (mutable borrow)
+        let result = match self.display_mode {
+            MapDisplayMode::Isomesh => {
+                Self::extract_wireframe(grid_ref, self.level, self.mesh_color)
+            }
+            MapDisplayMode::Isodot => {
+                Self::extract_dots(grid_ref, self.level, self.mesh_color)
+            }
+            MapDisplayMode::Isosurface | MapDisplayMode::Volume => {
+                Self::extract_isosurface(grid_ref, self.level, self.mesh_color)
+            }
+        };
+
         let mesh = self.cached_mesh.get_or_insert_with(MeshRep::new);
         mesh.set_mesh(result.0, result.1);
         self.dirty = false;
+    }
+
+    /// Create a carved copy of the grid, zeroing values far from carve positions
+    fn carve_grid(grid: &Grid3D, positions: &[[f32; 3]], radius: f32) -> Grid3D {
+        let radius_sq = radius * radius;
+        let mut carved = grid.clone();
+        let vd = grid.vertex_dims();
+
+        for z in 0..vd[2] {
+            for y in 0..vd[1] {
+                for x in 0..vd[0] {
+                    let pos = grid.vertex_position(x, y, z);
+                    let near = positions.iter().any(|p| {
+                        let dx = pos[0] - p[0];
+                        let dy = pos[1] - p[1];
+                        let dz = pos[2] - p[2];
+                        dx * dx + dy * dy + dz * dz <= radius_sq
+                    });
+                    if !near {
+                        let idx = grid.vertex_index(x, y, z);
+                        carved.values[idx] = 0.0;
+                    }
+                }
+            }
+        }
+        carved
+    }
+
+    /// Extract wireframe line segments from isosurface (for Isomesh mode)
+    fn extract_wireframe(grid: &Grid3D, level: f32, color: [f32; 4]) -> (Vec<MeshVertex>, Vec<u32>) {
+        // First extract triangles, then convert to line segments
+        let (tri_verts, tri_indices) = Self::extract_isosurface(grid, level, color);
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        // Convert each triangle into 3 line segments (6 vertices each)
+        for chunk in tri_indices.chunks(3) {
+            if chunk.len() < 3 {
+                break;
+            }
+            let v0 = &tri_verts[chunk[0] as usize];
+            let v1 = &tri_verts[chunk[1] as usize];
+            let v2 = &tri_verts[chunk[2] as usize];
+
+            // Emit 3 degenerate triangles (thin lines) for each edge
+            for (a, b) in [(v0, v1), (v1, v2), (v2, v0)] {
+                let base = vertices.len() as u32;
+                // Compute a perpendicular offset for line width
+                let dx = b.position[0] - a.position[0];
+                let dy = b.position[1] - a.position[1];
+                let dz = b.position[2] - a.position[2];
+                let len = (dx * dx + dy * dy + dz * dz).sqrt();
+                let line_width = grid.min_spacing() * 0.03;
+                let (ox, oy, oz) = if len > 1e-6 {
+                    // Cross with an arbitrary axis to get perpendicular
+                    let (cx, cy, cz) = if dx.abs() < 0.9 * len {
+                        (dy * 0.0 - dz * 0.0, dz * 1.0 - dx * 0.0, dx * 0.0 - dy * 1.0)
+                    } else {
+                        (dy * 1.0 - dz * 0.0, dz * 0.0 - dx * 1.0, dx * 0.0 - dy * 0.0)
+                    };
+                    let cl = (cx * cx + cy * cy + cz * cz).sqrt();
+                    if cl > 1e-6 {
+                        (cx / cl * line_width, cy / cl * line_width, cz / cl * line_width)
+                    } else {
+                        (line_width, 0.0, 0.0)
+                    }
+                } else {
+                    (line_width, 0.0, 0.0)
+                };
+
+                vertices.push(MeshVertex {
+                    position: [a.position[0] - ox, a.position[1] - oy, a.position[2] - oz],
+                    normal: a.normal,
+                    color,
+                });
+                vertices.push(MeshVertex {
+                    position: [a.position[0] + ox, a.position[1] + oy, a.position[2] + oz],
+                    normal: a.normal,
+                    color,
+                });
+                vertices.push(MeshVertex {
+                    position: [b.position[0] - ox, b.position[1] - oy, b.position[2] - oz],
+                    normal: b.normal,
+                    color,
+                });
+                vertices.push(MeshVertex {
+                    position: [b.position[0] + ox, b.position[1] + oy, b.position[2] + oz],
+                    normal: b.normal,
+                    color,
+                });
+
+                indices.push(base);
+                indices.push(base + 1);
+                indices.push(base + 2);
+                indices.push(base + 1);
+                indices.push(base + 3);
+                indices.push(base + 2);
+            }
+        }
+
+        (vertices, indices)
+    }
+
+    /// Extract dot positions at isosurface crossings (for Isodot mode)
+    fn extract_dots(grid: &Grid3D, level: f32, color: [f32; 4]) -> (Vec<MeshVertex>, Vec<u32>) {
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        let dot_size = grid.min_spacing() * 0.08;
+
+        let dims = grid.dims;
+
+        // Find edge crossings and place a small quad at each
+        for z in 0..dims[2] {
+            for y in 0..dims[1] {
+                for x in 0..dims[0] {
+                    let cube_values = grid.cube_values(x, y, z);
+                    let cube_positions = grid.cube_positions(x, y, z);
+
+                    let mut cube_index = 0u8;
+                    for (i, &val) in cube_values.iter().enumerate() {
+                        if val < level {
+                            cube_index |= 1 << i;
+                        }
+                    }
+
+                    if cube_index == 0 || cube_index == 255 {
+                        continue;
+                    }
+
+                    let edge_table = EDGE_TABLE[cube_index as usize];
+                    if edge_table == 0 {
+                        continue;
+                    }
+
+                    for i in 0..12 {
+                        if edge_table & (1 << i) != 0 {
+                            let (v1, v2) = EDGE_VERTICES[i];
+                            let p1 = cube_positions[v1];
+                            let p2 = cube_positions[v2];
+                            let val1 = cube_values[v1];
+                            let val2 = cube_values[v2];
+
+                            let t = if (val2 - val1).abs() > 1e-6 {
+                                (level - val1) / (val2 - val1)
+                            } else {
+                                0.5
+                            };
+
+                            let pos = [
+                                p1[0] + t * (p2[0] - p1[0]),
+                                p1[1] + t * (p2[1] - p1[1]),
+                                p1[2] + t * (p2[2] - p1[2]),
+                            ];
+
+                            let normal = Self::compute_gradient(grid, pos);
+
+                            // Create a small billboard quad
+                            let base = vertices.len() as u32;
+                            let d = dot_size;
+
+                            vertices.push(MeshVertex {
+                                position: [pos[0] - d, pos[1] - d, pos[2]],
+                                normal,
+                                color,
+                            });
+                            vertices.push(MeshVertex {
+                                position: [pos[0] + d, pos[1] - d, pos[2]],
+                                normal,
+                                color,
+                            });
+                            vertices.push(MeshVertex {
+                                position: [pos[0] + d, pos[1] + d, pos[2]],
+                                normal,
+                                color,
+                            });
+                            vertices.push(MeshVertex {
+                                position: [pos[0] - d, pos[1] + d, pos[2]],
+                                normal,
+                                color,
+                            });
+
+                            indices.push(base);
+                            indices.push(base + 1);
+                            indices.push(base + 2);
+                            indices.push(base);
+                            indices.push(base + 2);
+                            indices.push(base + 3);
+                        }
+                    }
+                }
+            }
+        }
+
+        (vertices, indices)
     }
 
     /// Simple marching cubes implementation for isosurface extraction
@@ -312,7 +550,7 @@ impl MapObject {
                             ];
 
                             // Compute gradient as normal (would need neighboring cells for proper gradient)
-                            edge_normals[i] = Self::compute_gradient(grid, edge_vertices[i], grid.spacing);
+                            edge_normals[i] = Self::compute_gradient(grid, edge_vertices[i]);
                         }
                     }
 
@@ -356,14 +594,16 @@ impl MapObject {
     }
 
     /// Compute gradient (normal) at a point using central differences
-    fn compute_gradient(grid: &Grid3D, pos: [f32; 3], spacing: f32) -> [f32; 3] {
-        let h = spacing * 0.5;
+    fn compute_gradient(grid: &Grid3D, pos: [f32; 3]) -> [f32; 3] {
+        let hx = grid.spacing[0] * 0.5;
+        let hy = grid.spacing[1] * 0.5;
+        let hz = grid.spacing[2] * 0.5;
 
         // Sample the grid (simplified - would use trilinear interpolation)
         let sample = |p: [f32; 3]| -> f32 {
-            let ix = ((p[0] - grid.origin[0]) / grid.spacing) as usize;
-            let iy = ((p[1] - grid.origin[1]) / grid.spacing) as usize;
-            let iz = ((p[2] - grid.origin[2]) / grid.spacing) as usize;
+            let ix = ((p[0] - grid.origin[0]) / grid.spacing[0]) as usize;
+            let iy = ((p[1] - grid.origin[1]) / grid.spacing[1]) as usize;
+            let iz = ((p[2] - grid.origin[2]) / grid.spacing[2]) as usize;
             let vd = grid.vertex_dims();
             if ix < vd[0] && iy < vd[1] && iz < vd[2] {
                 grid.get(ix, iy, iz)
@@ -372,9 +612,9 @@ impl MapObject {
             }
         };
 
-        let gx = sample([pos[0] + h, pos[1], pos[2]]) - sample([pos[0] - h, pos[1], pos[2]]);
-        let gy = sample([pos[0], pos[1] + h, pos[2]]) - sample([pos[0], pos[1] - h, pos[2]]);
-        let gz = sample([pos[0], pos[1], pos[2] + h]) - sample([pos[0], pos[1], pos[2] - h]);
+        let gx = sample([pos[0] + hx, pos[1], pos[2]]) - sample([pos[0] - hx, pos[1], pos[2]]);
+        let gy = sample([pos[0], pos[1] + hy, pos[2]]) - sample([pos[0], pos[1] - hy, pos[2]]);
+        let gz = sample([pos[0], pos[1], pos[2] + hz]) - sample([pos[0], pos[1], pos[2] - hz]);
 
         // Normalize
         let len = (gx * gx + gy * gy + gz * gz).sqrt();
