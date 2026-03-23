@@ -65,9 +65,9 @@ make release && make run
 
 ## What works
 
-**Formats:** PDB · mmCIF · bCIF · MOL2 · SDF/MOL · XYZ · GRO (+ gzip)
+**Formats:** PDB · mmCIF · bCIF · MOL2 · SDF/MOL · XYZ · GRO · CCP4/MRC (+ gzip)
 
-**Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots · Labels
+**Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots · Labels · Isomesh · Isosurface · Isodot
 
 **Selection language** — full PyMOL-compatible syntax:
 ```
@@ -83,6 +83,7 @@ polymer and not solvent
 - Measurements — distance, angle, dihedral with visual feedback
 - Crystallographic symmetry — `symexp` with all 230 space groups
 - Secondary structure — `dss` assignment from geometry
+- Electron density maps — CCP4/MRC loading with `isomesh`, `isosurface`, `isodot` contouring
 
 **Sessions** — save and load your sessions with high-efficiency `.prs` file format or use your old PyMOL sessions with `.pse` parser.
 
@@ -228,10 +229,6 @@ This builds all reference plugins and installs them to `~/.pymol-rs/plugins/`. T
 PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
     cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin
 ```
-
-## Roadmap
-
-- [ ] Electron density maps (isomesh / isosurface)
 
 ## License
 
