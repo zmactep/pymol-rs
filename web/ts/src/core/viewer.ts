@@ -13,6 +13,8 @@ export class ViewerCore {
   private animFrameId = 0;
   private resizeObserver: ResizeObserver | null = null;
   private labelOverlay: LabelOverlay;
+  private _deferred = false;
+  private _revealDuration = 150;
 
   constructor(private container: HTMLElement) {
     // Ensure container is a positioning context for the label overlay
@@ -51,6 +53,42 @@ export class ViewerCore {
 
   get wasmViewer(): WebViewer | null {
     return this.wasm;
+  }
+
+  get isDeferred(): boolean {
+    return this._deferred;
+  }
+
+  setDeferred(defer: boolean, revealDuration = 150): void {
+    this._deferred = defer;
+    this._revealDuration = revealDuration;
+    if (defer) {
+      this.container.style.opacity = "0";
+    }
+  }
+
+  reveal(): Promise<void> {
+    if (!this._deferred) return Promise.resolve();
+    this._deferred = false;
+
+    return new Promise<void>((resolve) => {
+      this.container.style.transition = `opacity ${this._revealDuration}ms ease-in`;
+      // Force reflow so the transition triggers
+      void this.container.offsetHeight;
+      this.container.style.opacity = "1";
+
+      let resolved = false;
+      const done = () => {
+        if (resolved) return;
+        resolved = true;
+        this.container.removeEventListener("transitionend", done);
+        this.container.style.transition = "";
+        resolve();
+      };
+      this.container.addEventListener("transitionend", done);
+      // Fallback in case transitionend doesn't fire
+      setTimeout(done, this._revealDuration + 50);
+    });
   }
 
   destroy(): void {

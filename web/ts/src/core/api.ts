@@ -31,6 +31,9 @@ export class PyMolRSViewer {
   constructor(container: HTMLElement, options: ViewerOptions = {}) {
     this.options = options;
     this.core = new ViewerCore(container);
+    if (options.defer) {
+      this.core.setDeferred(true, options.revealDuration ?? 150);
+    }
   }
 
   async init(): Promise<void> {
@@ -88,16 +91,61 @@ export class PyMolRSViewer {
   }
 
   // ---------------------------------------------------------------------------
+  // Deferred display
+  // ---------------------------------------------------------------------------
+
+  get isDeferred(): boolean {
+    return this.core.isDeferred;
+  }
+
+  async show(): Promise<void> {
+    await this.core.reveal();
+  }
+
+  // ---------------------------------------------------------------------------
   // Commands
   // ---------------------------------------------------------------------------
 
   execute(command: string): CommandOutput {
+    const async_cmd = parseAsyncCommand(command);
+    if (async_cmd) {
+      // Fire-and-forget; callers who need to await should use executeAsync()
+      this.executeAsync(command);
+      const text = async_cmd.kind === "fetch"
+        ? ` Fetching ${async_cmd.code}...`
+        : ` Loading ${async_cmd.url}...`;
+      return { messages: [{ level: "info", text }] };
+    }
     const wasm = this.core.wasmViewer;
     if (!wasm) return { messages: [] };
     const result = wasm.execute(command) as CommandOutput;
     this.events.emit("command-output", result.messages[0] ?? { level: "info", text: "" });
     this.refreshPanels();
     return result;
+  }
+
+  async executeAsync(command: string): Promise<CommandOutput> {
+    const cmd = parseAsyncCommand(command);
+    if (!cmd) return this.execute(command);
+
+    try {
+      if (cmd.kind === "fetch") {
+        const url = buildRcsbUrl(cmd.code, cmd.format);
+        await this.loadUrl(url, { name: cmd.name, format: cmd.format });
+        const msg = { level: "info" as const, text: ` Fetched ${cmd.code} as "${cmd.name}"` };
+        this.events.emit("command-output", msg);
+        return { messages: [msg] };
+      } else {
+        await this.loadUrl(cmd.url, { name: cmd.name, format: cmd.format });
+        const msg = { level: "info" as const, text: ` Loaded "${cmd.name}" from URL` };
+        this.events.emit("command-output", msg);
+        return { messages: [msg] };
+      }
+    } catch (e) {
+      const msg = { level: "error" as const, text: ` ${e}` };
+      this.events.emit("command-output", msg);
+      return { messages: [msg] };
+    }
   }
 
   loadData(data: Uint8Array, name: string, format: string): void {
@@ -200,4 +248,85 @@ export class PyMolRSViewer {
     this.panels.clear();
     this.core.destroy();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Command interception helpers
+// ---------------------------------------------------------------------------
+
+type AsyncCommand =
+  | { kind: "fetch"; code: string; name: string; format: string }
+  | { kind: "load"; url: string; name: string; format: string };
+
+/** Parse a PyMOL command string into positional and named args. */
+function parsePymolArgs(argsStr: string): { positional: string[]; named: Record<string, string> } {
+  const positional: string[] = [];
+  const named: Record<string, string> = {};
+  for (const part of argsStr.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq !== -1) {
+      named[trimmed.slice(0, eq).trim().toLowerCase()] = trimmed.slice(eq + 1).trim();
+    } else {
+      positional.push(trimmed);
+    }
+  }
+  return { positional, named };
+}
+
+/** Detect fetch/load commands that should be handled via JS fetch API. */
+function parseAsyncCommand(command: string): AsyncCommand | null {
+  const match = command.match(/^\s*(\w+)\s+(.*)/s);
+  if (!match) return null;
+  const verb = match[1].toLowerCase();
+  const { positional, named } = parsePymolArgs(match[2]);
+
+  if (verb === "fetch" && positional.length >= 1) {
+    const code = positional[0];
+    const name = positional[1] ?? named["name"] ?? code;
+    const typeStr = positional[2] ?? named["type"] ?? "bcif";
+    const format = normalizeFormat(typeStr);
+    return { kind: "fetch", code, name, format };
+  }
+
+  if (verb === "load" && positional.length >= 1) {
+    const filename = positional[0];
+    if (!/^https?:\/\//i.test(filename)) return null; // local path — let WASM handle it
+    const name = positional[1] ?? named["object"] ?? named["name"] ?? urlToName(filename);
+    const format = named["format"] ?? urlToFormat(filename);
+    return { kind: "load", url: filename, name, format };
+  }
+
+  return null;
+}
+
+function normalizeFormat(s: string): string {
+  switch (s.toLowerCase()) {
+    case "pdb": return "pdb";
+    case "cif": case "mmcif": return "cif";
+    case "bcif": case "binarycif": return "bcif";
+    default: return "bcif";
+  }
+}
+
+const RCSB_MODELS = "https://models.rcsb.org";
+const RCSB_FILES = "https://files.rcsb.org/download";
+
+function buildRcsbUrl(pdbId: string, format: string): string {
+  const id = pdbId.toLowerCase();
+  if (format === "bcif") return `${RCSB_MODELS}/${id}.bcif.gz`;
+  return `${RCSB_FILES}/${id}.${format}.gz`;
+}
+
+function urlToName(url: string): string {
+  let fileName = new URL(url, location.href).pathname.split("/").pop() ?? "structure";
+  if (fileName.toLowerCase().endsWith(".gz")) fileName = fileName.slice(0, -3);
+  return fileName.replace(/\.[^.]+$/, "");
+}
+
+function urlToFormat(url: string): string {
+  let fileName = new URL(url, location.href).pathname.split("/").pop() ?? "";
+  if (fileName.toLowerCase().endsWith(".gz")) fileName = fileName.slice(0, -3);
+  return fileName.split(".").pop()?.toLowerCase() ?? "pdb";
 }
