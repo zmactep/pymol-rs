@@ -3,14 +3,12 @@ _tests
 _plans
 *.so
 pymol-open-source
-ngl
 target
 .venv
 CLAUDE.md
 .claude
 .env
 .DS_Store
-BACKLOG.md
 node_modules
 dist
 pkg
