@@ -10,7 +10,7 @@
 APP_NAME       := PyMOL-RS
 APP_DIR        := target/app/$(APP_NAME).app
 BUNDLE_ID      := me.yakovlev.pymol-rs
-VERSION        := 0.2.2
+VERSION        := 0.2.3
 ICON_SRC       := images/pymol-rs.png
 ICONSET        := target/app/AppIcon.iconset
 ICNS           := target/app/AppIcon.icns

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pymol-rs"
-version = "0.2.0"
+version = "0.2.3"
 description = "PyMOL-RS: A modern Rust implementation of PyMOL molecular visualization"
 readme = "../README.md"
 requires-python = ">=3.8"
