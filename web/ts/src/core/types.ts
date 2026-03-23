@@ -62,6 +62,10 @@ export interface ViewerOptions {
   layout?: PanelPlacement[];
   /** Container elements for each slot (required when using `layout`). */
   slots?: Partial<Record<PanelSlot, HTMLElement>>;
+  /** When true, the viewer starts hidden and is revealed only when `show()` is called. */
+  defer?: boolean;
+  /** Duration of the fade-in transition in milliseconds (default: 150). */
+  revealDuration?: number;
 }
 
 export type PanelName = "repl" | "objects" | "sequence" | "movie";

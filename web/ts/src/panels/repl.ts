@@ -31,21 +31,20 @@ export class ReplPanel {
     this.input.addEventListener("keydown", (e) => this.onKey(e));
   }
 
-  private onKey(e: KeyboardEvent): void {
+  private async onKey(e: KeyboardEvent): Promise<void> {
     if (e.key === "Enter") {
       const cmd = this.input.value.trim();
       if (!cmd) return;
 
       this.history.push(cmd);
       this.historyIdx = this.history.length;
+      this.input.value = "";
       this.appendLine(`PyMOL> ${cmd}`, "cmd");
 
-      const result = this.viewer.execute(cmd);
+      const result = await this.viewer.executeAsync(cmd);
       for (const msg of result.messages) {
         this.appendLine(msg.text, msg.level);
       }
-
-      this.input.value = "";
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (this.historyIdx > 0) {

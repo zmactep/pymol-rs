@@ -29,7 +29,7 @@ import { PyMolRSViewer } from "./core/api.js";
  * Register `<pymol-rs-viewer>` as a custom HTML element.
  *
  * Attributes:
- *   src      — URL to load on mount
+ *   src      — URL(s) to load on mount (whitespace-separated for multiple)
  *   panels   — comma-separated panel names (repl, objects, sequence, movie)
  *   command  — PyMOL command to run after loading
  */
@@ -55,17 +55,34 @@ export function registerElement(tagName = "pymol-rs-viewer"): void {
           ? (panelAttr.split(",").map((s) => s.trim()) as Array<"repl" | "objects" | "sequence" | "movie">)
           : [];
 
-        this.viewer = new PyMolRSViewer(wrapper, { panels });
+        const src = this.getAttribute("src");
+        const cmd = this.getAttribute("command");
+        const deferAttr = this.getAttribute("defer");
+        const shouldDefer = deferAttr !== null
+          ? deferAttr !== "false"
+          : !!(src || cmd);
+
+        this.viewer = new PyMolRSViewer(wrapper, { panels, defer: shouldDefer });
         await this.viewer.init();
 
-        const src = this.getAttribute("src");
         if (src) {
-          await this.viewer.loadUrl(src);
+          const urls = src.split(/\s+/).filter(Boolean);
+          for (const url of urls) {
+            await this.viewer.loadUrl(url);
+          }
         }
 
-        const cmd = this.getAttribute("command");
         if (cmd) {
-          this.viewer.execute(cmd);
+          // Split on semicolons to support multiple commands;
+          // use executeAsync so fetch/load complete before reveal.
+          for (const c of cmd.split(";")) {
+            const trimmed = c.trim();
+            if (trimmed) await this.viewer.executeAsync(trimmed);
+          }
+        }
+
+        if (shouldDefer) {
+          await this.viewer.show();
         }
       }
 
