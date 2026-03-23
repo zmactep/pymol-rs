@@ -594,9 +594,12 @@
         <script type="module">
             import { PyMolRSViewer } from "./js/pymol-rs-viewer.js";
 
-            const viewer = new PyMolRSViewer(document.getElementById("skripkin-viewer"));
+            const viewer = new PyMolRSViewer(
+                document.getElementById("skripkin-viewer"),
+                { defer: true }
+            );
             await viewer.init();
-            viewer.execute("bg_color 0a0b0f")
+            viewer.execute("bg_color 0a0b0f");
 
             await viewer.loadUrl("./assets/pdb/1GVF.pdb", {
                 name: "1gvf",
@@ -608,12 +611,14 @@
             viewer.execute("symexp sym, 1gvf, 1gvf, 1, 1");
             viewer.execute("center");
             viewer.execute("orient");
-            viewer.execute("zoom name CA, buffer=-48")
+            viewer.execute("zoom name CA, buffer=-48");
             viewer.execute("set shading_mode, skripkin");
             viewer.execute("set ambient, 0.8");
             viewer.execute("set silhouettes, on");
             viewer.execute("set silhouette_width, 1");
             viewer.execute("set silhouette_color, black");
+
+            await viewer.show();
         </script>
 
         <script>

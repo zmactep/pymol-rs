@@ -1,7 +1,7 @@
-var p = Object.defineProperty;
-var u = (r, e, t) => e in r ? p(r, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : r[e] = t;
-var a = (r, e, t) => u(r, typeof e != "symbol" ? e + "" : e, t);
-class v {
+var f = Object.defineProperty;
+var v = (o, e, t) => e in o ? f(o, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : o[e] = t;
+var a = (o, e, t) => v(o, typeof e != "symbol" ? e + "" : e, t);
+class w {
   constructor(e) {
     a(this, "container");
     a(this, "pool", []);
@@ -14,8 +14,8 @@ class v {
       s.style.position = "absolute", s.style.whiteSpace = "nowrap", s.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", s.style.textShadow = "0 0 3px rgba(0,0,0,0.8), 0 0 6px rgba(0,0,0,0.5)", s.style.display = "none", this.container.appendChild(s), this.pool.push(s);
     }
     for (let s = 0; s < e.length; s++) {
-      const i = e[s], n = this.pool[s], o = i.x / t, l = i.y / t;
-      n.style.left = `${o}px`, n.style.top = `${l}px`, n.textContent = i.text, i.kind === "atom" ? (n.style.color = "white", n.style.fontSize = "14px", n.style.transform = "translateY(-100%)") : (n.style.color = "#ffff00", n.style.fontSize = "13px", n.style.transform = "translate(-50%, -50%)"), n.style.display = "";
+      const i = e[s], n = this.pool[s], r = i.x / t, c = i.y / t;
+      n.style.left = `${r}px`, n.style.top = `${c}px`, n.textContent = i.text, i.kind === "atom" ? (n.style.color = "white", n.style.fontSize = "14px", n.style.transform = "translateY(-100%)") : (n.style.color = "#ffff00", n.style.fontSize = "13px", n.style.transform = "translate(-50%, -50%)"), n.style.display = "";
     }
     for (let s = e.length; s < this.activeCount; s++)
       this.pool[s].style.display = "none";
@@ -25,14 +25,16 @@ class v {
     this.container.remove();
   }
 }
-class f {
+class y {
   constructor(e) {
     a(this, "wasm", null);
     a(this, "canvas");
     a(this, "animFrameId", 0);
     a(this, "resizeObserver", null);
     a(this, "labelOverlay");
-    this.container = e, getComputedStyle(e).position === "static" && (e.style.position = "relative"), this.canvas = document.createElement("canvas"), this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8), this.canvas.style.width = "100%", this.canvas.style.height = "100%", this.canvas.style.display = "block", this.canvas.tabIndex = 0, e.appendChild(this.canvas), this.labelOverlay = new v(e);
+    a(this, "_deferred", !1);
+    a(this, "_revealDuration", 150);
+    this.container = e, getComputedStyle(e).position === "static" && (e.style.position = "relative"), this.canvas = document.createElement("canvas"), this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8), this.canvas.style.width = "100%", this.canvas.style.height = "100%", this.canvas.style.display = "block", this.canvas.tabIndex = 0, e.appendChild(this.canvas), this.labelOverlay = new w(e);
   }
   async init() {
     const e = await import("./pymol_web-mVc0P39q.js");
@@ -42,6 +44,22 @@ class f {
   }
   get wasmViewer() {
     return this.wasm;
+  }
+  get isDeferred() {
+    return this._deferred;
+  }
+  setDeferred(e, t = 150) {
+    this._deferred = e, this._revealDuration = t, e && (this.container.style.opacity = "0");
+  }
+  reveal() {
+    return this._deferred ? (this._deferred = !1, new Promise((e) => {
+      this.container.style.transition = `opacity ${this._revealDuration}ms ease-in`, this.container.offsetHeight, this.container.style.opacity = "1";
+      let t = !1;
+      const s = () => {
+        t || (t = !0, this.container.removeEventListener("transitionend", s), this.container.style.transition = "", e());
+      };
+      this.container.addEventListener("transitionend", s), setTimeout(s, this._revealDuration + 50);
+    })) : Promise.resolve();
   }
   destroy() {
     var e;
@@ -73,16 +91,16 @@ class f {
     const e = this.canvas;
     e.addEventListener("mousedown", (t) => {
       var s;
-      t.preventDefault(), e.focus(), (s = this.wasm) == null || s.on_mouse_down(t.offsetX, t.offsetY, t.button, m(t));
+      t.preventDefault(), e.focus(), (s = this.wasm) == null || s.on_mouse_down(t.offsetX, t.offsetY, t.button, u(t));
     }), e.addEventListener("mousemove", (t) => {
       var s;
-      (s = this.wasm) == null || s.on_mouse_move(t.offsetX, t.offsetY, m(t));
+      (s = this.wasm) == null || s.on_mouse_move(t.offsetX, t.offsetY, u(t));
     }), e.addEventListener("mouseup", (t) => {
       var s;
       (s = this.wasm) == null || s.on_mouse_up(t.offsetX, t.offsetY, t.button);
     }), e.addEventListener("wheel", (t) => {
       var s;
-      t.preventDefault(), (s = this.wasm) == null || s.on_wheel(t.deltaY, m(t));
+      t.preventDefault(), (s = this.wasm) == null || s.on_wheel(t.deltaY, u(t));
     }, { passive: !1 }), e.addEventListener("contextmenu", (t) => t.preventDefault()), this.resizeObserver = new ResizeObserver(() => {
       this.syncCanvasSize(), this.wasm && this.wasm.resize(this.canvas.width, this.canvas.height);
     }), this.resizeObserver.observe(this.container);
@@ -92,11 +110,11 @@ class f {
     this.canvas.width = Math.round(t.width * e), this.canvas.height = Math.round(t.height * e);
   }
 }
-function m(r) {
+function u(o) {
   let e = 0;
-  return r.shiftKey && (e |= 1), r.ctrlKey && (e |= 2), r.altKey && (e |= 4), r.metaKey && (e |= 8), e;
+  return o.shiftKey && (e |= 1), o.ctrlKey && (e |= 2), o.altKey && (e |= 4), o.metaKey && (e |= 8), e;
 }
-class w {
+class b {
   constructor() {
     a(this, "listeners", /* @__PURE__ */ new Map());
   }
@@ -116,7 +134,7 @@ class w {
       }
   }
 }
-class y {
+class g {
   constructor(e, t) {
     a(this, "container");
     a(this, "viewer");
@@ -133,15 +151,14 @@ class y {
       </div>
     `, this.output = e.querySelector(".repl-output"), this.input = e.querySelector(".repl-input"), this.input.addEventListener("keydown", (s) => this.onKey(s));
   }
-  onKey(e) {
+  async onKey(e) {
     if (e.key === "Enter") {
       const t = this.input.value.trim();
       if (!t) return;
-      this.history.push(t), this.historyIdx = this.history.length, this.appendLine(`PyMOL> ${t}`, "cmd");
-      const s = this.viewer.execute(t);
+      this.history.push(t), this.historyIdx = this.history.length, this.input.value = "", this.appendLine(`PyMOL> ${t}`, "cmd");
+      const s = await this.viewer.executeAsync(t);
       for (const i of s.messages)
         this.appendLine(i.text, i.level);
-      this.input.value = "";
     } else e.key === "ArrowUp" ? (e.preventDefault(), this.historyIdx > 0 && (this.historyIdx--, this.input.value = this.history[this.historyIdx])) : e.key === "ArrowDown" && (e.preventDefault(), this.historyIdx < this.history.length - 1 ? (this.historyIdx++, this.input.value = this.history[this.historyIdx]) : (this.historyIdx = this.history.length, this.input.value = ""));
   }
   appendLine(e, t) {
@@ -154,8 +171,8 @@ class y {
     this.container.innerHTML = "";
   }
 }
-const b = ["lines", "sticks", "cartoon", "spheres", "surface"];
-class g {
+const x = ["lines", "sticks", "cartoon", "spheres", "surface"];
+class L {
   constructor(e, t) {
     a(this, "container");
     a(this, "viewer");
@@ -173,21 +190,21 @@ class g {
       if (!i) continue;
       const n = document.createElement("div");
       n.className = "object-row";
-      const o = document.createElement("button");
-      o.className = `obj-vis ${i.enabled ? "enabled" : "disabled"}`, o.textContent = i.enabled ? "V" : "-", o.title = i.enabled ? "Hide" : "Show", o.addEventListener("click", () => {
+      const r = document.createElement("button");
+      r.className = `obj-vis ${i.enabled ? "enabled" : "disabled"}`, r.textContent = i.enabled ? "V" : "-", r.title = i.enabled ? "Hide" : "Show", r.addEventListener("click", () => {
         this.viewer.execute(i.enabled ? `disable ${s}` : `enable ${s}`);
       });
-      const l = document.createElement("span");
-      if (l.className = "obj-name", l.textContent = i.object_type === "map" ? `${s} (map)` : `${s} (${i.atom_count})`, n.appendChild(o), n.appendChild(l), i.object_type !== "map") {
-        const c = document.createElement("span");
-        c.className = "obj-reps";
-        for (const h of b) {
-          const d = document.createElement("button");
-          d.className = "rep-btn", d.textContent = h.charAt(0).toUpperCase(), d.title = h, d.addEventListener("click", () => {
-            this.viewer.execute(`show ${h}, ${s}`);
-          }), c.appendChild(d);
+      const c = document.createElement("span");
+      if (c.className = "obj-name", c.textContent = i.object_type === "map" ? `${s} (map)` : `${s} (${i.atom_count})`, n.appendChild(r), n.appendChild(c), i.object_type !== "map") {
+        const l = document.createElement("span");
+        l.className = "obj-reps";
+        for (const d of x) {
+          const h = document.createElement("button");
+          h.className = "rep-btn", h.textContent = d.charAt(0).toUpperCase(), h.title = d, h.addEventListener("click", () => {
+            this.viewer.execute(`show ${d}, ${s}`);
+          }), l.appendChild(h);
         }
-        n.appendChild(c);
+        n.appendChild(l);
       }
       this.list.appendChild(n);
     }
@@ -198,16 +215,16 @@ class g {
       for (const i of t) {
         const n = document.createElement("div");
         n.className = "object-row selection-row";
-        const o = document.createElement("button");
-        o.className = `obj-vis selection-vis ${i.visible ? "enabled" : "disabled"}`, o.textContent = i.visible ? "V" : "-", o.title = i.visible ? "Hide indicators" : "Show indicators", o.addEventListener("click", () => {
+        const r = document.createElement("button");
+        r.className = `obj-vis selection-vis ${i.visible ? "enabled" : "disabled"}`, r.textContent = i.visible ? "V" : "-", r.title = i.visible ? "Hide indicators" : "Show indicators", r.addEventListener("click", () => {
           this.viewer.execute(`toggle ${i.name}`);
         });
-        const l = document.createElement("span");
-        l.className = "obj-name selection-name", l.textContent = `(${i.name})`, l.title = i.expression;
-        const c = document.createElement("button");
-        c.className = "rep-btn selection-delete", c.textContent = "X", c.title = "Delete selection", c.addEventListener("click", () => {
+        const c = document.createElement("span");
+        c.className = "obj-name selection-name", c.textContent = `(${i.name})`, c.title = i.expression;
+        const l = document.createElement("button");
+        l.className = "rep-btn selection-delete", l.textContent = "X", l.title = "Delete selection", l.addEventListener("click", () => {
           this.viewer.execute(`deselect ${i.name}`);
-        }), n.appendChild(o), n.appendChild(l), n.appendChild(c), this.list.appendChild(n);
+        }), n.appendChild(r), n.appendChild(c), n.appendChild(l), this.list.appendChild(n);
       }
     }
   }
@@ -215,7 +232,7 @@ class g {
     this.container.innerHTML = "";
   }
 }
-class x {
+class C {
   constructor(e, t) {
     a(this, "container");
     a(this, "viewer");
@@ -235,14 +252,14 @@ class x {
       i.className = "seq-chain-header", i.textContent = `${t.object_name} / ${t.chain_id || "?"}`, s.appendChild(i);
       const n = document.createElement("div");
       n.className = "seq-residues";
-      for (const o of t.residues) {
-        const l = document.createElement("span");
-        if (l.className = "seq-residue", l.textContent = o.one_letter, l.title = `${o.resn} ${o.resv}`, l.addEventListener("click", () => {
-          const c = `${t.object_name} and chain ${t.chain_id} and resi ${o.resv}`;
-          this.viewer.execute(`select sele, ${c}`);
-        }), n.appendChild(l), o.resv % 10 === 0) {
-          const c = document.createElement("span");
-          c.className = "seq-spacer", c.textContent = " ", n.appendChild(c);
+      for (const r of t.residues) {
+        const c = document.createElement("span");
+        if (c.className = "seq-residue", c.textContent = r.one_letter, c.title = `${r.resn} ${r.resv}`, c.addEventListener("click", () => {
+          const l = `${t.object_name} and chain ${t.chain_id} and resi ${r.resv}`;
+          this.viewer.execute(`select sele, ${l}`);
+        }), n.appendChild(c), r.resv % 10 === 0) {
+          const l = document.createElement("span");
+          l.className = "seq-spacer", l.textContent = " ", n.appendChild(l);
         }
       }
       s.appendChild(n), this.content.appendChild(s);
@@ -252,7 +269,7 @@ class x {
     this.container.innerHTML = "";
   }
 }
-class E {
+class _ {
   constructor(e, t) {
     a(this, "container");
     a(this, "viewer");
@@ -309,13 +326,13 @@ class E {
     this.container.innerHTML = "";
   }
 }
-class C {
+class E {
   constructor(e, t = {}) {
     a(this, "core");
-    a(this, "events", new w());
+    a(this, "events", new b());
     a(this, "panels", /* @__PURE__ */ new Map());
     a(this, "options");
-    this.options = t, this.core = new f(e);
+    this.options = t, this.core = new y(e), t.defer && this.core.setDeferred(!0, t.revealDuration ?? 150);
   }
   async init() {
     await this.core.init();
@@ -333,16 +350,16 @@ class C {
       let n;
       switch (t.name) {
         case "repl":
-          n = new y(i, this);
-          break;
-        case "objects":
           n = new g(i, this);
           break;
+        case "objects":
+          n = new L(i, this);
+          break;
         case "sequence":
-          n = new x(i, this);
+          n = new C(i, this);
           break;
         case "movie":
-          n = new E(i, this);
+          n = new _(i, this);
           break;
       }
       this.panels.set(t.name, n);
@@ -350,27 +367,58 @@ class C {
     this.events.emit("ready", {});
   }
   // ---------------------------------------------------------------------------
+  // Deferred display
+  // ---------------------------------------------------------------------------
+  get isDeferred() {
+    return this.core.isDeferred;
+  }
+  async show() {
+    await this.core.reveal();
+  }
+  // ---------------------------------------------------------------------------
   // Commands
   // ---------------------------------------------------------------------------
   execute(e) {
-    const t = this.core.wasmViewer;
-    if (!t) return { messages: [] };
-    const s = t.execute(e);
-    return this.events.emit("command-output", s.messages[0] ?? { level: "info", text: "" }), this.refreshPanels(), s;
+    const t = p(e);
+    if (t)
+      return this.executeAsync(e), { messages: [{ level: "info", text: t.kind === "fetch" ? ` Fetching ${t.code}...` : ` Loading ${t.url}...` }] };
+    const s = this.core.wasmViewer;
+    if (!s) return { messages: [] };
+    const i = s.execute(e);
+    return this.events.emit("command-output", i.messages[0] ?? { level: "info", text: "" }), this.refreshPanels(), i;
+  }
+  async executeAsync(e) {
+    const t = p(e);
+    if (!t) return this.execute(e);
+    try {
+      if (t.kind === "fetch") {
+        const s = D(t.code, t.format);
+        await this.loadUrl(s, { name: t.name, format: t.format });
+        const i = { level: "info", text: ` Fetched ${t.code} as "${t.name}"` };
+        return this.events.emit("command-output", i), { messages: [i] };
+      } else {
+        await this.loadUrl(t.url, { name: t.name, format: t.format });
+        const s = { level: "info", text: ` Loaded "${t.name}" from URL` };
+        return this.events.emit("command-output", s), { messages: [s] };
+      }
+    } catch (s) {
+      const i = { level: "error", text: ` ${s}` };
+      return this.events.emit("command-output", i), { messages: [i] };
+    }
   }
   loadData(e, t, s) {
     const i = this.core.wasmViewer;
     i && (i.load_data(e, t, s), this.refreshPanels());
   }
   async loadUrl(e, t) {
-    var h;
+    var d;
     const s = await fetch(e);
     if (!s.ok) throw new Error(`Fetch failed: ${s.status} ${s.statusText}`);
     const i = new Uint8Array(await s.arrayBuffer());
-    let o = new URL(e, location.href).pathname.split("/").pop() ?? "structure";
-    o.toLowerCase().endsWith(".gz") && (o = o.slice(0, -3));
-    const l = (t == null ? void 0 : t.name) ?? o.replace(/\.[^.]+$/, ""), c = (t == null ? void 0 : t.format) ?? ((h = o.split(".").pop()) == null ? void 0 : h.toLowerCase()) ?? "pdb";
-    this.loadData(i, l, c);
+    let r = new URL(e, location.href).pathname.split("/").pop() ?? "structure";
+    r.toLowerCase().endsWith(".gz") && (r = r.slice(0, -3));
+    const c = (t == null ? void 0 : t.name) ?? r.replace(/\.[^.]+$/, ""), l = (t == null ? void 0 : t.format) ?? ((d = r.split(".").pop()) == null ? void 0 : d.toLowerCase()) ?? "pdb";
+    this.loadData(i, c, l);
   }
   // ---------------------------------------------------------------------------
   // Queries
@@ -422,9 +470,63 @@ class C {
     this.panels.clear(), this.core.destroy();
   }
 }
-function L(r = "pymol-rs-viewer") {
-  customElements.get(r) || customElements.define(
-    r,
+function $(o) {
+  const e = [], t = {};
+  for (const s of o.split(",")) {
+    const i = s.trim();
+    if (!i) continue;
+    const n = i.indexOf("=");
+    n !== -1 ? t[i.slice(0, n).trim().toLowerCase()] = i.slice(n + 1).trim() : e.push(i);
+  }
+  return { positional: e, named: t };
+}
+function p(o) {
+  const e = o.match(/^\s*(\w+)\s+(.*)/s);
+  if (!e) return null;
+  const t = e[1].toLowerCase(), { positional: s, named: i } = $(e[2]);
+  if (t === "fetch" && s.length >= 1) {
+    const n = s[0], r = s[1] ?? i.name ?? n, c = s[2] ?? i.type ?? "bcif", l = S(c);
+    return { kind: "fetch", code: n, name: r, format: l };
+  }
+  if (t === "load" && s.length >= 1) {
+    const n = s[0];
+    if (!/^https?:\/\//i.test(n)) return null;
+    const r = s[1] ?? i.object ?? i.name ?? O(n), c = i.format ?? j(n);
+    return { kind: "load", url: n, name: r, format: c };
+  }
+  return null;
+}
+function S(o) {
+  switch (o.toLowerCase()) {
+    case "pdb":
+      return "pdb";
+    case "cif":
+    case "mmcif":
+      return "cif";
+    case "bcif":
+    case "binarycif":
+      return "bcif";
+    default:
+      return "bcif";
+  }
+}
+const M = "https://models.rcsb.org", k = "https://files.rcsb.org/download";
+function D(o, e) {
+  const t = o.toLowerCase();
+  return e === "bcif" ? `${M}/${t}.bcif.gz` : `${k}/${t}.${e}.gz`;
+}
+function O(o) {
+  let e = new URL(o, location.href).pathname.split("/").pop() ?? "structure";
+  return e.toLowerCase().endsWith(".gz") && (e = e.slice(0, -3)), e.replace(/\.[^.]+$/, "");
+}
+function j(o) {
+  var t;
+  let e = new URL(o, location.href).pathname.split("/").pop() ?? "";
+  return e.toLowerCase().endsWith(".gz") && (e = e.slice(0, -3)), ((t = e.split(".").pop()) == null ? void 0 : t.toLowerCase()) ?? "pdb";
+}
+function A(o = "pymol-rs-viewer") {
+  customElements.get(o) || customElements.define(
+    o,
     class extends HTMLElement {
       constructor() {
         super(...arguments);
@@ -433,12 +535,18 @@ function L(r = "pymol-rs-viewer") {
       async connectedCallback() {
         const t = this.attachShadow({ mode: "open" }), s = document.createElement("div");
         s.style.width = "100%", s.style.height = "100%", s.style.position = "relative", t.appendChild(s);
-        const i = this.getAttribute("panels"), n = i ? i.split(",").map((c) => c.trim()) : [];
-        this.viewer = new C(s, { panels: n }), await this.viewer.init();
-        const o = this.getAttribute("src");
-        o && await this.viewer.loadUrl(o);
-        const l = this.getAttribute("command");
-        l && this.viewer.execute(l);
+        const i = this.getAttribute("panels"), n = i ? i.split(",").map((h) => h.trim()) : [], r = this.getAttribute("src"), c = this.getAttribute("command"), l = this.getAttribute("defer"), d = l !== null ? l !== "false" : !!(r || c);
+        if (this.viewer = new E(s, { panels: n, defer: d }), await this.viewer.init(), r) {
+          const h = r.split(/\s+/).filter(Boolean);
+          for (const m of h)
+            await this.viewer.loadUrl(m);
+        }
+        if (c)
+          for (const h of c.split(";")) {
+            const m = h.trim();
+            m && await this.viewer.executeAsync(m);
+          }
+        d && await this.viewer.show();
       }
       disconnectedCallback() {
         var t;
@@ -448,6 +556,6 @@ function L(r = "pymol-rs-viewer") {
   );
 }
 export {
-  C as PyMolRSViewer,
-  L as registerElement
+  E as PyMolRSViewer,
+  A as registerElement
 };

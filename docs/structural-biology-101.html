@@ -66,7 +66,8 @@
 
                 <!-- 1. INTRO -->
                 <div class="doc-page" id="intro" data-title="Why structure matters"
-                     data-viewer-setup='{"pdb":"../assets/pdb/1CRN.pdb","cmds":["as cartoon","color chain","orient","zoom all, buffer=5"]}'>
+                     data-src="../assets/pdb/1CRN.pdb"
+                     data-command="as cartoon; color chain; orient; zoom all, buffer=5">
                     <div class="docs-hero">
                         <h1>Structural Biology 101</h1>
                         <p>An interactive guide to the molecular world.</p>
@@ -118,7 +119,8 @@
 
                 <!-- 2. ATOMS AND BONDS -->
                 <div class="doc-page" id="atoms" data-title="Atoms and bonds"
-                     data-viewer-setup='{"pdb":"../assets/pdb/1CRN.pdb","cmds":["set sphere_scale, 0.3","as sticks","show spheres","color cpk","orient","zoom all, buffer=5"]}'>
+                     data-src="../assets/pdb/1CRN.pdb"
+                     data-command="set sphere_scale, 0.3; as sticks; show spheres; color cpk; orient; zoom all, buffer=5">
                     <div class="docs-section">
                         <h2>Atoms and bonds</h2>
                         <p>
@@ -182,7 +184,8 @@
 
                 <!-- 3. AMINO ACIDS -->
                 <div class="doc-page" id="amino-acids" data-title="Amino acids"
-                     data-viewer-setup='{"pdb":"../assets/pdb/amino-acid-grid.pdb","cmds":["as sticks","color cpk","label name CA, resn","reset","orient","zoom all, buffer=5"]}'>
+                     data-src="../assets/pdb/amino-acid-grid.pdb"
+                     data-command="as sticks; color cpk; label name CA, resn; reset; orient; zoom all, buffer=5">
                     <div class="docs-section">
                         <h2>Amino acids</h2>
                         <p>
@@ -228,7 +231,8 @@
 
                 <!-- 4. PROTEINS -->
                 <div class="doc-page" id="proteins" data-title="Proteins"
-                     data-viewer-setup='{"pdb":"../assets/pdb/4OJN.pdb","cmds":["hide everything","show sticks, chain A and resi 48+49","color cpk","orient chain A and resi 48+49","zoom chain A and resi 48+49, buffer=3"]}'>
+                     data-src="../assets/pdb/4OJN.pdb"
+                     data-command="hide everything; show sticks, chain A and resi 48+49; color cpk; orient chain A and resi 48+49; zoom chain A and resi 48+49, buffer=3">
                     <div class="docs-section">
                         <h2>Proteins: from chain to shape</h2>
                         <p>
@@ -331,7 +335,8 @@
 
                 <!-- 5. NUCLEOTIDES -->
                 <div class="doc-page" id="nucleotides" data-title="Nucleotides"
-                     data-viewer-setup='{"pdb":"../assets/pdb/dna-nucleotides.pdb","cmds":["as sticks","color cpk","orient","zoom all, buffer=5"]}'>
+                     data-src="../assets/pdb/dna-nucleotides.pdb"
+                     data-command="as sticks; color cpk; orient; zoom all, buffer=5">
                     <div class="docs-section">
                         <h2>Nucleotides</h2>
                         <p>
@@ -408,7 +413,8 @@
 
                 <!-- 6. DNA AND RNA -->
                 <div class="doc-page" id="nucleic-acids" data-title="DNA and RNA"
-                     data-viewer-setup='{"pdb":"../assets/pdb/1BNA.pdb","cmds":["as sticks","color cpk","orient","turn z, 80","turn y, 30","zoom all, buffer=5"]}'>
+                     data-src="../assets/pdb/1BNA.pdb"
+                     data-command="as sticks; color cpk; orient; turn z, 80; turn y, 30; zoom all, buffer=5">
                     <div class="docs-section">
                         <h2>DNA and RNA</h2>
                         <p>
@@ -462,7 +468,8 @@
 
                 <!-- 7. EXPERIMENTAL METHODS -->
                 <div class="doc-page" id="methods" data-title="Experimental methods"
-                     data-viewer-setup='{"pdb":"../assets/pdb/1BNA.prs","cmds":["reset","as sticks, 1BNA","color cpk, 1BNA","zoom chain A and resi 5, buffer=3","turn y, 90","clip near, -100","clip far, 80"]}'>
+                     data-src="../assets/pdb/1BNA.prs"
+                     data-command="reset; as sticks, 1BNA; color cpk, 1BNA; zoom chain A and resi 5, buffer=3; turn y, 90; clip near, -100; clip far, 80">
                     <div class="docs-section">
                         <h2>How structures are determined</h2>
                         <p>
@@ -590,7 +597,8 @@
 
                 <!-- 8. DATABASES AND FORMATS -->
                 <div class="doc-page" id="databases" data-title="Databases and formats"
-                     data-viewer-setup='{"pdb":"../assets/pdb/1HHO.pdb","cmds":["as cartoon","color chain","color cpk, hetatm","orient","zoom all, buffer=5"]}'>
+                     data-src="../assets/pdb/1HHO.pdb"
+                     data-command="as cartoon; color chain; color cpk, hetatm; orient; zoom all, buffer=5">
                     <div class="docs-section">
                         <h2>Structure databases and file formats</h2>
                         <p>
@@ -742,7 +750,8 @@
 
                 <!-- 9. MOLECULAR SIMULATIONS -->
                 <div class="doc-page" id="simulations" data-title="Molecular simulations"
-                     data-viewer-setup='{"pdb":"../assets/pdb/1fsd.cif","cmds":["as cartoon","zoom all, buffer=2"]}'>
+                     data-src="../assets/pdb/1fsd.cif"
+                     data-command="as cartoon; zoom all, buffer=2">
                     <div class="docs-section">
                         <h2>Molecular simulations</h2>
                         <p>
@@ -887,7 +896,7 @@
 
         <script type="module">
             import { PyMolRSViewer } from "../js/pymol-rs-viewer.js";
-            import { patchLoadCommand, initDocPages } from "../js/docs-interactive.js";
+            import { initDocPages } from "../js/docs-interactive.js";
 
             const viewer = new PyMolRSViewer(
                 document.getElementById("viewer-container"),
@@ -901,7 +910,6 @@
                 }
             );
             await viewer.init();
-            patchLoadCommand(viewer, "../assets/pdb/");
             viewer.execute("bg_color 0a0b0f");
 
             initDocPages(viewer);
