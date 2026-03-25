@@ -5,6 +5,7 @@ export type ViewerEventType =
   | "selection-changed"
   | "command-output"
   | "movie-state-changed"
+  | "atom-picked"
   | "ready";
 
 export interface ViewerEventMap {
@@ -12,6 +13,13 @@ export interface ViewerEventMap {
   "selection-changed": { selection: string };
   "command-output": { level: string; text: string };
   "movie-state-changed": { frame: number; total: number; playing: boolean };
+  "atom-picked": {
+    object_name: string | null;
+    atom_index: number | null;
+    chain: string | null;
+    residue: number | null;
+    expression: string | null;
+  };
   "ready": {};
 }
 

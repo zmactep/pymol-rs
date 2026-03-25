@@ -7,6 +7,7 @@ import { ViewerEvents } from "./events.js";
 import type {
   CommandOutput,
   ObjectInfo,
+  PickHitInfo,
   SelectionInfo,
   SequenceChain,
   MovieState,
@@ -38,6 +39,24 @@ export class PyMolRSViewer {
 
   async init(): Promise<void> {
     const wasm = await this.core.init();
+
+    // Enable picking if requested.
+    if (this.options.picking) {
+      wasm.set_picking_enabled(true);
+    }
+
+    // Forward pick results as typed events.
+    this.core.onPick = (hit) => {
+      const h = (hit as PickHitInfo | null) ?? {
+        object_name: null,
+        atom_index: null,
+        chain: null,
+        residue: null,
+        expression: null,
+      };
+      this.events.emit("atom-picked", h);
+      this.refreshPanels();
+    };
 
     // Build the list of panels to mount
     const placements: PanelPlacement[] = [];
@@ -100,6 +119,21 @@ export class PyMolRSViewer {
 
   async show(): Promise<void> {
     await this.core.reveal();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Picking
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Enable or disable cursor-based atom picking at runtime.
+   *
+   * When enabled, left-click picks atoms, updates the `sele` selection, and
+   * fires `atom-picked` events. Can also be set at construction time via
+   * `ViewerOptions.picking`.
+   */
+  setPicking(enabled: boolean): void {
+    this.core.wasmViewer?.set_picking_enabled(enabled);
   }
 
   // ---------------------------------------------------------------------------

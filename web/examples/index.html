@@ -94,6 +94,37 @@
                 color: #484f58;
             }
 
+            /* pick info bar — sits below toolbar, hidden when empty */
+            #pick-bar {
+                height: 22px;
+                min-height: 22px;
+                background: #0d1117;
+                border-bottom: 1px solid #30363d;
+                display: none;
+                align-items: center;
+                padding: 0 12px;
+                gap: 16px;
+                font-size: 11px;
+                font-family: "SF Mono", "Fira Code", Consolas, monospace;
+            }
+            #pick-bar.visible {
+                display: flex;
+            }
+            .pick-label {
+                color: #484f58;
+                margin-right: 2px;
+            }
+            .pick-val {
+                color: #c9d1d9;
+            }
+            .pick-expr {
+                color: #58a6ff;
+                margin-left: auto;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
             /* ================================================================
        Main layout — mirrors desktop: top panel, center+right, bottom
        ================================================================ */
@@ -540,6 +571,14 @@
             <span class="toolbar-status" id="status"></span>
         </div>
 
+        <!-- Pick info bar -->
+        <div id="pick-bar">
+            <span class="pick-label">Object</span><span class="pick-val" id="pick-obj"></span>
+            <span class="pick-label">Chain</span><span class="pick-val" id="pick-chain"></span>
+            <span class="pick-label">Residue</span><span class="pick-val" id="pick-res"></span>
+            <span class="pick-expr" id="pick-expr"></span>
+        </div>
+
         <!-- Top panel tabs -->
         <div class="panel-tab-bar" id="top-tabs">
             <button
@@ -682,6 +721,7 @@
                             right: document.getElementById("panel-right"),
                             bottom: document.getElementById("panel-bottom"),
                         },
+                        picking: true,
                     },
                 );
 
@@ -693,6 +733,25 @@
                     console.error(e);
                     return;
                 }
+
+                // -- Atom picking --
+                const pickBar = document.getElementById("pick-bar");
+                const pickObj = document.getElementById("pick-obj");
+                const pickChain = document.getElementById("pick-chain");
+                const pickRes = document.getElementById("pick-res");
+                const pickExpr = document.getElementById("pick-expr");
+
+                viewer.on("atom-picked", (hit) => {
+                    if (hit.object_name) {
+                        pickObj.textContent = hit.object_name;
+                        pickChain.textContent = hit.chain ?? "–";
+                        pickRes.textContent = hit.residue ?? "–";
+                        pickExpr.textContent = hit.expression ?? "";
+                        pickBar.classList.add("visible");
+                    } else {
+                        pickBar.classList.remove("visible");
+                    }
+                });
 
                 // -- Fetch PDB by ID --
                 document

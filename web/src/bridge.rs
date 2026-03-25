@@ -7,13 +7,24 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use pymol_cmd::{CommandExecutor, MessageKind};
+use pymol_render::picking::Ray;
 use pymol_render::ShadingManager;
-use pymol_scene::{CameraDelta, InputState, MoleculeObject, Object, Session, SessionAdapter};
-use pymol_select::select;
+use pymol_scene::{
+    expand_pick_to_selection, normalize_matrix, pick_expression_for_hit, CameraDelta, InputState,
+    MoleculeObject, Object, Picker, Session, SessionAdapter,
+};
+use pymol_select::{build_sele_command, select};
+
+use crate::picking::PickHitInfo;
 
 use crate::event;
 use crate::gpu::GpuState;
 use crate::render_loop;
+
+/// Hover indicator color when clicking would add atoms to `sele` (yellow-ish).
+const HOVER_COLOR_YELLOW: [f32; 4] = [1.0, 1.0, 0.5, 0.7];
+/// Hover indicator color when clicking would remove atoms from `sele` (red).
+const HOVER_COLOR_RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 
 // ---------------------------------------------------------------------------
 // Serializable types returned to JS
@@ -89,6 +100,9 @@ pub struct WebViewer {
     needs_redraw: bool,
     width: u32,
     height: u32,
+    picker: Picker,
+    picking_enabled: bool,
+    hover_hit: Option<pymol_scene::PickHit>,
 }
 
 #[wasm_bindgen]
@@ -121,6 +135,9 @@ impl WebViewer {
             needs_redraw: true,
             width,
             height,
+            picker: Picker::new(),
+            picking_enabled: false,
+            hover_hit: None,
         })
     }
 
@@ -233,6 +250,216 @@ impl WebViewer {
     pub fn on_wheel(&mut self, delta_y: f32, modifiers: u32) {
         event::handle_wheel(&mut self.input, delta_y, modifiers);
         self.needs_redraw = true;
+    }
+
+    // =======================================================================
+    // Picking
+    // =======================================================================
+
+    /// Enable or disable cursor-based atom picking (default: disabled).
+    ///
+    /// When enabled, `pick_at_screen` performs ray-cast picking and updates
+    /// the `sele` named selection on click.
+    #[wasm_bindgen]
+    pub fn set_picking_enabled(&mut self, enabled: bool) {
+        self.picking_enabled = enabled;
+    }
+
+    /// Update hover indicators by ray-casting at physical-pixel coordinates.
+    ///
+    /// Call this from `mousemove` (coordinates pre-multiplied by `devicePixelRatio`).
+    /// Pass `(-1, -1)` on `mouseleave` — the ray will miss everything and all
+    /// hover indicators are cleared.
+    ///
+    /// No-ops while any mouse button is held (camera drag in progress).
+    #[wasm_bindgen]
+    pub fn process_hover(&mut self, screen_x: f32, screen_y: f32) {
+        // No hover feedback while dragging.
+        if self.input.any_button_pressed() {
+            return;
+        }
+
+        let gpu = match &self.gpu {
+            Some(g) => g,
+            None => return,
+        };
+
+        // Build picking ray.
+        let view_mat = self.session.camera.view_matrix();
+        let mut view_inv = view_mat
+            .inverse()
+            .unwrap_or(lin_alg::f32::Mat4::new_identity());
+        normalize_matrix(&mut view_inv);
+        let proj = self.session.camera.projection_matrix();
+        let ray = Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            &proj.data,
+            &view_inv.data,
+        );
+
+        let new_hit = self.picker.pick_ray(&ray, &self.session.registry);
+
+        // Change detection — skip GPU work if nothing changed.
+        let changed = match (&self.hover_hit, &new_hit) {
+            (None, None) => false,
+            (Some(_), None) | (None, Some(_)) => true,
+            (Some(a), Some(b)) => {
+                a.object_name != b.object_name || a.atom_index != b.atom_index
+            }
+        };
+        if !changed {
+            return;
+        }
+
+        // Collect shared data before any mutable borrows.
+        let names: Vec<String> = self
+            .session
+            .registry
+            .names()
+            .map(|s| s.to_string())
+            .collect();
+        let mode = self
+            .session
+            .settings
+            .get_int(pymol_settings::id::mouse_selection_mode);
+        let sel_width = self
+            .session
+            .settings
+            .get_float(pymol_settings::id::selection_width)
+            .max(6.0);
+        let sele_expr: Option<String> = self
+            .session
+            .selections
+            .get("sele")
+            .map(|e| e.expression.clone());
+
+        // Update hover indicator for each molecule.
+        for name in &names {
+            if let Some(mol_obj) = self.session.registry.get_molecule_mut(name) {
+                let hit_for_mol = new_hit.as_ref().filter(|h| h.object_name == *name);
+
+                if let Some(hit) = hit_for_mol {
+                    // Immutable phase: compute selection and color.
+                    let (sel, color) = {
+                        let mol = mol_obj.molecule();
+                        let sel = expand_pick_to_selection(hit, mode, mol);
+                        let overlaps = sele_expr.as_deref().map_or(false, |expr| {
+                            pymol_select::select(mol, expr)
+                                .map(|sele| sel.intersection(&sele).any())
+                                .unwrap_or(false)
+                        });
+                        let color = if overlaps {
+                            HOVER_COLOR_RED
+                        } else {
+                            HOVER_COLOR_YELLOW
+                        };
+                        (sel, color)
+                    }; // mol (immutable borrow) dropped here
+
+                    // Mutable phase: upload indicator to GPU.
+                    mol_obj.set_hover_indicator(&sel, &gpu.render_context, sel_width, color);
+                } else {
+                    mol_obj.clear_hover_indicator();
+                }
+            }
+        }
+
+        self.hover_hit = new_hit;
+        self.needs_redraw = true;
+    }
+
+    /// Ray-cast at physical-pixel canvas coordinates and, when picking is
+    /// enabled, update the `sele` named selection accordingly.
+    ///
+    /// `screen_x` and `screen_y` must be in **physical pixels** (i.e.
+    /// CSS offset coordinates multiplied by `devicePixelRatio`).
+    ///
+    /// Returns a JSON `PickHitInfo` object on a hit, or `null` on a miss or
+    /// when picking is disabled.
+    #[wasm_bindgen]
+    pub fn pick_at_screen(&mut self, screen_x: f32, screen_y: f32) -> JsValue {
+        if !self.picking_enabled {
+            return JsValue::NULL;
+        }
+
+        // Build the picking ray from camera matrices.
+        let view_mat = self.session.camera.view_matrix();
+        let mut view_inv = view_mat
+            .inverse()
+            .unwrap_or(lin_alg::f32::Mat4::new_identity());
+        normalize_matrix(&mut view_inv);
+
+        let proj = self.session.camera.projection_matrix();
+        let ray = Ray::from_screen(
+            screen_x,
+            screen_y,
+            self.width as f32,
+            self.height as f32,
+            &proj.data,
+            &view_inv.data,
+        );
+
+        let hit = self.picker.pick_ray(&ray, &self.session.registry);
+
+        // Collect all data that requires immutable borrows of self.session
+        // before taking any mutable borrow for command execution.
+        let (cmd, hit_info) = if let Some(ref hit) = hit {
+            if let Some(mol_obj) = self.session.registry.get_molecule(&hit.object_name) {
+                let mol = mol_obj.molecule();
+                let mode = self
+                    .session
+                    .settings
+                    .get_int(pymol_settings::id::mouse_selection_mode);
+
+                let cmd = pick_expression_for_hit(hit, mode, mol).and_then(|expr| {
+                    let overlaps_sele =
+                        self.session.selections.get("sele").is_some_and(|entry| {
+                            let sel = expand_pick_to_selection(hit, mode, mol);
+                            pymol_select::select(mol, &entry.expression)
+                                .map(|sele| sel.intersection(&sele).any())
+                                .unwrap_or(false)
+                        });
+                    let has_sele = self.session.selections.contains("sele");
+                    build_sele_command(&expr, overlaps_sele, has_sele)
+                });
+
+                let info = PickHitInfo::from_hit(hit, mode, mol);
+                (cmd, Some(info))
+            } else {
+                (None, None)
+            }
+        } else {
+            // Miss — clear selection if one exists.
+            let cmd = if self.session.selections.contains("sele") {
+                Some("deselect sele".to_string())
+            } else {
+                None
+            };
+            (cmd, None)
+        };
+
+        // Execute selection command (requires mutable borrow of self.session).
+        if let Some(ref cmd) = cmd {
+            let render_context = self.gpu.as_ref().map(|g| &g.render_context);
+            let mut adapter = SessionAdapter {
+                session: &mut self.session,
+                render_context,
+                default_size: (self.width, self.height),
+                needs_redraw: &mut self.needs_redraw,
+                async_fetch_fn: None,
+            };
+            let _ = self.executor.do_with_options(&mut adapter, cmd, true);
+        }
+
+        self.needs_redraw = true;
+
+        match hit_info {
+            Some(info) => serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL),
+            None => JsValue::NULL,
+        }
     }
 
     /// Process accumulated input deltas and update the camera.

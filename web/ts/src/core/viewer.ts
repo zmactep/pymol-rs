@@ -7,6 +7,9 @@ import type { LabelInfo } from "./types.js";
 import { MOD_SHIFT, MOD_CTRL, MOD_ALT, MOD_META } from "./types.js";
 import { LabelOverlay } from "./labels.js";
 
+/** Click-detection threshold: drag distance squared in CSS pixels. */
+const CLICK_THRESHOLD_SQ = 25; // 5 CSS-px radius
+
 export class ViewerCore {
   private wasm: WebViewer | null = null;
   private canvas: HTMLCanvasElement;
@@ -15,6 +18,11 @@ export class ViewerCore {
   private labelOverlay: LabelOverlay;
   private _deferred = false;
   private _revealDuration = 150;
+  private dpr = 1;
+  private clickStart: { x: number; y: number } | null = null;
+
+  /** Called with the raw WASM pick result (PickHitInfo | null) on each click. */
+  onPick: ((hit: unknown | null) => void) | null = null;
 
   constructor(private container: HTMLElement) {
     // Ensure container is a positioning context for the label overlay
@@ -136,19 +144,44 @@ export class ViewerCore {
 
   private bindEvents(): void {
     const c = this.canvas;
+    this.dpr = window.devicePixelRatio || 1;
 
     c.addEventListener("mousedown", (e) => {
       e.preventDefault();
       c.focus();
       this.wasm?.on_mouse_down(e.offsetX, e.offsetY, e.button, modBits(e));
+      // Track potential click start for left button only.
+      if (e.button === 0) {
+        this.clickStart = { x: e.offsetX, y: e.offsetY };
+      }
     });
 
     c.addEventListener("mousemove", (e) => {
       this.wasm?.on_mouse_move(e.offsetX, e.offsetY, modBits(e));
+      this.wasm?.process_hover(e.offsetX * this.dpr, e.offsetY * this.dpr);
     });
 
     c.addEventListener("mouseup", (e) => {
       this.wasm?.on_mouse_up(e.offsetX, e.offsetY, e.button);
+      // Detect click (left button, short drag).
+      if (e.button === 0 && this.clickStart !== null) {
+        const dx = e.offsetX - this.clickStart.x;
+        const dy = e.offsetY - this.clickStart.y;
+        if (dx * dx + dy * dy < CLICK_THRESHOLD_SQ) {
+          const hit =
+            this.wasm?.pick_at_screen(
+              e.offsetX * this.dpr,
+              e.offsetY * this.dpr,
+            ) ?? null;
+          this.onPick?.(hit);
+        }
+        this.clickStart = null;
+      }
+    });
+
+    c.addEventListener("mouseleave", () => {
+      this.clickStart = null;
+      this.wasm?.process_hover(-1, -1); // guaranteed miss → clears all hover indicators
     });
 
     c.addEventListener("wheel", (e) => {
@@ -160,6 +193,7 @@ export class ViewerCore {
 
     // Resize
     this.resizeObserver = new ResizeObserver(() => {
+      this.dpr = window.devicePixelRatio || 1;
       this.syncCanvasSize();
       if (this.wasm) {
         this.wasm.resize(this.canvas.width, this.canvas.height);
