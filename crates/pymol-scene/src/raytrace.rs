@@ -279,7 +279,7 @@ pub fn raytrace_scene(
     // Multi-light support (PyMOL light_count setting)
     let light_count = match shading_mode {
         pymol_settings::ShadingMode::Skripkin => 1,
-        pymol_settings::ShadingMode::Classic => input.settings.get_int(pymol_settings::id::light_count),
+        pymol_settings::ShadingMode::Classic | pymol_settings::ShadingMode::Full => input.settings.get_int(pymol_settings::id::light_count),
     };
 
     // spec_count controls how many positional lights contribute specular

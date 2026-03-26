@@ -18,6 +18,8 @@ pub enum ShadingMode {
     Classic = 0,
     /// Skripkin mode: pure ambient + multi-directional shadow AO, no directional lights.
     Skripkin = 1,
+    /// Full mode: Classic multi-light lighting + per-light directional shadow maps.
+    Full = 2,
 }
 
 impl ShadingMode {
@@ -26,6 +28,7 @@ impl ShadingMode {
         match s.to_lowercase().as_str() {
             "classic" | "0" => Some(ShadingMode::Classic),
             "skripkin" | "1" => Some(ShadingMode::Skripkin),
+            "full" | "2" => Some(ShadingMode::Full),
             _ => None,
         }
     }
@@ -40,6 +43,7 @@ impl ShadingMode {
         match self {
             ShadingMode::Classic => "classic",
             ShadingMode::Skripkin => "skripkin",
+            ShadingMode::Full => "full",
         }
     }
 }
@@ -48,6 +52,7 @@ impl From<i32> for ShadingMode {
     fn from(v: i32) -> Self {
         match v {
             1 => ShadingMode::Skripkin,
+            2 => ShadingMode::Full,
             _ => ShadingMode::Classic,
         }
     }

@@ -126,23 +126,41 @@ impl RenderContext {
         let shaders = Shaders {
             sphere: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Sphere Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sphere.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(concat!(
+                    include_str!("shaders/common.wgsl"),
+                    include_str!("shaders/lighting.wgsl"),
+                    include_str!("shaders/sphere.wgsl"),
+                ).into()),
             }),
             cylinder: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Cylinder Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/cylinder.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(concat!(
+                    include_str!("shaders/common.wgsl"),
+                    include_str!("shaders/lighting.wgsl"),
+                    include_str!("shaders/cylinder.wgsl"),
+                ).into()),
             }),
             line: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Line Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/line.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(concat!(
+                    include_str!("shaders/common.wgsl"),
+                    include_str!("shaders/line.wgsl"),
+                ).into()),
             }),
             mesh: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Mesh Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/mesh.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(concat!(
+                    include_str!("shaders/common.wgsl"),
+                    include_str!("shaders/lighting.wgsl"),
+                    include_str!("shaders/mesh.wgsl"),
+                ).into()),
             }),
             dot: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Dot Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/dot.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(concat!(
+                    include_str!("shaders/common.wgsl"),
+                    include_str!("shaders/dot.wgsl"),
+                ).into()),
             }),
         };
 
@@ -192,7 +210,7 @@ impl RenderContext {
     /// Update uniforms for a specific shading mode
     pub fn update_uniforms_for_mode(&self, mode: ShadingMode, uniforms: &GlobalUniforms) {
         let buffer = match mode {
-            ShadingMode::Classic => &self.classic_uniform_buffer,
+            ShadingMode::Classic | ShadingMode::Full => &self.classic_uniform_buffer,
             ShadingMode::Skripkin => &self.skripkin_uniform_buffer,
         };
         update_uniform_buffer(&self.queue, buffer, uniforms);
@@ -216,7 +234,7 @@ impl RenderContext {
     /// Get the uniform bind group for the active shading mode
     pub fn uniform_bind_group(&self) -> &wgpu::BindGroup {
         match self.active_shading_mode {
-            ShadingMode::Classic => &self.classic_uniform_bind_group,
+            ShadingMode::Classic | ShadingMode::Full => &self.classic_uniform_bind_group,
             ShadingMode::Skripkin => &self.skripkin_uniform_bind_group,
         }
     }

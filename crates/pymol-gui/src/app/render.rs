@@ -153,6 +153,9 @@ impl App {
             }
 
             context.update_uniforms(&uniforms);
+
+            let view = self.state.camera.view_matrix();
+            self.shading.set_camera_view(<[[f32; 4]; 4]>::from(view));
         }
 
         // Prepare molecule GPU geometry; detect geometry changes.

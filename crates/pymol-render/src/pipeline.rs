@@ -60,3 +60,23 @@ pub fn depth_stencil_state(
         bias: wgpu::DepthBiasState::default(),
     }
 }
+
+/// Depth stencil state with hardware depth bias for shadow map rendering.
+pub fn depth_stencil_state_with_bias(
+    depth_write: bool,
+    compare: wgpu::CompareFunction,
+    constant: i32,
+    slope_scale: f32,
+) -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: wgpu::TextureFormat::Depth32Float,
+        depth_write_enabled: depth_write,
+        depth_compare: compare,
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState {
+            constant,
+            slope_scale,
+            clamp: 0.0,
+        },
+    }
+}

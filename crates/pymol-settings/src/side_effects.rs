@@ -92,7 +92,8 @@ pub fn get_side_effects(id: u16) -> Vec<SideEffectCategory> {
         ],
 
         // Lighting settings
-        light_count | spec_count | precomputed_lighting => vec![
+        light_count | spec_count | precomputed_lighting |
+        shadow_map_size | shadow_bias | shadow_intensity | shadow_pcf => vec![
             SideEffectCategory::ShaderComputeLighting,
             SideEffectCategory::SceneInvalidate,
         ],

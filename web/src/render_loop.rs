@@ -28,6 +28,9 @@ pub fn render_frame(
     );
     gpu.render_context.update_uniforms(&uniforms);
 
+    let view = session.camera.view_matrix();
+    shading.set_camera_view(<[[f32; 4]; 4]>::from(view));
+
     // Update selection indicators
     let names: Vec<String> = session.registry.names().map(|s| s.to_string()).collect();
     let selection_results = session.selections.evaluate_visible(&session.registry, Default::default());

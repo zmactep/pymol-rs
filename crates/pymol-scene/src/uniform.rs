@@ -221,7 +221,7 @@ pub fn setup_uniforms(
 ) -> GlobalUniforms {
     let shading_mode = pymol_settings::ShadingMode::from_settings(settings);
     match shading_mode {
-        pymol_settings::ShadingMode::Classic => setup_classic_uniforms(camera, settings, clear_color, viewport_size),
+        pymol_settings::ShadingMode::Classic | pymol_settings::ShadingMode::Full => setup_classic_uniforms(camera, settings, clear_color, viewport_size),
         pymol_settings::ShadingMode::Skripkin => setup_skripkin_uniforms(camera, settings, clear_color, viewport_size),
     }
 }

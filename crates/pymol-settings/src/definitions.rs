@@ -6,7 +6,7 @@
 use crate::setting::{Setting, SettingLevel, SettingType, SettingValue};
 
 /// Total number of settings
-pub const SETTING_COUNT: usize = 809;
+pub const SETTING_COUNT: usize = 813;
 
 // =============================================================================
 // Setting ID Constants
@@ -861,6 +861,12 @@ pub mod id {
     // 807: Surface per-chain
     pub const surface_individual_chains: u16 = 807;
     pub const transparent_panels: u16 = 808;
+
+    // 809-811: Full shading mode (directional light shadows)
+    pub const shadow_map_size: u16 = 809;
+    pub const shadow_bias: u16 = 810;
+    pub const shadow_intensity: u16 = 811;
+    pub const shadow_pcf: u16 = 812;
 }
 
 // =============================================================================
@@ -1772,7 +1778,7 @@ pub static SETTINGS: &[Setting] = &[
     s_float!(801, "silhouette_depth_jump", Global, 0.03, 0.001, 0.5),
     // 802-806: Shading mode & multi-directional shadow AO
     // shading_mode: 0 = classic (PyMOL default lighting), 1 = skripkin (ambient + AO shadows)
-    s_int_enum!(802, "shading_mode", Global, 0, 0, 1, &[("classic", SettingValue::Int(0)), ("skripkin", SettingValue::Int(1))]),
+    s_int_enum!(802, "shading_mode", Global, 0, 0, 2, &[("classic", SettingValue::Int(0)), ("skripkin", SettingValue::Int(1)), ("full", SettingValue::Int(2))]),
     s_int!(803, "skripkin_directions", Global, 64),
     s_int!(804, "skripkin_map_size", Global, 128),
     s_float!(805, "skripkin_bias", Global, 0.01, 0.0, 0.1),
@@ -1781,6 +1787,12 @@ pub static SETTINGS: &[Setting] = &[
     s_bool!(807, "surface_individual_chains", Global, false),
     // 808: Transparent docked panels
     s_bool!(808, "transparent_panels", Global, false),
+    // 809-811: Full shading mode (directional light shadows)
+    s_int!(809, "shadow_map_size", Global, 512),
+    s_float!(810, "shadow_bias", Global, 0.01, 0.0, 0.1),
+    s_float!(811, "shadow_intensity", Global, 0.5, 0.0, 2.0),
+    // 812: Shadow PCF kernel size (N×N samples for antialiased shadow edges)
+    s_int!(812, "shadow_pcf", Global, 2),
 ];
 
 /// Initialize a settings store with all default values

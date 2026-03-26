@@ -5,12 +5,16 @@
 //! delegates to whichever is active, handling mode transitions automatically.
 
 pub mod classic;
+pub mod full;
 pub mod skripkin;
 
 pub use classic::ClassicPipeline;
+pub use full::FullPipeline;
 pub use skripkin::SkripkinPipeline;
 
-use crate::multishadow::{MultishadowAtlas, ShadowPipelines};
+use crate::multishadow::{
+    MultishadowAtlas, ShadowParams, ShadowPipelines, create_disabled_shadow_bind_group,
+};
 use crate::RenderContext;
 use pymol_settings::GlobalSettings;
 use pymol_settings::ShadingMode;
@@ -61,10 +65,127 @@ pub trait ShadingPipeline {
     fn shadow_pass_state(&self) -> Option<ShadowPassState<'_>> { None }
 }
 
+/// Shared state and logic for shadow-producing pipelines (Skripkin, Full).
+pub struct ShadowPipelineBase {
+    pub shadow_atlas: Option<MultishadowAtlas>,
+    pub shadow_pipelines: Option<ShadowPipelines>,
+    pub shadow_dirty: bool,
+    pub scene_bounds: Option<([f32; 3], f32)>,
+    pub shadow_matrices: Vec<[[f32; 4]; 4]>,
+}
+
+impl ShadowPipelineBase {
+    pub fn new() -> Self {
+        Self {
+            shadow_atlas: None,
+            shadow_pipelines: None,
+            shadow_dirty: true,
+            scene_bounds: None,
+            shadow_matrices: Vec::new(),
+        }
+    }
+
+    pub fn ensure_pipelines(&mut self, device: &wgpu::Device) {
+        if self.shadow_pipelines.is_none() {
+            self.shadow_pipelines = Some(ShadowPipelines::new(device));
+        }
+    }
+
+    /// Check dirty state, ensure pipelines, and resize atlas if needed.
+    /// Returns `true` if the caller should compute matrices and call `finish_prepare`.
+    pub fn begin_prepare(
+        &mut self,
+        context: &mut RenderContext,
+        shadow_count: u32,
+        tile_size: u32,
+    ) -> bool {
+        if self.shadow_atlas.is_none() {
+            self.shadow_dirty = true;
+        }
+        if !self.shadow_dirty {
+            return false;
+        }
+
+        let device = context.device();
+        self.ensure_pipelines(device);
+
+        let needs_new_atlas = self.shadow_atlas.as_ref().is_none_or(|a| {
+            a.direction_count != shadow_count || a.tile_size != tile_size
+        });
+        if needs_new_atlas {
+            self.shadow_atlas = Some(MultishadowAtlas::new(device, shadow_count, tile_size));
+        }
+
+        true
+    }
+
+    /// Upload shadow params and matrices, create bind group.
+    pub fn finish_prepare(&self, context: &mut RenderContext, params: ShadowParams) {
+        context
+            .shadow_sampling()
+            .update(context.queue(), &params, &self.shadow_matrices);
+
+        let atlas = self.shadow_atlas.as_ref().unwrap();
+        let active_bind_group = context
+            .shadow_sampling()
+            .create_bind_group(context.device(), &atlas.sample_view);
+        context.set_shadow_bind_group(active_bind_group);
+    }
+
+    pub fn deactivate(&mut self, context: &mut RenderContext) {
+        if self.shadow_atlas.is_some() {
+            context.shadow_sampling().update(
+                context.queue(),
+                &ShadowParams {
+                    shadow_count: 0,
+                    grid_size: 0,
+                    bias: 0.0,
+                    intensity: 0.0,
+                    mode: 0,
+                    pcf_samples: 0,
+                    _pad: [0; 2],
+                },
+                &[],
+            );
+            let disabled = create_disabled_shadow_bind_group(
+                context.device(),
+                context.shadow_sampling(),
+            );
+            context.set_shadow_bind_group(disabled);
+            self.shadow_atlas = None;
+        }
+    }
+
+    pub fn needs_shadow_update(&self) -> bool {
+        self.shadow_dirty
+    }
+
+    pub fn invalidate_shadows(&mut self) {
+        self.shadow_dirty = true;
+    }
+
+    pub fn set_scene_bounds(&mut self, center: [f32; 3], radius: f32) {
+        self.scene_bounds = Some((center, radius));
+    }
+
+    pub fn mark_shadow_done(&mut self) {
+        self.shadow_dirty = false;
+    }
+
+    pub fn shadow_pass_state(&self) -> Option<ShadowPassState<'_>> {
+        Some(ShadowPassState {
+            atlas: self.shadow_atlas.as_ref()?,
+            pipelines: self.shadow_pipelines.as_ref()?,
+            matrices: &self.shadow_matrices,
+        })
+    }
+}
+
 /// Owns all shading mode structs and routes calls to the active one.
 pub struct ShadingManager {
     pub classic: ClassicPipeline,
     pub skripkin: SkripkinPipeline,
+    pub full: FullPipeline,
     pub active_mode: ShadingMode,
 }
 
@@ -79,6 +200,7 @@ impl ShadingManager {
         Self {
             classic: ClassicPipeline,
             skripkin: SkripkinPipeline::new(),
+            full: FullPipeline::new(),
             active_mode: ShadingMode::Classic,
         }
     }
@@ -89,6 +211,7 @@ impl ShadingManager {
             match self.active_mode {
                 ShadingMode::Classic => self.classic.deactivate(context),
                 ShadingMode::Skripkin => self.skripkin.deactivate(context),
+                ShadingMode::Full => self.full.deactivate(context),
             }
             self.active_mode = mode;
             context.set_active_shading_mode(mode);
@@ -105,12 +228,19 @@ impl ShadingManager {
         match self.active_mode {
             ShadingMode::Classic => self.classic.prepare(context, settings),
             ShadingMode::Skripkin => self.skripkin.prepare(context, settings),
+            ShadingMode::Full => self.full.prepare(context, settings),
         }
+    }
+
+    /// Provide the camera view matrix for Full mode shadow computation.
+    pub fn set_camera_view(&mut self, view: [[f32; 4]; 4]) {
+        self.full.set_camera_view(view);
     }
 
     /// Invalidate shadows in all modes (only relevant for Skripkin).
     pub fn invalidate_shadows(&mut self) {
         self.skripkin.invalidate_shadows();
+        self.full.invalidate_shadows();
     }
 
     /// Forward scene bounds to the active pipeline.
@@ -118,6 +248,7 @@ impl ShadingManager {
         match self.active_mode {
             ShadingMode::Classic => self.classic.set_scene_bounds(center, radius),
             ShadingMode::Skripkin => self.skripkin.set_scene_bounds(center, radius),
+            ShadingMode::Full => self.full.set_scene_bounds(center, radius),
         }
     }
 
@@ -126,6 +257,7 @@ impl ShadingManager {
         match self.active_mode {
             ShadingMode::Classic => self.classic.mark_shadow_done(),
             ShadingMode::Skripkin => self.skripkin.mark_shadow_done(),
+            ShadingMode::Full => self.full.mark_shadow_done(),
         }
     }
 
@@ -134,6 +266,7 @@ impl ShadingManager {
         match self.active_mode {
             ShadingMode::Classic => self.classic.shadow_pass_state(),
             ShadingMode::Skripkin => self.skripkin.shadow_pass_state(),
+            ShadingMode::Full => self.full.shadow_pass_state(),
         }
     }
 }

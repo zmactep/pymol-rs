@@ -7,7 +7,6 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::pipeline::depth_stencil_state;
 use crate::vertex::{CylinderVertex, MeshVertex, SphereVertex};
 
 /// Maximum number of shadow directions supported
@@ -33,6 +32,11 @@ pub struct ShadowParams {
     pub bias: f32,
     /// AO intensity (0 = no AO, 1 = full)
     pub intensity: f32,
+    /// Shadow mode: 0 = disabled, 1 = AO (skripkin), 2 = directional (full)
+    pub mode: u32,
+    /// PCF kernel size (N×N samples for antialiased shadow edges, 1 = no PCF)
+    pub pcf_samples: u32,
+    pub _pad: [u32; 2],
 }
 
 /// Generate N uniformly distributed directions on a unit sphere
@@ -93,7 +97,7 @@ pub fn compute_shadow_matrix(
 
     // Orthographic projection covering the bounding sphere
     let r = scene_radius;
-    let ortho = ortho_matrix(-r, r, -r, r, 0.0, scene_radius * 4.0);
+    let ortho = ortho_matrix(-r, r, -r, r, 0.01, scene_radius * 4.0);
 
     // view_proj = ortho * view (column-major multiply)
     mat4_mul(&ortho, &view)
@@ -163,7 +167,7 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-fn mat4_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+pub fn mat4_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let mut result = [[0.0f32; 4]; 4];
     for col in 0..4 {
         for row in 0..4 {
@@ -301,7 +305,8 @@ impl ShadowPipelines {
             ),
         });
 
-        let depth_stencil = Some(depth_stencil_state(true, wgpu::CompareFunction::Less));
+        use crate::pipeline::depth_stencil_state_with_bias;
+        let depth_stencil = Some(depth_stencil_state_with_bias(true, wgpu::CompareFunction::Less, 2, 2.0));
 
         // Mesh depth-only pipeline
         let mesh_pipeline =
