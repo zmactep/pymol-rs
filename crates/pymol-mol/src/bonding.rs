@@ -8,6 +8,7 @@ use lin_alg::f32::Vec3;
 use crate::bond::{Bond, BondOrder};
 use crate::index::{AtomIndex, BondIndex};
 use crate::molecule::ObjectMolecule;
+use crate::residue::{atoms_same_residue, is_ion, is_water};
 use crate::spatial::SpatialGrid;
 
 // ============================================================================
@@ -141,6 +142,17 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
             let threshold_sq = threshold * threshold;
 
             if dist_sq < threshold_sq {
+                // For solvent/ion residues, only allow intra-residue bonds
+                let atom_i = &mol.atoms[i];
+                let atom_j = &mol.atoms[j];
+                if (is_water(&atom_i.residue.resn)
+                    || is_ion(&atom_i.residue.resn)
+                    || is_water(&atom_j.residue.resn)
+                    || is_ion(&atom_j.residue.resn))
+                    && !atoms_same_residue(atom_i, atom_j)
+                {
+                    continue;
+                }
                 new_bonds.push((AtomIndex(i as u32), AtomIndex(j as u32)));
             }
         }
