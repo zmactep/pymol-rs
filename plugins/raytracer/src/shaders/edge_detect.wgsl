@@ -13,7 +13,6 @@ struct EdgeParams {
     viewport: vec2<f32>,
     thickness: f32,
     depth_jump: f32,
-    _pad: vec4<f32>,
 }
 
 @group(0) @binding(0) var depth_tex: texture_2d<f32>;

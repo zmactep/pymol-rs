@@ -75,7 +75,7 @@ pub fn raytrace(
         triangle_size as f64 / (1024.0 * 1024.0),
         max_buffer_size as f64 / (1024.0 * 1024.0)
     );
-    
+
     if triangle_size > max_buffer_size {
         return Err(RaytraceError::RenderFailed(format!(
             "Triangle buffer too large ({:.1} MB, limit {:.1} MB). Scene has {} triangles. \
@@ -274,7 +274,6 @@ pub fn raytrace(
             viewport: [render_width as f32, render_height as f32],
             thickness: params.settings.silhouette_thickness,
             depth_jump: params.settings.silhouette_depth_jump,
-            _pad: [0.0; 4],
         };
         let edge_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Edge Params"),

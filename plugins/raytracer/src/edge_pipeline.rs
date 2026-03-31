@@ -14,7 +14,6 @@ pub struct EdgeParams {
     pub viewport: [f32; 2],
     pub thickness: f32,
     pub depth_jump: f32,
-    pub _pad: [f32; 4],
 }
 
 impl Default for EdgeParams {
@@ -23,7 +22,6 @@ impl Default for EdgeParams {
             viewport: [0.0, 0.0],
             thickness: 4.0,    // Sampling distance in pixels
             depth_jump: 0.03,  // Depth discontinuity threshold
-            _pad: [0.0; 4],
         }
     }
 }
