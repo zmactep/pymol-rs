@@ -1,0 +1,50 @@
+[package]
+name = "raytracer-plugin"
+description = "GPU raytracing plugin for PyMOL-RS"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Plugin SDK
+pymol-plugin = { workspace = true }
+
+# Scene types (MoleculeObject, Camera, ObjectRegistry, etc.)
+pymol-scene = { workspace = true, default-features = false }
+
+# Render types (MeshVertex, RenderContext)
+pymol-render = { workspace = true, default-features = false }
+
+# Molecular data (ObjectMolecule, CoordSet, Atom)
+pymol-mol = { workspace = true }
+
+# Colors
+pymol-color = { workspace = true }
+
+# Settings (for reading shading/sphere/stick settings)
+pymol-settings = { workspace = true }
+
+# GPU
+wgpu = { workspace = true }
+
+# Math
+lin_alg = { workspace = true }
+
+# GPU data
+bytemuck = { workspace = true }
+
+# Image export
+image = { workspace = true }
+
+# Logging
+log = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }

@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use crate::camera::Camera;
 use crate::movie::Movie;
 use crate::object::{DirtyFlags, Object, ObjectRegistry, ObjectRegistrySnapshot};
-use crate::raytrace::RaytraceInput;
 use crate::scene::SceneManager;
 use crate::selection::SelectionManager;
 use crate::view::ViewManager;
@@ -147,26 +146,6 @@ impl Session {
             if let Some(map_obj) = self.registry.get_map_mut(name) {
                 map_obj.prepare_render(context);
             }
-        }
-    }
-
-    /// Build a [`RaytraceInput`] borrowing from this session.
-    pub fn raytrace_input<'a>(
-        &'a mut self,
-        context: &'a RenderContext,
-        default_size: (u32, u32),
-    ) -> RaytraceInput<'a> {
-        RaytraceInput {
-            device: context.device(),
-            queue: context.queue(),
-            camera: &mut self.camera,
-            registry: &self.registry,
-            settings: &self.settings,
-            named_colors: &self.named_colors,
-            element_colors: &self.element_colors,
-            chain_colors: &self.chain_colors,
-            clear_color: self.clear_color,
-            default_size,
         }
     }
 

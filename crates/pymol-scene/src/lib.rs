@@ -31,7 +31,6 @@ mod movie;
 mod object;
 pub mod quat;
 mod pick;
-mod raytrace;
 mod scene;
 mod selection;
 mod session;
@@ -55,8 +54,7 @@ pub use scene::{Scene, SceneAtomData, SceneManager, SceneObjectData, ScenePerAto
 pub use selection::{SelectionEntry, SelectionManager};
 pub use session::Session;
 pub use session_adapter::SessionAdapter;
-pub use raytrace::{raytrace_scene, raytrace_to_file, RaytraceError, RaytraceInput};
-pub use uniform::setup_uniforms;
+pub use uniform::{compute_reflect_scale, setup_uniforms};
 pub use view::ViewManager;
 pub use viewer_trait::{ViewportImage, ViewerLike};
 #[cfg(feature = "windowing")]

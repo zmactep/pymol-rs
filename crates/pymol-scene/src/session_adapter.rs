@@ -14,7 +14,6 @@ use crate::camera::Camera;
 use crate::capture::capture_png_to_file;
 use crate::movie::Movie;
 use crate::object::ObjectRegistry;
-use crate::raytrace::{raytrace_scene, raytrace_to_file};
 use crate::scene::{SceneManager, SceneStoreMask};
 use crate::selection::SelectionManager;
 use crate::session::Session;
@@ -122,32 +121,18 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
         ).map_err(|e| e.to_string())
     }
 
-    fn raytrace(
-        &mut self,
-        width: Option<u32>,
-        height: Option<u32>,
-        antialias: u32,
-    ) -> Result<Vec<u8>, String> {
-        let context = self.render_context.ok_or("No render context available")?;
-        self.session.prepare_render_all(context);
-        let mut input = self.session.raytrace_input(context, self.default_size);
-        raytrace_scene(&mut input, width, height, antialias)
-            .map(|(data, _, _)| data)
-            .map_err(|e| e.to_string())
+    fn gpu_device(&self) -> Option<&wgpu::Device> {
+        self.render_context.map(|c| c.device())
     }
 
-    fn raytrace_to_file(
-        &mut self,
-        path: &Path,
-        width: Option<u32>,
-        height: Option<u32>,
-        antialias: u32,
-    ) -> Result<(u32, u32), String> {
-        let context = self.render_context.ok_or("No render context available")?;
-        self.session.prepare_render_all(context);
-        let mut input = self.session.raytrace_input(context, self.default_size);
-        raytrace_to_file(&mut input, path, width, height, antialias)
-            .map_err(|e| e.to_string())
+    fn gpu_queue(&self) -> Option<&wgpu::Queue> {
+        self.render_context.map(|c| c.queue())
+    }
+
+    fn prepare_render(&mut self) {
+        if let Some(context) = self.render_context {
+            self.session.prepare_render_all(context);
+        }
     }
 
     fn capture_frame_png(

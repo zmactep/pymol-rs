@@ -19,7 +19,6 @@ parallel = ["pymol-render/parallel"]
 # Internal crates
 pymol-mol.workspace = true
 pymol-render = { workspace = true, default-features = false }
-pymol-raytracer.workspace = true
 pymol-select.workspace = true
 pymol-color.workspace = true
 pymol-settings.workspace = true

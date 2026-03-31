@@ -10,7 +10,6 @@ pub mod dot;
 pub mod line;
 pub mod mesh;
 pub mod movie;
-pub mod ray;
 pub mod ribbon;
 pub mod shading;
 pub mod sphere;
@@ -24,7 +23,6 @@ pub use dot::{DotOverrides, DotSettings};
 pub use line::{LineOverrides, LineSettings};
 pub use mesh::{MeshOverrides, MeshSettings};
 pub use movie::MovieSettings;
-pub use ray::RayTraceSettings;
 pub use ribbon::{RibbonOverrides, RibbonSettings};
 pub use shading::{
     ClassicShadingSettings, CommonShadingSettings, FullShadingSettings, ShadingSettings,
@@ -43,7 +41,6 @@ pub use ui::UiSettings;
 pub struct Settings {
     // Global-only
     pub shading: ShadingSettings,
-    pub ray: RayTraceSettings,
     pub ui: UiSettings,
     pub movie: MovieSettings,
     pub behavior: BehaviorSettings,
@@ -63,7 +60,6 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             shading: ShadingSettings::default(),
-            ray: RayTraceSettings::default(),
             ui: UiSettings::default(),
             movie: MovieSettings::default(),
             behavior: BehaviorSettings::default(),

@@ -44,8 +44,6 @@ static LEGACY_MAP: &[(&str, u16)] = &[
     ("surface_quality", 38),
     // Stick
     ("valence", 64),
-    // Ray
-    ("ray_trace_fog", 67),
     // Dot
     ("dot_width", 77),
     // UI
@@ -73,8 +71,6 @@ static LEGACY_MAP: &[(&str, u16)] = &[
     ("cartoon_refine", 123),
     // Stick
     ("valence_size", 135),
-    // Ray
-    ("ray_opaque_background", 137),
     // Surface
     ("transparency", 138),
     ("surface_color", 144),
@@ -86,9 +82,6 @@ static LEGACY_MAP: &[(&str, u16)] = &[
     ("sphere_color", 173),
     // Shading — Common
     ("fog_start", 192),
-    // Ray
-    ("ray_shadow", 195),
-    ("ray_transparency_shadows", 199),
     // Surface
     ("transparency_mode", 213),
     // Ribbon
@@ -112,8 +105,6 @@ static LEGACY_MAP: &[(&str, u16)] = &[
     ("mesh_lighting", 337),
     // Surface
     ("surface_solvent", 338),
-    // Ray
-    ("ray_max_passes", 350),
     // UI
     ("mouse_selection_mode", 354),
     // Stick
@@ -133,12 +124,6 @@ static LEGACY_MAP: &[(&str, u16)] = &[
     ("light5", 464),
     ("light6", 465),
     ("light7", 466),
-    // Ray
-    ("ray_trace_mode", 468),
-    ("ray_trace_gain", 469),
-    ("ray_trace_depth_factor", 472),
-    ("ray_trace_slope_factor", 473),
-    ("ray_trace_disco_factor", 474),
     // Shading — Classic
     ("spec_direct_power", 488),
     ("light8", 489),
@@ -150,8 +135,6 @@ static LEGACY_MAP: &[(&str, u16)] = &[
     ("mouse_wheel_scale", 523),
     // Line
     ("line_color", 526),
-    // Ray
-    ("ray_trace_color", 546),
     // Movie
     ("movie_fps", 550),
     // Movie

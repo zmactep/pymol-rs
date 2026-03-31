@@ -293,29 +293,21 @@ pub trait ViewerLike {
     }
 
     // =========================================================================
-    // Raytracing — Optional Overrides
+    // GPU Access — Optional Overrides
     // =========================================================================
 
-    /// Perform raytracing and return the image data as RGBA bytes
-    fn raytrace(
-        &mut self,
-        _width: Option<u32>,
-        _height: Option<u32>,
-        _antialias: u32,
-    ) -> Result<Vec<u8>, String> {
-        Err("Raytracing not supported by this viewer".to_string())
+    /// Get the wgpu device (if available)
+    fn gpu_device(&self) -> Option<&wgpu::Device> {
+        None
     }
 
-    /// Perform raytracing and save to a PNG file
-    fn raytrace_to_file(
-        &mut self,
-        _path: &Path,
-        _width: Option<u32>,
-        _height: Option<u32>,
-        _antialias: u32,
-    ) -> Result<(u32, u32), String> {
-        Err("Raytracing not supported by this viewer".to_string())
+    /// Get the wgpu queue (if available)
+    fn gpu_queue(&self) -> Option<&wgpu::Queue> {
+        None
     }
+
+    /// Ensure all representations are built and up-to-date
+    fn prepare_render(&mut self) {}
 
     // =========================================================================
     // Viewport Image Overlay — Default Implementations

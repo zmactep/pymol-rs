@@ -87,7 +87,7 @@ polymer and not solvent
 
 **Sessions** — save and load your sessions with high-efficiency `.prs` file format or use your old PyMOL sessions with `.pse` parser.
 
-**Ray tracing** — offline GPU ray tracing with BVH acceleration, shadows, and transparency.
+**Ray tracing** — offline GPU ray tracing with BVH acceleration, shadows, and transparency (via the `raytracer` plugin).
 
 **GUI** — egui-based interface with command line, object panel, sequence viewer, mouse picking, and viewport:
 
@@ -168,7 +168,6 @@ pymol-rs/
 ├── pymol-settings    Configuration system
 ├── pymol-algos       Molecular algorithms
 ├── pymol-render      wgpu rendering engine
-├── pymol-raytracer   Offline ray tracing
 ├── pymol-scene       Viewer, camera, scene graph
 ├── pymol-session     Sessions save and load (`.prs` and `.pse`)
 ├── pymol-cmd         Command parser & executor
@@ -195,6 +194,7 @@ Three reference plugins are included in the `plugins/` directory:
 
 | Plugin | Crate | Description |
 |--------|-------|-------------|
+| **raytracer** | `raytracer-plugin` | GPU ray tracing — BVH-accelerated compute shader pipeline with shadows, transparency, and edge detection |
 | **hello** | `hello-plugin` | Minimal example — registers a single command to demonstrate the plugin lifecycle |
 | **ipc** | `ipc-plugin` | Inter-process communication plugin for external tool integration |
 | **python** | `python-plugin` | Embedded CPython interpreter via PyO3 — enables Python scripting inside the native binary |
@@ -227,7 +227,7 @@ This builds all reference plugins and installs them to `~/.pymol-rs/plugins/`. T
 
 ```bash
 PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
-    cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin
+    cargo build --release -p raytracer-plugin -p hello-plugin -p ipc-plugin -p python-plugin
 ```
 
 ## License

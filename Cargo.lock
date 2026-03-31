@@ -2643,7 +2643,6 @@ dependencies = [
  "pymol-io",
  "pymol-mol",
  "pymol-plugin",
- "pymol-raytracer",
  "pymol-render",
  "pymol-scene",
  "pymol-select",
@@ -2702,21 +2701,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pymol-raytracer"
-version = "0.2.3"
-dependencies = [
- "bytemuck",
- "env_logger",
- "lin_alg",
- "log",
- "pymol-color",
- "pymol-io",
- "pymol-mol",
- "thiserror 2.0.18",
- "wgpu",
-]
-
-[[package]]
 name = "pymol-render"
 version = "0.2.3"
 dependencies = [
@@ -2750,7 +2734,6 @@ dependencies = [
  "pymol-color",
  "pymol-io",
  "pymol-mol",
- "pymol-raytracer",
  "pymol-render",
  "pymol-select",
  "pymol-settings",
@@ -3047,6 +3030,24 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "raytracer-plugin"
+version = "0.2.3"
+dependencies = [
+ "bytemuck",
+ "image",
+ "lin_alg",
+ "log",
+ "pymol-color",
+ "pymol-mol",
+ "pymol-plugin",
+ "pymol-render",
+ "pymol-scene",
+ "pymol-settings",
+ "thiserror 2.0.18",
+ "wgpu",
 ]
 
 [[package]]

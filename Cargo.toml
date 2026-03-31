@@ -7,7 +7,6 @@ members = [
     "crates/pymol-select",
     "crates/pymol-io",
     "crates/pymol-render",
-    "crates/pymol-raytracer",
     "crates/pymol-scene",
     "crates/pymol-cmd",
     "crates/pymol-framework",
@@ -19,6 +18,7 @@ members = [
     "plugins/ipc",
     "plugins/python",
     "plugins/toolbar",
+    "plugins/raytracer",
 ]
 default-members = [
     "crates/pymol-settings",
@@ -27,7 +27,6 @@ default-members = [
     "crates/pymol-select",
     "crates/pymol-io",
     "crates/pymol-render",
-    "crates/pymol-raytracer",
     "crates/pymol-scene",
     "crates/pymol-cmd",
     "crates/pymol-framework",
@@ -57,7 +56,6 @@ pymol-mol = { version = "0.2.3", path = "crates/pymol-mol" }
 pymol-select = { version = "0.2.3", path = "crates/pymol-select" }
 pymol-io = { version = "0.2.3", path = "crates/pymol-io" }
 pymol-render = { version = "0.2.3", path = "crates/pymol-render", default-features = false }
-pymol-raytracer = { version = "0.2.3", path = "crates/pymol-raytracer" }
 pymol-scene = { version = "0.2.3", path = "crates/pymol-scene", default-features = false }
 pymol-cmd = { version = "0.2.3", path = "crates/pymol-cmd", default-features = false }
 pymol-gui = { version = "0.2.3", path = "crates/pymol-gui" }

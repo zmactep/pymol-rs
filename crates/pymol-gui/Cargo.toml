@@ -25,7 +25,6 @@ pymol-select = { workspace = true }
 pymol-settings = { workspace = true }
 pymol-color = { workspace = true }
 pymol-render = { workspace = true, features = ["parallel"] }
-pymol-raytracer = { workspace = true }
 
 # Plugin loading
 libloading = { workspace = true }

@@ -163,21 +163,6 @@ fn build_descriptors() -> Vec<SettingDescriptor> {
     reg!("shadow_pcf", i32, global = |s| s.shading.full.shadow_pcf, min = 1.0, max = 16.0, side_effects = [SceneInvalidate]);
 
     // =========================================================================
-    // Ray tracing
-    // =========================================================================
-    reg!("ray_max_passes", i32, global = |s| s.ray.max_passes, min = 1.0, max = 100.0);
-    reg!("ray_shadow", bool, global = |s| s.ray.shadow);
-    reg!("ray_trace_mode", i32, global = |s| s.ray.trace_mode);
-    reg!("ray_trace_fog", f32, global = |s| s.ray.trace_fog);
-    reg!("ray_trace_color", i32, global = |s| s.ray.trace_color);
-    reg!("ray_opaque_background", i32, global = |s| s.ray.opaque_background);
-    reg!("ray_transparency_shadows", bool, global = |s| s.ray.transparency_shadows);
-    reg!("ray_trace_depth_factor", f32, global = |s| s.ray.trace_depth_factor, min = 0.0, max = 1.0);
-    reg!("ray_trace_slope_factor", f32, global = |s| s.ray.trace_slope_factor, min = 0.0, max = 2.0);
-    reg!("ray_trace_disco_factor", f32, global = |s| s.ray.trace_disco_factor, min = 0.0, max = 1.0);
-    reg!("ray_trace_gain", f32, global = |s| s.ray.trace_gain, min = 0.0, max = 1.0);
-
-    // =========================================================================
     // UI
     // =========================================================================
     reg!("mouse_selection_mode", crate::MouseSelectionMode, global = |s| s.ui.mouse_selection_mode, hints = crate::MouseSelectionMode, side_effects = [OrthoDirty]);

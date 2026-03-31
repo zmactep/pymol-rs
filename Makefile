@@ -58,7 +58,7 @@ python-dev:
 # ── Plugins ───────────────────────────────────────────────────────
 
 plugins:
-	cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin -p toolbar-plugin
+	cargo build --release -p raytracer-plugin -p hello-plugin -p ipc-plugin -p python-plugin -p toolbar-plugin
 	mkdir -p target/release/plugins
 	cp target/release/lib*_plugin.dylib target/release/plugins/ 2>/dev/null || \
 	cp target/release/lib*_plugin.so    target/release/plugins/ 2>/dev/null || \

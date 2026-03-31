@@ -697,7 +697,7 @@ DESCRIPTION
 
 USAGE
 
-    png filename [, width [, height [, dpi [, ray [, quiet]]]]]
+    png filename [, width [, height [, dpi [, quiet]]]]
 
 ARGUMENTS
 
@@ -705,13 +705,12 @@ ARGUMENTS
     width = integer: width in pixels (default: current window width)
     height = integer: height in pixels (default: current window height)
     dpi = float: dots-per-inch (not yet implemented)
-    ray = 0/1: run ray tracing first (not yet implemented)
     quiet = 0/1: suppress feedback (default: 0)
 
 NOTES
 
     If only width or height is specified, the aspect ratio is preserved.
-    Ray tracing is not yet implemented in this version.
+    Use the "ray" command (from the raytracer plugin) for ray-traced images.
 
 EXAMPLES
 
@@ -750,15 +749,9 @@ EXAMPLES
             .get_float(3)
             .or_else(|| args.get_named_float("dpi"));
 
-        // Get ray flag
-        let ray = args
-            .get_bool(4)
-            .or_else(|| args.get_named_bool("ray"))
-            .unwrap_or(false);
-
         // Get quiet flag
         let quiet = args
-            .get_bool(5)
+            .get_bool(4)
             .or_else(|| args.get_named_bool("quiet"))
             .unwrap_or(false);
 
@@ -770,29 +763,7 @@ EXAMPLES
             path.to_path_buf()
         };
 
-        if ray {
-            // Use raytracing
-            use std::time::Instant;
-            let start = Instant::now();
-
-            let (final_width, final_height) = ctx.viewer
-                .raytrace_to_file(&path, width, height, 1) // Default antialias = 1
-                .map_err(|e| CmdError::execution(format!("Failed to raytrace: {}", e)))?;
-
-            if !quiet {
-                let elapsed = start.elapsed();
-                ctx.print(&format!(
-                    " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
-                    elapsed.as_secs() / 3600,
-                    (elapsed.as_secs() % 3600) / 60,
-                    elapsed.as_secs() % 60,
-                    elapsed.subsec_millis() / 10,
-                    final_width,
-                    final_height
-                ));
-                ctx.print(&format!(" Saved \"{}\"", path.display()));
-            }
-        } else if let Some(vp_img) = ctx.viewer.get_viewport_image() {
+        if let Some(vp_img) = ctx.viewer.get_viewport_image() {
             // Export stored viewport image overlay
             #[cfg(feature = "native-io")]
             {
