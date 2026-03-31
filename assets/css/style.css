@@ -858,6 +858,9 @@ footer {
 .arch-crate.span-4 {
     grid-column: span 4;
 }
+.arch-crate.span-6 {
+    grid-column: span 6;
+}
 
 /* ═══════════════════ SKRIPKIN SHOWCASE ═══════════════════ */
 .showcase {
@@ -1015,6 +1018,9 @@ footer {
         grid-column: span 1;
     }
     .arch-crate.span-4 {
+        grid-column: span 1;
+    }
+    .arch-crate.span-6 {
         grid-column: span 1;
     }
 }
