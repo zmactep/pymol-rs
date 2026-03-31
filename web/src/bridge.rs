@@ -321,15 +321,8 @@ impl WebViewer {
             .names()
             .map(|s| s.to_string())
             .collect();
-        let mode = self
-            .session
-            .settings
-            .get_int(pymol_settings::id::mouse_selection_mode);
-        let sel_width = self
-            .session
-            .settings
-            .get_float(pymol_settings::id::selection_width)
-            .max(6.0);
+        let mode = self.session.settings.ui.mouse_selection_mode as i32;
+        let sel_width = self.session.settings.ui.selection_width.max(6.0);
         let sele_expr: Option<String> = self
             .session
             .selections
@@ -409,10 +402,7 @@ impl WebViewer {
         let (cmd, hit_info) = if let Some(ref hit) = hit {
             if let Some(mol_obj) = self.session.registry.get_molecule(&hit.object_name) {
                 let mol = mol_obj.molecule();
-                let mode = self
-                    .session
-                    .settings
-                    .get_int(pymol_settings::id::mouse_selection_mode);
+                let mode = self.session.settings.ui.mouse_selection_mode as i32;
 
                 let cmd = pick_expression_for_hit(hit, mode, mol).and_then(|expr| {
                     let overlaps_sele =
@@ -492,10 +482,7 @@ impl WebViewer {
                     view.clip_back = (view.clip_back + back).max(view.clip_front + 0.01);
                 }
                 CameraDelta::SlabScale(raw_delta) => {
-                    let mws = self
-                        .session
-                        .settings
-                        .get_float(pymol_settings::id::mouse_wheel_scale);
+                    let mws = self.session.settings.ui.mouse_wheel_scale;
                     let scale = 1.0 + 0.04 * mws * raw_delta;
 
                     let view = self.session.camera.view_mut();

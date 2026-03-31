@@ -16,7 +16,7 @@ use crate::multishadow::{
     MultishadowAtlas, ShadowParams, ShadowPipelines, create_disabled_shadow_bind_group,
 };
 use crate::RenderContext;
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 use pymol_settings::ShadingMode;
 
 /// Resources required to drive shadow depth render passes.
@@ -39,7 +39,7 @@ pub trait ShadingPipeline {
     fn prepare(
         &mut self,
         context: &mut RenderContext,
-        settings: &GlobalSettings,
+        settings: &Settings,
     ) -> bool;
 
     /// Clean up when switching away from this mode.
@@ -223,7 +223,7 @@ impl ShadingManager {
     pub fn prepare(
         &mut self,
         context: &mut RenderContext,
-        settings: &GlobalSettings,
+        settings: &Settings,
     ) -> bool {
         match self.active_mode {
             ShadingMode::Classic => self.classic.prepare(context, settings),

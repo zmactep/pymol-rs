@@ -15,7 +15,7 @@ pub mod surface;
 pub mod wire_surface;
 
 use pymol_mol::{CoordSet, ObjectMolecule};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 use crate::color_resolver::ColorResolver;
 
@@ -81,7 +81,7 @@ pub trait Representation {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     );
 
     /// Upload vertex data to GPU buffers

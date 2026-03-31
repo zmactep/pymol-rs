@@ -8,7 +8,7 @@ use crate::representation::Representation;
 use crate::vertex::DotVertex;
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 /// Dot representation for atoms
 ///
@@ -114,16 +114,12 @@ impl Representation for DotRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.instances.clear();
 
-        let dot_width = settings
-            .get_float_if_defined(pymol_settings::id::dot_width)
-            .unwrap_or(self.dot_width);
-        let dot_density = settings
-            .get_int_if_defined(pymol_settings::id::dot_density)
-            .unwrap_or(self.dot_density);
+        let dot_width = settings.dot.width;
+        let dot_density = settings.dot.density;
 
         // Calculate number of dots based on density
         // density 1 = ~10 dots, 2 = ~30 dots, 3 = ~100 dots, 4 = ~300 dots

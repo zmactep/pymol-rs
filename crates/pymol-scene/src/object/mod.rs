@@ -26,7 +26,7 @@ use ahash::AHashMap;
 use lin_alg::f32::{Mat4, Vec3};
 use pymol_color::ColorIndex;
 use pymol_mol::RepMask;
-use pymol_settings::GlobalSettings;
+use pymol_settings::ObjectOverrides;
 use serde::{Deserialize, Serialize};
 
 // On native targets, Object requires Send + Sync for thread safety.
@@ -207,14 +207,21 @@ pub trait Object: MaybeSend + MaybeSync {
         false
     }
 
-    /// Get object-level settings override (if any)
-    fn settings(&self) -> Option<&GlobalSettings> {
+    /// Get object-level settings overrides (if any)
+    fn overrides(&self) -> Option<&ObjectOverrides> {
         None
     }
 
-    /// Get mutable object-level settings
-    fn settings_mut(&mut self) -> Option<&mut GlobalSettings> {
+    /// Get mutable object-level settings overrides
+    fn overrides_mut(&mut self) -> Option<&mut ObjectOverrides> {
         None
+    }
+
+    /// Get or create mutable object-level settings overrides.
+    ///
+    /// Default implementation panics — override in types that support per-object settings.
+    fn get_or_create_overrides(&mut self) -> &mut ObjectOverrides {
+        unimplemented!("{} does not support per-object settings overrides", self.name())
     }
 
     /// Check if this object is enabled
@@ -297,8 +304,8 @@ pub struct MoleculeObjectSnapshot {
     pub state: ObjectState,
     /// Current coordinate state index being displayed
     pub display_state: usize,
-    /// Per-object settings override
-    pub settings: Option<GlobalSettings>,
+    /// Per-object settings overrides
+    pub overrides: Option<ObjectOverrides>,
     /// Surface quality
     pub surface_quality: i32,
 }
@@ -322,8 +329,8 @@ pub struct MapObjectSnapshot {
     pub carve_radius: f32,
     /// Carve positions
     pub carve_positions: Option<Vec<[f32; 3]>>,
-    /// Per-object settings
-    pub settings: Option<GlobalSettings>,
+    /// Per-object settings overrides
+    pub overrides: Option<ObjectOverrides>,
 }
 
 impl ObjectRegistry {
@@ -346,7 +353,7 @@ impl ObjectRegistry {
                                     molecule: mol_obj.molecule().clone(),
                                     state: mol_obj.state().clone(),
                                     display_state: mol_obj.display_state(),
-                                    settings: mol_obj.settings().cloned(),
+                                    overrides: mol_obj.overrides().cloned(),
                                     surface_quality: mol_obj.surface_quality(),
                                 },
                             ));
@@ -370,7 +377,7 @@ impl ObjectRegistry {
                                     mesh_color: map_obj.mesh_color(),
                                     carve_radius: map_obj.carve_radius(),
                                     carve_positions: map_obj.carve_positions().cloned(),
-                                    settings: map_obj.settings().cloned(),
+                                    overrides: map_obj.overrides().cloned(),
                                 },
                             ));
                         }
@@ -407,8 +414,8 @@ impl ObjectRegistry {
             if snap.display_state > 0 {
                 mol_obj.set_display_state(snap.display_state);
             }
-            if let Some(settings) = snap.settings {
-                *mol_obj.get_or_create_settings() = settings;
+            if let Some(overrides) = snap.overrides {
+                *mol_obj.get_or_create_overrides() = overrides;
             }
             mol_obj.set_surface_quality(snap.surface_quality);
             registry.objects.insert(name, Box::new(mol_obj));
@@ -436,8 +443,8 @@ impl ObjectRegistry {
             if let Some(positions) = snap.carve_positions {
                 map_obj.set_carve_positions(positions);
             }
-            if let Some(settings) = snap.settings {
-                map_obj.set_settings(settings);
+            if let Some(overrides) = snap.overrides {
+                map_obj.set_overrides(overrides);
             }
             registry.objects.insert(name, Box::new(map_obj));
         }

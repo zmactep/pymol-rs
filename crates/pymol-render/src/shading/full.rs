@@ -7,7 +7,7 @@
 
 use crate::RenderContext;
 use crate::multishadow::{ShadowParams, compute_shadow_matrix, mat4_mul};
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use super::{ShadowPassState, ShadowPipelineBase, ShadingPipeline};
 
@@ -54,16 +54,18 @@ impl ShadingPipeline for FullPipeline {
     fn prepare(
         &mut self,
         context: &mut RenderContext,
-        settings: &GlobalSettings,
+        settings: &Settings,
     ) -> bool {
-        let light_count = settings.get_int(pymol_settings::id::light_count);
+        let classic = &settings.shading.classic;
+        let full = &settings.shading.full;
+        let light_count = classic.light_count;
         let shadow_count = (light_count - 1).max(0) as u32;
 
         if shadow_count == 0 {
             return false;
         }
 
-        let tile_size = settings.get_int(pymol_settings::id::shadow_map_size).max(64) as u32;
+        let tile_size = full.shadow_map_size.max(64) as u32;
 
         if !self.base.begin_prepare(context, shadow_count, tile_size) {
             return false;
@@ -71,16 +73,10 @@ impl ShadingPipeline for FullPipeline {
 
         let (scene_center, scene_radius) = self.base.scene_bounds.unwrap_or(([0.0, 0.0, 0.0], 10.0));
 
-        let light_setting_ids = [
-            pymol_settings::id::light,
-            pymol_settings::id::light2,
-            pymol_settings::id::light3,
-            pymol_settings::id::light4,
-            pymol_settings::id::light5,
-            pymol_settings::id::light6,
-            pymol_settings::id::light7,
-            pymol_settings::id::light8,
-            pymol_settings::id::light9,
+        let light_dirs: [[f32; 3]; 9] = [
+            classic.light, classic.light2, classic.light3,
+            classic.light4, classic.light5, classic.light6,
+            classic.light7, classic.light8, classic.light9,
         ];
 
         let view = self.camera_view.unwrap_or([
@@ -93,7 +89,7 @@ impl ShadingPipeline for FullPipeline {
 
         self.base.shadow_matrices = (0..shadow_count as usize)
             .map(|i| {
-                let dir = settings.get_float3(light_setting_ids[i]);
+                let dir = light_dirs[i];
                 let neg_dir = [-dir[0], -dir[1], -dir[2]];
                 let shadow_vp = compute_shadow_matrix(neg_dir, view_center, scene_radius);
                 mat4_mul(&shadow_vp, &view)
@@ -102,9 +98,9 @@ impl ShadingPipeline for FullPipeline {
 
         self.prev_camera_view = self.camera_view;
 
-        let bias = settings.get_float(pymol_settings::id::shadow_bias);
-        let intensity = settings.get_float(pymol_settings::id::shadow_intensity);
-        let pcf_samples = settings.get_int(pymol_settings::id::shadow_pcf).max(1) as u32;
+        let bias = full.shadow_bias;
+        let intensity = full.shadow_intensity;
+        let pcf_samples = full.shadow_pcf.max(1) as u32;
         let atlas = self.base.shadow_atlas.as_ref().unwrap();
         let params = ShadowParams {
             shadow_count,

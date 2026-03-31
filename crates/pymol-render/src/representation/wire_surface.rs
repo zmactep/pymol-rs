@@ -17,7 +17,7 @@ use super::surface::grid::Grid3D;
 use super::surface::marching_cubes;
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 /// Wire surface representation (mesh wireframe)
 ///
@@ -189,20 +189,20 @@ impl Representation for WireSurfaceRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.clear();
 
-        let surface_type_setting = settings.get_int_if_defined(pymol_settings::id::surface_type).unwrap_or(0);
-        let surface_solvent = settings.get_bool_if_defined(pymol_settings::id::surface_solvent).unwrap_or(false);
+        let surface_type_setting = settings.surface.surface_type;
+        let surface_solvent = settings.surface.solvent;
         self.surface_type = if surface_solvent {
             SurfaceType::SolventAccessible
         } else {
             SurfaceType::from_setting(surface_type_setting)
         };
 
-        let individual_chains = settings.get_bool(pymol_settings::id::surface_individual_chains);
-        let mesh_color = settings.get_color(pymol_settings::id::mesh_color);
+        let individual_chains = settings.surface.individual_chains;
+        let mesh_color = settings.mesh.color;
 
         // Collect atoms with MESH visibility
         let mut atoms: Vec<SurfaceAtom> = Vec::new();

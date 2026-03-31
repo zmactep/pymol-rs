@@ -11,7 +11,7 @@ use pymol_render::{
     SelectionIndicatorRep, SphereRep, StickRep, SurfaceRep, WireSurfaceRep,
 };
 use pymol_select::SelectionResult;
-use pymol_settings::{GlobalSettings, SettingResolver};
+use pymol_settings::{ObjectOverrides, ResolvedSettings, Settings};
 
 use super::{Object, ObjectState, ObjectType};
 
@@ -85,8 +85,8 @@ pub struct MoleculeObject {
     representations: RepresentationCache,
     /// Dirty flags indicating what needs rebuilding
     dirty: DirtyFlags,
-    /// Per-object settings override
-    settings: Option<GlobalSettings>,
+    /// Per-object settings overrides
+    overrides: Option<ObjectOverrides>,
     /// Surface quality (-4 to 4, default 0)
     surface_quality: i32,
 }
@@ -114,7 +114,7 @@ impl MoleculeObject {
             representations: RepresentationCache::default(),
             dirty: DirtyFlags::ALL,
             surface_quality: 0,
-            settings: None,
+            overrides: None,
         }
     }
 
@@ -131,7 +131,7 @@ impl MoleculeObject {
             representations: RepresentationCache::default(),
             dirty: DirtyFlags::ALL,
             surface_quality: 0,
-            settings: None,
+            overrides: None,
         }
     }
 
@@ -154,7 +154,7 @@ impl MoleculeObject {
             representations: RepresentationCache::default(),
             dirty: DirtyFlags::ALL,
             surface_quality: 0,
-            settings: None,
+            overrides: None,
         }
     }
 
@@ -409,12 +409,12 @@ impl MoleculeObject {
         }
     }
 
-    /// Get per-object settings (create if needed)
-    pub fn get_or_create_settings(&mut self) -> &mut GlobalSettings {
-        if self.settings.is_none() {
-            self.settings = Some(GlobalSettings::new());
+    /// Get per-object overrides (create if needed)
+    pub fn get_or_create_overrides(&mut self) -> &mut ObjectOverrides {
+        if self.overrides.is_none() {
+            self.overrides = Some(ObjectOverrides::default());
         }
-        self.settings.as_mut().unwrap()
+        self.overrides.as_mut().unwrap()
     }
 
     /// Build/rebuild representations for rendering
@@ -424,7 +424,7 @@ impl MoleculeObject {
         &mut self,
         context: &RenderContext,
         color_resolver: ColorResolver,
-        global_settings: &GlobalSettings,
+        global_settings: &Settings,
     ) {
         if self.dirty.is_empty() {
             return;
@@ -442,12 +442,8 @@ impl MoleculeObject {
             None => return,
         };
 
-        // Create setting resolver with object settings
-        let settings = if let Some(ref obj_settings) = self.settings {
-            SettingResolver::with_object(global_settings, obj_settings)
-        } else {
-            SettingResolver::global(global_settings)
-        };
+        // Resolve settings: merge global + per-object overrides
+        let settings = ResolvedSettings::resolve(global_settings, self.overrides.as_ref());
 
         let vis = &self.state.visible_reps;
 
@@ -520,9 +516,9 @@ impl MoleculeObject {
                 surface.upload(context.device(), context.queue());
             } else if self.dirty.intersects(DirtyFlags::COLOR) {
                 // Fast path: recolor only (skip distance field + marching cubes)
-                let transparency = settings.get_float(138).clamp(0.0, 1.0);
+                let transparency = settings.surface.transparency.clamp(0.0, 1.0);
                 let alpha = 1.0 - transparency;
-                let surface_color = settings.get_color(pymol_settings::id::surface_color);
+                let surface_color = settings.surface.color;
                 let atom_colors = collect_surface_atom_colors(
                     &self.molecule, coord_set, &color_resolver, alpha, surface_color,
                 );
@@ -994,12 +990,16 @@ impl Object for MoleculeObject {
         self.set_display_state(state)
     }
 
-    fn settings(&self) -> Option<&GlobalSettings> {
-        self.settings.as_ref()
+    fn overrides(&self) -> Option<&ObjectOverrides> {
+        self.overrides.as_ref()
     }
 
-    fn settings_mut(&mut self) -> Option<&mut GlobalSettings> {
-        self.settings.as_mut()
+    fn overrides_mut(&mut self) -> Option<&mut ObjectOverrides> {
+        self.overrides.as_mut()
+    }
+
+    fn get_or_create_overrides(&mut self) -> &mut ObjectOverrides {
+        self.get_or_create_overrides()
     }
 
     fn set_name(&mut self, name: String) {

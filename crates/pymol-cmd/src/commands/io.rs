@@ -8,7 +8,6 @@ use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_mol::ObjectMolecule;
 use pymol_render::Grid3D;
 use pymol_scene::{MapData, MapObject, MoleculeObject};
-use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
@@ -290,7 +289,7 @@ EXAMPLES
 
         // Apply DSS (Define Secondary Structure) if auto_dss is enabled
         // This recalculates secondary structure based on backbone geometry
-        let auto_dss = ctx.viewer.settings().get_bool(setting_id::auto_dss);
+        let auto_dss = ctx.viewer.settings().behavior.auto_dss;
         if auto_dss {
             apply_dss(&mut mol);
         }
@@ -1114,7 +1113,7 @@ EXAMPLES
                 .map_err(|e| CmdError::FileFormat(e.to_string()))?;
 
             // Apply DSS if auto_dss is enabled
-            let auto_dss = ctx.viewer.settings().get_bool(setting_id::auto_dss);
+            let auto_dss = ctx.viewer.settings().behavior.auto_dss;
             if auto_dss {
                 apply_dss(&mut mol);
             }

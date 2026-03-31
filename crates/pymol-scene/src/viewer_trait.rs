@@ -12,7 +12,7 @@ use std::path::Path;
 
 use pymol_color::NamedColors;
 use serde::{Deserialize, Serialize};
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use crate::camera::Camera;
 use crate::movie::{LoopMode, Movie};
@@ -65,10 +65,10 @@ pub trait ViewerLike {
     fn camera_mut(&mut self) -> &mut Camera;
 
     /// Get a reference to the global settings
-    fn settings(&self) -> &GlobalSettings;
+    fn settings(&self) -> &Settings;
 
     /// Get a mutable reference to the global settings
-    fn settings_mut(&mut self) -> &mut GlobalSettings;
+    fn settings_mut(&mut self) -> &mut Settings;
 
     /// Request a redraw
     fn request_redraw(&mut self);
@@ -389,7 +389,7 @@ pub trait ViewerLike {
 
     /// Start movie playback
     fn movie_play(&mut self) {
-        let loop_setting = self.settings().get_bool(pymol_settings::id::movie_loop);
+        let loop_setting = self.settings().movie.movie_loop;
         if loop_setting {
             self.movie_mut().set_loop_mode(LoopMode::Loop);
         }
@@ -514,8 +514,8 @@ pub trait ViewerLike {
     fn movie_store_view(&mut self, frame: usize) {
         let view = self.camera().current_view();
         self.movie_mut().store_camera_keyframe(frame, view);
-        let loop_movie = self.settings().get_bool(pymol_settings::id::movie_loop);
-        if self.settings().get_bool(pymol_settings::id::movie_auto_interpolate) {
+        let loop_movie = self.settings().movie.movie_loop;
+        if self.settings().movie.movie_auto_interpolate {
             self.movie_mut().interpolate_keyframes(loop_movie);
         }
         self.request_redraw();
@@ -527,8 +527,8 @@ pub trait ViewerLike {
             .map(|s| s.view.clone())
             .unwrap_or_else(|| self.camera().current_view());
         self.movie_mut().store_scene_keyframe(frame, scene_name, view);
-        let loop_movie = self.settings().get_bool(pymol_settings::id::movie_loop);
-        if self.settings().get_bool(pymol_settings::id::movie_auto_interpolate) {
+        let loop_movie = self.settings().movie.movie_loop;
+        if self.settings().movie.movie_auto_interpolate {
             self.movie_mut().interpolate_keyframes(loop_movie);
         }
         self.request_redraw();
@@ -544,8 +544,8 @@ pub trait ViewerLike {
         self.movie_mut()
             .store_object_keyframe(frame, object, state, transform);
         // Auto-interpolate object transforms between keyframes
-        let loop_movie = self.settings().get_bool(pymol_settings::id::movie_loop);
-        if self.settings().get_bool(pymol_settings::id::movie_auto_interpolate) {
+        let loop_movie = self.settings().movie.movie_loop;
+        if self.settings().movie.movie_auto_interpolate {
             self.movie_mut().interpolate_object_keyframes(loop_movie);
         }
         self.request_redraw();
@@ -558,7 +558,7 @@ pub trait ViewerLike {
 
     /// Trigger keyframe interpolation
     fn movie_interpolate(&mut self) {
-        let loop_movie = self.settings().get_bool(pymol_settings::id::movie_loop);
+        let loop_movie = self.settings().movie.movie_loop;
         self.movie_mut().interpolate_keyframes(loop_movie);
         self.request_redraw();
     }

@@ -11,6 +11,5 @@ documentation.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
-parking_lot = { workspace = true }
 ahash = { workspace = true }
 serde = { workspace = true }

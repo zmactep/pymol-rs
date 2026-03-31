@@ -6,7 +6,6 @@ use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
 use pymol_select::{SelectionOptions, SelectionResult};
-use pymol_settings::id;
 
 /// Expand self-references in a selection expression.
 ///
@@ -105,8 +104,8 @@ pub fn select_with_context(
     let mut results: Vec<(String, SelectionResult)> = Vec::new();
 
     let options = SelectionOptions {
-        ignore_case: viewer.settings().get_bool(id::ignore_case),
-        ignore_case_chain: viewer.settings().get_bool(id::ignore_case_chain),
+        ignore_case: viewer.settings().behavior.ignore_case,
+        ignore_case_chain: viewer.settings().behavior.ignore_case_chain,
     };
 
     for obj_name in &object_names {

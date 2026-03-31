@@ -5,12 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::store::GlobalSettings;
+use crate::impl_setting_enum;
 
 /// Available shading modes.
 ///
-/// Each mode reads only its own set of parameters — Classic ignores
-/// skripkin_*, Skripkin ignores light_count/ambient/direct/reflect/specular.
+/// Each mode reads only its own set of parameters:
+/// - **Classic**: multi-light PyMOL model (ambient, direct, reflect, specular, lights).
+/// - **Skripkin**: pure ambient + multi-directional shadow AO (own ambient/specular/shininess).
+/// - **Full**: Classic lighting + per-light directional shadow maps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(i32)]
 pub enum ShadingMode {
@@ -22,44 +24,18 @@ pub enum ShadingMode {
     Full = 2,
 }
 
-impl ShadingMode {
-    /// Parse from a string alias (case-insensitive).
-    pub fn from_str_alias(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "classic" | "0" => Some(ShadingMode::Classic),
-            "skripkin" | "1" => Some(ShadingMode::Skripkin),
-            "full" | "2" => Some(ShadingMode::Full),
-            _ => None,
-        }
-    }
-
-    /// Get the current shading mode from global settings.
-    pub fn from_settings(settings: &GlobalSettings) -> Self {
-        Self::from(settings.get_int(crate::definitions::id::shading_mode))
-    }
-
-    /// Display name for UI/feedback.
-    pub fn name(&self) -> &'static str {
-        match self {
-            ShadingMode::Classic => "classic",
-            ShadingMode::Skripkin => "skripkin",
-            ShadingMode::Full => "full",
-        }
+impl Default for ShadingMode {
+    fn default() -> Self {
+        Self::Classic
     }
 }
 
-impl From<i32> for ShadingMode {
-    fn from(v: i32) -> Self {
-        match v {
-            1 => ShadingMode::Skripkin,
-            2 => ShadingMode::Full,
-            _ => ShadingMode::Classic,
-        }
+impl_setting_enum! {
+    ShadingMode {
+        Classic = 0 => "classic",
+        Skripkin = 1 => "skripkin",
+        Full = 2 => "full",
     }
+    default: Classic
 }
 
-impl From<ShadingMode> for i32 {
-    fn from(m: ShadingMode) -> i32 {
-        m as i32
-    }
-}

@@ -9,7 +9,7 @@ use crate::representation::Representation;
 use crate::vertex::LineVertex;
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 use super::bond_utils::{
     calculate_perpendicular_with_neighbor, find_neighbor_position, get_bond_offsets, normalize,
@@ -69,13 +69,13 @@ impl Representation for LineRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.vertices.clear();
 
-        let valence_enabled = settings.get_bool_if_defined(pymol_settings::id::valence).unwrap_or(true);
-        let valence_size = settings.get_float_if_defined(pymol_settings::id::valence_size).unwrap_or(0.06);
-        let line_color = settings.get_color(pymol_settings::id::line_color);
+        let valence_enabled = settings.stick.valence;
+        let valence_size = settings.stick.valence_size;
+        let line_color = settings.line.color;
 
         // Scale valence_size for visible line separation.
         // The raw valence_size (default 0.06 Å) is too small for lines.

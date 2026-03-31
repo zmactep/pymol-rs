@@ -9,7 +9,7 @@ use crate::representation::Representation;
 use crate::vertex::{CylinderVertex, SphereVertex};
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 use super::bond_utils::{
     calculate_perpendicular_with_neighbor, find_neighbor_position, get_bond_offsets, normalize,
@@ -109,18 +109,15 @@ impl Representation for StickRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.cylinder_instances.clear();
         self.sphere_instances.clear();
 
-        let stick_radius = settings
-            .get_float_if_defined(pymol_settings::id::stick_radius)
-            .unwrap_or(self.stick_radius);
-
-        let valence_enabled = settings.get_bool_if_defined(pymol_settings::id::valence).unwrap_or(true);
-        let stick_valence_scale = settings.get_float_if_defined(pymol_settings::id::stick_valence_scale).unwrap_or(1.0);
-        let stick_color = settings.get_color(pymol_settings::id::stick_color);
+        let stick_radius = settings.stick.radius;
+        let valence_enabled = settings.stick.valence;
+        let stick_valence_scale = settings.stick.valence_scale;
+        let stick_color = settings.stick.color;
 
         // For sticks, the offset needs to be based on stick_radius to prevent overlap.
         // Using stick_radius * 1.5 as base gives a compact appearance for double/triple bonds.
@@ -284,7 +281,7 @@ mod tests {
     use lin_alg::f32::Vec3;
     use pymol_color::{ElementColors, NamedColors};
     use pymol_mol::{Atom, BondOrder, Element};
-    use pymol_settings::GlobalSettings;
+    use pymol_settings::{ResolvedSettings, Settings};
 
     use crate::color_resolver::ColorResolver;
 
@@ -325,8 +322,8 @@ mod tests {
         let elements = ElementColors::default();
         let colors = ColorResolver::new(&named, &elements);
 
-        let global_settings = GlobalSettings::new();
-        let settings = SettingResolver::global(&global_settings);
+        let global_settings = Settings::default();
+        let settings = ResolvedSettings::resolve(&global_settings, None);
 
         let mut rep = StickRep::new();
         rep.build(mol, coord_set, &colors, &settings);

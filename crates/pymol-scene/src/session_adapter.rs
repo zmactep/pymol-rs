@@ -8,7 +8,7 @@ use std::path::Path;
 
 use pymol_color::NamedColors;
 use pymol_render::RenderContext;
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use crate::camera::Camera;
 use crate::capture::capture_png_to_file;
@@ -50,8 +50,8 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     fn objects_mut(&mut self) -> &mut ObjectRegistry { &mut self.session.registry }
     fn camera(&self) -> &Camera { &self.session.camera }
     fn camera_mut(&mut self) -> &mut Camera { &mut self.session.camera }
-    fn settings(&self) -> &GlobalSettings { &self.session.settings }
-    fn settings_mut(&mut self) -> &mut GlobalSettings { &mut self.session.settings }
+    fn settings(&self) -> &Settings { &self.session.settings }
+    fn settings_mut(&mut self) -> &mut Settings { &mut self.session.settings }
     fn movie(&self) -> &Movie { &self.session.movie }
     fn movie_mut(&mut self) -> &mut Movie { &mut self.session.movie }
     fn scenes(&self) -> &SceneManager { &self.session.scenes }

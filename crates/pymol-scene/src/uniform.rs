@@ -5,7 +5,7 @@
 
 use crate::camera::Camera;
 use pymol_render::GlobalUniforms;
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 /// Compute reflect scale factor to maintain consistent brightness (PyMOL algorithm)
 ///
@@ -78,16 +78,16 @@ fn setup_common_uniforms(
 /// Setup fog parameters from settings (shared helper).
 fn setup_fog(
     uniforms: &mut GlobalUniforms,
-    settings: &GlobalSettings,
+    settings: &Settings,
     clear_color: [f32; 3],
     clip_front: f32,
     clip_back: f32,
 ) {
-    let depth_cue_enabled = settings.get_bool(pymol_settings::id::depth_cue);
-    let fog_density = settings.get_float(pymol_settings::id::fog);
+    let depth_cue_enabled = settings.shading.common.depth_cue;
+    let fog_density = settings.shading.common.fog;
 
     if depth_cue_enabled && fog_density > 0.0 {
-        let fog_start_ratio = settings.get_float(pymol_settings::id::fog_start);
+        let fog_start_ratio = settings.shading.common.fog_start;
         let fog_start_actual = (clip_back - clip_front) * fog_start_ratio + clip_front;
 
         let fog_end_actual = if (fog_density - 1.0).abs() < 0.001 {
@@ -107,44 +107,35 @@ fn setup_fog(
 /// specular, shininess, multi-light directions, fog, depth cue.
 pub fn setup_classic_uniforms(
     camera: &Camera,
-    settings: &GlobalSettings,
+    settings: &Settings,
     clear_color: [f32; 3],
     viewport_size: (f32, f32),
 ) -> GlobalUniforms {
     let mut uniforms = GlobalUniforms::new();
     setup_common_uniforms(&mut uniforms, camera, clear_color, viewport_size);
 
+    let classic = &settings.shading.classic;
+
     // Multi-light support
-    let light_count = settings.get_int(pymol_settings::id::light_count);
-    let spec_count = settings.get_int(pymol_settings::id::spec_count);
+    let light_count = classic.light_count;
+    let spec_count = classic.spec_count;
 
-    let light_setting_ids = [
-        pymol_settings::id::light,
-        pymol_settings::id::light2,
-        pymol_settings::id::light3,
-        pymol_settings::id::light4,
-        pymol_settings::id::light5,
-        pymol_settings::id::light6,
-        pymol_settings::id::light7,
-        pymol_settings::id::light8,
-        pymol_settings::id::light9,
+    let light_dirs: Vec<[f32; 3]> = vec![
+        classic.light, classic.light2, classic.light3,
+        classic.light4, classic.light5, classic.light6,
+        classic.light7, classic.light8, classic.light9,
     ];
-
-    let light_dirs: Vec<[f32; 3]> = light_setting_ids
-        .iter()
-        .map(|&id| settings.get_float3(id))
-        .collect();
 
     uniforms.set_lights(light_count, spec_count, &light_dirs);
 
     // Classic PyMOL dual-light model
-    let ambient = settings.get_float(pymol_settings::id::ambient);
-    let direct = settings.get_float(pymol_settings::id::direct);
-    let reflect = settings.get_float(pymol_settings::id::reflect);
-    let specular = settings.get_float(pymol_settings::id::specular);
-    let shininess = settings.get_float(pymol_settings::id::shininess);
-    let spec_direct = settings.get_float(pymol_settings::id::spec_direct);
-    let spec_direct_power = settings.get_float(pymol_settings::id::spec_direct_power);
+    let ambient = classic.ambient;
+    let direct = classic.direct;
+    let reflect = classic.reflect;
+    let specular = classic.specular;
+    let shininess = classic.shininess;
+    let spec_direct = classic.spec_direct;
+    let spec_direct_power = classic.spec_direct_power;
 
     // PyMOL brightness consistency adjustments
     let reflect_scale = compute_reflect_scale(light_count, &light_dirs);
@@ -180,7 +171,7 @@ pub fn setup_classic_uniforms(
 /// shadow AO, not from camera-direction or positional lights.
 pub fn setup_skripkin_uniforms(
     camera: &Camera,
-    settings: &GlobalSettings,
+    settings: &Settings,
     clear_color: [f32; 3],
     viewport_size: (f32, f32),
 ) -> GlobalUniforms {
@@ -190,9 +181,10 @@ pub fn setup_skripkin_uniforms(
     // No positional lights and no headlight — light_count=0.
     uniforms.set_lights(0, 0, &[]);
 
-    let ambient = settings.get_float(pymol_settings::id::ambient);
-    let specular = settings.get_float(pymol_settings::id::specular);
-    let shininess = settings.get_float(pymol_settings::id::shininess);
+    let classic = &settings.shading.classic;
+    let ambient = classic.ambient;
+    let specular = classic.specular;
+    let shininess = classic.shininess;
 
     uniforms.set_lighting(
         ambient,
@@ -215,12 +207,11 @@ pub fn setup_skripkin_uniforms(
 /// the `Viewer` and GUI's `App::render()`.
 pub fn setup_uniforms(
     camera: &Camera,
-    settings: &GlobalSettings,
+    settings: &Settings,
     clear_color: [f32; 3],
     viewport_size: (f32, f32),
 ) -> GlobalUniforms {
-    let shading_mode = pymol_settings::ShadingMode::from_settings(settings);
-    match shading_mode {
+    match settings.shading.mode {
         pymol_settings::ShadingMode::Classic | pymol_settings::ShadingMode::Full => setup_classic_uniforms(camera, settings, clear_color, viewport_size),
         pymol_settings::ShadingMode::Skripkin => setup_skripkin_uniforms(camera, settings, clear_color, viewport_size),
     }

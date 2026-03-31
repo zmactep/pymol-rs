@@ -1167,10 +1167,7 @@ SEE ALSO
             .clamp(0, 100);
 
         // Get FPS from settings
-        let fps = ctx
-            .viewer
-            .settings()
-            .get_float(pymol_settings::id::movie_fps);
+        let fps = ctx.viewer.settings().movie.movie_fps;
 
         // Create temp directory
         let tmp_path = filename.with_extension("tmp");

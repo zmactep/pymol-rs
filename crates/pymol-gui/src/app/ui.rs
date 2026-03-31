@@ -82,7 +82,7 @@ impl App {
 
             self.view.egui.ctx.run(raw_input, |ctx| {
                 // Layout renders all panels + returns viewport rect
-                let transparent_panels = self.state.settings.get_bool(pymol_settings::id::transparent_panels);
+                let transparent_panels = self.state.settings.ui.transparent_panels;
                 viewport_rect_logical = render_layout(layout, ctx, components, &shared, bus, transparent_panels);
 
                 // Render image overlay in viewport if present

@@ -30,7 +30,7 @@ use crate::representation::Representation;
 use crate::vertex::MeshVertex;
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 pub use coloring::AtomColor;
 pub use distance_field::{SurfaceAtom, SurfaceType};
@@ -487,33 +487,25 @@ impl Representation for SurfaceRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.clear();
 
-        // Get settings
-        // Setting IDs from pymol-settings definitions:
-        // 138 = transparency (float, 0.0 = opaque, 1.0 = invisible)
-        // 331 = surface_type
-        // 338 = surface_solvent (bool)
-        // Note: surface_quality (38) is controlled via set_quality() API
-        
         // Get transparency and convert to alpha
         // PyMOL uses transparency (0=opaque, 1=invisible), we need alpha (1=opaque, 0=invisible)
-        // Use get_float() which always returns a value (set value or default of 0.0)
-        let transparency = settings.get_float(pymol_settings::id::transparency).clamp(0.0, 1.0);
+        let transparency = settings.surface.transparency.clamp(0.0, 1.0);
         let alpha = 1.0 - transparency;
 
-        let surface_type_setting = settings.get_int_if_defined(pymol_settings::id::surface_type).unwrap_or(0);
-        let surface_solvent = settings.get_bool_if_defined(pymol_settings::id::surface_solvent).unwrap_or(false);
+        let surface_type_setting = settings.surface.surface_type;
+        let surface_solvent = settings.surface.solvent;
         self.surface_type = if surface_solvent {
             SurfaceType::SolventAccessible
         } else {
             SurfaceType::from_setting(surface_type_setting)
         };
 
-        let individual_chains = settings.get_bool(pymol_settings::id::surface_individual_chains);
-        let surface_color = settings.get_color(pymol_settings::id::surface_color);
+        let individual_chains = settings.surface.individual_chains;
+        let surface_color = settings.surface.color;
 
         // Collect atoms with SURFACE visibility
         let mut atoms: Vec<SurfaceAtom> = Vec::new();

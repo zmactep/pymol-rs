@@ -9,7 +9,7 @@
 
 use pymol_color::{ChainColors, ElementColors, NamedColors};
 use pymol_render::{ColorResolver, RenderContext};
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 use serde::{Deserialize, Serialize};
 
 use crate::camera::Camera;
@@ -49,7 +49,7 @@ pub struct Session {
     // Settings and Colors
     // =========================================================================
     /// Global rendering settings
-    pub settings: GlobalSettings,
+    pub settings: Settings,
     /// Named colors table (e.g., "red", "carbon")
     pub named_colors: NamedColors,
     /// Per-element color defaults
@@ -79,7 +79,7 @@ struct SessionProxy {
     scenes: SceneManager,
     views: ViewManager,
     movie: Movie,
-    settings: GlobalSettings,
+    settings: Settings,
     named_colors: NamedColors,
     element_colors: ElementColors,
     chain_colors: ChainColors,
@@ -179,7 +179,7 @@ impl Session {
             scenes: SceneManager::new(),
             views: ViewManager::new(),
             movie: Movie::new(),
-            settings: GlobalSettings::new(),
+            settings: Settings::default(),
             named_colors: NamedColors::default(),
             element_colors: ElementColors::default(),
             chain_colors: ChainColors,
@@ -202,13 +202,11 @@ impl Session {
 
     /// Apply default global settings (will be loaded from config file in the future)
     pub fn apply_default_settings(&mut self) {
-        use pymol_settings::{id as setting_id, SettingValue};
-
         if let Some((idx, _)) = self.named_colors.get_by_name("green") {
-            let _ = self.settings.set(setting_id::cartoon_color, SettingValue::Color(idx as i32));
+            self.settings.cartoon.color = idx as i32;
         }
         if let Some((idx, _)) = self.named_colors.get_by_name("magenta") {
-            let _ = self.settings.set(setting_id::cartoon_nucleic_acid_color, SettingValue::Color(idx as i32));
+            self.settings.cartoon.nucleic_acid_color = idx as i32;
         }
     }
 }

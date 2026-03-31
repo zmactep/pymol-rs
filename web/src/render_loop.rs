@@ -18,7 +18,7 @@ pub fn render_frame(
     let height = gpu.surface_config.height;
 
     // Setup uniforms
-    let shading_mode = pymol_settings::ShadingMode::from_settings(&session.settings);
+    let shading_mode = session.settings.shading.mode;
     shading.set_mode(shading_mode, &mut gpu.render_context);
     let uniforms = setup_uniforms(
         &session.camera,
@@ -34,7 +34,7 @@ pub fn render_frame(
     // Update selection indicators
     let names: Vec<String> = session.registry.names().map(|s| s.to_string()).collect();
     let selection_results = session.selections.evaluate_visible(&session.registry, Default::default());
-    let selection_width = session.settings.get_float(pymol_settings::id::selection_width).max(6.0);
+    let selection_width = session.settings.ui.selection_width.max(6.0);
 
     for name in &names {
         if let Some(mol_obj) = session.registry.get_molecule_mut(name) {
@@ -173,10 +173,10 @@ pub fn render_frame(
     }
 
     // Post-process: silhouette edge detection
-    if session.settings.get_bool(pymol_settings::id::silhouettes) {
-        let thickness = session.settings.get_float(pymol_settings::id::silhouette_width);
-        let depth_jump = session.settings.get_float(pymol_settings::id::silhouette_depth_jump);
-        let color_int = session.settings.get_color(pymol_settings::id::silhouette_color);
+    if session.settings.shading.common.silhouettes {
+        let thickness = session.settings.shading.common.silhouette_width;
+        let depth_jump = session.settings.shading.common.silhouette_depth_jump;
+        let color_int = session.settings.shading.common.silhouette_color;
         let color = pymol_color::Color::from_packed_rgb(color_int).to_rgba(1.0);
         gpu.silhouette.render(
             &mut encoder,

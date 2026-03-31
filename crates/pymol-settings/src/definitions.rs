@@ -888,10 +888,9 @@ pub fn get_setting_id(name: &str) -> Option<u16> {
 /// Returns names of all settings that are not of type `Blank` (unused/reserved).
 /// Useful for autocomplete in the command line.
 pub fn setting_names() -> Vec<&'static str> {
-    SETTINGS
+    crate::registry::all_descriptors()
         .iter()
-        .filter(|s| s.setting_type != SettingType::Blank)
-        .map(|s| s.name)
+        .map(|d| d.name)
         .collect()
 }
 
@@ -1794,38 +1793,6 @@ pub static SETTINGS: &[Setting] = &[
     // 812: Shadow PCF kernel size (N×N samples for antialiased shadow edges)
     s_int!(812, "shadow_pcf", Global, 2),
 ];
-
-/// Initialize a settings store with all default values
-pub fn create_default_settings() -> Vec<SettingValue> {
-    SETTINGS.iter().map(|s| s.default.clone()).collect()
-}
-
-/// String defaults for settings that have them
-/// Called during runtime initialization since we can't store String in const
-pub fn get_string_default(id: u16) -> &'static str {
-    match id {
-        187 => "tmp_pymol",
-        225 => "all",
-        246..=248 => "",
-        330 | 396 | 440 | 507 | 513 | 516 | 712 | 747 => "",
-        342 | 345 | 589 | 592 => "",
-        412 => "*",
-        413 => "",
-        486 => "HEADER, TITLE, COMPND",
-        635 => "CA",
-        636 => "pdb",
-        654 => "FWT PHWT DELFWT PHDELWT",
-        655 => "2FOFCWT PH2FOFCWT FOFCWT PHFOFCWT",
-        656 => "2FOFCWT_no_fill PH2FOFCWT_no_fill None None",
-        657 => "2FOFCWT PH2FOFCWT FOFCWT PHFOFCWT",
-        658 => "volume",
-        659 => "volume",
-        660 => "mol2",
-        716 | 717 => "*",
-        760 => "cif",
-        _ => "",
-    }
-}
 
 #[cfg(test)]
 mod tests {

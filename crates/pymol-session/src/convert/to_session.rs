@@ -126,7 +126,7 @@ fn convert_settings(pse: &PseSession, session: &mut Session) {
             Some(SerializedSetting { id: s.id, value })
         })
         .collect();
-    session.settings.from_session_list(&serialized);
+    session.settings = pymol_settings::legacy::import_session(&serialized);
 }
 
 fn convert_setting_value(pse_val: &PseSettingValue) -> Option<SettingValue> {

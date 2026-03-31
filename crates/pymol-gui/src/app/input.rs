@@ -72,10 +72,7 @@ impl App {
                     self.scene_dirty = true;
                 }
                 CameraDelta::SlabScale(raw_delta) => {
-                    let mws = self
-                        .state
-                        .settings
-                        .get_float(pymol_settings::id::mouse_wheel_scale);
+                    let mws = self.state.settings.ui.mouse_wheel_scale;
                     let scale = 1.0 + 0.04 * mws * raw_delta;
 
                     let view = self.state.camera.view_mut();
@@ -158,7 +155,7 @@ impl App {
     pub(crate) fn process_click(&mut self) {
         let mouse_pos = self.viewport.input.mouse_position();
         let hit = self.pick_at(mouse_pos);
-        let mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
+        let mode = self.state.settings.ui.mouse_selection_mode as i32;
 
         if let Some(ref hit) = hit {
             if let Some(mol_obj) = self.state.registry.get_molecule(&hit.object_name) {

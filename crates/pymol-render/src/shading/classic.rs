@@ -1,14 +1,14 @@
 //! Classic shading pipeline — no shadow passes.
 
 use crate::RenderContext;
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use super::ShadingPipeline;
 
 pub struct ClassicPipeline;
 
 impl ShadingPipeline for ClassicPipeline {
-    fn prepare(&mut self, _context: &mut RenderContext, _settings: &GlobalSettings) -> bool {
+    fn prepare(&mut self, _context: &mut RenderContext, _settings: &Settings) -> bool {
         false // No shadow passes needed.
     }
 

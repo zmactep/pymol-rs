@@ -47,4 +47,12 @@ impl SettingError {
     pub fn not_found_name(name: impl Into<String>) -> Self {
         SettingError::NotFound(name.into())
     }
+
+    /// Create a type mismatch error for the expected type.
+    pub fn type_mismatch(expected: &'static str) -> Self {
+        SettingError::TypeMismatch {
+            expected,
+            actual: "unknown",
+        }
+    }
 }

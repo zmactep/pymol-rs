@@ -8,7 +8,7 @@ use std::path::Path;
 use pymol_color::{Color, ElementColors, NamedColors};
 use pymol_render::silhouette::SilhouettePipeline;
 use pymol_render::{ColorResolver, RenderContext};
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use crate::camera::Camera;
 use crate::error::ViewerError;
@@ -53,7 +53,7 @@ pub fn capture_png_to_file(
     context: &RenderContext,
     camera: &mut Camera,
     registry: &mut ObjectRegistry,
-    settings: &GlobalSettings,
+    settings: &Settings,
     named_colors: &NamedColors,
     element_colors: &ElementColors,
     clear_color: [f32; 3],
@@ -156,7 +156,7 @@ pub fn capture_png_to_file(
                         r: clear_color[0] as f64,
                         g: clear_color[1] as f64,
                         b: clear_color[2] as f64,
-                        a: if settings.get_bool(pymol_settings::id::opaque_background) {
+                        a: if settings.ui.opaque_background {
                             1.0
                         } else {
                             0.0
@@ -189,11 +189,11 @@ pub fn capture_png_to_file(
     }
 
     // Post-process: silhouette edge detection (matches GUI render loop)
-    if settings.get_bool(pymol_settings::id::silhouettes) {
+    if settings.shading.common.silhouettes {
         let silhouette = SilhouettePipeline::new(device, texture_format);
-        let thickness = settings.get_float(pymol_settings::id::silhouette_width);
-        let depth_jump = settings.get_float(pymol_settings::id::silhouette_depth_jump);
-        let color_int = settings.get_color(pymol_settings::id::silhouette_color);
+        let thickness = settings.shading.common.silhouette_width;
+        let depth_jump = settings.shading.common.silhouette_depth_jump;
+        let color_int = settings.shading.common.silhouette_color;
         let color = Color::from_packed_rgb(color_int).to_rgba(1.0);
 
         silhouette.render(

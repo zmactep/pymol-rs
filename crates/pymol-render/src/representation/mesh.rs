@@ -8,7 +8,7 @@ use crate::representation::Representation;
 use crate::vertex::MeshVertex;
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 /// Mesh representation
 ///
@@ -166,7 +166,7 @@ impl Representation for MeshRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         // For mesh representation, we typically don't build from molecular data
         // directly - the mesh data is usually set via set_mesh() from a surface
@@ -174,7 +174,7 @@ impl Representation for MeshRep {
         // here for atoms that have MESH visible.
 
         self.clear();
-        let mesh_color = settings.get_color(pymol_settings::id::mesh_color);
+        let mesh_color = settings.mesh.color;
 
         // Simple icosahedron-based mesh for atoms with MESH visible
         for (atom_idx, coord) in coord_set.iter_with_atoms() {

@@ -114,7 +114,7 @@ EXAMPLES
                 ctx.viewer.replace_session(Session::new());
             }
             "settings" => {
-                ctx.viewer.settings_mut().reset_all();
+                *ctx.viewer.settings_mut() = pymol_settings::Settings::default();
                 ctx.viewer.session_mut().apply_default_settings();
             }
             "objects" => {

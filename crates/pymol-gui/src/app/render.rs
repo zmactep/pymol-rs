@@ -132,8 +132,8 @@ impl App {
         let output_view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Upload scene uniforms and set the active shading mode.
-        let shading_mode = pymol_settings::ShadingMode::from_settings(&self.state.settings);
-        let transparent_panels = self.state.settings.get_bool(pymol_settings::id::transparent_panels);
+        let shading_mode = self.state.settings.shading.mode;
+        let transparent_panels = self.state.settings.ui.transparent_panels;
         {
             let context = self.view.gpu.render_context.as_mut().unwrap();
             self.shading.set_mode(shading_mode, context);
@@ -270,8 +270,8 @@ impl App {
         };
 
         let selection_results = self.evaluate_visible_selections();
-        let selection_width = self.state.settings.get_float(pymol_settings::id::selection_width).max(6.0);
-        let mouse_selection_mode = self.state.settings.get_int(pymol_settings::id::mouse_selection_mode);
+        let selection_width = self.state.settings.ui.selection_width.max(6.0);
+        let mouse_selection_mode = self.state.settings.ui.mouse_selection_mode as i32;
 
         // Snapshot hover state to avoid borrow issues
         let hover_hit = self.viewport.hover_hit.clone();
@@ -466,16 +466,16 @@ impl App {
         width: u32,
         height: u32,
     ) {
-        if !self.state.settings.get_bool(pymol_settings::id::silhouettes) {
+        if !self.state.settings.shading.common.silhouettes {
             return;
         }
         if let (Some(silhouette), Some(depth_view)) =
             (&self.view.gpu.silhouette_pipeline, &self.view.gpu.depth_view)
         {
             let context = self.view.gpu.render_context.as_ref().unwrap();
-            let thickness = self.state.settings.get_float(pymol_settings::id::silhouette_width);
-            let depth_jump = self.state.settings.get_float(pymol_settings::id::silhouette_depth_jump);
-            let color_int = self.state.settings.get_color(pymol_settings::id::silhouette_color);
+            let thickness = self.state.settings.shading.common.silhouette_width;
+            let depth_jump = self.state.settings.shading.common.silhouette_depth_jump;
+            let color_int = self.state.settings.shading.common.silhouette_color;
             let color = pymol_color::Color::from_packed_rgb(color_int).to_rgba(1.0);
             silhouette.render(
                 encoder,

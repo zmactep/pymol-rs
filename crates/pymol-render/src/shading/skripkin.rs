@@ -4,7 +4,7 @@ use crate::RenderContext;
 use crate::multishadow::{
     ShadowParams, compute_shadow_matrix, fibonacci_sphere_directions,
 };
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use super::{ShadowPassState, ShadowPipelineBase, ShadingPipeline};
 
@@ -30,10 +30,11 @@ impl ShadingPipeline for SkripkinPipeline {
     fn prepare(
         &mut self,
         context: &mut RenderContext,
-        settings: &GlobalSettings,
+        settings: &Settings,
     ) -> bool {
-        let n_directions = settings.get_int(pymol_settings::id::skripkin_directions).max(1) as u32;
-        let tile_size = settings.get_int(pymol_settings::id::skripkin_map_size).max(32) as u32;
+        let sk = &settings.shading.skripkin;
+        let n_directions = sk.directions.max(1) as u32;
+        let tile_size = sk.map_size.max(32) as u32;
 
         if !self.base.begin_prepare(context, n_directions, tile_size) {
             return false;
@@ -46,8 +47,8 @@ impl ShadingPipeline for SkripkinPipeline {
             .map(|dir| compute_shadow_matrix(*dir, scene_center, scene_radius))
             .collect();
 
-        let bias = settings.get_float(pymol_settings::id::skripkin_bias);
-        let intensity = settings.get_float(pymol_settings::id::skripkin_intensity);
+        let bias = sk.bias;
+        let intensity = sk.intensity;
         let atlas = self.base.shadow_atlas.as_ref().unwrap();
         let params = ShadowParams {
             shadow_count: n_directions,

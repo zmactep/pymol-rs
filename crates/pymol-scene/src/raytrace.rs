@@ -9,7 +9,7 @@ use pymol_raytracer::{
     GpuTriangle, PrimitiveCollector, RayColorResolver, RaytraceParams, RaytraceSettings,
 };
 use pymol_render::MeshVertex;
-use pymol_settings::GlobalSettings;
+use pymol_settings::Settings;
 
 use crate::camera::normalize_matrix;
 use crate::object::{MoleculeObject, Object, ObjectRegistry};
@@ -45,7 +45,7 @@ pub struct RaytraceInput<'a> {
     /// Object registry containing molecules
     pub registry: &'a ObjectRegistry,
     /// Global settings
-    pub settings: &'a GlobalSettings,
+    pub settings: &'a Settings,
     /// Named colors
     pub named_colors: &'a NamedColors,
     /// Element colors
@@ -152,8 +152,8 @@ pub fn raytrace_scene(
     );
 
     // Get sphere/stick settings
-    let sphere_scale = input.settings.get_float(pymol_settings::id::sphere_scale);
-    let stick_radius = input.settings.get_float(pymol_settings::id::stick_radius);
+    let sphere_scale = input.settings.sphere.scale;
+    let stick_radius = input.settings.stick.radius;
     let options = CollectOptions {
         sphere_scale,
         stick_radius,
@@ -238,24 +238,26 @@ pub fn raytrace_scene(
     input.camera.set_aspect(original_aspect);
 
     // Build raytracing settings from global settings
-    let ray_shadow = input.settings.get_bool(pymol_settings::id::ray_shadow);
-    let ray_trace_fog = input.settings.get_float(pymol_settings::id::ray_trace_fog) > 0.0;
-    let ray_max_passes = input.settings.get_int(pymol_settings::id::ray_max_passes) as u32;
-    let ray_transparency_shadows = input.settings.get_bool(pymol_settings::id::ray_transparency_shadows);
+    let ray = &input.settings.ray;
+    let classic = &input.settings.shading.classic;
+    let ray_shadow = ray.shadow;
+    let ray_trace_fog = ray.trace_fog > 0.0;
+    let ray_max_passes = ray.max_passes as u32;
+    let ray_transparency_shadows = ray.transparency_shadows;
 
-    let ambient = input.settings.get_float(pymol_settings::id::ambient);
-    let direct = input.settings.get_float(pymol_settings::id::direct);
-    let reflect = input.settings.get_float(pymol_settings::id::reflect);
-    let specular = input.settings.get_float(pymol_settings::id::specular);
-    let shininess = input.settings.get_float(pymol_settings::id::shininess);
+    let ambient = classic.ambient;
+    let direct = classic.direct;
+    let reflect = classic.reflect;
+    let specular = classic.specular;
+    let shininess = classic.shininess;
 
     // Ray trace mode settings
-    let ray_trace_mode = input.settings.get_int(pymol_settings::id::ray_trace_mode);
-    let ray_opaque_background = input.settings.get_int(pymol_settings::id::ray_opaque_background);
-    let transparency_mode = input.settings.get_int(pymol_settings::id::transparency_mode);
+    let ray_trace_mode = ray.trace_mode;
+    let ray_opaque_background = ray.opaque_background;
+    let transparency_mode = input.settings.surface.transparency_mode;
 
     // Resolve ray_trace_color (default -6 = black in PyMOL)
-    let ray_trace_color_idx = input.settings.get_color(pymol_settings::id::ray_trace_color);
+    let ray_trace_color_idx = ray.trace_color;
     let ray_trace_color = if ray_trace_color_idx >= 0 {
         // Positive index: look up in named colors
         input.named_colors
@@ -268,43 +270,34 @@ pub fn raytrace_scene(
     };
 
     // Edge detection parameters (PyMOL gradient-of-gradient algorithm)
-    let ray_trace_slope_factor = input.settings.get_float(pymol_settings::id::ray_trace_slope_factor);
-    let ray_trace_depth_factor = input.settings.get_float(pymol_settings::id::ray_trace_depth_factor);
-    let ray_trace_disco_factor = input.settings.get_float(pymol_settings::id::ray_trace_disco_factor);
-    let ray_trace_gain = input.settings.get_float(pymol_settings::id::ray_trace_gain);
+    let ray_trace_slope_factor = ray.trace_slope_factor;
+    let ray_trace_depth_factor = ray.trace_depth_factor;
+    let ray_trace_disco_factor = ray.trace_disco_factor;
+    let ray_trace_gain = ray.trace_gain;
 
     // Shading mode determines the lighting pipeline
-    let shading_mode = pymol_settings::ShadingMode::from_settings(input.settings);
+    let shading_mode = input.settings.shading.mode;
 
     // Multi-light support (PyMOL light_count setting)
     let light_count = match shading_mode {
         pymol_settings::ShadingMode::Skripkin => 1,
-        pymol_settings::ShadingMode::Classic | pymol_settings::ShadingMode::Full => input.settings.get_int(pymol_settings::id::light_count),
+        pymol_settings::ShadingMode::Classic | pymol_settings::ShadingMode::Full => classic.light_count,
     };
 
     // spec_count controls how many positional lights contribute specular
     // -1 (default) means all positional lights contribute specular
-    let spec_count = input.settings.get_int(pymol_settings::id::spec_count);
+    let spec_count = classic.spec_count;
 
     // Gather light directions from settings (light, light2, ..., light9)
-    let light_setting_ids = [
-        pymol_settings::id::light,
-        pymol_settings::id::light2,
-        pymol_settings::id::light3,
-        pymol_settings::id::light4,
-        pymol_settings::id::light5,
-        pymol_settings::id::light6,
-        pymol_settings::id::light7,
-        pymol_settings::id::light8,
-        pymol_settings::id::light9,
+    let light_dirs_3: Vec<[f32; 3]> = vec![
+        classic.light, classic.light2, classic.light3,
+        classic.light4, classic.light5, classic.light6,
+        classic.light7, classic.light8, classic.light9,
     ];
 
     let mut light_dirs = [[0.0f32; 4]; 9];
-    let mut light_dirs_3: Vec<[f32; 3]> = Vec::with_capacity(9);
-    for (i, &id) in light_setting_ids.iter().enumerate() {
-        let dir = input.settings.get_float3(id);
+    for (i, dir) in light_dirs_3.iter().enumerate() {
         light_dirs[i] = [dir[0], dir[1], dir[2], 0.0];
-        light_dirs_3.push(dir);
     }
 
     // PyMOL brightness consistency adjustments:
@@ -321,8 +314,8 @@ pub fn raytrace_scene(
     };
 
     // Silhouette settings for edge detection in ray trace modes 1-3
-    let silhouette_thickness = input.settings.get_float(pymol_settings::id::silhouette_width);
-    let silhouette_depth_jump = input.settings.get_float(pymol_settings::id::silhouette_depth_jump);
+    let silhouette_thickness = input.settings.shading.common.silhouette_width;
+    let silhouette_depth_jump = input.settings.shading.common.silhouette_depth_jump;
 
     let settings = RaytraceSettings {
         light_dirs,
@@ -334,9 +327,9 @@ pub fn raytrace_scene(
         specular,
         shininess,
         bg_color: [input.clear_color[0], input.clear_color[1], input.clear_color[2], 1.0],
-        fog_start: input.settings.get_float(pymol_settings::id::fog_start),
+        fog_start: input.settings.shading.common.fog_start,
         fog_end: 1.0,
-        fog_density: input.settings.get_float(pymol_settings::id::fog),
+        fog_density: input.settings.shading.common.fog,
         fog_color: [input.clear_color[0], input.clear_color[1], input.clear_color[2], 1.0],
         ray_shadow,
         ray_max_passes,

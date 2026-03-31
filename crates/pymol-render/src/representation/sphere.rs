@@ -8,7 +8,7 @@ use crate::representation::Representation;
 use crate::vertex::SphereVertex;
 
 use pymol_mol::{CoordSet, ObjectMolecule, RepMask};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 /// Sphere representation for atoms
 ///
@@ -84,14 +84,12 @@ impl Representation for SphereRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.instances.clear();
 
-        let sphere_scale = settings
-            .get_float_if_defined(pymol_settings::id::sphere_scale)
-            .unwrap_or(self.sphere_scale);
-        let sphere_color = settings.get_color(pymol_settings::id::sphere_color);
+        let sphere_scale = settings.sphere.scale;
+        let sphere_color = settings.sphere.color;
 
         // Iterate over atoms
         for (atom_idx, coord) in coord_set.iter_with_atoms() {

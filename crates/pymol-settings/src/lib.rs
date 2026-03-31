@@ -6,7 +6,7 @@
 //!
 //! # Architecture
 //!
-//! The settings system mirrors PyMOL's original design with 798 settings organized
+//! The settings system mirrors PyMOL's original design with 813 settings organized
 //! into a hierarchical inheritance model:
 //!
 //! ```text
@@ -39,6 +39,17 @@
 //! assert_eq!(ambient, 0.2);
 //! ```
 
+// enums must come first so that `impl_setting_enum!` is available to later modules
+pub mod enums;
+
+// macros must come before groups (groups use define_settings_group!)
+pub mod macros;
+
+pub mod groups;
+pub mod legacy;
+pub mod overrides;
+pub mod registry;
+
 mod definitions;
 mod error;
 mod setting;
@@ -47,19 +58,18 @@ mod side_effects;
 mod store;
 
 // Re-export main types
-pub use definitions::{
-    create_default_settings, get_setting, get_setting_id, get_string_default, setting_names,
-    SETTINGS, SETTING_COUNT,
-};
+pub use definitions::{get_setting, get_setting_id, setting_names, SETTINGS, SETTING_COUNT};
 pub use error::SettingError;
-pub use setting::{Setting, SettingLevel, SettingType, SettingValue, ValueHints};
-pub use side_effects::{
-    get_side_effects, FnSideEffect, SettingSideEffect, SideEffectCategory, SideEffectRegistry,
-};
+pub use setting::{Setting, SettingLevel, SettingType, SettingValue};
+pub use side_effects::SideEffectCategory;
+pub use enums::{MouseSelectionMode, SettingEnum};
 pub use shading_mode::ShadingMode;
-pub use store::{
-    GlobalSettings, SerializedSetting, SettingResolver, SettingStore, UniqueId, UniqueSettings,
-};
+pub use store::{GlobalSettings, SerializedSetting, UniqueId, UniqueSettings};
+
+// New typed settings system re-exports
+pub use groups::Settings;
+pub use macros::{Merge, SettingDescriptor, SettingKind};
+pub use overrides::{ObjectOverrides, ResolvedSettings};
 
 /// Setting ID constants
 pub mod id {
@@ -69,10 +79,7 @@ pub mod id {
 /// Re-export commonly used types for convenience
 pub mod prelude {
     pub use crate::definitions::id;
-    pub use crate::{
-        GlobalSettings, Setting, SettingError, SettingLevel, SettingResolver, SettingStore,
-        SettingType, SettingValue, UniqueSettings,
-    };
+    pub use crate::{GlobalSettings, SettingError, SettingType, SettingValue, UniqueSettings};
 }
 
 #[cfg(test)]
@@ -90,18 +97,6 @@ mod tests {
         // Test reset
         settings.reset(id::ambient).unwrap();
         assert_eq!(settings.get_float(id::ambient), 0.14); // default
-    }
-
-    #[test]
-    fn test_resolver_chain() {
-        let mut global = GlobalSettings::new();
-        let mut object = GlobalSettings::new();
-
-        global.set_float(id::ambient, 0.1).unwrap();
-        object.set_float(id::ambient, 0.2).unwrap();
-
-        let resolver = SettingResolver::with_object(&global, &object);
-        assert_eq!(resolver.get_float(id::ambient), 0.2);
     }
 
     #[test]

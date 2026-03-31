@@ -2796,7 +2796,6 @@ name = "pymol-settings"
 version = "0.2.3"
 dependencies = [
  "ahash",
- "parking_lot",
  "serde",
  "thiserror 2.0.18",
 ]

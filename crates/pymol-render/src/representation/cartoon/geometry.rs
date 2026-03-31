@@ -5,8 +5,6 @@
 
 use lin_alg::f32::Vec3;
 use pymol_mol::SecondaryStructure;
-use pymol_settings::SettingResolver;
-
 use super::frame::FrameWithMetadata;
 use super::utils::{find_ss_regions, is_helix, normalize_safe, smooth};
 use crate::vertex::MeshVertex;
@@ -337,47 +335,6 @@ pub struct CartoonGeometrySettings {
 }
 
 impl CartoonGeometrySettings {
-    /// Create settings from the settings resolver
-    pub fn from_resolver(settings: &SettingResolver) -> Self {
-        // Setting IDs from pymol-settings definitions
-        const CARTOON_OVAL_WIDTH: u16 = 101;
-        const CARTOON_OVAL_LENGTH: u16 = 100;
-        const CARTOON_RECT_WIDTH: u16 = 97;
-        const CARTOON_RECT_LENGTH: u16 = 96;
-        const CARTOON_LOOP_RADIUS: u16 = 92;
-        const CARTOON_OVAL_QUALITY: u16 = 102;
-        const CARTOON_ROUND_HELICES: u16 = 111;
-        const CARTOON_FANCY_SHEETS: u16 = 119;
-        const CARTOON_FANCY_HELICES: u16 = 118;
-        const CARTOON_DUMBBELL_LENGTH: u16 = 115;
-        const CARTOON_DUMBBELL_WIDTH: u16 = 116;
-        const CARTOON_DUMBBELL_RADIUS: u16 = 117;
-
-        // Quality: PyMOL uses -1 for "auto", so we need to handle negative values
-        // Higher quality = smoother curves. Using 32 for smooth, round helices
-        let quality_raw = settings.get_int_if_defined(CARTOON_OVAL_QUALITY).unwrap_or(32);
-        let quality = if quality_raw < 0 { 32u32 } else { (quality_raw as u32).max(32) };
-
-        Self {
-            helix_width: settings.get_float_if_defined(CARTOON_OVAL_WIDTH).unwrap_or(0.25),
-            helix_height: settings.get_float_if_defined(CARTOON_OVAL_LENGTH).unwrap_or(1.35),
-            sheet_width: settings.get_float_if_defined(CARTOON_RECT_WIDTH).unwrap_or(0.4),
-            sheet_height: settings.get_float_if_defined(CARTOON_RECT_LENGTH).unwrap_or(1.4),
-            loop_radius: settings.get_float_if_defined(CARTOON_LOOP_RADIUS).unwrap_or(0.2),
-            quality,
-            round_helices: settings.get_bool_if_defined(CARTOON_ROUND_HELICES).unwrap_or(true),
-            fancy_sheets: settings.get_bool_if_defined(CARTOON_FANCY_SHEETS).unwrap_or(true),
-            fancy_helices: settings.get_bool_if_defined(CARTOON_FANCY_HELICES).unwrap_or(false),
-            dumbbell_length: settings.get_float_if_defined(CARTOON_DUMBBELL_LENGTH).unwrap_or(1.6),
-            dumbbell_width: settings.get_float_if_defined(CARTOON_DUMBBELL_WIDTH).unwrap_or(0.17),
-            dumbbell_radius: settings.get_float_if_defined(CARTOON_DUMBBELL_RADIUS).unwrap_or(0.16),
-            arrow_tip_scale: 1.5,
-            arrow_length: 0, // Will be calculated from subdivisions
-            arrow_residues: 1, // Match PyMOL's sampling (~7-8 frames)
-            uniform_tube: false, // Default: different profiles for different SS types
-        }
-    }
-
     /// Set the arrow length based on spline subdivisions
     ///
     /// The arrow head length matches PyMOL's sampling parameter.

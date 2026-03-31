@@ -6,7 +6,6 @@ use lin_alg::f32::{Mat4, Vec3};
 use pymol_algos::svd3;
 use pymol_mol::AtomIndex;
 use pymol_scene::{Object, ViewportImage}; // For extent() method on MoleculeObject
-use pymol_settings::id as setting_id;
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
@@ -1715,7 +1714,7 @@ SEE ALSO
         let antialias = args
             .get_int(2)
             .or_else(|| args.get_named_int("antialias"))
-            .unwrap_or_else(|| ctx.viewer.settings().get_int(setting_id::antialias) as i64) as u32;
+            .unwrap_or_else(|| ctx.viewer.settings().ui.antialias as i64) as u32;
 
         let filename = args
             .get_str(3)

@@ -39,7 +39,7 @@ use crate::representation::Representation;
 use crate::vertex::MeshVertex;
 
 use pymol_mol::{CoordSet, ObjectMolecule};
-use pymol_settings::SettingResolver;
+use pymol_settings::ResolvedSettings;
 
 use self::backbone::{
     apply_pymol_smoothing, extract_backbone_segments, extract_nucleic_segments,
@@ -188,18 +188,16 @@ impl Representation for CartoonRep {
         molecule: &ObjectMolecule,
         coord_set: &CoordSet,
         colors: &ColorResolver,
-        settings: &SettingResolver,
+        settings: &ResolvedSettings,
     ) {
         self.vertices.clear();
         self.indices.clear();
 
-        use pymol_settings::id;
-
-        let gap_cutoff = settings.get_int_if_defined(id::cartoon_gap_cutoff).unwrap_or(10);
-        let sampling = settings.get_int_if_defined(id::cartoon_sampling).unwrap_or(7);
-        let power = settings.get_float_if_defined(id::cartoon_power).unwrap_or(2.0);
-        let power_b = settings.get_float_if_defined(id::cartoon_power_b).unwrap_or(0.52);
-        let throw = settings.get_float_if_defined(id::cartoon_throw).unwrap_or(1.35);
+        let gap_cutoff = settings.cartoon.gap_cutoff;
+        let sampling = settings.cartoon.sampling;
+        let power = settings.cartoon.power;
+        let power_b = settings.cartoon.power_b;
+        let throw = settings.cartoon.throw;
 
         let subdivisions = if sampling < 0 { 7u32 } else { (sampling as u32).max(7) };
 
@@ -208,39 +206,23 @@ impl Representation for CartoonRep {
             power_a: power,
             power_b,
             throw_factor: throw,
-            flat_cycles: settings
-                .get_int_if_defined(id::cartoon_flat_cycles)
-                .unwrap_or(4) as u32,
-            smooth_first: settings
-                .get_int_if_defined(id::cartoon_smooth_first)
-                .unwrap_or(1) as u32,
-            smooth_last: settings
-                .get_int_if_defined(id::cartoon_smooth_last)
-                .unwrap_or(1) as u32,
-            smooth_cycles: settings
-                .get_int_if_defined(id::cartoon_smooth_cycles)
-                .unwrap_or(2) as u32,
-            refine_normals: settings
-                .get_bool_if_defined(id::cartoon_refine_normals)
-                .unwrap_or(true),
-            round_helices: settings
-                .get_bool_if_defined(id::cartoon_round_helices)
-                .unwrap_or(true),
-            refine: settings
-                .get_int_if_defined(id::cartoon_refine)
-                .unwrap_or(5) as u32,
-            smooth_loops: settings
-                .get_bool_if_defined(id::cartoon_smooth_loops)
-                .unwrap_or(false),
+            flat_cycles: settings.cartoon.flat_cycles as u32,
+            smooth_first: settings.cartoon.smooth_first as u32,
+            smooth_last: settings.cartoon.smooth_last as u32,
+            smooth_cycles: settings.cartoon.smooth_cycles as u32,
+            refine_normals: settings.cartoon.refine_normals != 0,
+            round_helices: settings.cartoon.round_helices,
+            refine: settings.cartoon.refine as u32,
+            smooth_loops: settings.cartoon.smooth_loops,
         };
 
         let geom_settings =
-            CartoonGeometrySettings::from_resolver(settings).with_subdivisions(subdivisions);
+            CartoonGeometrySettings::default().with_subdivisions(subdivisions);
 
         // Resolve object-level cartoon color defaults from settings
         // PyMOL priority: nucleic_acid_color == -1 means "use cartoon_color"
-        let cartoon_color = settings.get_color(id::cartoon_color);
-        let nucleic_acid_color = settings.get_color(id::cartoon_nucleic_acid_color);
+        let cartoon_color = settings.cartoon.color;
+        let nucleic_acid_color = settings.cartoon.nucleic_acid_color;
         let effective_nucleic_color = if nucleic_acid_color < 0 { cartoon_color } else { nucleic_acid_color };
 
         // Use the new PyMOL-compatible pipeline
@@ -325,7 +307,7 @@ mod tests {
     use super::spline::InterpolationSettings;
     use lin_alg::f32::Vec3;
     use pymol_mol::{Atom, CoordSet, Element, ObjectMolecule};
-    use pymol_settings::GlobalSettings;
+    use pymol_settings::{ResolvedSettings, Settings};
 
     #[test]
     fn test_cartoon_rep_new() {
@@ -428,8 +410,8 @@ mod tests {
 
         let mol = create_test_peptide();
         let coord_set = mol.get_coord_set(0).unwrap();
-        let settings = GlobalSettings::new();
-        let settings_resolver = pymol_settings::SettingResolver::global(&settings);
+        let settings = Settings::default();
+        let settings_resolver = ResolvedSettings::resolve(&settings, None);
 
         // Create color tables
         let named_colors = NamedColors::new();
@@ -508,8 +490,8 @@ mod tests {
         assert_eq!(protein_count, 6, "Should have 6 protein residues");
 
         let coord_set = mol.get_coord_set(0).unwrap();
-        let settings = GlobalSettings::new();
-        let settings_resolver = pymol_settings::SettingResolver::global(&settings);
+        let settings = Settings::default();
+        let settings_resolver = ResolvedSettings::resolve(&settings, None);
 
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();
@@ -593,8 +575,8 @@ mod tests {
             }
         };
 
-        let settings = GlobalSettings::new();
-        let settings_resolver = pymol_settings::SettingResolver::global(&settings);
+        let settings = Settings::default();
+        let settings_resolver = ResolvedSettings::resolve(&settings, None);
 
         let named_colors = NamedColors::new();
         let element_colors = ElementColors::new();

@@ -6,7 +6,7 @@
 use lin_alg::f32::Vec3;
 use pymol_mol::Symmetry;
 use pymol_render::{Grid3D, MeshRep, MeshVertex, RenderContext, Representation};
-use pymol_settings::GlobalSettings;
+use pymol_settings::ObjectOverrides;
 use serde::{Deserialize, Serialize};
 
 use super::{Object, ObjectState, ObjectType};
@@ -87,8 +87,8 @@ pub struct MapObject {
     carve_radius: f32,
     /// Positions to carve around (atoms from selection)
     carve_positions: Option<Vec<[f32; 3]>>,
-    /// Per-object settings
-    settings: Option<GlobalSettings>,
+    /// Per-object settings overrides
+    overrides: Option<ObjectOverrides>,
     /// Cached mesh representation
     cached_mesh: Option<MeshRep>,
     /// Whether the cached data needs rebuilding
@@ -108,7 +108,7 @@ impl MapObject {
             mesh_color: [0.0, 0.5, 1.0, 1.0], // Blue
             carve_radius: 0.0,
             carve_positions: None,
-            settings: None,
+            overrides: None,
             cached_mesh: None,
             dirty: true,
         }
@@ -126,7 +126,7 @@ impl MapObject {
             mesh_color: [0.0, 0.5, 1.0, 1.0],
             carve_radius: 0.0,
             carve_positions: None,
-            settings: None,
+            overrides: None,
             cached_mesh: None,
             dirty: true,
         }
@@ -144,7 +144,7 @@ impl MapObject {
             mesh_color: [0.0, 0.5, 1.0, 1.0],
             carve_radius: 0.0,
             carve_positions: None,
-            settings: None,
+            overrides: None,
             cached_mesh: None,
             dirty: true,
         }
@@ -263,14 +263,14 @@ impl MapObject {
         self.carve_positions.as_ref()
     }
 
-    /// Get per-object settings
-    pub fn settings(&self) -> Option<&GlobalSettings> {
-        self.settings.as_ref()
+    /// Get per-object overrides
+    pub fn overrides(&self) -> Option<&ObjectOverrides> {
+        self.overrides.as_ref()
     }
 
-    /// Set per-object settings
-    pub fn set_settings(&mut self, settings: GlobalSettings) {
-        self.settings = Some(settings);
+    /// Set per-object overrides
+    pub fn set_overrides(&mut self, overrides: ObjectOverrides) {
+        self.overrides = Some(overrides);
     }
 
     /// Check if dirty
@@ -741,12 +741,19 @@ impl Object for MapObject {
         }
     }
 
-    fn settings(&self) -> Option<&GlobalSettings> {
-        self.settings.as_ref()
+    fn overrides(&self) -> Option<&ObjectOverrides> {
+        self.overrides.as_ref()
     }
 
-    fn settings_mut(&mut self) -> Option<&mut GlobalSettings> {
-        self.settings.as_mut()
+    fn overrides_mut(&mut self) -> Option<&mut ObjectOverrides> {
+        self.overrides.as_mut()
+    }
+
+    fn get_or_create_overrides(&mut self) -> &mut ObjectOverrides {
+        if self.overrides.is_none() {
+            self.overrides = Some(ObjectOverrides::default());
+        }
+        self.overrides.as_mut().unwrap()
     }
 
     fn set_name(&mut self, name: String) {
