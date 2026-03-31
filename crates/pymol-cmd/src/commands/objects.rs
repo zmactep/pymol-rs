@@ -4,7 +4,7 @@ use pymol_mol::dss::{assign_secondary_structure, DssSettings};
 use pymol_mol::{AtomIndex, ObjectMolecule};
 use pymol_scene::{DirtyFlags, MoleculeObject};
 
-use crate::args::ParsedCommand;
+use crate::args::{ArgValue, ParsedCommand};
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
@@ -85,6 +85,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(StateCommand);
     registry.register(CountStatesCommand);
     registry.register(SplitStatesCommand);
+    registry.register(DeleteStatesCommand);
     registry.register(ExtractCommand);
     registry.register(RemoveCommand);
     registry.register(DssCommand);
@@ -1076,6 +1077,183 @@ EXAMPLES
                 " Split \"{}\" into {} objects ({}{:04} to {}{:04})",
                 object, count, prefix, first + 1, prefix, last
             ));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// delete_states command
+// ============================================================================
+
+/// Parse state spec tokens from args starting at `from` into sorted, deduplicated
+/// 0-indexed state indices.
+///
+/// Accepts individual states (`1 2 3`) and ranges (`1-3 9-13`). All values are
+/// 1-indexed on the user side and converted to 0-indexed internally.
+fn parse_state_spec(args: &ParsedCommand, from: usize) -> Result<Vec<usize>, CmdError> {
+    let mut tokens = Vec::new();
+    for (_, val) in args.args.iter().skip(from) {
+        match val {
+            ArgValue::Int(i) => tokens.push(i.to_string()),
+            ArgValue::Float(f) => tokens.push(f.to_string()),
+            ArgValue::String(s) => tokens.push(s.clone()),
+            _ => {}
+        }
+    }
+
+    if tokens.is_empty() {
+        return Err(CmdError::MissingArgument("states".to_string()));
+    }
+
+    let mut indices = Vec::new();
+    for token in &tokens {
+        if let Some(dash_pos) = token[1..].find('-') {
+            // Range like "1-3" — offset by 1 to skip possible leading digit
+            let dash_pos = dash_pos + 1;
+            let start: usize = token[..dash_pos].parse().map_err(|_| CmdError::InvalidArgument {
+                name: "states".to_string(),
+                reason: format!("invalid range start in '{}'", token),
+            })?;
+            let end: usize = token[dash_pos + 1..].parse().map_err(|_| CmdError::InvalidArgument {
+                name: "states".to_string(),
+                reason: format!("invalid range end in '{}'", token),
+            })?;
+            if start == 0 || end == 0 {
+                return Err(CmdError::InvalidArgument {
+                    name: "states".to_string(),
+                    reason: "state indices are 1-based".to_string(),
+                });
+            }
+            let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+            for s in lo..=hi {
+                indices.push(s - 1);
+            }
+        } else {
+            let state: usize = token.parse().map_err(|_| CmdError::InvalidArgument {
+                name: "states".to_string(),
+                reason: format!("expected integer or range, got '{}'", token),
+            })?;
+            if state == 0 {
+                return Err(CmdError::InvalidArgument {
+                    name: "states".to_string(),
+                    reason: "state indices are 1-based".to_string(),
+                });
+            }
+            indices.push(state - 1);
+        }
+    }
+
+    indices.sort_unstable();
+    indices.dedup();
+    Ok(indices)
+}
+
+struct DeleteStatesCommand;
+
+impl Command for DeleteStatesCommand {
+    fn name(&self) -> &str {
+        "delete_states"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["delete_state"]
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Object]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "delete_states" removes states from a multi-state object like a
+    trajectory or NMR ensemble.
+
+USAGE
+
+    delete_states name, states
+
+ARGUMENTS
+
+    name = string: object name (wildcard supported)
+    states = space-separated list of state numbers or ranges (1-indexed)
+
+EXAMPLES
+
+    delete_states 1nmr, 1-5
+    delete_states *, 1-3 10-40
+    delete_states traj, 1 2 3
+"#
+    }
+
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+        let name = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("name"))
+            .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
+
+        let indices = parse_state_spec(args, 1)?;
+
+        let obj_names: Vec<String> = ctx
+            .viewer
+            .objects()
+            .matching(name)
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        if obj_names.is_empty() {
+            return Err(CmdError::ObjectNotFound(name.to_string()));
+        }
+
+        let mut total_deleted = 0usize;
+        let mut objects_modified = 0usize;
+
+        for obj_name in &obj_names {
+            let mol_obj = match ctx.viewer.objects_mut().get_molecule_mut(obj_name) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let n_states = mol_obj.molecule().state_count();
+            if n_states == 0 {
+                continue;
+            }
+
+            // Filter to valid indices for this object
+            let valid: Vec<usize> = indices.iter().copied().filter(|&i| i < n_states).collect();
+            if valid.is_empty() {
+                continue;
+            }
+
+            let count = valid.len();
+            mol_obj.molecule_mut().remove_states(&valid);
+            total_deleted += count;
+            objects_modified += 1;
+        }
+
+        if total_deleted == 0 {
+            return Err(CmdError::execution("no matching states found to delete".to_string()));
+        }
+
+        ctx.viewer.update_movie_state_count();
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            if objects_modified == 1 {
+                ctx.print(&format!(
+                    " Deleted {} state(s) from \"{}\".",
+                    total_deleted, obj_names[0]
+                ));
+            } else {
+                ctx.print(&format!(
+                    " Deleted {} state(s) from {} objects.",
+                    total_deleted, objects_modified
+                ));
+            }
         }
 
         Ok(())

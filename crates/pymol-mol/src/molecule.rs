@@ -388,6 +388,24 @@ impl ObjectMolecule {
         self.current_state = 0;
     }
 
+    /// Remove specific states (coordinate sets) by 0-indexed indices.
+    ///
+    /// Indices must be sorted and deduplicated. Out-of-range indices are
+    /// silently ignored. After removal, `current_state` is clamped to the
+    /// valid range.
+    pub fn remove_states(&mut self, indices: &[usize]) {
+        for &idx in indices.iter().rev() {
+            if idx < self.coord_sets.len() {
+                self.coord_sets.remove(idx);
+            }
+        }
+        if self.coord_sets.is_empty() {
+            self.current_state = 0;
+        } else {
+            self.current_state = self.current_state.min(self.coord_sets.len() - 1);
+        }
+    }
+
     /// Get a coordinate set by state index
     #[inline]
     pub fn get_coord_set(&self, state: usize) -> Option<&CoordSet> {

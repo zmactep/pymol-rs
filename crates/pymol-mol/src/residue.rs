@@ -346,7 +346,6 @@ pub fn residue_to_char(resn: &str) -> char {
 //   is_nucleotide(x)           ⟹  nucleotide_to_char(x).is_some()
 
 /// Amino acids: canonical (true) + variants (false).
-/// Single source of truth — replaces separate STANDARD_AMINO_ACIDS and AMINO_ACIDS sets.
 static AMINO_ACIDS: phf::Map<&str, bool> = phf_map! {
     // 20 canonical (standard = true)
     "ALA" => true, "ARG" => true, "ASN" => true, "ASP" => true, "CYS" => true,
@@ -358,6 +357,8 @@ static AMINO_ACIDS: phf::Map<&str, bool> = phf_map! {
     "HSP" => false, "HSD" => false, "HSE" => false,
     // Cysteine variants (false)
     "CYX" => false,
+    // Protonation variants (false)
+    "ASH" => false, "GLH" => false,
     // Non-standard but common (false)
     "MSE" => false, "SEC" => false, "PYL" => false,
     // Charged variants (false)
