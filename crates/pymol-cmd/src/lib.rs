@@ -48,7 +48,7 @@ mod script;
 
 // Re-export main types
 pub use args::{ArgValue, ParsedCommand};
-pub use command::{ArgHint, Command, CommandContext, CommandRegistry, FormatHandler, MessageKind, OutputMessage, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
+pub use command::{ArgHint, Command, CommandContext, CommandRegistry, DynamicSettingEntry, DynamicSettingRegistry, FormatHandler, MessageKind, OutputMessage, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
 pub use dynamic::{DynamicCommand, DynamicCommandInvocation};
 pub use error::{CmdError, CmdResult, ParseError};
 pub use executor::{CommandExecutor, CommandOutput};

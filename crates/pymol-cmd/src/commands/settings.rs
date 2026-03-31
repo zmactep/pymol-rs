@@ -1,12 +1,12 @@
 //! Settings commands: set, get, unset, dss
 
 use crate::args::ParsedCommand;
-use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, DynamicSettingEntry, ViewerLike};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 use pymol_scene::{DirtyFlags, Object};
 use pymol_select::AtomIndex;
-use pymol_settings::{registry, SideEffectCategory, SettingType, SettingValue};
+use pymol_settings::{registry, DynamicSettingDescriptor, SideEffectCategory, SettingType, SettingValue};
 use pymol_settings::SettingDescriptor;
 
 /// Register settings commands
@@ -118,6 +118,67 @@ fn format_setting_display(desc: &SettingDescriptor, value: &SettingValue) -> Str
         return name.to_string();
     }
     format_setting_value(value)
+}
+
+/// Format a dynamic setting value for display, using hint names when available
+fn format_dynamic_display(desc: &DynamicSettingDescriptor, value: &SettingValue) -> String {
+    if let Some(name) = desc.hint_name(value) {
+        return name.to_string();
+    }
+    format_setting_value(value)
+}
+
+/// Apply side effects from a slice of categories.
+///
+/// Shared between built-in and dynamic settings.
+fn apply_side_effects_from_slice<'v, 'r>(
+    ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+    side_effects: &[SideEffectCategory],
+    setting_name: &str,
+    value: &SettingValue,
+) {
+    for category in side_effects {
+        match category {
+            SideEffectCategory::RepresentationRebuild => {
+                if setting_name == "surface_quality" {
+                    if let Some(quality) = value.as_int() {
+                        let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                        for obj_name in names {
+                            if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                                mol.set_surface_quality(quality);
+                            }
+                        }
+                    }
+                }
+                let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                for obj_name in names {
+                    if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                        mol.invalidate_representations();
+                    }
+                }
+            }
+            SideEffectCategory::ColorRebuild => {
+                let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                for obj_name in names {
+                    if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                        mol.invalidate(DirtyFlags::COLOR);
+                    }
+                }
+            }
+            SideEffectCategory::SceneInvalidate
+            | SideEffectCategory::SceneChanged
+            | SideEffectCategory::FullRebuild => {}
+            SideEffectCategory::ViewportUpdate => {
+                if setting_name.starts_with("bg_rgb") {
+                    if let Some(color_int) = value.as_int() {
+                        let [r, g, b] = pymol_color::Color::from_packed_rgb(color_int).to_array();
+                        ctx.viewer.set_background_color(r, g, b);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 // ============================================================================
@@ -299,6 +360,227 @@ impl SetCommand {
         Ok(total_affected)
     }
 
+    /// Execute a `set` for a built-in (static registry) setting.
+    fn execute_builtin<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+        desc: &SettingDescriptor,
+        name: &str,
+        value_str: Option<String>,
+        selection: Option<&str>,
+    ) -> CmdResult {
+        // Handle missing value (boolean toggle)
+        let value_str = match value_str {
+            Some(v) => v,
+            None => {
+                if desc.setting_type == SettingType::Bool {
+                    let current = (desc.get)(ctx.viewer.settings()).as_bool().unwrap_or(false);
+                    let new_value = !current;
+                    (desc.set)(ctx.viewer.settings_mut(), SettingValue::Bool(new_value))
+                        .map_err(|e| CmdError::execution(e.to_string()))?;
+                    self.apply_side_effects(ctx, desc, &SettingValue::Bool(new_value));
+                    ctx.viewer.request_redraw();
+                    if !ctx.quiet {
+                        ctx.print(&format!(" {} = {}", name, if new_value { "on" } else { "off" }));
+                    }
+                    return Ok(());
+                } else {
+                    return Err(CmdError::MissingArgument("value".to_string()));
+                }
+            }
+        };
+
+        // For Float3 settings or color settings: collect 3 comma-separated floats
+        let (value_str, selection) = if (desc.setting_type == SettingType::Float3
+            || is_color_setting(desc.name))
+            && !value_str.starts_with('[')
+            && value_str.parse::<f32>().is_ok()
+        {
+            if let (Some(y), Some(z)) = (
+                args.get_arg(2).and_then(|v| v.to_string_repr()),
+                args.get_arg(3).and_then(|v| v.to_string_repr()),
+            ) {
+                if y.parse::<f32>().is_ok() && z.parse::<f32>().is_ok() {
+                    let combined = format!("[{}, {}, {}]", value_str, y, z);
+                    let shifted_selection = args.get_str(4).or_else(|| args.get_named_str("selection"));
+                    (combined, shifted_selection)
+                } else {
+                    (value_str, selection)
+                }
+            } else {
+                (value_str, selection)
+            }
+        } else {
+            (value_str, selection)
+        };
+
+        let value = self.parse_value(ctx, desc, &value_str)?;
+
+        // Per-atom rep color
+        if let Some(field_accessor) = rep_color_field(desc.name) {
+            let is_global = selection.is_none();
+            let selection_str = selection.unwrap_or("all");
+            let color_index = value.as_int()
+                .ok_or_else(|| CmdError::execution("Expected color/int value"))?;
+
+            if is_global {
+                (desc.set)(ctx.viewer.settings_mut(), value.clone())
+                    .map_err(|e| CmdError::execution(e.to_string()))?;
+            }
+
+            let total_affected = self.apply_per_atom_color(ctx, selection_str, color_index, field_accessor)?;
+            ctx.viewer.request_redraw();
+
+            if !ctx.quiet {
+                ctx.print(&format!(" Set {} = {} for {} atoms", name, value_str, total_affected));
+            }
+            return Ok(());
+        }
+
+        // Per-atom sphere_scale
+        if desc.name == "sphere_scale" {
+            if let Some(selection_str) = selection {
+                let scale_value = value.as_float()
+                    .ok_or_else(|| CmdError::execution("Expected float value for sphere_scale"))?;
+
+                let total_affected = self.apply_per_atom_sphere_scale(ctx, selection_str, scale_value)?;
+                ctx.viewer.request_redraw();
+
+                if !ctx.quiet {
+                    ctx.print(&format!(" Set sphere_scale = {} for {} atoms", scale_value, total_affected));
+                }
+                return Ok(());
+            }
+        }
+
+        // Per-object override
+        if let Some(sel) = selection {
+            if let Some(set_override) = desc.set_override {
+                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
+                    set_override(mol.get_or_create_overrides(), value.clone())
+                        .map_err(|e| CmdError::execution(e.to_string()))?;
+                    mol.invalidate(DirtyFlags::COLOR);
+                    ctx.viewer.request_redraw();
+                    if !ctx.quiet {
+                        let display = format_setting_display(desc, &value);
+                        ctx.print(&format!(" {} = {} (object {})", name, display, sel));
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        // Global set
+        (desc.set)(ctx.viewer.settings_mut(), value.clone())
+            .map_err(|e| CmdError::execution(e.to_string()))?;
+
+        self.apply_side_effects(ctx, desc, &value);
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            let display = format_setting_display(desc, &value);
+            ctx.print(&format!(" {} = {}", name, display));
+        }
+
+        Ok(())
+    }
+
+    /// Execute a `set` for a dynamic (plugin-registered) setting.
+    fn execute_dynamic<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        entry: &DynamicSettingEntry,
+        name: &str,
+        value_str: Option<String>,
+        selection: Option<&str>,
+    ) -> CmdResult {
+        let desc = &entry.descriptor;
+
+        // Handle missing value (boolean toggle)
+        let value_str = match value_str {
+            Some(v) => v,
+            None => {
+                if desc.setting_type == SettingType::Bool {
+                    let store = entry.store.read().map_err(|e| CmdError::execution(e.to_string()))?;
+                    let current = store.get(name)
+                        .unwrap_or(&desc.default)
+                        .as_bool()
+                        .unwrap_or(false);
+                    drop(store);
+                    let new_value = SettingValue::Bool(!current);
+                    entry.store.write().map_err(|e| CmdError::execution(e.to_string()))?
+                        .set(name, new_value.clone());
+                    apply_side_effects_from_slice(ctx, &desc.side_effects, name, &new_value);
+                    ctx.viewer.request_redraw();
+                    if !ctx.quiet {
+                        ctx.print(&format!(" {} = {}", name, if !current { "on" } else { "off" }));
+                    }
+                    return Ok(());
+                } else {
+                    return Err(CmdError::MissingArgument("value".to_string()));
+                }
+            }
+        };
+
+        // Parse value — resolve hints, then type-based parsing
+        let value = if desc.has_value_hints() {
+            if let Some(val) = desc.resolve_hint(&value_str) {
+                val.clone()
+            } else if value_str.parse::<f64>().is_err() {
+                let names: Vec<_> = desc.hint_names().collect();
+                return Err(CmdError::invalid_arg(
+                    "value",
+                    format!("Unknown value '{}' for {}. Use {}", value_str, name, names.join("/")),
+                ));
+            } else {
+                parse_setting_value(&value_str, desc.setting_type)?
+            }
+        } else {
+            parse_setting_value(&value_str, desc.setting_type)?
+        };
+
+        // Validate min/max
+        if let (Some(min), Some(max)) = (desc.min, desc.max) {
+            if let Some(fval) = value.as_float() {
+                if fval < min || fval > max {
+                    return Err(CmdError::invalid_arg(
+                        "value",
+                        format!("Value {} out of range [{}, {}] for {}", fval, min, max, name),
+                    ));
+                }
+            }
+        }
+
+        // Per-object override
+        if let Some(sel) = selection {
+            if desc.object_overridable {
+                entry.store.write().map_err(|e| CmdError::execution(e.to_string()))?
+                    .set_object(sel, name, value.clone());
+                apply_side_effects_from_slice(ctx, &desc.side_effects, name, &value);
+                ctx.viewer.request_redraw();
+                if !ctx.quiet {
+                    let display = format_dynamic_display(desc, &value);
+                    ctx.print(&format!(" {} = {} (object {})", name, display, sel));
+                }
+                return Ok(());
+            }
+        }
+
+        // Global set
+        entry.store.write().map_err(|e| CmdError::execution(e.to_string()))?
+            .set(name, value.clone());
+        apply_side_effects_from_slice(ctx, &desc.side_effects, name, &value);
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            let display = format_dynamic_display(desc, &value);
+            ctx.print(&format!(" {} = {}", name, display));
+        }
+
+        Ok(())
+    }
+
     /// Apply side effects based on the descriptor's side_effects list
     fn apply_side_effects<'v, 'r>(
         &self,
@@ -306,56 +588,7 @@ impl SetCommand {
         desc: &SettingDescriptor,
         value: &SettingValue,
     ) {
-        for category in desc.side_effects {
-            match category {
-                SideEffectCategory::RepresentationRebuild => {
-                    // Special case: surface_quality needs propagation
-                    if desc.name == "surface_quality" {
-                        if let Some(quality) = value.as_int() {
-                            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-                            for obj_name in names {
-                                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                                    mol.set_surface_quality(quality);
-                                }
-                            }
-                        }
-                    }
-                    // Invalidate all molecule representations
-                    let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-                    for obj_name in names {
-                        if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                            mol.invalidate_representations();
-                        }
-                    }
-                }
-                SideEffectCategory::ColorRebuild => {
-                    // Color/transparency changed — only need color update, not geometry rebuild
-                    let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-                    for obj_name in names {
-                        if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                            mol.invalidate(DirtyFlags::COLOR);
-                        }
-                    }
-                }
-                SideEffectCategory::SceneInvalidate
-                | SideEffectCategory::SceneChanged
-                | SideEffectCategory::FullRebuild => {
-                    // These all need a redraw (handled after this function)
-                }
-                SideEffectCategory::ViewportUpdate => {
-                    // Background color: convert color int to RGB floats and apply
-                    if desc.name.starts_with("bg_rgb") {
-                        if let Some(color_int) = value.as_int() {
-                            let [r, g, b] = pymol_color::Color::from_packed_rgb(color_int).to_array();
-                            ctx.viewer.set_background_color(r, g, b);
-                        }
-                    }
-                }
-                _ => {
-                    // Other categories (ShaderReload, etc.) — not yet wired
-                }
-            }
-        }
+        apply_side_effects_from_slice(ctx, desc.side_effects, desc.name, value);
     }
 }
 
@@ -415,134 +648,16 @@ EXAMPLES
         }
 
         // === 3. Resolve setting descriptor ===
-        let desc = registry::lookup_by_name(name)
-            .ok_or_else(|| CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))?;
-
-        // === 4. Handle missing value (boolean toggle) ===
-        let value_str = match value_str {
-            Some(v) => v,
-            None => {
-                if desc.setting_type == SettingType::Bool {
-                    let current = (desc.get)(ctx.viewer.settings()).as_bool().unwrap_or(false);
-                    let new_value = !current;
-                    (desc.set)(ctx.viewer.settings_mut(), SettingValue::Bool(new_value))
-                        .map_err(|e| CmdError::execution(e.to_string()))?;
-                    self.apply_side_effects(ctx, desc, &SettingValue::Bool(new_value));
-                    ctx.viewer.request_redraw();
-                    if !ctx.quiet {
-                        ctx.print(&format!(" {} = {}", name, if new_value { "on" } else { "off" }));
-                    }
-                    return Ok(());
-                } else {
-                    return Err(CmdError::MissingArgument("value".to_string()));
-                }
-            }
-        };
-
-        // === 5. Parse value (with per-setting overrides) ===
-        // For Float3 settings or color settings: collect 3 comma-separated floats into a single value
-        // e.g. "set silhouette_color, 1.0, 1.0, 1.0" → Float3([1.0, 1.0, 1.0])
-        // When floats are collected from args 2,3 — selection shifts to arg 4
-        // Also collect for Color settings — supports "set bg_rgb, 1.0, 1.0, 1.0"
-        let (value_str, selection) = if (desc.setting_type == SettingType::Float3
-            || is_color_setting(desc.name))
-            && !value_str.starts_with('[')
-            && value_str.parse::<f32>().is_ok()
-        {
-            if let (Some(y), Some(z)) = (
-                args.get_arg(2).and_then(|v| v.to_string_repr()),
-                args.get_arg(3).and_then(|v| v.to_string_repr()),
-            ) {
-                if y.parse::<f32>().is_ok() && z.parse::<f32>().is_ok() {
-                    let combined = format!("[{}, {}, {}]", value_str, y, z);
-                    let shifted_selection = args.get_str(4).or_else(|| args.get_named_str("selection"));
-                    (combined, shifted_selection)
-                } else {
-                    (value_str, selection)
-                }
-            } else {
-                (value_str, selection)
-            }
-        } else {
-            (value_str, selection)
-        };
-
-        let value = self.parse_value(ctx, desc, &value_str)?;
-
-        // === 6. Apply (per-atom or global) ===
-        // Per-atom rep color
-        if let Some(field_accessor) = rep_color_field(desc.name) {
-            let is_global = selection.is_none();
-            let selection_str = selection.unwrap_or("all");
-            let color_index = value.as_int()
-                .ok_or_else(|| CmdError::execution("Expected color/int value"))?;
-
-            // When no selection: also store in global settings so new objects
-            // inherit this color
-            if is_global {
-                (desc.set)(ctx.viewer.settings_mut(), value.clone())
-                    .map_err(|e| CmdError::execution(e.to_string()))?;
-            }
-
-            let total_affected = self.apply_per_atom_color(ctx, selection_str, color_index, field_accessor)?;
-            ctx.viewer.request_redraw();
-
-            if !ctx.quiet {
-                ctx.print(&format!(" Set {} = {} for {} atoms", name, value_str, total_affected));
-            }
-            return Ok(());
+        if let Some(desc) = registry::lookup_by_name(name) {
+            return self.execute_builtin(ctx, args, desc, name, value_str, selection);
         }
 
-        // Per-atom sphere_scale
-        if desc.name == "sphere_scale" {
-            if let Some(selection_str) = selection {
-                let scale_value = value.as_float()
-                    .ok_or_else(|| CmdError::execution("Expected float value for sphere_scale"))?;
-
-                let total_affected = self.apply_per_atom_sphere_scale(ctx, selection_str, scale_value)?;
-                ctx.viewer.request_redraw();
-
-                if !ctx.quiet {
-                    ctx.print(&format!(" Set sphere_scale = {} for {} atoms", scale_value, total_affected));
-                }
-                return Ok(());
-            }
-            // No selection → fall through to global set
+        // === 3b. Fall through to dynamic (plugin) settings ===
+        if let Some(entry) = ctx.dynamic_setting(name).cloned() {
+            return self.execute_dynamic(ctx, &entry, name, value_str, selection);
         }
 
-        // Per-object setting when selection names an object
-        if let Some(sel) = selection {
-            if let Some(set_override) = desc.set_override {
-                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
-                    set_override(mol.get_or_create_overrides(), value.clone())
-                        .map_err(|e| CmdError::execution(e.to_string()))?;
-                    mol.invalidate(DirtyFlags::COLOR);
-                    ctx.viewer.request_redraw();
-                    if !ctx.quiet {
-                        let display = format_setting_display(desc, &value);
-                        ctx.print(&format!(" {} = {} (object {})", name, display, sel));
-                    }
-                    return Ok(());
-                }
-            }
-        }
-
-        // Global set
-        (desc.set)(ctx.viewer.settings_mut(), value.clone())
-            .map_err(|e| CmdError::execution(e.to_string()))?;
-
-        // === 7. Side effects ===
-        self.apply_side_effects(ctx, desc, &value);
-
-        ctx.viewer.request_redraw();
-
-        // === 8. Print feedback ===
-        if !ctx.quiet {
-            let display = format_setting_display(desc, &value);
-            ctx.print(&format!(" {} = {}", name, display));
-        }
-
-        Ok(())
+        Err(CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))
     }
 }
 
@@ -610,23 +725,37 @@ EXAMPLES
             return Ok(());
         }
 
-        // Look up the setting descriptor by name
-        let desc = registry::lookup_by_name(name)
-            .ok_or_else(|| CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))?;
+        // Look up in built-in registry first
+        if let Some(desc) = registry::lookup_by_name(name) {
+            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            if let Some(sel) = selection {
+                if let Some(field_reader) = rep_color_field_read(desc.name) {
+                    let selection_results = evaluate_selection(ctx.viewer, sel)?;
+                    for (obj_name, selected) in &selection_results {
+                        if let Some(mol) = ctx.viewer.objects().get_molecule(obj_name) {
+                            for idx in selected.indices() {
+                                if let Some(atom) = mol.molecule().get_atom(idx) {
+                                    let color_val = field_reader(&atom.repr.colors);
+                                    let value = SettingValue::Int(color_val);
+                                    let display = format_setting_display(desc, &value);
+                                    ctx.print(&format!(" {} = {} ({})", name, display, sel));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                }
 
-        // Per-atom rep color: report first selected atom's value
-        let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
-        if let Some(sel) = selection {
-            if let Some(field_reader) = rep_color_field_read(desc.name) {
-                let selection_results = evaluate_selection(ctx.viewer, sel)?;
-                for (obj_name, selected) in &selection_results {
-                    if let Some(mol) = ctx.viewer.objects().get_molecule(obj_name) {
-                        for idx in selected.indices() {
-                            if let Some(atom) = mol.molecule().get_atom(idx) {
-                                let color_val = field_reader(&atom.repr.colors);
-                                let value = SettingValue::Int(color_val);
-                                let display = format_setting_display(desc, &value);
-                                ctx.print(&format!(" {} = {} ({})", name, display, sel));
+                if let Some(get_override) = desc.get_override {
+                    if let Some(mol) = ctx.viewer.objects().get_molecule(sel) {
+                        if let Some(overrides) = mol.overrides() {
+                            if let Some(value) = get_override(overrides) {
+                                let display = format_setting_value(&value);
+                                if let Some(hint_name) = desc.hint_name(&value) {
+                                    ctx.print(&format!(" {} = {} ({}, object {})", name, display, hint_name, sel));
+                                } else {
+                                    ctx.print(&format!(" {} ({}) = {} (object {})", name, desc.setting_type, display, sel));
+                                }
                                 return Ok(());
                             }
                         }
@@ -634,35 +763,44 @@ EXAMPLES
                 }
             }
 
-            // Per-object override when selection names an object
-            if let Some(get_override) = desc.get_override {
-                if let Some(mol) = ctx.viewer.objects().get_molecule(sel) {
-                    if let Some(overrides) = mol.overrides() {
-                        if let Some(value) = get_override(overrides) {
-                            let display = format_setting_value(&value);
-                            if let Some(hint_name) = desc.hint_name(&value) {
-                                ctx.print(&format!(" {} = {} ({}, object {})", name, display, hint_name, sel));
-                            } else {
-                                ctx.print(&format!(" {} ({}) = {} (object {})", name, desc.setting_type, display, sel));
-                            }
-                            return Ok(());
-                        }
+            let value = (desc.get)(ctx.viewer.settings());
+            if let Some(hint_name) = desc.hint_name(&value) {
+                ctx.print(&format!(" {} = {} ({})", name, format_setting_value(&value), hint_name));
+            } else {
+                ctx.print(&format!(" {} ({}) = {}", name, desc.setting_type, format_setting_value(&value)));
+            }
+            return Ok(());
+        }
+
+        // Fall through to dynamic (plugin) settings
+        if let Some(entry) = ctx.dynamic_setting(name).cloned() {
+            let desc = &entry.descriptor;
+            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            let store = entry.store.read().map_err(|e| CmdError::execution(e.to_string()))?;
+
+            // Per-object override
+            if let Some(sel) = selection {
+                if desc.object_overridable {
+                    if let Some(value) = store.get_object(sel, name) {
+                        let display = format_dynamic_display(desc, value);
+                        ctx.print(&format!(" {} ({}) = {} (object {})", name, desc.setting_type, display, sel));
+                        return Ok(());
                     }
                 }
             }
+
+            // Global value (fall back to default)
+            let value = store.get(name).unwrap_or(&desc.default);
+            let display = format_dynamic_display(desc, value);
+            if let Some(hint_name) = desc.hint_name(value) {
+                ctx.print(&format!(" {} = {} ({})", name, format_setting_value(value), hint_name));
+            } else {
+                ctx.print(&format!(" {} ({}) = {}", name, desc.setting_type, display));
+            }
+            return Ok(());
         }
 
-        // Get the current (global) value
-        let value = (desc.get)(ctx.viewer.settings());
-
-        // Display the value with type information
-        if let Some(hint_name) = desc.hint_name(&value) {
-            ctx.print(&format!(" {} = {} ({})", name, format_setting_value(&value), hint_name));
-        } else {
-            ctx.print(&format!(" {} ({}) = {}", name, desc.setting_type, format_setting_value(&value)));
-        }
-
-        Ok(())
+        Err(CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))
     }
 }
 
@@ -710,44 +848,83 @@ EXAMPLES
             .or_else(|| args.get_named_str("name"))
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
-        // Look up the setting descriptor by name
-        let desc = registry::lookup_by_name(name)
-            .ok_or_else(|| CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))?;
+        // Look up in built-in registry first
+        if let Some(desc) = registry::lookup_by_name(name) {
+            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
 
-        let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
-
-        // Per-atom rep color: reset via selection
-        if let Some(sel) = selection {
-            if let Some(field_accessor) = rep_color_field(desc.name) {
-                let selection_results = evaluate_selection(ctx.viewer, sel)?;
-                let mut total = 0usize;
-                for (obj_name, selected) in selection_results {
-                    if selected.count() > 0 {
-                        if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol_obj.molecule_mut().get_atom_mut(AtomIndex(idx.0)) {
-                                    *field_accessor(&mut atom.repr.colors) = pymol_mol::COLOR_UNSET;
+            if let Some(sel) = selection {
+                if let Some(field_accessor) = rep_color_field(desc.name) {
+                    let selection_results = evaluate_selection(ctx.viewer, sel)?;
+                    let mut total = 0usize;
+                    for (obj_name, selected) in selection_results {
+                        if selected.count() > 0 {
+                            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                                for idx in selected.indices() {
+                                    if let Some(atom) = mol_obj.molecule_mut().get_atom_mut(AtomIndex(idx.0)) {
+                                        *field_accessor(&mut atom.repr.colors) = pymol_mol::COLOR_UNSET;
+                                    }
                                 }
+                                total += selected.count();
+                                mol_obj.invalidate(DirtyFlags::COLOR);
                             }
-                            total += selected.count();
-                            mol_obj.invalidate(DirtyFlags::COLOR);
                         }
                     }
+                    ctx.viewer.request_redraw();
+                    if !ctx.quiet {
+                        ctx.print(&format!(" {} reset for {} atoms", name, total));
+                    }
+                    return Ok(());
                 }
-                ctx.viewer.request_redraw();
-                if !ctx.quiet {
-                    ctx.print(&format!(" {} reset for {} atoms", name, total));
+
+                if let Some(unset_override) = desc.unset_override {
+                    if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
+                        if let Some(overrides) = mol.overrides_mut() {
+                            unset_override(overrides);
+                        }
+                        mol.invalidate(DirtyFlags::COLOR);
+                        ctx.viewer.request_redraw();
+                        if !ctx.quiet {
+                            ctx.print(&format!(" {} reset to global default (object {})", name, sel));
+                        }
+                        return Ok(());
+                    }
                 }
-                return Ok(());
             }
 
-            // Per-object override: unset it
-            if let Some(unset_override) = desc.unset_override {
-                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
-                    if let Some(overrides) = mol.overrides_mut() {
-                        unset_override(overrides);
+            if let Some(field_accessor) = rep_color_field(desc.name) {
+                let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+                for obj_name in names {
+                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
+                        for atom in mol_obj.molecule_mut().atoms_mut() {
+                            *field_accessor(&mut atom.repr.colors) = pymol_mol::COLOR_UNSET;
+                        }
+                        mol_obj.invalidate(DirtyFlags::COLOR);
                     }
-                    mol.invalidate(DirtyFlags::COLOR);
+                }
+            }
+
+            let default_value = (desc.get)(&pymol_settings::Settings::default());
+            (desc.set)(ctx.viewer.settings_mut(), default_value.clone())
+                .map_err(|e| CmdError::execution(e.to_string()))?;
+
+            ctx.viewer.request_redraw();
+
+            if !ctx.quiet {
+                ctx.print(&format!(" {} reset to default: {}", name, format_setting_value(&default_value)));
+            }
+
+            return Ok(());
+        }
+
+        // Fall through to dynamic (plugin) settings
+        if let Some(entry) = ctx.dynamic_setting(name).cloned() {
+            let desc = &entry.descriptor;
+            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+
+            if let Some(sel) = selection {
+                if desc.object_overridable {
+                    entry.store.write().map_err(|e| CmdError::execution(e.to_string()))?
+                        .remove_object(sel, name);
                     ctx.viewer.request_redraw();
                     if !ctx.quiet {
                         ctx.print(&format!(" {} reset to global default (object {})", name, sel));
@@ -755,33 +932,18 @@ EXAMPLES
                     return Ok(());
                 }
             }
-        }
 
-        // No selection + rep color: reset per-atom on all objects, then global
-        if let Some(field_accessor) = rep_color_field(desc.name) {
-            let names: Vec<_> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
-            for obj_name in names {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    for atom in mol_obj.molecule_mut().atoms_mut() {
-                        *field_accessor(&mut atom.repr.colors) = pymol_mol::COLOR_UNSET;
-                    }
-                    mol_obj.invalidate(DirtyFlags::COLOR);
-                }
+            // Reset global to default
+            entry.store.write().map_err(|e| CmdError::execution(e.to_string()))?
+                .remove(name);
+            ctx.viewer.request_redraw();
+            if !ctx.quiet {
+                ctx.print(&format!(" {} reset to default: {}", name, format_setting_value(&desc.default)));
             }
+            return Ok(());
         }
 
-        // Reset global setting to default
-        let default_value = (desc.get)(&pymol_settings::Settings::default());
-        (desc.set)(ctx.viewer.settings_mut(), default_value.clone())
-            .map_err(|e| CmdError::execution(e.to_string()))?;
-
-        ctx.viewer.request_redraw();
-
-        if !ctx.quiet {
-            ctx.print(&format!(" {} reset to default: {}", name, format_setting_value(&default_value)));
-        }
-
-        Ok(())
+        Err(CmdError::invalid_arg("name", format!("Unknown setting: {}", name)))
     }
 }
 

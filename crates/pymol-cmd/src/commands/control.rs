@@ -375,6 +375,7 @@ EXAMPLES
                         registry.clone(),
                         ctx.script_handlers_map().cloned().unwrap_or_default(),
                         ctx.format_handlers_map().cloned().unwrap_or_default(),
+                        ctx.dynamic_settings().cloned().unwrap_or_default(),
                     )
                 } else {
                     CommandExecutor::new()

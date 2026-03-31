@@ -263,7 +263,8 @@ impl App {
                 .map(|s| s.to_string())
                 .collect();
             let setting_names = pymol_settings::setting_names();
-            let setting_names_refs: Vec<&str> = setting_names.to_vec();
+            let mut setting_names_refs: Vec<&str> = setting_names.to_vec();
+            setting_names_refs.extend(self.executor.dynamic_settings().names().iter().map(String::as_str));
 
             let shared = pymol_framework::component::SharedContext {
                 registry: &self.state.registry,

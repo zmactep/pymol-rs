@@ -1,11 +1,20 @@
 use pymol_plugin::prelude::*;
-use pymol_plugin::pymol_plugin;
+use pymol_plugin::{define_plugin_settings, pymol_plugin};
+
+// Define typed settings for this plugin.
+// `set hello_style, 1` / `get hello_style` work out of the box.
+define_plugin_settings! {
+    HelloSettings {
+        style: i32 = 0, name = "hello_style";
+    }
+}
 
 pymol_plugin! {
     name: "hello",
     version: "0.2.0",
-    description: "Example plugin: registers a 'hello' command",
+    description: "Example plugin: registers a 'hello' command with a configurable style setting",
     commands: [HelloCommand],
+    settings: [HelloSettings],
 }
 
 struct HelloCommand;

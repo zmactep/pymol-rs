@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 
-use crate::command::{CommandContext, CommandRegistry, FormatHandler, ScriptHandler, OutputMessage, ViewerLike};
+use crate::command::{CommandContext, CommandRegistry, DynamicSettingRegistry, FormatHandler, ScriptHandler, OutputMessage, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
 use crate::parser::{parse_command, parse_commands};
@@ -42,6 +42,8 @@ pub struct CommandExecutor {
     script_handlers: AHashMap<String, ScriptHandler>,
     /// Format handlers registered by plugins (extension -> handler for `load`/`save`)
     format_handlers: AHashMap<String, Arc<FormatHandler>>,
+    /// Dynamic settings registered by plugins
+    dynamic_settings: DynamicSettingRegistry,
 }
 
 impl Default for CommandExecutor {
@@ -58,6 +60,7 @@ impl CommandExecutor {
             history: CommandHistory::new(),
             script_handlers: AHashMap::new(),
             format_handlers: AHashMap::new(),
+            dynamic_settings: DynamicSettingRegistry::new(),
         }
     }
 
@@ -69,12 +72,14 @@ impl CommandExecutor {
         registry: CommandRegistry,
         script_handlers: AHashMap<String, ScriptHandler>,
         format_handlers: AHashMap<String, Arc<FormatHandler>>,
+        dynamic_settings: DynamicSettingRegistry,
     ) -> Self {
         Self {
             registry,
             history: CommandHistory::new(),
             script_handlers,
             format_handlers,
+            dynamic_settings,
         }
     }
 
@@ -124,6 +129,16 @@ impl CommandExecutor {
     /// Get a reference to the format handlers map
     pub fn format_handlers(&self) -> &AHashMap<String, Arc<FormatHandler>> {
         &self.format_handlers
+    }
+
+    /// Get a reference to the dynamic settings registry
+    pub fn dynamic_settings(&self) -> &DynamicSettingRegistry {
+        &self.dynamic_settings
+    }
+
+    /// Get a mutable reference to the dynamic settings registry
+    pub fn dynamic_settings_mut(&mut self) -> &mut DynamicSettingRegistry {
+        &mut self.dynamic_settings
     }
 
     /// Execute a single command string
@@ -184,7 +199,8 @@ impl CommandExecutor {
             .with_registry(&self.registry)
             .with_script_handlers(&self.script_handlers)
             .with_format_handlers(&self.format_handlers)
-            .with_history(&self.history);
+            .with_history(&self.history)
+            .with_dynamic_settings(&self.dynamic_settings);
         command.execute(&mut ctx, &parsed)?;
 
         // Return collected output

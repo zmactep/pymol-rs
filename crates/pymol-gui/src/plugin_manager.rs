@@ -202,6 +202,15 @@ impl PluginManager {
             executor.register_format_handler(handler);
         }
 
+        // Register plugin settings
+        for (descriptors, store) in registrar.drain_settings() {
+            for desc in descriptors {
+                if let Err(e) = executor.dynamic_settings_mut().register(desc, store.clone()) {
+                    log::warn!("Failed to register plugin setting: {}", e);
+                }
+            }
+        }
+
         // Register components
         for (component, config) in registrar.drain_components() {
             let id = component.id().to_string();

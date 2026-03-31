@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 use pymol_mol::ObjectMolecule;
+use pymol_settings::{DynamicSettingDescriptor, SharedSettingStore};
 
 use crate::history::CommandHistory;
 
@@ -39,6 +40,102 @@ pub struct FormatHandler {
     pub reader: Option<PluginReaderFn>,
     /// Writer factory, or `None` if the format is read-only
     pub writer: Option<PluginWriterFn>,
+}
+
+// =============================================================================
+// Dynamic setting registry
+// =============================================================================
+
+/// An entry in the dynamic setting registry: descriptor + shared store.
+///
+/// Cloning is cheap — the store is behind `Arc<RwLock>`.
+#[derive(Clone)]
+pub struct DynamicSettingEntry {
+    /// Metadata (type, default, constraints, side effects).
+    pub descriptor: DynamicSettingDescriptor,
+    /// Shared store holding the actual values (owned by the plugin).
+    pub store: SharedSettingStore,
+}
+
+/// Registry for dynamically registered settings (from plugins).
+///
+/// Lives on [`CommandExecutor`](crate::executor::CommandExecutor), mirroring
+/// how `script_handlers` and `format_handlers` are stored.
+/// The `set`/`get` commands fall through to this after checking the built-in
+/// static registry.
+/// Cloning is cheap — each entry's store is behind `Arc<RwLock>`.
+#[derive(Clone)]
+pub struct DynamicSettingRegistry {
+    entries: AHashMap<String, DynamicSettingEntry>,
+    /// Insertion-ordered names (for autocomplete).
+    names: Vec<String>,
+}
+
+impl DynamicSettingRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self {
+            entries: AHashMap::new(),
+            names: Vec::new(),
+        }
+    }
+
+    /// Register a dynamic setting with its shared store.
+    ///
+    /// Returns an error if the name collides with a built-in setting or an
+    /// already-registered dynamic setting.
+    pub fn register(
+        &mut self,
+        descriptor: DynamicSettingDescriptor,
+        store: SharedSettingStore,
+    ) -> Result<(), String> {
+        let name = &descriptor.name;
+
+        // Reject collision with built-in settings
+        if pymol_settings::registry::lookup_by_name(name).is_some() {
+            return Err(format!(
+                "Cannot register dynamic setting '{}': collides with a built-in setting",
+                name
+            ));
+        }
+
+        // Reject duplicate dynamic settings
+        if self.entries.contains_key(name) {
+            return Err(format!(
+                "Dynamic setting '{}' is already registered",
+                name
+            ));
+        }
+
+        self.names.push(name.clone());
+        self.entries.insert(
+            name.clone(),
+            DynamicSettingEntry { descriptor, store },
+        );
+        Ok(())
+    }
+
+    /// Remove all entries whose name matches a predicate.
+    pub fn unregister_where(&mut self, predicate: impl Fn(&str) -> bool) {
+        self.entries.retain(|name, _| !predicate(name));
+        self.names.retain(|name| !predicate(name));
+    }
+
+    /// Look up a dynamic setting by name.
+    pub fn lookup(&self, name: &str) -> Option<&DynamicSettingEntry> {
+        self.entries.get(name)
+    }
+
+    /// All registered dynamic setting names (insertion order).
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+}
+
+impl Default for DynamicSettingRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // Re-export ViewerLike from pymol-scene
@@ -152,6 +249,8 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     format_handlers: Option<&'r AHashMap<String, Arc<FormatHandler>>>,
     /// Command history (for saving as .pml script)
     history: Option<&'r CommandHistory>,
+    /// Dynamic settings registered by plugins
+    dynamic_settings: Option<&'r DynamicSettingRegistry>,
 }
 
 impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
@@ -165,6 +264,7 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
             script_handlers: None,
             format_handlers: None,
             history: None,
+            dynamic_settings: None,
         }
     }
 
@@ -226,6 +326,22 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
     /// Get the command history
     pub fn history(&self) -> Option<&CommandHistory> {
         self.history
+    }
+
+    /// Set the dynamic settings registry reference
+    pub fn with_dynamic_settings(mut self, registry: &'r DynamicSettingRegistry) -> Self {
+        self.dynamic_settings = Some(registry);
+        self
+    }
+
+    /// Look up a dynamic setting entry by name.
+    pub fn dynamic_setting(&self, name: &str) -> Option<&DynamicSettingEntry> {
+        self.dynamic_settings.and_then(|r| r.lookup(name))
+    }
+
+    /// Get the full dynamic settings registry (if available).
+    pub fn dynamic_settings(&self) -> Option<&DynamicSettingRegistry> {
+        self.dynamic_settings
     }
 
     /// Print an info message (unless quiet mode is enabled)

@@ -50,6 +50,7 @@ pub mod legacy;
 pub mod overrides;
 pub mod registry;
 
+pub mod dynamic;
 mod definitions;
 mod error;
 mod setting;
@@ -70,6 +71,7 @@ pub use store::{GlobalSettings, SerializedSetting, UniqueId, UniqueSettings};
 pub use groups::Settings;
 pub use macros::{Merge, SettingDescriptor, SettingKind};
 pub use overrides::{ObjectOverrides, ResolvedSettings};
+pub use dynamic::{DynamicSettingDescriptor, DynamicSettingStore, SharedSettingStore};
 
 /// Setting ID constants
 pub mod id {

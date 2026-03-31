@@ -30,6 +30,13 @@ pub mod registrar;
 // plugins needing an explicit `log` dependency.
 pub use log;
 
+/// Hidden re-exports used by `define_plugin_settings!` macro internals.
+/// Not part of the public API.
+#[doc(hidden)]
+pub mod __private {
+    pub use pymol_settings::{SettingType, SettingValue, SideEffectCategory};
+}
+
 /// Convenient re-exports for plugin authors.
 ///
 /// A single `use pymol_plugin::prelude::*;` gives access to all types
@@ -51,9 +58,13 @@ pub mod prelude {
 
     // Plugin API
     pub use crate::registrar::{
-        CommandResult, DynamicCommandInvocation, FormatHandler, HotkeyCallback,
-        KeyBinding, KeyCode, MessageHandler, PluginKeyAction, PluginMetadata,
-        PluginReaderFn, PluginRegistrar, PluginWriterFn, PollContext,
+        CommandResult, DynamicCommandInvocation, DynamicSettingDescriptor,
+        DynamicSettingStore, FormatHandler, HotkeyCallback, KeyBinding, KeyCode,
+        MessageHandler, PluginKeyAction, PluginMetadata, PluginReaderFn,
+        PluginRegistrar, PluginWriterFn, PollContext, SharedSettingStore,
     };
+    // Settings side effects (needed for define_plugin_settings! macro)
+    pub use pymol_settings::SideEffectCategory;
     // pymol_plugin! macro is auto-exported via #[macro_export]
+    // define_plugin_settings! macro is auto-exported via #[macro_export]
 }

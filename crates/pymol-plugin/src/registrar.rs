@@ -14,6 +14,7 @@ use pymol_framework::component::{EguiComponent, SharedContext};
 use pymol_framework::layout::PanelConfig;
 use pymol_framework::message::{AppMessage, MessageBus};
 pub use pymol_scene::{KeyBinding, KeyCode};
+pub use pymol_settings::{DynamicSettingDescriptor, DynamicSettingStore, SharedSettingStore};
 
 /// A boxed closure that mutates the viewer on the main thread.
 ///
@@ -237,6 +238,7 @@ pub struct PluginRegistrar {
     pub(crate) script_handlers: Vec<(String, ScriptHandler)>,
     pub(crate) format_handlers: Vec<FormatHandler>,
     pub(crate) hotkeys: Vec<(KeyBinding, PluginKeyAction)>,
+    pub(crate) settings: Vec<(Vec<DynamicSettingDescriptor>, SharedSettingStore)>,
 }
 
 impl PluginRegistrar {
@@ -250,6 +252,7 @@ impl PluginRegistrar {
             script_handlers: Vec::new(),
             format_handlers: Vec::new(),
             hotkeys: Vec::new(),
+            settings: Vec::new(),
         }
     }
 
@@ -293,6 +296,23 @@ impl PluginRegistrar {
     /// the extension matches, the plugin's reader or writer is used.
     pub fn register_format_handler(&mut self, handler: FormatHandler) {
         self.format_handlers.push(handler);
+    }
+
+    /// Register plugin settings with their shared store.
+    ///
+    /// The plugin creates a [`SharedSettingStore`], populates it with defaults,
+    /// and passes the descriptors + store here. The host will dispatch
+    /// `set`/`get`/`unset` commands to the store when a matching setting
+    /// name is used.
+    ///
+    /// Use the [`define_plugin_settings!`](crate::define_plugin_settings) macro
+    /// to generate descriptors and store initialization from a struct definition.
+    pub fn register_settings(
+        &mut self,
+        descriptors: Vec<DynamicSettingDescriptor>,
+        store: SharedSettingStore,
+    ) {
+        self.settings.push((descriptors, store));
     }
 
     /// Register a keyboard shortcut.
@@ -341,6 +361,11 @@ impl PluginRegistrar {
     /// Drain all registered hotkey bindings.
     pub fn drain_hotkeys(&mut self) -> Vec<(KeyBinding, PluginKeyAction)> {
         std::mem::take(&mut self.hotkeys)
+    }
+
+    /// Drain all registered plugin settings (descriptors + shared stores).
+    pub fn drain_settings(&mut self) -> Vec<(Vec<DynamicSettingDescriptor>, SharedSettingStore)> {
+        std::mem::take(&mut self.settings)
     }
 }
 
