@@ -3,14 +3,15 @@
        plugins plugins-install \
        icon app app-full \
        sign sign-full notarize dmg dmg-full \
-       web-build web-dev web-clean
+       web-build web-dev web-clean \
+       version
 
 # ── Variables ─────────────────────────────────────────────────────
 
 APP_NAME       := PyMOL-RS
 APP_DIR        := target/app/$(APP_NAME).app
 BUNDLE_ID      := me.yakovlev.pymol-rs
-VERSION        := 0.2.3
+VERSION        := 0.2.5
 ICON_SRC       := images/pymol-rs.png
 ICONSET        := target/app/AppIcon.iconset
 ICNS           := target/app/AppIcon.icns
@@ -209,6 +210,12 @@ web-dev:
 web-clean:
 	rm -rf web/pkg web/dist web/node_modules
 
+# ── Version ──────────────────────────────────────────────────────
+
+version:
+	@if [ -z "$(V)" ]; then echo "Usage: make version V=X.Y.Z"; exit 1; fi
+	bash scripts/version.sh $(V)
+
 # ── Help ──────────────────────────────────────────────────────────
 
 help:
@@ -228,6 +235,9 @@ help:
 	@echo "  app-full         Full .app (+ plugins + Python + venv)"
 	@echo "  sign / sign-full Code-sign the .app"
 	@echo "  dmg / dmg-full   Distributable DMG (signed + notarized)"
+	@echo ""
+	@echo "Version:"
+	@echo "  version V=X.Y.Z Update version across all crates and packages"
 	@echo ""
 	@echo "Web:"
 	@echo "  web-build        Build WASM + TypeScript bundle"
