@@ -68,6 +68,9 @@ pub struct App {
     pub(crate) frame: FrameState,
     /// Whether the scene changed and a redraw should be scheduled.
     pub(crate) scene_dirty: bool,
+    /// Monotonically increasing counter, bumped on every `mark_dirty()` call.
+    /// Plugins can compare against a cached value to detect viewport changes.
+    pub(crate) scene_generation: u64,
     /// Whether the viewport image data changed (even if size stayed the same).
     pub(crate) image_dirty: bool,
 
@@ -158,6 +161,7 @@ impl App {
             viewport: ViewportModel::new(),
             frame: FrameState::new(),
             scene_dirty: true,
+            scene_generation: 0,
             image_dirty: false,
             key_bindings: KeyBindings::new(),
             drag_hover_path: None,
@@ -213,6 +217,7 @@ impl App {
     /// state that affects rendering has changed (camera, objects, selections, etc.).
     pub(crate) fn mark_dirty(&mut self) {
         self.scene_dirty = true;
+        self.scene_generation = self.scene_generation.wrapping_add(1);
         self.view.request_redraw();
     }
 
@@ -285,6 +290,7 @@ impl App {
                 command_registry: self.executor.registry(),
                 setting_names: &setting_names_refs,
                 dynamic_settings: Some(self.executor.dynamic_settings()),
+                scene_generation: self.scene_generation,
             };
 
             self.plugin_manager.poll_all(&shared, &mut self.bus);

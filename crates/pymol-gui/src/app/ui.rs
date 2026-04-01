@@ -82,6 +82,7 @@ impl App {
             command_registry: cmd_registry,
             setting_names: &setting_names_refs,
             dynamic_settings: Some(self.executor.dynamic_settings()),
+            scene_generation: self.scene_generation,
         };
 
         // Run egui with the layout engine

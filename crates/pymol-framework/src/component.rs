@@ -34,6 +34,12 @@ pub struct SharedContext<'a> {
     pub gpu_device: Option<&'a wgpu::Device>,
     pub gpu_queue: Option<&'a wgpu::Queue>,
 
+    // Change detection
+    /// Monotonically increasing counter bumped on every scene change
+    /// (camera, objects, commands, etc.). Compare against a cached value
+    /// to detect viewport changes.
+    pub scene_generation: u64,
+
     // Viewport image overlay (e.g. from `ray` command or plugins)
     pub viewport_image: Option<&'a ViewportImage>,
 
