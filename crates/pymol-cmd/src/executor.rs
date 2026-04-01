@@ -6,22 +6,24 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 
-use crate::command::{CommandContext, CommandRegistry, DynamicSettingRegistry, FormatHandler, ScriptHandler, OutputMessage, ViewerLike};
+use crate::command::{CommandAction, CommandContext, CommandRegistry, DynamicSettingRegistry, FormatHandler, ScriptHandler, OutputMessage, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 use crate::history::CommandHistory;
 use crate::parser::{parse_command, parse_commands};
 
-/// Result of command execution including any output messages
+/// Result of command execution including any output messages and actions
 #[derive(Debug, Default)]
 pub struct CommandOutput {
     /// Output messages from the command (typed with info/warning/error)
     pub messages: Vec<OutputMessage>,
+    /// Side-effect actions requested by the command
+    pub actions: Vec<CommandAction>,
 }
 
 impl CommandOutput {
     /// Create a new empty output
     pub fn new() -> Self {
-        Self { messages: Vec::new() }
+        Self { messages: Vec::new(), actions: Vec::new() }
     }
 
     /// Check if there are any output messages
@@ -203,9 +205,10 @@ impl CommandExecutor {
             .with_dynamic_settings(&self.dynamic_settings);
         command.execute(&mut ctx, &parsed)?;
 
-        // Return collected output
+        // Return collected output and actions
         Ok(CommandOutput {
             messages: ctx.take_output(),
+            actions: ctx.take_actions(),
         })
     }
 

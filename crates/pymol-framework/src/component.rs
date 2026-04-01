@@ -7,9 +7,10 @@
 //! by backend-specific extension traits (e.g. [`EguiComponent`] behind the
 //! `egui` feature flag).
 
-use pymol_cmd::CommandRegistry;
+use pymol_cmd::{CommandRegistry, DynamicSettingRegistry};
 use pymol_color::NamedColors;
 use pymol_scene::{Camera, Movie, ObjectRegistry, SelectionManager, ViewportImage};
+use pymol_settings::Settings;
 
 use crate::message::AppMessage;
 #[cfg(feature = "egui")]
@@ -26,6 +27,12 @@ pub struct SharedContext<'a> {
     pub selections: &'a SelectionManager,
     pub named_colors: &'a NamedColors,
     pub movie: &'a Movie,
+    pub settings: &'a Settings,
+    pub clear_color: [f32; 3],
+
+    // GPU (optional — available when a wgpu surface is initialised)
+    pub gpu_device: Option<&'a wgpu::Device>,
+    pub gpu_queue: Option<&'a wgpu::Queue>,
 
     // Viewport image overlay (e.g. from `ray` command or plugins)
     pub viewport_image: Option<&'a ViewportImage>,
@@ -34,6 +41,7 @@ pub struct SharedContext<'a> {
     pub command_names: &'a [String],
     pub command_registry: &'a CommandRegistry,
     pub setting_names: &'a [&'a str],
+    pub dynamic_settings: Option<&'a DynamicSettingRegistry>,
 }
 
 /// A self-contained UI component (panel).

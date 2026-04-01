@@ -24,6 +24,7 @@ pub fn pymol_classic() -> Layout {
                 expanded: true,
                 resizable: true,
                 floatable: true,
+                visible: true,
                 docked_slot: None,
             },
             PanelSlot {
@@ -32,6 +33,7 @@ pub fn pymol_classic() -> Layout {
                 expanded: false,
                 resizable: false,
                 floatable: true,
+                visible: true,
                 docked_slot: None,
             },
             PanelSlot {
@@ -40,6 +42,7 @@ pub fn pymol_classic() -> Layout {
                 expanded: false,
                 resizable: true,
                 floatable: true,
+                visible: true,
                 docked_slot: None,
             },
             PanelSlot {
@@ -48,6 +51,7 @@ pub fn pymol_classic() -> Layout {
                 expanded: true,
                 resizable: true,
                 floatable: true,
+                visible: true,
                 docked_slot: None,
             },
         ],
@@ -133,9 +137,11 @@ pub fn render_layout(
     egui_ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, TransparentPanels(transparent_panels)));
 
     // Collect panel descriptors so closures don't borrow layout.
+    // Skip invisible panels entirely — they are not rendered at all.
     let descriptors: Vec<_> = layout
         .panels
         .iter()
+        .filter(|p| p.visible)
         .map(|p| PanelDescriptor {
             id: p.component_id.clone(),
             slot: p.slot.clone(),
@@ -246,6 +252,7 @@ fn show_panel_shell(
                 panel
                     .resizable(resizable)
                     .default_width(size)
+                    .min_width(size)
                     .show(egui_ctx, render_inner);
             } else {
                 panel
@@ -373,7 +380,7 @@ fn render_tabbed_group(
                 bus,
             );
         } else {
-            show_collapsed_tab_bar(ui, &tabs, store, bus);
+            show_collapsed_tab_bar(ui, orientation, &tabs, store, bus);
         }
     };
 
@@ -480,25 +487,73 @@ fn show_tab_bar(
     });
 }
 
-/// Render a collapsed tab bar showing all tab titles in a horizontal strip.
+/// Render a collapsed tab bar showing all tab titles.
+///
+/// Horizontal panels (Top/Bottom) show titles side-by-side.
+/// Vertical panels (Left/Right) stack rotated text tabs vertically.
 fn show_collapsed_tab_bar(
     ui: &mut egui::Ui,
+    orientation: Orientation,
     tabs: &[(String, bool)],
     store: &mut ComponentStore,
     bus: &mut MessageBus,
 ) {
-    ui.horizontal_centered(|ui| {
-        for (id, _) in tabs {
-            let title = store.get_title(id).unwrap_or_else(|| id.clone());
-            if ui
-                .add(egui::Button::new(&title).frame(false))
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                bus.send(AppMessage::ActivateTab(id.clone()));
+    match orientation {
+        Orientation::Horizontal { .. } => {
+            ui.horizontal_centered(|ui| {
+                for (id, _) in tabs {
+                    let title = store.get_title(id).unwrap_or_else(|| id.clone());
+                    if ui
+                        .add(egui::Button::new(&title).frame(false))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        bus.send(AppMessage::ActivateTab(id.clone()));
+                    }
+                }
+            });
+        }
+        Orientation::Vertical { .. } => {
+            // Measure how much height each tab gets (divide available space evenly).
+            let total_height = ui.available_height();
+            let tab_height = total_height / tabs.len().max(1) as f32;
+
+            for (id, _) in tabs {
+                let title = store.get_title(id).unwrap_or_else(|| id.clone());
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), tab_height),
+                    egui::Sense::click(),
+                );
+
+                if response.clicked() {
+                    bus.send(AppMessage::ActivateTab(id.clone()));
+                }
+
+                if response.hovered() {
+                    ui.painter().rect_filled(
+                        rect,
+                        0.0,
+                        ui.visuals().widgets.hovered.bg_fill,
+                    );
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+
+                // Draw rotated title text (bottom-to-top)
+                let painter = ui.painter();
+                let font_id = egui::TextStyle::Button.resolve(ui.style());
+                let color = ui.visuals().text_color();
+                let galley = painter.layout_no_wrap(title, font_id, color);
+                let center = rect.center();
+
+                let mut text_shape = egui::epaint::TextShape::new(center, galley, color);
+                text_shape.angle = -std::f32::consts::FRAC_PI_2;
+                let half = text_shape.galley.rect.size() * 0.5;
+                text_shape.pos -= egui::vec2(half.y, -half.x);
+
+                painter.add(text_shape);
             }
         }
-    });
+    }
 }
 
 // ---------------------------------------------------------------------------

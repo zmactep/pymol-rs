@@ -93,6 +93,7 @@ impl EguiComponent for ReplComponent {
             color_names: &color_names,
             object_names: &object_names,
             selection_names: &selection_names,
+            dynamic_settings: ctx.dynamic_settings,
         };
 
         CommandLinePanel::show(

@@ -56,12 +56,11 @@ EXAMPLES
 "#
     }
 
-    fn execute<'v, 'r>(&self, _ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
+    fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let _code = args.get_int(0).or_else(|| args.get_named_int("code")).unwrap_or(0);
 
-        // Signal that we want to quit
-        // The actual quit will be handled by the event loop
-        Err(CmdError::Aborted)
+        ctx.quit();
+        Ok(())
     }
 }
 

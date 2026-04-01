@@ -48,7 +48,7 @@ mod script;
 
 // Re-export main types
 pub use args::{ArgValue, ParsedCommand};
-pub use command::{ArgHint, Command, CommandContext, CommandRegistry, DynamicSettingEntry, DynamicSettingRegistry, FormatHandler, MessageKind, OutputMessage, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
+pub use command::{ArgHint, Command, CommandAction, CommandContext, CommandRegistry, DynamicSettingEntry, DynamicSettingRegistry, FormatHandler, MessageKind, OutputMessage, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
 pub use dynamic::{DynamicCommand, DynamicCommandInvocation};
 pub use error::{CmdError, CmdResult, ParseError};
 pub use executor::{CommandExecutor, CommandOutput};
@@ -59,7 +59,7 @@ pub use script::ScriptEngine;
 /// Prelude for convenient imports
 pub mod prelude {
     pub use crate::args::{ArgValue, ParsedCommand};
-    pub use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, FormatHandler, MessageKind, OutputMessage, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
+    pub use crate::command::{ArgHint, Command, CommandAction, CommandContext, CommandRegistry, FormatHandler, MessageKind, OutputMessage, PluginReaderFn, PluginWriterFn, ScriptHandler, ViewerLike};
     pub use crate::error::{CmdError, CmdResult};
     pub use crate::executor::CommandExecutor;
     pub use crate::parser::{parse_command, parse_commands};

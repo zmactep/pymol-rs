@@ -266,16 +266,25 @@ impl App {
             let mut setting_names_refs: Vec<&str> = setting_names.to_vec();
             setting_names_refs.extend(self.executor.dynamic_settings().names().iter().map(String::as_str));
 
+            let (gpu_device, gpu_queue) = self.view.gpu.render_context.as_ref()
+                .map(|c| (c.device(), c.queue()))
+                .unzip();
+
             let shared = pymol_framework::component::SharedContext {
                 registry: &self.state.registry,
                 camera: &self.state.camera,
                 selections: &self.state.selections,
                 named_colors: &self.state.named_colors,
                 movie: &self.state.movie,
+                settings: &self.state.settings,
+                clear_color: self.state.clear_color,
+                gpu_device,
+                gpu_queue,
                 viewport_image: self.state.viewport_image.as_ref(),
                 command_names: &all_names,
                 command_registry: self.executor.registry(),
                 setting_names: &setting_names_refs,
+                dynamic_settings: Some(self.executor.dynamic_settings()),
             };
 
             self.plugin_manager.poll_all(&shared, &mut self.bus);

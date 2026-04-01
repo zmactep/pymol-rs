@@ -63,16 +63,25 @@ impl App {
             None
         };
 
+        let (gpu_device, gpu_queue) = self.view.gpu.render_context.as_ref()
+            .map(|c| (c.device(), c.queue()))
+            .unzip();
+
         let shared = SharedContext {
             registry: &self.state.registry,
             camera: &self.state.camera,
             selections: &self.state.selections,
             named_colors: &self.state.named_colors,
             movie: &self.state.movie,
+            settings: &self.state.settings,
+            clear_color: self.state.clear_color,
+            gpu_device,
+            gpu_queue,
             viewport_image: self.state.viewport_image.as_ref(),
             command_names: &all_command_names,
             command_registry: cmd_registry,
             setting_names: &setting_names_refs,
+            dynamic_settings: Some(self.executor.dynamic_settings()),
         };
 
         // Run egui with the layout engine
@@ -289,6 +298,8 @@ impl App {
 
             // Layout
             AppMessage::TogglePanel(_)
+            | AppMessage::ShowPanel(_)
+            | AppMessage::HidePanel(_)
             | AppMessage::FloatPanel(_)
             | AppMessage::DockPanel(_)
             | AppMessage::ActivateTab(_) => self.dispatch_layout(msg),
@@ -335,6 +346,8 @@ impl App {
     fn dispatch_layout(&mut self, msg: &AppMessage) {
         match msg {
             AppMessage::TogglePanel(id) => self.layout.toggle_expanded(id),
+            AppMessage::ShowPanel(id) => self.layout.show_panel(id),
+            AppMessage::HidePanel(id) => self.layout.hide_panel(id),
             AppMessage::FloatPanel(id) => self.layout.float_panel(id),
             AppMessage::DockPanel(id) => self.layout.dock_panel(id),
             AppMessage::ActivateTab(id) => self.layout.activate_tab(id),

@@ -321,12 +321,17 @@ impl Camera {
 
     /// Get the projection matrix
     pub fn projection_matrix(&self) -> Mat4 {
+        self.projection_matrix_for_aspect(self.aspect)
+    }
+
+    /// Get the projection matrix for a given aspect ratio (without mutating the camera).
+    pub fn projection_matrix_for_aspect(&self, aspect: f32) -> Mat4 {
         let view = if let Some(anim) = &self.animation {
             anim.current_view()
         } else {
             self.view.clone()
         };
-        view.projection_matrix(self.aspect, self.projection)
+        view.projection_matrix(aspect, self.projection)
     }
 
     /// Rotate the camera by axis-angle

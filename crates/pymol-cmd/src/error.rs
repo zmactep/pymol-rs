@@ -58,10 +58,6 @@ pub enum CmdError {
     #[error("script error at line {line}: {message}")]
     Script { line: usize, message: String },
 
-    /// Command execution was aborted
-    #[error("command aborted")]
-    Aborted,
-
     /// Generic execution error
     #[error("{0}")]
     Execution(String),

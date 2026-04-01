@@ -3,7 +3,7 @@
 //! Parsing, dispatching, and executing PyMOL commands.
 //! Also handles async task result processing.
 
-use pymol_cmd::{CmdError, MessageKind};
+use pymol_cmd::{CommandAction, MessageKind};
 use pymol_scene::SessionAdapter;
 
 use pymol_framework::message::AppMessage;
@@ -90,12 +90,15 @@ impl App {
                         }
                     }
                 }
+                // Dispatch side-effect actions requested by the command
+                for action in output.actions {
+                    match action {
+                        CommandAction::ShowPanel(name) => self.bus.send(AppMessage::ShowPanel(name)),
+                        CommandAction::HidePanel(name) => self.bus.send(AppMessage::HidePanel(name)),
+                        CommandAction::Quit => self.frame.quit_requested = true,
+                    }
+                }
                 Ok(())
-            }
-            Err(CmdError::Aborted) => {
-                // Quit/exit command was issued - signal application to close
-                self.frame.quit_requested = true;
-                Ok(())  // Not an error to the caller
             }
             Err(e) => {
                 // Print the error to the GUI output

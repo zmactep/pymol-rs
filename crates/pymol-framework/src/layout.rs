@@ -64,6 +64,9 @@ pub struct PanelSlot {
     pub resizable: bool,
     /// Whether the panel can be detached into a floating window.
     pub floatable: bool,
+    /// Whether the panel is visible at all (when false, not rendered even as a collapsed tab).
+    #[serde(default = "default_visible")]
+    pub visible: bool,
     /// Original docked slot, saved when the panel is floated so it can dock back.
     #[serde(skip)]
     pub docked_slot: Option<Slot>,
@@ -78,6 +81,7 @@ pub struct PanelConfig {
     pub expanded: bool,
     pub resizable: bool,
     pub floatable: bool,
+    pub visible: bool,
 }
 
 impl PanelConfig {
@@ -88,6 +92,7 @@ impl PanelConfig {
             expanded: true,
             resizable: true,
             floatable: true,
+            visible: true,
         }
     }
 
@@ -98,6 +103,7 @@ impl PanelConfig {
             expanded: true,
             resizable: true,
             floatable: true,
+            visible: true,
         }
     }
 
@@ -108,6 +114,7 @@ impl PanelConfig {
             expanded: true,
             resizable: true,
             floatable: true,
+            visible: true,
         }
     }
 
@@ -118,6 +125,7 @@ impl PanelConfig {
             expanded: true,
             resizable: true,
             floatable: true,
+            visible: true,
         }
     }
 
@@ -131,6 +139,7 @@ impl PanelConfig {
             expanded: true,
             resizable: true,
             floatable: false,
+            visible: true,
         }
     }
 
@@ -142,6 +151,7 @@ impl PanelConfig {
             expanded: self.expanded,
             resizable: self.resizable,
             floatable: self.floatable,
+            visible: self.visible,
             docked_slot: None,
         }
     }
@@ -160,6 +170,10 @@ impl PanelConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layout {
     pub panels: Vec<PanelSlot>,
+}
+
+fn default_visible() -> bool {
+    true
 }
 
 impl Layout {
@@ -249,6 +263,32 @@ impl Layout {
             if let Some(original) = panel.docked_slot.take() {
                 panel.slot = original;
             }
+        }
+    }
+
+    /// Show a panel (make visible and expanded).
+    pub fn show_panel(&mut self, id: &str) {
+        if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
+            panel.visible = true;
+            panel.expanded = true;
+            // Collapse siblings on the same side
+            let side = panel.slot.side();
+            let id_owned = id.to_string();
+            if let Some(side) = side {
+                for panel in &mut self.panels {
+                    if panel.slot.side() == Some(side) && panel.component_id != id_owned {
+                        panel.expanded = false;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Hide a panel (make invisible — not even rendered as a collapsed tab).
+    pub fn hide_panel(&mut self, id: &str) {
+        if let Some(panel) = self.panels.iter_mut().find(|p| p.component_id == id) {
+            panel.visible = false;
+            panel.expanded = false;
         }
     }
 

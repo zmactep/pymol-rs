@@ -48,6 +48,10 @@ pub enum AppMessage {
     // =====================================================================
     /// Toggle a panel's expanded/collapsed state by component ID.
     TogglePanel(String),
+    /// Show a panel (make visible and expanded).
+    ShowPanel(String),
+    /// Hide a panel completely (not even rendered as a collapsed tab).
+    HidePanel(String),
     /// Detach a docked panel into a floating window.
     FloatPanel(String),
     /// Dock a floating panel back to its original slot.

@@ -17,7 +17,7 @@
 
 use std::path::Path;
 
-use pymol_cmd::{ArgHint, CommandRegistry};
+use pymol_cmd::{ArgHint, CommandRegistry, DynamicSettingRegistry};
 
 /// Result of completion generation
 #[derive(Debug)]
@@ -59,6 +59,7 @@ pub struct CompletionContext<'a> {
     pub color_names: &'a [String],
     pub object_names: &'a [String],
     pub selection_names: &'a [String],
+    pub dynamic_settings: Option<&'a DynamicSettingRegistry>,
 }
 
 /// Generate completions for the current command input
@@ -117,6 +118,7 @@ pub fn generate_completions(
                         }
                         ArgHint::LabelProperty => complete_from_static(prefix, prefix_start, LABEL_PROPERTY_NAMES),
                         ArgHint::Command => complete_from_list(prefix, prefix_start, ctx.command_names),
+                        ArgHint::Keywords(words) => complete_from_static(prefix, prefix_start, words),
                         ArgHint::None => CompletionResult::empty(cursor_pos),
                     }
                 } else {
@@ -267,6 +269,23 @@ fn complete_setting_value(
                 }
                 _ => return CompletionResult::empty(prefix_start),
             };
+        }
+    }
+
+    // Fall through to dynamic (plugin) settings
+    if let Some(dyn_reg) = ctx.dynamic_settings {
+        if let Some(entry) = dyn_reg.lookup(setting_name) {
+            let desc = &entry.descriptor;
+            if desc.has_value_hints() {
+                let hints: Vec<&str> = desc.hint_names().collect();
+                return complete_from_static(prefix, prefix_start, &hints);
+            }
+            match desc.setting_type {
+                pymol_settings::SettingType::Bool => {
+                    return complete_from_static(prefix, prefix_start, &["on", "off"]);
+                }
+                _ => return CompletionResult::empty(prefix_start),
+            }
         }
     }
 

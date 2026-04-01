@@ -173,6 +173,8 @@ pub enum ArgHint {
     LabelProperty,
     /// Command name (for help, etc.)
     Command,
+    /// Fixed list of keyword choices (e.g., &["show", "hide"])
+    Keywords(&'static [&'static str]),
 }
 
 // ============================================================================
@@ -226,6 +228,19 @@ impl OutputMessage {
     }
 }
 
+/// Side-effect actions that a command can request.
+///
+/// These are dispatched by the application layer after command execution.
+#[derive(Debug, Clone)]
+pub enum CommandAction {
+    /// Request that a named panel be shown.
+    ShowPanel(String),
+    /// Request that a named panel be hidden.
+    HidePanel(String),
+    /// Request application quit.
+    Quit,
+}
+
 /// Command execution context
 ///
 /// Provides access to the viewer state and execution options.
@@ -241,6 +256,8 @@ pub struct CommandContext<'v, 'r, V: ViewerLike + ?Sized> {
     pub quiet: bool,
     /// Collected output messages (for GUI display)
     output_buffer: Vec<OutputMessage>,
+    /// Collected side-effect actions
+    action_buffer: Vec<CommandAction>,
     /// Optional reference to command registry (for help lookups)
     registry: Option<&'r CommandRegistry>,
     /// Script handlers registered by plugins (extension -> handler)
@@ -260,6 +277,7 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
             viewer,
             quiet: false,
             output_buffer: Vec::new(),
+            action_buffer: Vec::new(),
             registry: None,
             script_handlers: None,
             format_handlers: None,
@@ -379,6 +397,26 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
     /// Get a reference to the collected output messages
     pub fn output(&self) -> &[OutputMessage] {
         &self.output_buffer
+    }
+
+    /// Request that a named panel be shown
+    pub fn show_panel(&mut self, name: impl Into<String>) {
+        self.action_buffer.push(CommandAction::ShowPanel(name.into()));
+    }
+
+    /// Request that a named panel be hidden
+    pub fn hide_panel(&mut self, name: impl Into<String>) {
+        self.action_buffer.push(CommandAction::HidePanel(name.into()));
+    }
+
+    /// Request application quit
+    pub fn quit(&mut self) {
+        self.action_buffer.push(CommandAction::Quit);
+    }
+
+    /// Take the collected actions, clearing the buffer
+    pub fn take_actions(&mut self) -> Vec<CommandAction> {
+        std::mem::take(&mut self.action_buffer)
     }
 }
 
