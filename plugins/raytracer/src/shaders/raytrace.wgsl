@@ -50,7 +50,7 @@ struct Uniforms {
     ray_transparency_shadows: u32,
     // Ray trace mode settings
     ray_trace_mode: u32,        // 0=normal, 1=normal+outline, 2=outline only, 3=quantized+outline
-    ray_opaque_background: i32, // -1=auto, 0=transparent, 1=opaque
+    ray_opaque_background: u32, // 0=transparent, 1=opaque
     transparency_mode: u32,     // 0=fast/opaque, 1=multi-layer, 2=uni-layer
     _pad2: u32,
     ray_trace_color: vec4<f32>, // Color for outlines
@@ -636,9 +636,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var first_hit = true;
     
     // Determine background behavior
-    // ray_opaque_background: -1=auto (opaque), 0=transparent, 1=opaque  
-    // Only transparent when explicitly set to 0
-    let use_transparent_bg = uniforms.ray_opaque_background == 0;
+    let use_transparent_bg = uniforms.ray_opaque_background == 0u;
     
     // Transparency mode handling:
     // Mode 0: fast/ugly - treat everything as opaque, single pass
@@ -667,8 +665,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         
         // Store depth and normal from first hit only
         if first_hit {
-            let far_clip = 10000.0;
-            depth = clamp(hit.t / far_clip, 0.0, 0.999);
+            // Compute proper NDC depth using the projection matrix.
+            // wgpu uses [0, 1] depth range: near → 0, far → 1.
+            // This gives edge detection sufficient resolution to find internal edges.
+            let hit_point_ws = current_ray.origin + hit.t * current_ray.direction;
+            let hit_view = uniforms.view_matrix * vec4<f32>(hit_point_ws, 1.0);
+            let hit_clip = uniforms.proj_matrix * hit_view;
+            let ndc_z = hit_clip.z / hit_clip.w; // [0, 1] in wgpu
+            depth = clamp(ndc_z, 0.001, 0.998);
             normal = hit.normal * 0.5 + 0.5;
             first_hit = false;
         }

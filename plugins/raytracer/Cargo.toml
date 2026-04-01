@@ -48,3 +48,9 @@ log = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
+
+# GUI
+egui = { workspace = true }
+
+# File dialogs
+rfd = "0.15"
