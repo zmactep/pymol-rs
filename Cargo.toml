@@ -40,7 +40,7 @@ default-members = [
 exclude = ["python", "web"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.2.5"
 edition = "2021"
 authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
@@ -50,19 +50,19 @@ documentation = "https://github.com/zmactep/pymol-rs"
 
 [workspace.dependencies]
 # Internal crates
-pymol-settings = { version = "0.2.3", path = "crates/pymol-settings" }
-pymol-color = { version = "0.2.3", path = "crates/pymol-color" }
-pymol-mol = { version = "0.2.3", path = "crates/pymol-mol" }
-pymol-select = { version = "0.2.3", path = "crates/pymol-select" }
-pymol-io = { version = "0.2.3", path = "crates/pymol-io" }
-pymol-render = { version = "0.2.3", path = "crates/pymol-render", default-features = false }
-pymol-scene = { version = "0.2.3", path = "crates/pymol-scene", default-features = false }
-pymol-cmd = { version = "0.2.3", path = "crates/pymol-cmd", default-features = false }
-pymol-gui = { version = "0.2.3", path = "crates/pymol-gui" }
-pymol-algos = { version = "0.2.3", path = "crates/pymol-algos" }
-pymol-session = { version = "0.2.3", path = "crates/pymol-session" }
-pymol-framework = { version = "0.2.3", path = "crates/pymol-framework" }
-pymol-plugin = { version = "0.2.3", path = "crates/pymol-plugin" }
+pymol-settings = { version = "0.2.5", path = "crates/pymol-settings" }
+pymol-color = { version = "0.2.5", path = "crates/pymol-color" }
+pymol-mol = { version = "0.2.5", path = "crates/pymol-mol" }
+pymol-select = { version = "0.2.5", path = "crates/pymol-select" }
+pymol-io = { version = "0.2.5", path = "crates/pymol-io" }
+pymol-render = { version = "0.2.5", path = "crates/pymol-render", default-features = false }
+pymol-scene = { version = "0.2.5", path = "crates/pymol-scene", default-features = false }
+pymol-cmd = { version = "0.2.5", path = "crates/pymol-cmd", default-features = false }
+pymol-gui = { version = "0.2.5", path = "crates/pymol-gui" }
+pymol-algos = { version = "0.2.5", path = "crates/pymol-algos" }
+pymol-session = { version = "0.2.5", path = "crates/pymol-session" }
+pymol-framework = { version = "0.2.5", path = "crates/pymol-framework" }
+pymol-plugin = { version = "0.2.5", path = "crates/pymol-plugin" }
 
 # External dependencies
 bitflags = { version = "2", features = ["serde"] }
