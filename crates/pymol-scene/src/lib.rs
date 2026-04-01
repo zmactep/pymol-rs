@@ -31,6 +31,7 @@ mod movie;
 mod object;
 pub mod quat;
 mod pick;
+mod pick_bvh;
 mod scene;
 mod selection;
 mod session;

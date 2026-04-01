@@ -300,7 +300,7 @@ impl WebViewer {
             &view_inv.data,
         );
 
-        let new_hit = self.picker.pick_ray(&ray, &self.session.registry);
+        let new_hit = self.picker.pick_ray(&ray, &mut self.session.registry);
 
         // Change detection — skip GPU work if nothing changed.
         let changed = match (&self.hover_hit, &new_hit) {
@@ -395,7 +395,7 @@ impl WebViewer {
             &view_inv.data,
         );
 
-        let hit = self.picker.pick_ray(&ray, &self.session.registry);
+        let hit = self.picker.pick_ray(&ray, &mut self.session.registry);
 
         // Collect all data that requires immutable borrows of self.session
         // before taking any mutable borrow for command execution.

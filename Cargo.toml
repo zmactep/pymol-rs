@@ -19,6 +19,7 @@ members = [
     "plugins/python",
     "plugins/toolbar",
     "plugins/raytracer",
+    "bench",
 ]
 default-members = [
     "crates/pymol-settings",

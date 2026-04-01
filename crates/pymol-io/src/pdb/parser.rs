@@ -1,13 +1,12 @@
 //! PDB file parser
 //!
-//! Parses PDB format files using nom combinators.
+//! Parses PDB format files using fixed-width column extraction.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use nom::IResult;
 use pymol_mol::{
     Atom, AtomIndex, AtomResidue, BondOrder, CoordSet, ObjectMolecule, SecondaryStructure,
 };
@@ -76,7 +75,7 @@ impl<R: Read> PdbReader<R> {
 
             match record_type {
                 "ATOM  " | "HETATM" => {
-                    if let Ok((_, record)) = parse_atom_record(line) {
+                    if let Some(record) = parse_atom_record(line) {
                         let coord = Vec3::new(record.x, record.y, record.z);
                         if in_model && current_model > 1 {
                             // Multi-model: store coordinates for models 2+ as extra coord sets
@@ -91,24 +90,16 @@ impl<R: Read> PdbReader<R> {
                     }
                 }
                 "CONECT" => {
-                    if let Ok((_, record)) = parse_conect_record(line) {
-                        conects.push(record);
-                    }
+                    conects.push(parse_conect_record(line));
                 }
                 "CRYST1" => {
-                    if let Ok((_, record)) = parse_cryst1_record(line) {
-                        cryst1 = Some(record);
-                    }
+                    cryst1 = Some(parse_cryst1_record(line));
                 }
                 "HELIX " => {
-                    if let Ok((_, record)) = parse_helix_record(line) {
-                        helices.push(record);
-                    }
+                    helices.push(parse_helix_record(line));
                 }
                 "SHEET " => {
-                    if let Ok((_, record)) = parse_sheet_record(line) {
-                        sheets.push(record);
-                    }
+                    sheets.push(parse_sheet_record(line));
                 }
                 "TITLE " => {
                     if line.len() > 10 {
@@ -321,13 +312,10 @@ fn apply_secondary_structure(
 // ============================================================================
 
 /// Parse an ATOM or HETATM record
-fn parse_atom_record(input: &str) -> IResult<&str, AtomRecord> {
+fn parse_atom_record(input: &str) -> Option<AtomRecord> {
     // Ensure line is at least 54 characters (minimum for coordinates)
     if input.len() < 54 {
-        return Err(nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::TooLarge,
-        )));
+        return None;
     }
 
     let hetatm = input.starts_with("HETATM");
@@ -412,11 +400,11 @@ fn parse_atom_record(input: &str) -> IResult<&str, AtomRecord> {
         charge,
     };
 
-    Ok(("", record))
+    Some(record)
 }
 
 /// Parse a CONECT record
-fn parse_conect_record(input: &str) -> IResult<&str, ConectRecord> {
+fn parse_conect_record(input: &str) -> ConectRecord {
     // CONECT record format:
     // 6-10: atom serial number
     // 11-15, 16-20, 21-25, 26-30: bonded atom serial numbers
@@ -438,11 +426,11 @@ fn parse_conect_record(input: &str) -> IResult<&str, ConectRecord> {
         }
     }
 
-    Ok(("", ConectRecord { atom, bonded }))
+    ConectRecord { atom, bonded }
 }
 
 /// Parse a CRYST1 record
-fn parse_cryst1_record(input: &str) -> IResult<&str, Cryst1Record> {
+fn parse_cryst1_record(input: &str) -> Cryst1Record {
     // CRYST1 record format:
     // 6-14: a (9)
     // 15-23: b (9)
@@ -483,23 +471,20 @@ fn parse_cryst1_record(input: &str) -> IResult<&str, Cryst1Record> {
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(1);
 
-    Ok((
-        "",
-        Cryst1Record {
-            a,
-            b,
-            c,
-            alpha,
-            beta,
-            gamma,
-            space_group,
-            z,
-        },
-    ))
+    Cryst1Record {
+        a,
+        b,
+        c,
+        alpha,
+        beta,
+        gamma,
+        space_group,
+        z,
+    }
 }
 
 /// Parse a HELIX record
-fn parse_helix_record(input: &str) -> IResult<&str, HelixRecord> {
+fn parse_helix_record(input: &str) -> HelixRecord {
     // HELIX record format (simplified)
     let serial: i32 = input
         .get(7..10)
@@ -525,26 +510,23 @@ fn parse_helix_record(input: &str) -> IResult<&str, HelixRecord> {
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(1);
 
-    Ok((
-        "",
-        HelixRecord {
-            serial,
-            helix_id,
-            init_resn,
-            init_chain,
-            init_seq,
-            init_icode,
-            end_resn,
-            end_chain,
-            end_seq,
-            end_icode,
-            helix_class,
-        },
-    ))
+    HelixRecord {
+        serial,
+        helix_id,
+        init_resn,
+        init_chain,
+        init_seq,
+        init_icode,
+        end_resn,
+        end_chain,
+        end_seq,
+        end_icode,
+        helix_class,
+    }
 }
 
 /// Parse a SHEET record
-fn parse_sheet_record(input: &str) -> IResult<&str, SheetRecord> {
+fn parse_sheet_record(input: &str) -> SheetRecord {
     // SHEET record format (simplified)
     let strand: i32 = input
         .get(7..10)
@@ -574,23 +556,20 @@ fn parse_sheet_record(input: &str) -> IResult<&str, SheetRecord> {
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
 
-    Ok((
-        "",
-        SheetRecord {
-            strand,
-            sheet_id,
-            num_strands,
-            init_resn,
-            init_chain,
-            init_seq,
-            init_icode,
-            end_resn,
-            end_chain,
-            end_seq,
-            end_icode,
-            sense,
-        },
-    ))
+    SheetRecord {
+        strand,
+        sheet_id,
+        num_strands,
+        init_resn,
+        init_chain,
+        init_seq,
+        init_icode,
+        end_resn,
+        end_chain,
+        end_seq,
+        end_icode,
+        sense,
+    }
 }
 
 #[cfg(test)]
@@ -601,7 +580,7 @@ mod tests {
     fn test_parse_atom_record() {
         let line =
             "ATOM      1  N   ALA A   1       1.000   2.000   3.000  1.00 20.00           N  ";
-        let (_, record) = parse_atom_record(line).unwrap();
+        let record = parse_atom_record(line).unwrap();
 
         assert_eq!(record.serial, 1);
         assert_eq!(record.name.trim(), "N");
@@ -619,7 +598,7 @@ mod tests {
     fn test_parse_hetatm_record() {
         let line =
             "HETATM    1  O   HOH A   1       1.000   2.000   3.000  1.00 20.00           O  ";
-        let (_, record) = parse_atom_record(line).unwrap();
+        let record = parse_atom_record(line).unwrap();
 
         assert!(record.hetatm);
         assert_eq!(record.resn, "HOH");
@@ -628,7 +607,7 @@ mod tests {
     #[test]
     fn test_parse_conect_record() {
         let line = "CONECT    1    2    3    4    5";
-        let (_, record) = parse_conect_record(line).unwrap();
+        let record = parse_conect_record(line);
 
         assert_eq!(record.atom, 1);
         assert_eq!(record.bonded, vec![2, 3, 4, 5]);

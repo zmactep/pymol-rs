@@ -4,7 +4,7 @@
 //! using either GPU-based color coding or CPU-based ray casting.
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{AtomIndex, ObjectMolecule, RepMask};
+use pymol_mol::{AtomIndex, ObjectMolecule};
 use pymol_render::picking::{PickResult, PickingConfig, Ray};
 use pymol_select::SelectionResult;
 
@@ -85,74 +85,61 @@ impl Picker {
         self.last_result = None;
     }
 
-    /// Pick using CPU ray-casting
+    /// Pick using CPU ray-casting with BVH acceleration.
     ///
-    /// This is a fallback method that doesn't require GPU readback.
-    /// It's slower but works without specialized shaders.
+    /// Uses a cached BVH per molecule for O(log n) ray traversal.
+    /// The BVH is built lazily on first pick and invalidated when
+    /// coordinates change.
     ///
     /// # Arguments
     /// * `ray` - The picking ray in world space
-    /// * `registry` - The object registry to pick from
+    /// * `registry` - The object registry to pick from (mutable for lazy BVH build)
     ///
     /// # Returns
     /// The closest hit, if any
-    pub fn pick_ray(&mut self, ray: &Ray, registry: &ObjectRegistry) -> Option<PickHit> {
+    pub fn pick_ray(&mut self, ray: &Ray, registry: &mut ObjectRegistry) -> Option<PickHit> {
         let mut closest: Option<PickHit> = None;
         let mut closest_distance = f32::MAX;
 
-        // Iterate through all enabled objects
-        for obj in registry.enabled_objects() {
-            let name = obj.name().to_string();
-            let obj_type = obj.object_type();
+        // Collect enabled object names first (to avoid borrow conflicts)
+        let names: Vec<(String, ObjectType)> = registry
+            .enabled_objects()
+            .map(|obj| (obj.name().to_string(), obj.object_type()))
+            .collect();
 
-            // For molecules, test against atom spheres
-            if let Some(mol_obj) = registry.get_molecule(&name) {
-                let molecule = mol_obj.molecule();
-                let state_idx = mol_obj.display_state();
-                let obj_reps = mol_obj.visible_reps();
-
-                if let Some(coord_set) = molecule.get_coord_set(state_idx) {
-                    for (atom_idx, coord) in coord_set.iter_with_atoms() {
-                        if let Some(atom) = molecule.get_atom(atom_idx) {
-                            // Skip atoms with no visible representation
-                            if atom.repr.visible_reps.intersection(obj_reps) == RepMask::NONE {
-                                continue;
-                            }
-
-                            let center = [coord.x, coord.y, coord.z];
-                            let radius = atom.effective_vdw();
-
-                            if let Some(t) = ray.intersect_sphere(center, radius) {
-                                if t < closest_distance {
-                                    let hit_pos = ray.at(t);
-                                    closest = Some(PickHit {
-                                        object_name: name.clone(),
-                                        object_type: obj_type,
-                                        atom_index: Some(atom_idx),
-                                        position: Vec3::new(hit_pos[0], hit_pos[1], hit_pos[2]),
-                                        distance: t,
-                                    });
-                                    closest_distance = t;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            // For other object types, test against bounding box
-            else if let Some((min, max)) = obj.extent() {
-                // Simple AABB test (could be improved with actual geometry)
-                if let Some(t) = Self::ray_aabb_intersection(ray, min, max) {
+        for (name, obj_type) in &names {
+            // For molecules, use BVH-accelerated picking
+            if let Some(mol_obj) = registry.get_molecule_mut(name) {
+                let bvh = mol_obj.pick_bvh();
+                if let Some((atom_idx, t)) = bvh.intersect_ray(ray) {
                     if t < closest_distance {
                         let hit_pos = ray.at(t);
                         closest = Some(PickHit {
-                            object_name: name,
-                            object_type: obj_type,
-                            atom_index: None,
+                            object_name: name.clone(),
+                            object_type: *obj_type,
+                            atom_index: Some(atom_idx),
                             position: Vec3::new(hit_pos[0], hit_pos[1], hit_pos[2]),
                             distance: t,
                         });
                         closest_distance = t;
+                    }
+                }
+            }
+            // For other object types, test against bounding box
+            else if let Some(obj) = registry.get(name) {
+                if let Some((min, max)) = obj.extent() {
+                    if let Some(t) = Self::ray_aabb_intersection(ray, min, max) {
+                        if t < closest_distance {
+                            let hit_pos = ray.at(t);
+                            closest = Some(PickHit {
+                                object_name: name.clone(),
+                                object_type: *obj_type,
+                                atom_index: None,
+                                position: Vec3::new(hit_pos[0], hit_pos[1], hit_pos[2]),
+                                distance: t,
+                            });
+                            closest_distance = t;
+                        }
                     }
                 }
             }
@@ -378,6 +365,7 @@ fn format_resi(resv: i32, inscode: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pymol_mol::RepMask;
 
     #[test]
     fn test_picker_creation() {

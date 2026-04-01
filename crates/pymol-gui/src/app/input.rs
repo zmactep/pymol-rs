@@ -110,7 +110,7 @@ impl App {
             &view_inv.data,
         );
 
-        self.viewport.picker.pick_ray(&ray, &self.state.registry)
+        self.viewport.picker.pick_ray(&ray, &mut self.state.registry)
     }
 
     /// Process hover picking — detect atom under cursor and update hover indicator.

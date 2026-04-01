@@ -2208,7 +2208,6 @@ dependencies = [
  "flate2",
  "lin_alg",
  "molly",
- "nom",
  "pymol-mol",
  "reqwest",
  "rmp-serde",

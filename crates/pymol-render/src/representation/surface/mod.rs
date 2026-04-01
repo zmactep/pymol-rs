@@ -1,25 +1,15 @@
 //! Surface representation for molecular surfaces
 //!
-//! Provides two algorithms for generating molecular surfaces:
+//! Uses a marching cubes algorithm for generating molecular surfaces:
 //!
-//! 1. **Marching Cubes** (volumetric): Better for small molecules, higher quality
-//!    - Computes distance field on a 3D grid
-//!    - Extracts isosurface at distance = 0
-//!    - O(n³) complexity where n is grid size
-//!
-//! 2. **Dot-Based** (analytical): Better for large molecules, faster
-//!    - Generates dots on sphere tessellations
-//!    - Filters buried dots via spatial queries
-//!    - Triangulates exposed dots
-//!    - O(n) complexity where n is number of atoms
+//! - Computes distance field on a 3D grid
+//! - Extracts isosurface at distance = 0
+//! - O(n³) complexity where n is grid size
 
 pub mod coloring;
 pub mod distance_field;
-pub mod dot_surface;
 pub mod grid;
 pub mod marching_cubes;
-pub mod sphere;
-pub mod triangulate;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -46,26 +36,10 @@ struct SdfParams {
     atom_count: usize,
 }
 
-/// Algorithm used for surface generation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SurfaceAlgorithm {
-    /// Marching cubes on distance field (volumetric approach)
-    /// Better for small molecules with higher quality requirements
-    MarchingCubes,
-    /// Dot-based surface (analytical approach)
-    /// Better for large molecules with faster performance
-    #[default]
-    DotBased,
-    /// Automatically choose based on molecule size
-    Auto,
-}
-
 /// Surface representation for molecular surfaces
 ///
-/// Generates a triangulated molecular surface from atomic positions.
-/// Supports two algorithms:
-/// - Marching cubes (volumetric) - better quality for small molecules
-/// - Dot-based (analytical) - faster for large molecules
+/// Generates a triangulated molecular surface from atomic positions
+/// using a marching cubes (volumetric) algorithm.
 pub struct SurfaceRep {
     /// Vertex data (CPU side)
     vertices: Vec<MeshVertex>,
@@ -89,8 +63,6 @@ pub struct SurfaceRep {
     probe_radius: f32,
     /// Surface quality (-4 to 4)
     quality: i32,
-    /// Algorithm to use for surface generation
-    algorithm: SurfaceAlgorithm,
     /// Whether any vertices have transparency (alpha < 1.0)
     has_transparency: bool,
     /// Cached SDF grid (persists across rebuilds to avoid recomputation)
@@ -114,7 +86,6 @@ impl SurfaceRep {
             surface_type: SurfaceType::default(),
             probe_radius: 1.4,
             quality: 0,
-            algorithm: SurfaceAlgorithm::Auto,
             has_transparency: false,
             cached_sdf: None,
             cached_sdf_params: None,
@@ -126,14 +97,6 @@ impl SurfaceRep {
     /// When true, the surface should be rendered with a transparent blend mode.
     pub fn has_transparency(&self) -> bool {
         self.has_transparency
-    }
-
-    /// Set the surface generation algorithm
-    pub fn set_algorithm(&mut self, algorithm: SurfaceAlgorithm) {
-        if self.algorithm != algorithm {
-            self.algorithm = algorithm;
-            self.dirty = true;
-        }
     }
 
     /// Set the render pipeline and bind group
@@ -246,7 +209,6 @@ impl SurfaceRep {
 
             // Build this chain's surface in a temporary rep
             let mut temp = SurfaceRep::new();
-            temp.algorithm = self.algorithm;
             temp.surface_type = self.surface_type;
             temp.probe_radius = self.probe_radius;
             temp.quality = self.quality;
@@ -274,20 +236,7 @@ impl SurfaceRep {
             return;
         }
 
-        // Determine which algorithm to use
-        // Note: Dot-based is faster but produces lower quality surfaces with gaps.
-        // Marching cubes is slower but produces better quality closed surfaces.
-        let use_dot_based = match self.algorithm {
-            SurfaceAlgorithm::DotBased => true,
-            SurfaceAlgorithm::MarchingCubes => false,
-            SurfaceAlgorithm::Auto => false, // Default to marching cubes for quality
-        };
-
-        if use_dot_based {
-            self.build_dot_based(atoms, atom_colors);
-        } else {
-            self.build_marching_cubes(atoms, atom_colors);
-        }
+        self.build_marching_cubes(atoms, atom_colors);
     }
 
     /// Recolor existing vertices without rebuilding geometry.
@@ -308,68 +257,6 @@ impl SurfaceRep {
         });
         self.has_transparency = transparency > 0.0;
         true
-    }
-
-    /// Build surface using dot-based algorithm (O(n) complexity)
-    fn build_dot_based(
-        &mut self,
-        atoms: &[SurfaceAtom],
-        atom_colors: &[AtomColor],
-    ) {
-        use dot_surface::{DotSurfaceConfig, DotSurfaceType};
-
-        // Convert surface type
-        let dot_surface_type = match self.surface_type {
-            SurfaceType::VanDerWaals => DotSurfaceType::VanDerWaals,
-            SurfaceType::SolventAccessible => DotSurfaceType::SolventAccessible,
-            SurfaceType::SolventExcluded => DotSurfaceType::SolventExcluded,
-        };
-
-        // Configure dot surface generation
-        let config = DotSurfaceConfig {
-            surface_type: dot_surface_type,
-            probe_radius: self.probe_radius,
-            quality: self.quality,
-            tolerance: 0.01,
-        };
-
-        // Generate exposed surface dots
-        let dots = dot_surface::generate_surface_dots(atoms, &config);
-
-        if dots.is_empty() {
-            self.dirty = false;
-            return;
-        }
-
-        // Compute edge cutoff for triangulation
-        let cutoff = dot_surface::compute_edge_cutoff(atoms, &config);
-
-        // Triangulate the dots
-        let tri_result = triangulate::triangulate_dots(&dots, cutoff);
-
-        if tri_result.indices.is_empty() {
-            self.dirty = false;
-            return;
-        }
-
-        // Color vertices based on atom colors
-        let positions: Vec<[f32; 3]> = dots.iter().map(|d| d.position).collect();
-        let colors = coloring::color_vertices(&positions, atom_colors);
-
-        // Build mesh vertices
-        self.vertices.reserve(dots.len());
-        for (i, dot) in dots.iter().enumerate() {
-            self.vertices.push(MeshVertex {
-                position: dot.position,
-                normal: dot.normal,
-                color: colors[i],
-            });
-        }
-
-        // Copy indices
-        self.indices = tri_result.indices;
-        self.index_count = self.indices.len() as u32;
-        self.dirty = false;
     }
 
     /// Build surface using marching cubes algorithm (volumetric)
@@ -688,76 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dot_based_algorithm() {
-        let mut rep = SurfaceRep::new();
-        rep.set_algorithm(SurfaceAlgorithm::DotBased);
-        
-        // Create a simple molecule with overlapping atoms
-        let atoms = vec![
-            SurfaceAtom {
-                position: [0.0, 0.0, 0.0],
-                radius: 1.5,
-                atom_index: 0,
-            },
-            SurfaceAtom {
-                position: [2.0, 0.0, 0.0],
-                radius: 1.5,
-                atom_index: 1,
-            },
-            SurfaceAtom {
-                position: [1.0, 1.7, 0.0],
-                radius: 1.5,
-                atom_index: 2,
-            },
-        ];
-        
-        let colors = vec![
-            AtomColor { position: [0.0, 0.0, 0.0], color: [1.0, 0.0, 0.0, 1.0] },
-            AtomColor { position: [2.0, 0.0, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-            AtomColor { position: [1.0, 1.7, 0.0], color: [0.0, 0.0, 1.0, 1.0] },
-        ];
-
-        rep.set_quality(0);
-        rep.build_from_atoms(&atoms, &colors);
-
-        // Should produce some triangles
-        assert!(!rep.is_empty(), "Dot-based surface should have triangles");
-        assert!(!rep.vertices.is_empty(), "Should have vertices");
-        assert!(!rep.indices.is_empty(), "Should have indices");
-        assert_eq!(rep.indices.len() % 3, 0, "Indices should be triangle triplets");
-    }
-
-    #[test]
-    fn test_auto_algorithm_selection() {
-        let mut rep = SurfaceRep::new();
-        rep.set_algorithm(SurfaceAlgorithm::Auto);
-
-        // Small molecule - should use marching cubes (< 500 atoms)
-        let small_atoms: Vec<SurfaceAtom> = (0..10)
-            .map(|i| SurfaceAtom {
-                position: [i as f32 * 3.0, 0.0, 0.0],
-                radius: 1.5,
-                atom_index: i,
-            })
-            .collect();
-        
-        let small_colors: Vec<AtomColor> = (0..10)
-            .map(|i| AtomColor {
-                position: [i as f32 * 3.0, 0.0, 0.0],
-                color: [1.0, 0.0, 0.0, 1.0],
-            })
-            .collect();
-
-        rep.set_quality(-3); // Lower quality for faster test
-        rep.build_from_atoms(&small_atoms, &small_colors);
-        
-        // Should produce a surface
-        assert!(!rep.is_empty(), "Auto should produce surface for small molecule");
-    }
-
-    #[test]
-    fn test_marching_cubes_vs_dot_based_produces_output() {
-        // Test that both algorithms produce valid output for the same input
+    fn test_marching_cubes_produces_output() {
         let atoms = vec![
             SurfaceAtom {
                 position: [0.0, 0.0, 0.0],
@@ -770,30 +588,17 @@ mod tests {
                 atom_index: 1,
             },
         ];
-        
+
         let colors = vec![
             AtomColor { position: [0.0, 0.0, 0.0], color: [1.0, 0.0, 0.0, 1.0] },
             AtomColor { position: [2.5, 0.0, 0.0], color: [0.0, 0.0, 1.0, 1.0] },
         ];
 
-        // Test marching cubes
-        let mut mc_rep = SurfaceRep::new();
-        mc_rep.set_algorithm(SurfaceAlgorithm::MarchingCubes);
-        mc_rep.set_quality(-2);
-        mc_rep.build_from_atoms(&atoms, &colors);
-        
-        // Test dot-based
-        let mut dot_rep = SurfaceRep::new();
-        dot_rep.set_algorithm(SurfaceAlgorithm::DotBased);
-        dot_rep.set_quality(-2);
-        dot_rep.build_from_atoms(&atoms, &colors);
+        let mut rep = SurfaceRep::new();
+        rep.set_quality(-2);
+        rep.build_from_atoms(&atoms, &colors);
 
-        // Both should produce output
-        assert!(!mc_rep.is_empty(), "Marching cubes should produce output");
-        assert!(!dot_rep.is_empty(), "Dot-based should produce output");
-
-        // Both should have valid triangle counts
-        assert_eq!(mc_rep.indices.len() % 3, 0);
-        assert_eq!(dot_rep.indices.len() % 3, 0);
+        assert!(!rep.is_empty(), "Marching cubes should produce output");
+        assert_eq!(rep.indices.len() % 3, 0);
     }
 }

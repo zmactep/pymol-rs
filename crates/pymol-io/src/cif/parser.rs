@@ -44,10 +44,10 @@ struct AtomSiteColumns {
 
 impl AtomSiteColumns {
     /// Build column index struct from the loop column names
-    fn from_columns(columns: &[String]) -> Self {
+    fn from_columns(columns: &[&str]) -> Self {
         let mut cols = AtomSiteColumns::default();
         for (i, name) in columns.iter().enumerate() {
-            match name.as_str() {
+            match *name {
                 "_atom_site.type_symbol" => cols.type_symbol = Some(i),
                 "_atom_site.label_atom_id" => cols.label_atom_id = Some(i),
                 "_atom_site.auth_atom_id" => cols.auth_atom_id = Some(i),
@@ -121,7 +121,7 @@ fn parse_cif_tokens(tokens: &[Token]) -> IoResult<ObjectMolecule> {
     while pos < tokens.len() {
         match &tokens[pos] {
             Token::DataBlock(name) => {
-                mol.name = name.clone();
+                mol.name = name.to_string();
                 pos += 1;
                 break;
             }
@@ -206,11 +206,11 @@ fn parse_loop(
     ss_ranges: &mut Vec<SecondaryStructureRange>,
 ) -> IoResult<usize> {
     // Collect column names
-    let mut columns: Vec<String> = Vec::new();
+    let mut columns: Vec<&str> = Vec::new();
     while pos < tokens.len() {
         match &tokens[pos] {
             Token::DataName(name) => {
-                columns.push(name.clone());
+                columns.push(name);
                 pos += 1;
             }
             _ => break,
@@ -248,8 +248,8 @@ fn parse_loop(
 /// Extract a `&str` from a value token (zero-copy)
 fn token_value_str<'a>(token: &'a Token<'a>) -> Option<&'a str> {
     match token {
-        Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) => Some(v),
-        Token::TextField(v) => Some(v.as_str()),
+        Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v)
+        | Token::TextField(v) => Some(v),
         _ => None,
     }
 }
@@ -258,7 +258,7 @@ fn token_value_str<'a>(token: &'a Token<'a>) -> Option<&'a str> {
 fn parse_atom_site_loop(
     tokens: &[Token],
     mut pos: usize,
-    columns: &[String],
+    columns: &[&str],
     mol: &mut ObjectMolecule,
 ) -> IoResult<usize> {
     // Pre-resolve column indices — O(1) lookups per field instead of HashMap
@@ -303,11 +303,9 @@ fn parse_atom_site_loop(
                 break;
             }
             match &tokens[pos] {
-                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) => {
+                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v)
+                | Token::TextField(v) => {
                     row[n_read] = Some(v);
-                }
-                Token::TextField(v) => {
-                    row[n_read] = Some(v.as_str());
                 }
                 Token::Missing | Token::Unknown => {
                     row[n_read] = None;
@@ -525,7 +523,7 @@ fn parse_symmetry(tokens: &[Token], mut pos: usize, space_group: &mut Option<Str
 fn parse_ss_loop(
     tokens: &[Token],
     mut pos: usize,
-    columns: &[String],
+    columns: &[&str],
     category: SsCategory,
     ss_ranges: &mut Vec<SecondaryStructureRange>,
 ) -> IoResult<usize> {
@@ -561,11 +559,9 @@ fn parse_ss_loop(
                 break;
             }
             match &tokens[pos] {
-                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v) => {
+                Token::Value(v) | Token::SingleQuoted(v) | Token::DoubleQuoted(v)
+                | Token::TextField(v) => {
                     row[col] = Some(v);
-                }
-                Token::TextField(v) => {
-                    row[col] = Some(v.as_str());
                 }
                 Token::Missing | Token::Unknown => {
                     row[col] = None;

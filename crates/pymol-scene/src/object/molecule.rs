@@ -13,6 +13,7 @@ use pymol_render::{
 use pymol_select::SelectionResult;
 use pymol_settings::{ObjectOverrides, ResolvedSettings, Settings};
 
+use crate::pick_bvh::PickBvh;
 use super::{Object, ObjectState, ObjectType};
 
 bitflags! {
@@ -89,6 +90,8 @@ pub struct MoleculeObject {
     overrides: Option<ObjectOverrides>,
     /// Surface quality (-4 to 4, default 0)
     surface_quality: i32,
+    /// Cached BVH for fast ray-picking (lazily built, invalidated on COORDS change)
+    pick_bvh: Option<PickBvh>,
 }
 
 impl MoleculeObject {
@@ -115,6 +118,7 @@ impl MoleculeObject {
             dirty: DirtyFlags::ALL,
             surface_quality: 0,
             overrides: None,
+            pick_bvh: None,
         }
     }
 
@@ -132,6 +136,7 @@ impl MoleculeObject {
             dirty: DirtyFlags::ALL,
             surface_quality: 0,
             overrides: None,
+            pick_bvh: None,
         }
     }
 
@@ -155,6 +160,7 @@ impl MoleculeObject {
             dirty: DirtyFlags::ALL,
             surface_quality: 0,
             overrides: None,
+            pick_bvh: None,
         }
     }
 
@@ -175,6 +181,7 @@ impl MoleculeObject {
     /// Note: This will mark the object as dirty.
     pub fn molecule_mut(&mut self) -> &mut ObjectMolecule {
         self.dirty = DirtyFlags::ALL;
+        self.pick_bvh = None;
         &mut self.molecule
     }
 
@@ -189,6 +196,7 @@ impl MoleculeObject {
             if self.display_state != state {
                 self.display_state = state;
                 self.dirty |= DirtyFlags::COORDS;
+                self.pick_bvh = None;
             }
             true
         } else {
@@ -199,6 +207,9 @@ impl MoleculeObject {
     /// Invalidate cached representations
     pub fn invalidate(&mut self, flags: DirtyFlags) {
         self.dirty |= flags;
+        if flags.intersects(DirtyFlags::COORDS) {
+            self.pick_bvh = None;
+        }
     }
 
     /// Invalidate all representations so they get rebuilt
@@ -270,6 +281,18 @@ impl MoleculeObject {
             }
         }
         self.dirty |= DirtyFlags::REPS;
+    }
+
+    /// Get or build the cached BVH for ray-picking.
+    pub fn pick_bvh(&mut self) -> &PickBvh {
+        if self.pick_bvh.is_none() {
+            self.pick_bvh = Some(PickBvh::build(
+                &self.molecule,
+                self.display_state,
+                self.state.visible_reps,
+            ));
+        }
+        self.pick_bvh.as_ref().unwrap()
     }
 
     /// Hide all representations
@@ -720,6 +743,7 @@ impl MoleculeObject {
     pub fn clear_cache(&mut self) {
         self.representations.clear();
         self.dirty = DirtyFlags::ALL;
+        self.pick_bvh = None;
     }
 
     /// Get cartoon mesh data for raytracing

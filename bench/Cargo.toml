@@ -1,0 +1,23 @@
+[package]
+name = "pymol-bench"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+pymol-io = { workspace = true }
+pymol-mol = { workspace = true }
+pymol-select = { workspace = true }
+pymol-render = { workspace = true, default-features = false, features = ["parallel"] }
+pymol-color = { workspace = true }
+pymol-scene = { workspace = true, default-features = false, features = ["parallel"] }
+pymol-settings = { workspace = true }
+flate2 = { workspace = true }
+once_cell = "1"
+
+[[bench]]
+name = "assembly"
+harness = false

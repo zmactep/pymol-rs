@@ -3,7 +3,7 @@
 //! Evaluates parsed selection expressions against molecules in a context.
 
 use lin_alg::f32::Vec3;
-use pymol_mol::{three_to_one, Atom, AtomFlags, AtomIndex, SecondaryStructure};
+use pymol_mol::{spatial::SpatialGrid, three_to_one, Atom, AtomFlags, AtomIndex, SecondaryStructure};
 
 use crate::ast::{CompareOp, MacroSpec, PropertyValue, SelectionExpr};
 use crate::context::EvalContext;
@@ -447,8 +447,10 @@ fn eval_around(
     let mut result = SelectionResult::new(ctx.total_atoms());
     let dist_sq = dist * dist;
 
-    // Collect coordinates of selected atoms
-    let mut selected_coords: Vec<Vec3> = Vec::new();
+    // Build spatial grid from selected atoms
+    let mut grid = SpatialGrid::with_capacity(dist, inner_result.count());
+    let mut selected_coords: Vec<Vec3> = Vec::with_capacity(inner_result.count());
+
     for (mol, offset) in ctx.molecules_with_offsets() {
         let state = ctx.effective_state(mol);
         if let Some(cs) = mol.get_coord_set(state) {
@@ -456,6 +458,7 @@ fn eval_around(
                 let global_idx = offset + local_idx;
                 if inner_result.contains_index(global_idx) {
                     if let Some(coord) = cs.get_atom_coord(AtomIndex(local_idx as u32)) {
+                        grid.insert(coord, selected_coords.len());
                         selected_coords.push(coord);
                     }
                 }
@@ -463,7 +466,8 @@ fn eval_around(
         }
     }
 
-    // Find atoms within distance
+    // Query grid for each non-selected atom
+    let mut neighbors = Vec::new();
     for (mol, offset) in ctx.molecules_with_offsets() {
         let state = ctx.effective_state(mol);
         if let Some(cs) = mol.get_coord_set(state) {
@@ -474,8 +478,9 @@ fn eval_around(
                     continue;
                 }
                 if let Some(coord) = cs.get_atom_coord(AtomIndex(local_idx as u32)) {
-                    for sel_coord in &selected_coords {
-                        let d = coord - *sel_coord;
+                    grid.query_neighbors(coord, &mut neighbors);
+                    for &ni in &neighbors {
+                        let d = coord - selected_coords[ni];
                         if d.magnitude_squared() <= dist_sq {
                             result.set_index(global_idx);
                             break;
@@ -552,8 +557,10 @@ fn eval_within(
     let mut result = SelectionResult::new(ctx.total_atoms());
     let dist_sq = dist * dist;
 
-    // Collect target coordinates
-    let mut target_coords: Vec<Vec3> = Vec::new();
+    // Build spatial grid from target coordinates
+    let mut grid = SpatialGrid::with_capacity(dist, target_result.count());
+    let mut target_coords: Vec<Vec3> = Vec::with_capacity(target_result.count());
+
     for (mol, offset) in ctx.molecules_with_offsets() {
         let state = ctx.effective_state(mol);
         if let Some(cs) = mol.get_coord_set(state) {
@@ -561,6 +568,7 @@ fn eval_within(
                 let global_idx = offset + local_idx;
                 if target_result.contains_index(global_idx) {
                     if let Some(coord) = cs.get_atom_coord(AtomIndex(local_idx as u32)) {
+                        grid.insert(coord, target_coords.len());
                         target_coords.push(coord);
                     }
                 }
@@ -568,7 +576,8 @@ fn eval_within(
         }
     }
 
-    // Find source atoms within distance of any target
+    // Query grid for each source atom
+    let mut neighbors = Vec::new();
     for (mol, offset) in ctx.molecules_with_offsets() {
         let state = ctx.effective_state(mol);
         if let Some(cs) = mol.get_coord_set(state) {
@@ -578,8 +587,9 @@ fn eval_within(
                     continue;
                 }
                 if let Some(coord) = cs.get_atom_coord(AtomIndex(local_idx as u32)) {
-                    for target_coord in &target_coords {
-                        let d = coord - *target_coord;
+                    grid.query_neighbors(coord, &mut neighbors);
+                    for &ni in &neighbors {
+                        let d = coord - target_coords[ni];
                         if d.magnitude_squared() <= dist_sq {
                             result.set_index(global_idx);
                             break;

@@ -17,7 +17,6 @@ fetch-async = ["dep:reqwest"]
 
 [dependencies]
 pymol-mol = { workspace = true }
-nom = { workspace = true }
 thiserror = { workspace = true }
 flate2 = { workspace = true }
 lin_alg = { workspace = true }
