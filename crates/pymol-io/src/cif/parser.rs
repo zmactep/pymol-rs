@@ -361,8 +361,11 @@ fn parse_atom_site_loop(
         atom.residue = residue_cache
             .entry(cache_key)
             .or_insert_with(|| {
+                // Strip hyphens from chain IDs so assembly chains like "A-2"
+                // become "A2", which is valid in the selection language.
+                let chain_id = chain_str.replace('-', "");
                 Arc::new(AtomResidue::from_parts(
-                    chain_str.to_string(),
+                    chain_id,
                     resn_str.to_string(),
                     resv,
                     inscode,

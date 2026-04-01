@@ -88,11 +88,11 @@ fn read_setting_value(type_code: u8, val: &PickleValue) -> Result<PseSettingValu
     })
 }
 
-fn read_view(value: Option<&PickleValue>) -> Result<[f64; 18], SessionError> {
-    let mut view = [0.0f64; 18];
+fn read_view(value: Option<&PickleValue>) -> Result<[f64; 25], SessionError> {
+    let mut view = [0.0f64; 25];
     if let Some(v) = value {
         let list = v.as_list().or_else(|| v.as_tuple()).unwrap_or(&[]);
-        for (i, item) in list.iter().enumerate().take(18) {
+        for (i, item) in list.iter().enumerate().take(25) {
             view[i] = item.as_float().unwrap_or(0.0);
         }
     }
@@ -144,19 +144,20 @@ fn read_names(
             }
             _ => {
                 // Object (type 1 = molecule, etc.)
-                let (data, visible, color) = if let Some(obj_data) = entry.get(5) {
+                let (data, hdr) = if let Some(obj_data) = entry.get(5) {
                     read_object_data(type_code, obj_data)?
                 } else {
-                    (PseObjectData::Unsupported, true, 0)
+                    (PseObjectData::Unsupported, PseObjectHeader { visible: true, color: 0, rep_mask: 0, ttt: None, settings: vec![] })
                 };
-                let rep_mask = 0u32;
 
                 names.push(Some(PseNameEntry::Object(PseObject {
                     name,
                     type_code,
-                    visible,
-                    rep_mask,
-                    color,
+                    visible: hdr.visible,
+                    rep_mask: hdr.rep_mask,
+                    color: hdr.color,
+                    ttt: hdr.ttt,
+                    settings: hdr.settings,
                     data,
                 })));
             }
@@ -165,33 +166,79 @@ fn read_names(
     Ok(names)
 }
 
-/// Returns (data, visible, color) extracted from the object data list.
-/// The header at list[0] contains: [0]=enabled, [1]=name, [3]=color.
+/// Parsed fields from the PSE object header (CObject base).
+struct PseObjectHeader {
+    visible: bool,
+    color: i64,
+    rep_mask: u32,
+    ttt: Option<[f64; 16]>,
+    settings: Vec<PseSetting>,
+}
+
+/// Returns (data, header) extracted from the object data list.
+///
+/// The header at list[0] is a CObject serialized by `ObjectFromPyList`:
+///   [0]=type, [1]=name, [2]=Color, [3]=visRep, [7]=TTTFlag, [9]=Enabled, [11]=TTT(16 floats)
 fn read_object_data(
     type_code: i64,
     value: &PickleValue,
-) -> Result<(PseObjectData, bool, i64), SessionError> {
+) -> Result<(PseObjectData, PseObjectHeader), SessionError> {
+    let default_header = PseObjectHeader { visible: true, color: 0, rep_mask: 0, ttt: None, settings: vec![] };
+
     // Only parse molecules (type_code=1) for now
     if type_code != 1 {
-        return Ok((PseObjectData::Unsupported, true, 0));
+        return Ok((PseObjectData::Unsupported, default_header));
     }
 
     let list = match value.as_list() {
         Some(l) if l.len() >= 10 => l,
-        _ => return Ok((PseObjectData::Unsupported, true, 0)),
+        _ => return Ok((PseObjectData::Unsupported, default_header)),
     };
 
-    // Extract visible and color from header (list[0])
+    // Extract fields from header (list[0]) per PyMOL's ObjectFromPyList
     let header = list[0].as_list();
     let visible = header
-        .and_then(|h| h.first())
+        .and_then(|h| h.get(9))
         .and_then(|v| v.as_int())
         .unwrap_or(1)
         != 0;
     let color = header
-        .and_then(|h| h.get(3))
+        .and_then(|h| h.get(2))
         .and_then(|v| v.as_int())
         .unwrap_or(0);
+    let rep_mask = header
+        .and_then(|h| h.get(3))
+        .and_then(|v| v.as_int())
+        .unwrap_or(0) as u32;
+    let ttt_flag = header
+        .and_then(|h| h.get(7))
+        .and_then(|v| v.as_int())
+        .unwrap_or(0)
+        != 0;
+    let ttt = if ttt_flag {
+        header
+            .and_then(|h| h.get(11))
+            .and_then(|v| v.as_list().or_else(|| v.as_tuple()))
+            .and_then(|ttt_list| {
+                if ttt_list.len() >= 16 {
+                    let mut arr = [0.0f64; 16];
+                    for (i, item) in ttt_list.iter().enumerate().take(16) {
+                        arr[i] = item.as_float().unwrap_or(0.0);
+                    }
+                    Some(arr)
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+
+    // Per-object settings from header[8] (CObject.Setting in PyMOL)
+    let obj_settings = header
+        .and_then(|h| h.get(8))
+        .map(|v| read_settings(Some(v)).unwrap_or_default())
+        .unwrap_or_default();
 
     // PSE molecule object data layout:
     // [0] = header/settings, [1] = 1, [2] = n_bonds, [3] = n_atoms,
@@ -218,7 +265,7 @@ fn read_object_data(
         discrete,
         n_discrete,
         symmetry,
-    }), visible, color))
+    }), PseObjectHeader { visible, color, rep_mask, ttt, settings: obj_settings }))
 }
 
 fn read_atoms(value: Option<&PickleValue>) -> Result<Vec<PseAtom>, SessionError> {
@@ -392,26 +439,28 @@ fn read_colors(value: Option<&PickleValue>) -> Result<Vec<PseColor>, SessionErro
     let mut colors = Vec::new();
     for item in list {
         let entry = item.as_list().or_else(|| item.as_tuple()).unwrap_or(&[]);
-        if entry.len() < 2 {
+        // PyMOL's ColorAsPyList format: [name, index, [r,g,b], custom, lut_flag, [lut_rgb], fixed]
+        if entry.len() < 3 {
             continue;
         }
         let name = entry[0].as_str().unwrap_or("").to_string();
-        let rgb_list = entry[1]
+        let index = entry[1].as_int().unwrap_or(0);
+        let rgb_list = entry[2]
             .as_list()
-            .or_else(|| entry[1].as_tuple())
+            .or_else(|| entry[2].as_tuple())
             .unwrap_or(&[]);
         let mut rgb = [0.0f32; 3];
         for (i, item) in rgb_list.iter().enumerate().take(3) {
             rgb[i] = item.as_float().unwrap_or(0.0) as f32;
         }
-        colors.push(PseColor { name, rgb });
+        colors.push(PseColor { name, index, rgb });
     }
     Ok(colors)
 }
 
 fn read_view_dict(
     value: Option<&PickleValue>,
-) -> Result<HashMap<String, [f64; 18]>, SessionError> {
+) -> Result<HashMap<String, [f64; 25]>, SessionError> {
     let dict = match value {
         Some(v) => v.as_dict().unwrap_or(&[]),
         None => return Ok(HashMap::new()),
@@ -420,8 +469,8 @@ fn read_view_dict(
     for (k, v) in dict {
         let name = k.as_str().unwrap_or("").to_string();
         let list = v.as_list().or_else(|| v.as_tuple()).unwrap_or(&[]);
-        let mut view = [0.0f64; 18];
-        for (i, item) in list.iter().enumerate().take(18) {
+        let mut view = [0.0f64; 25];
+        for (i, item) in list.iter().enumerate().take(25) {
             view[i] = item.as_float().unwrap_or(0.0);
         }
         map.insert(name, view);
@@ -494,7 +543,7 @@ mod tests {
             (
                 PickleValue::String("view".into()),
                 PickleValue::Tuple(
-                    (0..18)
+                    (0..25)
                         .map(|i| PickleValue::Float(i as f64))
                         .collect(),
                 ),
@@ -509,7 +558,7 @@ mod tests {
         assert_eq!(pse.version, 1830000);
         assert!(pse.settings.is_empty());
         assert!(pse.names.is_empty());
-        for i in 0..18 {
+        for i in 0..25 {
             assert!((pse.view[i] - i as f64).abs() < 1e-10);
         }
     }
@@ -538,6 +587,7 @@ mod tests {
             PickleValue::String("colors".into()),
             PickleValue::List(vec![PickleValue::List(vec![
                 PickleValue::String("red".into()),
+                PickleValue::Int(1),
                 PickleValue::List(vec![
                     PickleValue::Float(1.0),
                     PickleValue::Float(0.0),
@@ -549,6 +599,7 @@ mod tests {
         let pse = read_session(&session).unwrap();
         assert_eq!(pse.colors.len(), 1);
         assert_eq!(pse.colors[0].name, "red");
+        assert_eq!(pse.colors[0].index, 1);
         assert!((pse.colors[0].rgb[0] - 1.0).abs() < 1e-6);
     }
 }

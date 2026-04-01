@@ -196,12 +196,16 @@ fn parse_atom_site(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResul
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
-        let cache_key = (chain.to_string(), resn.to_string(), resv, inscode);
+        // Strip hyphens from chain IDs so assembly chains like "A-2"
+        // become "A2", which is valid in the selection language.
+        let chain_id = chain.replace('-', "");
+        let cache_key = (chain_id, resn.to_string(), resv, inscode);
         atom.residue = residue_cache
             .entry(cache_key)
             .or_insert_with(|| {
+                let chain_id = chain.replace('-', "");
                 Arc::new(AtomResidue::from_parts(
-                    chain.to_string(),
+                    chain_id,
                     resn.to_string(),
                     resv,
                     inscode,

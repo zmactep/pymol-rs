@@ -11,11 +11,11 @@ use pymol_mol::{
     CoordSet, Element, ObjectMolecule, RepMask, ResidueKey, SecondaryStructure, Symmetry,
 };
 use pymol_scene::{MoleculeObject, Object, SceneView, Session};
-use pymol_settings::{SerializedSetting, SettingValue};
+use pymol_settings::{ObjectOverrides, SerializedSetting, SettingValue};
 
 use super::pymol_colors::pymol_color_rgb;
 use crate::pse::{
-    PseAtom, PseCoordSet, PseMolecule, PseNameEntry, PseObject, PseObjectData,
+    PseAtom, PseColor, PseCoordSet, PseMolecule, PseNameEntry, PseObject, PseObjectData,
     PseSelection, PseSession, PseSettingValue, PseSymmetry,
 };
 use crate::SessionError;
@@ -27,18 +27,28 @@ use crate::SessionError;
 /// Caches the mapping from PyMOL color indices to our NamedColors indices.
 struct PseColorMapper {
     cache: AHashMap<i64, i32>,
+    /// Session-defined custom colors (from the PSE "colors" list), keyed by PyMOL index.
+    session_colors: AHashMap<i64, [f32; 3]>,
 }
 
 impl PseColorMapper {
-    fn new() -> Self {
-        Self { cache: AHashMap::new() }
+    fn new(pse_colors: &[PseColor]) -> Self {
+        let mut session_colors = AHashMap::new();
+        for c in pse_colors {
+            session_colors.insert(c.index, c.rgb);
+        }
+        Self {
+            cache: AHashMap::new(),
+            session_colors,
+        }
     }
 
     /// Map a PyMOL color index to our color index.
     ///
     /// Negative values have special meaning (-1=ByElement, etc.) and pass through.
-    /// Positive values are looked up in the PyMOL color table, registered in
-    /// `NamedColors` if needed, and the resulting local index is returned.
+    /// Positive values are looked up first in session-defined colors, then in the
+    /// built-in PyMOL color table, registered in `NamedColors` if needed,
+    /// and the resulting local index is returned.
     fn map(&mut self, pymol_index: i64, named_colors: &mut NamedColors) -> i32 {
         if pymol_index < 0 {
             return pymol_index as i32;
@@ -46,7 +56,11 @@ impl PseColorMapper {
         if let Some(&local) = self.cache.get(&pymol_index) {
             return local;
         }
-        let local = if let Some((r, g, b)) = pymol_color_rgb(pymol_index) {
+        // Session colors take priority over built-in table
+        let local = if let Some(&[r, g, b]) = self.session_colors.get(&pymol_index) {
+            let color_name = format!("_pse_{}", pymol_index);
+            named_colors.register(&color_name, Color::new(r, g, b)) as i32
+        } else if let Some((r, g, b)) = pymol_color_rgb(pymol_index) {
             let color_name = format!("_pse_{}", pymol_index);
             named_colors.register(&color_name, Color::new(r, g, b)) as i32
         } else {
@@ -61,10 +75,6 @@ impl PseColorMapper {
 /// Convert a parsed PSE session into a live [`Session`].
 pub fn pse_to_session(pse: &PseSession) -> Result<Session, SessionError> {
     let mut session = Session::new();
-
-    // --- Settings ---
-    // Skip PSE global settings for now — they can cause rendering issues
-    // convert_settings(pse, &mut session);
 
     // --- Camera / View ---
     let view = convert_view(&pse.view);
@@ -84,7 +94,10 @@ pub fn pse_to_session(pse: &PseSession) -> Result<Session, SessionError> {
     }
 
     // --- Color mapper ---
-    let mut color_mapper = PseColorMapper::new();
+    let mut color_mapper = PseColorMapper::new(&pse.colors);
+
+    // --- Global settings (after color_mapper, so color indices get remapped) ---
+    session.settings = convert_settings(pse, &mut color_mapper, &mut session.named_colors);
 
     // --- Objects and Selections ---
     let mut object_names: Vec<Option<String>> = Vec::new();
@@ -116,26 +129,50 @@ pub fn pse_to_session(pse: &PseSession) -> Result<Session, SessionError> {
 // Settings
 // =============================================================================
 
-#[allow(dead_code)]
-fn convert_settings(pse: &PseSession, session: &mut Session) {
-    let serialized: Vec<SerializedSetting> = pse
-        .settings
+/// Convert a list of PSE settings to serialized settings (with color remapping).
+fn serialize_pse_settings(
+    pse_settings: &[crate::pse::PseSetting],
+    color_mapper: &mut PseColorMapper,
+    named_colors: &mut NamedColors,
+) -> Vec<SerializedSetting> {
+    pse_settings
         .iter()
         .filter_map(|s| {
-            let value = convert_setting_value(&s.value)?;
+            let value = convert_setting_value(&s.value, color_mapper, named_colors)?;
             Some(SerializedSetting { id: s.id, value })
         })
-        .collect();
-    session.settings = pymol_settings::legacy::import_session(&serialized);
+        .collect()
 }
 
-fn convert_setting_value(pse_val: &PseSettingValue) -> Option<SettingValue> {
+fn convert_settings(
+    pse: &PseSession,
+    color_mapper: &mut PseColorMapper,
+    named_colors: &mut NamedColors,
+) -> pymol_settings::groups::Settings {
+    let serialized = serialize_pse_settings(&pse.settings, color_mapper, named_colors);
+    pymol_settings::legacy::import_session(&serialized)
+}
+
+fn convert_object_overrides(
+    pse_settings: &[crate::pse::PseSetting],
+    color_mapper: &mut PseColorMapper,
+    named_colors: &mut NamedColors,
+) -> ObjectOverrides {
+    let serialized = serialize_pse_settings(pse_settings, color_mapper, named_colors);
+    pymol_settings::legacy::import_object_overrides(&serialized)
+}
+
+fn convert_setting_value(
+    pse_val: &PseSettingValue,
+    color_mapper: &mut PseColorMapper,
+    named_colors: &mut NamedColors,
+) -> Option<SettingValue> {
     Some(match pse_val {
         PseSettingValue::Bool(b) => SettingValue::Bool(*b),
         PseSettingValue::Int(i) => SettingValue::Int(*i as i32),
         PseSettingValue::Float(f) => SettingValue::Float(*f as f32),
         PseSettingValue::Float3(a) => SettingValue::Float3([a[0] as f32, a[1] as f32, a[2] as f32]),
-        PseSettingValue::Color(c) => SettingValue::Color(*c as i32),
+        PseSettingValue::Color(c) => SettingValue::Color(color_mapper.map(*c, named_colors)),
         PseSettingValue::String(s) => SettingValue::String(s.clone()),
     })
 }
@@ -144,34 +181,33 @@ fn convert_setting_value(pse_val: &PseSettingValue) -> Option<SettingValue> {
 // View / Camera
 // =============================================================================
 
-/// Convert PSE 18-float view to [`SceneView`].
+/// Convert PSE 25-float view to [`SceneView`].
 ///
-/// PSE layout:
-/// - `[0..9]`   3×3 rotation (row-major)
-/// - `[9..12]`  camera position
-/// - `[12..15]` rotation origin
-/// - `[15]`     front clip
-/// - `[16]`     back clip
-/// - `[17]`     orthographic flag
-fn convert_view(view: &[f64; 18]) -> SceneView {
+/// PSE layout (from PyMOL's `SceneView` struct):
+/// - `[0..16]`  4×4 rotation matrix (column-major, matching GLM/Mat4 convention)
+/// - `[16..19]` camera position
+/// - `[19..22]` rotation origin
+/// - `[22]`     front clip
+/// - `[23]`     back clip
+/// - `[24]`     FOV (negative = orthographic)
+fn convert_view(view: &[f64; 25]) -> SceneView {
+    // PyMOL stores the 4x4 rotation in column-major order — same as our Mat4.data
     let mut rotation = Mat4::new_identity();
-    rotation.data[0] = view[0] as f32;
-    rotation.data[1] = view[1] as f32;
-    rotation.data[2] = view[2] as f32;
-    rotation.data[4] = view[3] as f32;
-    rotation.data[5] = view[4] as f32;
-    rotation.data[6] = view[5] as f32;
-    rotation.data[8] = view[6] as f32;
-    rotation.data[9] = view[7] as f32;
-    rotation.data[10] = view[8] as f32;
+    for i in 0..16 {
+        rotation.data[i] = view[i] as f32;
+    }
+
+    let fov_raw = view[24] as f32;
 
     SceneView {
         rotation,
-        position: Vec3::new(view[9] as f32, view[10] as f32, view[11] as f32),
-        origin: Vec3::new(view[12] as f32, view[13] as f32, view[14] as f32),
-        clip_front: view[15] as f32,
-        clip_back: view[16] as f32,
-        fov: 14.0, // PSE doesn't store FOV in the view tuple; default
+        // PyMOL uses negative z for "camera in front of origin", pymol-rs uses positive z.
+        // Negate to convert between conventions.
+        position: Vec3::new(-(view[16] as f32), -(view[17] as f32), -(view[18] as f32)),
+        origin: Vec3::new(view[19] as f32, view[20] as f32, view[21] as f32),
+        clip_front: view[22] as f32,
+        clip_back: view[23] as f32,
+        fov: if fov_raw < 0.0 { fov_raw.abs() } else if fov_raw > 0.0 { fov_raw } else { 14.0 },
     }
 }
 
@@ -249,7 +285,7 @@ fn convert_molecule(
         .unique_settings
         .iter()
         .filter_map(|us| {
-            let value = convert_setting_value(&us.value)?;
+            let value = convert_setting_value(&us.value, color_mapper, named_colors)?;
             Some((us.unique_id as i32, us.setting_id, value))
         })
         .collect();
@@ -275,6 +311,17 @@ fn convert_molecule(
     state.enabled = obj.visible;
     state.visible_reps = RepMask(obj_rep_mask);
     state.color = color_index_from_pse(obj.color);
+
+    // Apply TTT matrix (molecule position/rotation from the session)
+    if let Some(ref ttt) = obj.ttt {
+        state.set_transform(ttt_to_mat4(ttt));
+    }
+
+    // Per-object settings overrides
+    if !obj.settings.is_empty() {
+        let overrides = convert_object_overrides(&obj.settings, color_mapper, named_colors);
+        *mol_obj.get_or_create_overrides() = overrides;
+    }
 
     Ok(mol_obj)
 }
@@ -381,6 +428,38 @@ fn convert_selection(
 }
 
 // =============================================================================
+// TTT helpers
+// =============================================================================
+
+/// Convert a PyMOL TTT (16-float) matrix to a [`Mat4`].
+///
+/// PyMOL TTT format: `y = R * (x + pre_trans) + post_trans`
+///   - `[0..3, 4..7, 8..11]` = 3×3 rotation (row-major) with post-translation in column 3
+///   - `[12..15]` = pre-translation (applied before rotation)
+///
+/// The equivalent standard affine transform is `y = R*x + (R*pre + post)`.
+fn ttt_to_mat4(ttt: &[f64; 16]) -> Mat4 {
+    let r = [
+        ttt[0] as f32, ttt[1] as f32, ttt[2] as f32,
+        ttt[4] as f32, ttt[5] as f32, ttt[6] as f32,
+        ttt[8] as f32, ttt[9] as f32, ttt[10] as f32,
+    ];
+    let pre = [ttt[12] as f32, ttt[13] as f32, ttt[14] as f32];
+
+    // Effective translation = R * pre_trans + post_trans
+    let tx = r[0] * pre[0] + r[1] * pre[1] + r[2] * pre[2] + ttt[3] as f32;
+    let ty = r[3] * pre[0] + r[4] * pre[1] + r[5] * pre[2] + ttt[7] as f32;
+    let tz = r[6] * pre[0] + r[7] * pre[1] + r[8] * pre[2] + ttt[11] as f32;
+
+    Mat4::new([
+        r[0], r[1], r[2], tx,
+        r[3], r[4], r[5], ty,
+        r[6], r[7], r[8], tz,
+        0.0,  0.0,  0.0,  1.0,
+    ])
+}
+
+// =============================================================================
 // Color helpers
 // =============================================================================
 
@@ -403,10 +482,17 @@ mod tests {
             version: 1830000,
             settings: vec![],
             view: [
-                1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+                // 4x4 identity rotation (column-major)
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0,
+                // position
                 0.0, 0.0, -50.0,
+                // origin
                 0.0, 0.0, 0.0,
-                40.0, 100.0, 0.0,
+                // front clip, back clip, fov
+                40.0, 100.0, 14.0,
             ],
             names: vec![],
             colors: vec![],
@@ -426,13 +512,13 @@ mod tests {
     fn test_view_conversion() {
         let session = pse_to_session(&minimal_pse()).unwrap();
         let view = session.camera.current_view();
-        assert!((view.position.z - (-50.0)).abs() < 0.001);
+        assert!((view.position.z - 50.0).abs() < 0.001);
     }
 
     #[test]
     fn test_custom_colors() {
         let mut pse = minimal_pse();
-        pse.colors.push(PseColor { name: "mycolor".into(), rgb: [0.5, 0.3, 0.1] });
+        pse.colors.push(PseColor { name: "mycolor".into(), index: 7777, rgb: [0.5, 0.3, 0.1] });
         let session = pse_to_session(&pse).unwrap();
         let (_, c) = session.named_colors.get_by_name("mycolor").unwrap();
         assert!((c.r - 0.5).abs() < 0.001);
@@ -447,6 +533,8 @@ mod tests {
             visible: true,
             rep_mask: 0x01,
             color: -1,
+            ttt: None,
+            settings: vec![],
             data: PseObjectData::Molecule(PseMolecule {
                 atoms: vec![PseAtom {
                     resv: 1, chain: "A".into(), alt: String::new(), resi: "1".into(),
@@ -473,7 +561,7 @@ mod tests {
     fn test_selection_conversion() {
         let mut pse = minimal_pse();
         pse.names.push(Some(PseNameEntry::Object(PseObject {
-            name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1,
+            name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1, ttt: None, settings: vec![],
             data: PseObjectData::Molecule(PseMolecule {
                 atoms: vec![], bonds: vec![], coord_sets: vec![],
                 discrete: false, n_discrete: 0, symmetry: None,
@@ -491,8 +579,13 @@ mod tests {
     fn test_named_views() {
         let mut pse = minimal_pse();
         pse.view_dict.insert("front".into(), [
-            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
-            0.0, 0.0, -30.0, 0.0, 0.0, 0.0, 20.0, 80.0, 0.0,
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, -30.0,
+            0.0, 0.0, 0.0,
+            20.0, 80.0, 14.0,
         ]);
         let session = pse_to_session(&pse).unwrap();
         assert!(session.views.get("front").is_some());
@@ -503,5 +596,104 @@ mod tests {
         assert!(matches!(color_index_from_pse(-1), ColorIndex::ByElement));
         assert!(matches!(color_index_from_pse(-2), ColorIndex::ByChain));
         assert!(matches!(color_index_from_pse(5), ColorIndex::Named(5)));
+    }
+
+    #[test]
+    fn test_ttt_matrix_applied() {
+        let mut pse = minimal_pse();
+        pse.names.push(Some(PseNameEntry::Object(PseObject {
+            name: "mol1".into(),
+            type_code: 1,
+            visible: true,
+            rep_mask: 0x01,
+            color: -1,
+            ttt: Some([
+                1.0, 0.0, 0.0, 5.0,   // identity rotation + 5.0 X post-translation
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0,   // no pre-translation
+            ]),
+            settings: vec![],
+            data: PseObjectData::Molecule(PseMolecule {
+                atoms: vec![PseAtom {
+                    resv: 1, chain: "A".into(), alt: String::new(), resi: "1".into(),
+                    segi: String::new(), resn: "ALA".into(), name: "CA".into(),
+                    elem: "C".into(), text_type: String::new(), label: String::new(),
+                    ss: String::new(), b: 0.0, q: 1.0, vdw: 1.7,
+                    partial_charge: 0.0, formal_charge: 0, color: -1, id: 1, unique_id: 0,
+                    visible_reps: 0x20, hetatm: false,
+                }],
+                bonds: vec![],
+                coord_sets: vec![Some(PseCoordSet { n_atom: 1, coords: vec![0.0, 0.0, 0.0], idx_to_atm: vec![] })],
+                discrete: false, n_discrete: 0, symmetry: None,
+            }),
+        })));
+
+        let session = pse_to_session(&pse).unwrap();
+        let mol_obj = session.registry.get_molecule("mol1").unwrap();
+        // Transform should have the 5.0 X translation
+        let t = &mol_obj.state().transform;
+        assert!((t.data[3] - 5.0).abs() < 1e-6, "expected tx=5.0, got {}", t.data[3]);
+    }
+
+    #[test]
+    fn test_no_ttt_means_identity() {
+        let mut pse = minimal_pse();
+        pse.names.push(Some(PseNameEntry::Object(PseObject {
+            name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1, ttt: None, settings: vec![],
+            data: PseObjectData::Molecule(PseMolecule {
+                atoms: vec![], bonds: vec![], coord_sets: vec![],
+                discrete: false, n_discrete: 0, symmetry: None,
+            }),
+        })));
+
+        let session = pse_to_session(&pse).unwrap();
+        let mol_obj = session.registry.get_molecule("mol1").unwrap();
+        assert_eq!(mol_obj.state().transform.data, Mat4::new_identity().data);
+    }
+
+    #[test]
+    fn test_session_custom_color_mapping() {
+        let mut pse = minimal_pse();
+        // Register a custom session color at PyMOL index 9999
+        pse.colors.push(PseColor { name: "custom_blue".into(), index: 9999, rgb: [0.0, 0.0, 1.0] });
+        // Create a molecule with an atom using that custom color index
+        pse.names.push(Some(PseNameEntry::Object(PseObject {
+            name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1, ttt: None, settings: vec![],
+            data: PseObjectData::Molecule(PseMolecule {
+                atoms: vec![PseAtom {
+                    resv: 1, chain: "A".into(), alt: String::new(), resi: "1".into(),
+                    segi: String::new(), resn: "ALA".into(), name: "CA".into(),
+                    elem: "C".into(), text_type: String::new(), label: String::new(),
+                    ss: String::new(), b: 0.0, q: 1.0, vdw: 1.7,
+                    partial_charge: 0.0, formal_charge: 0, color: 9999, id: 1, unique_id: 0,
+                    visible_reps: 0x20, hetatm: false,
+                }],
+                bonds: vec![],
+                coord_sets: vec![Some(PseCoordSet { n_atom: 1, coords: vec![0.0, 0.0, 0.0], idx_to_atm: vec![] })],
+                discrete: false, n_discrete: 0, symmetry: None,
+            }),
+        })));
+
+        let session = pse_to_session(&pse).unwrap();
+        let mol_obj = session.registry.get_molecule("mol1").unwrap();
+        let atom = mol_obj.molecule().get_atom(AtomIndex(0)).unwrap();
+        // The atom's base color should be a valid named color index (>= 0), not -1 (ByElement)
+        assert!(atom.repr.colors.base >= 0, "expected mapped color index, got {}", atom.repr.colors.base);
+    }
+
+    #[test]
+    fn test_ttt_with_pre_translation() {
+        // TTT with pre-translation: y = R * (x + pre) + post
+        // With identity rotation: y = x + pre + post
+        let ttt: [f64; 16] = [
+            1.0, 0.0, 0.0, 3.0,   // post_x = 3
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            2.0, 0.0, 0.0, 1.0,   // pre_x = 2
+        ];
+        let mat = ttt_to_mat4(&ttt);
+        // Effective tx = R*pre + post = 1.0*2.0 + 3.0 = 5.0
+        assert!((mat.data[3] - 5.0).abs() < 1e-6);
     }
 }

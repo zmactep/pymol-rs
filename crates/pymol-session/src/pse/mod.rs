@@ -7,10 +7,10 @@ use std::collections::HashMap;
 pub struct PseSession {
     pub version: i64,
     pub settings: Vec<PseSetting>,
-    pub view: [f64; 18],
+    pub view: [f64; 25],
     pub names: Vec<Option<PseNameEntry>>,
     pub colors: Vec<PseColor>,
-    pub view_dict: HashMap<String, [f64; 18]>,
+    pub view_dict: HashMap<String, [f64; 25]>,
     pub scene_order: Vec<String>,
     pub unique_settings: Vec<PseUniqueSetting>,
 }
@@ -35,6 +35,8 @@ pub enum PseSettingValue {
 #[derive(Debug, Clone)]
 pub struct PseColor {
     pub name: String,
+    /// PyMOL color index this color is registered as.
+    pub index: i64,
     pub rgb: [f32; 3],
 }
 
@@ -60,6 +62,11 @@ pub struct PseObject {
     pub visible: bool,
     pub rep_mask: u32,
     pub color: i64,
+    /// TTT (Translate-Transform-Translate) 4×4 matrix from the object header.
+    /// Present only when TTTFlag is set in the PSE data.
+    pub ttt: Option<[f64; 16]>,
+    /// Per-object settings from the CObject header (header[8]).
+    pub settings: Vec<PseSetting>,
     pub data: PseObjectData,
 }
 

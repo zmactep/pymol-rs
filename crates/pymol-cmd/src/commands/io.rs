@@ -117,15 +117,17 @@ EXAMPLES
                 let p = Path::new(filename);
                 let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("obj");
                 // Strip double extension for .gz files (e.g. "1AOI.cif.gz" → "1AOI")
-                if p.extension().and_then(|s| s.to_str()) == Some("gz") {
+                let name = if p.extension().and_then(|s| s.to_str()) == Some("gz") {
                     Path::new(stem)
                         .file_stem()
                         .and_then(|s| s.to_str())
                         .unwrap_or(stem)
-                        .to_string()
                 } else {
-                    stem.to_string()
-                }
+                    stem
+                };
+                // Replace hyphens with underscores so object names are
+                // valid in the selection language (e.g. "7KP3-assembly1" → "7KP3_assembly1")
+                name.replace('-', "_")
             });
 
         // Get state (optional, 0 = append)
@@ -168,36 +170,12 @@ EXAMPLES
             "pse" | "pze" => {
                 use pymol_session::{load_pse, pse_to_session};
                 let pse = load_pse(&path).map_err(|e| CmdError::FileFormat(e.to_string()))?;
-                let mut session = pse_to_session(&pse).map_err(|e| CmdError::FileFormat(e.to_string()))?;
-                // Merge PSE named colors into the viewer's color table,
-                // remapping atom color indices to match the viewer's registry.
-                let index_map = ctx.viewer.named_colors_mut().merge_from(&session.named_colors);
-                let mol_names: Vec<String> = session.registry.names().map(|s| s.to_string()).collect();
-                let n_objs = mol_names.len();
-                // Move objects into viewer, then remap atom color indices
-                for name in &mol_names {
-                    if let Some(obj) = session.registry.remove(name) {
-                        ctx.viewer.objects_mut().insert_boxed(name, obj);
-                    }
-                }
-                // Remap color indices on molecule atoms to match viewer's color table
-                for name in &mol_names {
-                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(name) {
-                        for atom in mol_obj.molecule_mut().atoms_mut() {
-                            let base = atom.repr.colors.base;
-                            if base >= 0 {
-                                if let Some(&new_idx) = index_map.get(&(base as u32)) {
-                                    atom.repr.colors.base = new_idx as i32;
-                                }
-                            }
-                        }
-                    }
-                }
+                let session = pse_to_session(&pse).map_err(|e| CmdError::FileFormat(e.to_string()))?;
+                let n_objs = session.registry.len();
+                ctx.viewer.replace_session(session);
                 if !quiet {
                     ctx.print(&format!(" Loaded PSE session \"{}\" ({} objects)", filename, n_objs));
                 }
-                // Zoom to show everything
-                ctx.viewer.zoom_all(0.0);
                 ctx.viewer.update_movie_state_count();
                 return Ok(());
             }
