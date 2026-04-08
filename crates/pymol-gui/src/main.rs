@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use pymol_gui::App;
+use pymol_gui::menu;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 /// PyMOL-RS GUI Application
@@ -94,9 +95,13 @@ fn main() {
         }
     }
 
-    // Create event loop
+    // Create event loop (initializes NSApplication on macOS)
     let event_loop = EventLoop::new().expect("Failed to create event loop");
     event_loop.set_control_flow(ControlFlow::Wait);
+
+    // Build native menu bar (platform init deferred to App::resumed)
+    let app_menu = menu::build_menu();
+    app.set_native_menu(app_menu);
 
     // Run the application
     if let Err(e) = event_loop.run_app(&mut app) {

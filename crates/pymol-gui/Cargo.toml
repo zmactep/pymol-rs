@@ -51,5 +51,18 @@ dirs = "5"
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 
+# Native menu & file dialog
+muda = { workspace = true }
+rfd = { workspace = true }
+
+# HTTP / JSON (for RCSB preview in fetch dialog)
+reqwest = { version = "0.13", features = ["gzip", "json"] }
+serde_json = "1"
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
+
+# macOS native menu integration
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow"] }

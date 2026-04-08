@@ -34,6 +34,24 @@ impl ApplicationHandler for App {
                 .expect("Failed to create window"),
         );
 
+        // macOS: disable automatic window tabbing (removes "Show Tab Bar" from View menu)
+        #[cfg(target_os = "macos")]
+        {
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::NSWindow;
+            // Safety: resumed() is always called on the main thread by winit
+            let mtm = unsafe { MainThreadMarker::new_unchecked() };
+            NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
+        }
+
+        // Activate native menu bar (must happen after window creation).
+        // The AppMenu is kept alive in self.native_menu — dropping the
+        // muda::Menu would deallocate the underlying NSMenu.
+        if let Some(ref app_menu) = self.native_menu {
+            #[cfg(target_os = "macos")]
+            app_menu.menu.init_for_nsapp();
+        }
+
         // Initialize GPU
         match pollster::block_on(self.init_gpu(window.clone())) {
             Ok((device_name, backend)) => {
@@ -122,6 +140,12 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Process native menu events
+        self.process_menu_events();
+
+        // Sync menu check states with actual settings
+        self.sync_menu_check_states();
+
         // Poll plugins that need periodic processing
         self.poll_plugins();
 
@@ -151,6 +175,270 @@ impl ApplicationHandler for App {
 
         // Process async tasks
         self.process_async_tasks();
+    }
+}
+
+// =============================================================================
+// Native menu event handling
+// =============================================================================
+
+impl App {
+    /// Poll and dispatch native menu events from `muda`.
+    pub(crate) fn process_menu_events(&mut self) {
+        // Collect pending menu event IDs to avoid holding an immutable borrow
+        // on self.native_menu while calling &mut self methods.
+        let ids = match &self.native_menu {
+            Some(m) => &m.ids,
+            None => return,
+        };
+
+        let mut pending = Vec::new();
+        while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+            pending.push(event.id);
+        }
+        if pending.is_empty() {
+            return;
+        }
+
+        // Snapshot the IDs we need to compare against (all are small, cloneable).
+        let run = ids.run.clone();
+        let open = ids.open.clone();
+        let fetch = ids.fetch.clone();
+        let save = ids.save.clone();
+        let export_png = ids.export_png.clone();
+        let export_movie = ids.export_movie.clone();
+        let select_all = ids.select_all.clone();
+        let deselect_all = ids.deselect_all.clone();
+        let reset_view = ids.reset_view.clone();
+        let zoom_all = ids.zoom_all.clone();
+        let orient = ids.orient.clone();
+        let center = ids.center.clone();
+        let opaque_background = ids.opaque_background.clone();
+        let bg_white = ids.bg_white.clone();
+        let bg_black = ids.bg_black.clone();
+        let transparent_panels = ids.transparent_panels.clone();
+        let help_commands = ids.help_commands.clone();
+
+        // Snapshot panel component IDs for matching
+        let panel_ids: Vec<String> = self
+            .layout
+            .panels
+            .iter()
+            .map(|p| p.component_id.clone())
+            .collect();
+
+        for id in pending {
+            if id == run {
+                self.menu_run_script();
+            } else if id == open {
+                self.menu_open_file();
+            } else if id == fetch {
+                self.fetch_dialog.open();
+            } else if id == save {
+                self.menu_save_file();
+            } else if id == export_png {
+                self.menu_export_png();
+            } else if id == export_movie {
+                self.menu_export_movie();
+            } else if id == select_all {
+                let _ = self.execute_command("select sele, all", false);
+            } else if id == deselect_all {
+                let _ = self.execute_command("deselect", false);
+            } else if id == reset_view {
+                let _ = self.execute_command("reset", false);
+            } else if id == zoom_all {
+                let _ = self.execute_command("zoom", false);
+            } else if id == orient {
+                let _ = self.execute_command("orient", false);
+            } else if id == center {
+                let _ = self.execute_command("center", false);
+            } else if id == opaque_background {
+                let current = self.state.settings.ui.opaque_background;
+                let cmd = if current { "set opaque_background, off" } else { "set opaque_background, on" };
+                let _ = self.execute_command(cmd, false);
+            } else if id == bg_white {
+                let _ = self.execute_command("bg_color white", false);
+            } else if id == bg_black {
+                let _ = self.execute_command("bg_color black", false);
+            } else if id == transparent_panels {
+                let current = self.state.settings.ui.transparent_panels;
+                let cmd = if current { "set transparent_panels, off" } else { "set transparent_panels, on" };
+                let _ = self.execute_command(cmd, false);
+            } else if id == help_commands {
+                let _ = self.execute_command("help", false);
+            } else if let Some(component_id) = panel_ids.iter().find(|p| id == muda::MenuId::new(p.as_str())) {
+                let visible = self
+                    .layout
+                    .panels
+                    .iter()
+                    .find(|p| p.component_id == *component_id)
+                    .is_some_and(|p| p.visible);
+                if visible {
+                    self.bus.send(AppMessage::HidePanel(component_id.clone()));
+                } else {
+                    self.bus.send(AppMessage::ShowPanel(component_id.clone()));
+                }
+            }
+        }
+
+        self.mark_dirty();
+        self.view.egui.ctx.request_repaint();
+    }
+
+    /// Sync native menu check states with actual application settings.
+    pub(crate) fn sync_menu_check_states(&mut self) {
+        if let Some(ref mut app_menu) = self.native_menu {
+            app_menu.state.transparent_panels = self.state.settings.ui.transparent_panels;
+            app_menu.state.opaque_background = self.state.settings.ui.opaque_background;
+            app_menu.state.bg_color = self.state.clear_color;
+            app_menu.state.panels = self
+                .layout
+                .panels
+                .iter()
+                .map(|p| {
+                    let title = self
+                        .components
+                        .get_title(&p.component_id)
+                        .unwrap_or_else(|| p.component_id.clone());
+                    (p.component_id.clone(), title, p.visible)
+                })
+                .collect();
+            app_menu.sync();
+        }
+    }
+
+    /// Collect extra extensions registered by plugins for file format handlers.
+    fn plugin_format_extensions(&self) -> Vec<String> {
+        self.executor
+            .format_handlers()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Collect extra extensions registered by plugins for script handlers.
+    fn plugin_script_extensions(&self) -> Vec<String> {
+        self.executor
+            .script_handlers()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    // ── File dialogs ────────────────────────────────────────────────────
+
+    /// Run Script… — open a script file.
+    fn menu_run_script(&mut self) {
+        let mut builtin: Vec<&str> = vec!["pml"];
+        let plugin_exts = self.plugin_script_extensions();
+        let plugin_refs: Vec<&str> = plugin_exts.iter().map(|s| s.as_str()).collect();
+        builtin.extend(&plugin_refs);
+
+        let dialog = rfd::FileDialog::new()
+            .set_title("Run Script")
+            .add_filter("Script files", &builtin)
+            .add_filter("All files", &["*"]);
+
+        if let Some(path) = dialog.pick_file() {
+            let _ = self.execute_command(&format!("run \"{}\"", path.display()), false);
+        }
+    }
+
+    /// Trajectory-only file extensions.
+    const TRAJECTORY_EXTS: &'static [&'static str] = &["xtc", "trr"];
+
+    /// Open… — load a molecular structure or trajectory file.
+    fn menu_open_file(&mut self) {
+        let mut structure_exts: Vec<&str> = vec![
+            "pdb", "ent", "cif", "mmcif", "bcif",
+            "sdf", "mol", "sd", "mol2", "ml2",
+            "xyz", "gro", "ccp4", "map", "mrc",
+        ];
+        let plugin_exts = self.plugin_format_extensions();
+        let plugin_refs: Vec<&str> = plugin_exts.iter().map(|s| s.as_str()).collect();
+        structure_exts.extend(&plugin_refs);
+        let session_exts: Vec<&str> = vec![
+            "pse", "pze", "prs",
+        ];
+
+        // Combined filter: structures + trajectories
+        let mut all_exts = structure_exts.clone();
+        all_exts.extend(Self::TRAJECTORY_EXTS);
+        all_exts.extend(&session_exts);
+
+        let dialog = rfd::FileDialog::new()
+            .set_title("Open")
+            .add_filter("All supported files", &all_exts)
+            .add_filter("Session files", &session_exts)
+            .add_filter("Molecular files", &structure_exts)
+            .add_filter("Trajectory files", Self::TRAJECTORY_EXTS)
+            .add_filter("All files", &["*"]);
+
+        if let Some(path) = dialog.pick_file() {
+            let ext = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+
+            if Self::TRAJECTORY_EXTS.contains(&ext.as_str()) {
+                let _ = self.execute_command(
+                    &format!("load_traj \"{}\"", path.display()),
+                    false,
+                );
+            } else {
+                let _ = self.execute_command(
+                    &format!("load \"{}\"", path.display()),
+                    false,
+                );
+            }
+        }
+    }
+
+    /// Save… — save structure or session.
+    fn menu_save_file(&mut self) {
+        let mut builtin: Vec<&str> = vec![
+            "pdb", "cif", "mmcif",
+            "sdf", "mol", "mol2", "ml2",
+            "xyz", "gro"
+        ];
+        let plugin_exts = self.plugin_format_extensions();
+        let plugin_refs: Vec<&str> = plugin_exts.iter().map(|s| s.as_str()).collect();
+        builtin.extend(&plugin_refs);
+
+        let dialog = rfd::FileDialog::new()
+            .set_title("Save")
+            .add_filter("Molecular files", &builtin)
+            .add_filter("Session", &["prs"])
+            .add_filter("Scripts", &["pml"])
+            .add_filter("All files", &["*"]);
+
+        if let Some(path) = dialog.save_file() {
+            let _ = self.execute_command(&format!("save \"{}\"", path.display()), false);
+        }
+    }
+
+    /// Export PNG… — save a PNG screenshot.
+    fn menu_export_png(&mut self) {
+        let dialog = rfd::FileDialog::new()
+            .set_title("Export PNG")
+            .add_filter("PNG image", &["png"])
+            .set_file_name("screenshot.png");
+
+        if let Some(path) = dialog.save_file() {
+            let _ = self.execute_command(&format!("png \"{}\"", path.display()), false);
+        }
+    }
+
+    /// Export Movie… — render movie to video file.
+    fn menu_export_movie(&mut self) {
+        let dialog = rfd::FileDialog::new()
+            .set_title("Export Movie")
+            .add_filter("Video files", &["mp4", "mov", "webm"])
+            .set_file_name("movie.mp4");
+
+        if let Some(path) = dialog.save_file() {
+            let _ = self.execute_command(&format!("mproduce \"{}\"", path.display()), false);
+        }
     }
 }
 

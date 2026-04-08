@@ -6,6 +6,7 @@
 pub mod command;
 pub mod completion;
 pub mod drag_drop_overlay;
+pub mod fetch_dialog;
 pub mod movie;
 pub mod notification;
 pub mod objects;
@@ -15,6 +16,7 @@ pub mod sequence;
 pub use command::{CommandLinePanel, CommandLineUiState};
 pub use completion::{generate_completions, CompletionResult};
 pub use drag_drop_overlay::DragDropOverlay;
+pub use fetch_dialog::FetchDialog;
 pub use movie::MoviePanel;
 pub use notification::NotificationOverlay;
 pub use objects::{ObjectListPanel, ObjectListUiState};

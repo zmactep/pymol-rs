@@ -19,6 +19,7 @@ pub mod component_store;
 pub mod components;
 pub mod fetch;
 pub mod layout;
+pub mod menu;
 pub mod plugin_manager;
 pub mod ui;
 pub mod view;

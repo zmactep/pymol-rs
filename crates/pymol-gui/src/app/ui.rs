@@ -113,8 +113,17 @@ impl App {
                 if let Some(ref path) = self.drag_hover_path {
                     DragDropOverlay::show(ctx, path);
                 }
+
+                // Fetch PDB dialog
+                let rt_handle = self.task_runner.handle();
+                self.fetch_dialog.show(ctx, &rt_handle);
             })
         };
+
+        // Execute fetch dialog command if user clicked "Fetch"
+        if let Some(cmd) = self.fetch_dialog.take_command() {
+            let _ = self.execute_command(&cmd, false);
+        }
 
         // Convert viewport rect from logical to physical pixels
         let viewport_rect_physical = egui::Rect::from_min_max(

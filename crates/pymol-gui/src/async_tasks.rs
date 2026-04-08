@@ -193,6 +193,12 @@ impl TaskRunner {
         self.receiver.try_recv().ok()
     }
 
+    /// Get a handle to the tokio runtime for spawning ad-hoc futures
+    /// (e.g. lightweight preview queries that don't need full AsyncTask tracking).
+    pub fn handle(&self) -> tokio::runtime::Handle {
+        self.runtime.handle().clone()
+    }
+
     /// Spawn an async task
     ///
     /// The task runs asynchronously and sends the result back via the channel.

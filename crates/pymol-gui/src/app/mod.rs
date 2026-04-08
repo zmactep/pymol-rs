@@ -20,6 +20,8 @@ use pymol_scene::{KeyBinding, KeyBindings, MoleculeObject, Session, SessionAdapt
 pub use pymol_scene::SelectionEntry;
 
 use crate::component_store::ComponentStore;
+use crate::menu::AppMenu;
+use crate::ui::FetchDialog;
 use pymol_framework::message::MessageBus;
 
 use crate::async_tasks::{TaskContext, TaskRunner};
@@ -84,6 +86,13 @@ pub struct App {
 
     // Plugin system
     pub(crate) plugin_manager: PluginManager,
+
+    // Native menu — the AppMenu (including muda::Menu) must stay alive
+    // for the entire app lifetime so macOS doesn't deallocate the NSMenu.
+    pub(crate) native_menu: Option<AppMenu>,
+
+    // Dialogs
+    pub(crate) fetch_dialog: FetchDialog,
 
     // Init / mode
     headless: bool,
@@ -167,6 +176,8 @@ impl App {
             drag_hover_path: None,
             task_runner: TaskRunner::new(),
             plugin_manager: PluginManager::new(),
+            native_menu: None,
+            fetch_dialog: FetchDialog::new(),
             headless,
             pending_load_file: None,
         };
@@ -204,6 +215,11 @@ impl App {
         F: Fn(&mut App) + Send + Sync + 'static,
     {
         self.key_bindings.bind(key, Arc::new(action));
+    }
+
+    /// Store the native menu for deferred platform initialization.
+    pub fn set_native_menu(&mut self, menu: AppMenu) {
+        self.native_menu = Some(menu);
     }
 
     /// Queue a file to load after initialization
