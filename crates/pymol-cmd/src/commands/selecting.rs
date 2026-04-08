@@ -215,11 +215,11 @@ EXAMPLES
             selection.to_string()
         };
 
-        // Evaluate the selection to count atoms and validate it
-        let (total_count, _results) = select_with_context(ctx.viewer, &expanded)?;
+        // Evaluate the selection to count atoms and cache results
+        let (total_count, results) = select_with_context(ctx.viewer, &expanded)?;
 
-        // Store the expanded expression (no self-references)
-        ctx.viewer.define_selection(name, &expanded);
+        // Store the expanded expression with cached evaluation results
+        ctx.viewer.define_selection_with_results(name, &expanded, results);
 
         // Ensure the selection is visible (show indicators)
         ctx.viewer.set_selection_visible(name, true);
@@ -368,8 +368,8 @@ EXAMPLES
                     }
                 } else {
                     // "sele" doesn't exist - create it with "all" as default
-                    let (count, _) = select_with_context(ctx.viewer, "all")?;
-                    ctx.viewer.define_selection(sel, "all");
+                    let (count, results) = select_with_context(ctx.viewer, "all")?;
+                    ctx.viewer.define_selection_with_results(sel, "all", results);
                     ctx.viewer.set_selection_visible(sel, true);
                     if !ctx.quiet {
                         ctx.print(&format!(" Indicating \"{}\" ({} atoms)", sel, count));
@@ -387,8 +387,8 @@ EXAMPLES
                     }
                 } else {
                     // It's a selection expression - create/update "indicate" selection
-                    let (count, _) = select_with_context(ctx.viewer, sel)?;
-                    ctx.viewer.define_selection("indicate", sel);
+                    let (count, results) = select_with_context(ctx.viewer, sel)?;
+                    ctx.viewer.define_selection_with_results("indicate", sel, results);
                     ctx.viewer.set_selection_visible("indicate", true);
                     if !ctx.quiet {
                         ctx.print(&format!(" Indicating \"{}\" ({} atoms)", sel, count));

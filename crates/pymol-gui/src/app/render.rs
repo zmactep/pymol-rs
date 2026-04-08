@@ -264,12 +264,13 @@ impl App {
     /// Reads hover/selection state and writes indicator geometry to molecules.
     /// Called before `render()` so mutations are complete before the GPU pass.
     pub(crate) fn update_indicators(&mut self, names: &[String]) {
-        let context = match self.view.gpu.render_context.as_ref() {
-            Some(c) => c,
-            None => return,
-        };
+        if self.view.gpu.render_context.is_none() {
+            return;
+        }
 
         let selection_results = self.evaluate_visible_selections();
+
+        let context = self.view.gpu.render_context.as_ref().unwrap();
         let selection_width = self.state.settings.ui.selection_width.max(6.0);
         let mouse_selection_mode = self.state.settings.ui.mouse_selection_mode as i32;
 

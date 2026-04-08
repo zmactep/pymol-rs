@@ -11,6 +11,7 @@
 use std::path::Path;
 
 use pymol_color::NamedColors;
+use pymol_select::SelectionResult;
 use serde::{Deserialize, Serialize};
 use pymol_settings::Settings;
 
@@ -221,9 +222,21 @@ pub trait ViewerLike {
         self.selections().get_expression(name)
     }
 
-    /// Define (store) a named selection expression
+    /// Define (store) a named selection expression.
+    /// Cache will be lazily populated on the next render.
     fn define_selection(&mut self, name: &str, selection: &str) {
         self.selections_mut().define(name, selection);
+        self.request_redraw();
+    }
+
+    /// Define a named selection with pre-computed evaluation results.
+    fn define_selection_with_results(
+        &mut self,
+        name: &str,
+        selection: &str,
+        results: Vec<(String, SelectionResult)>,
+    ) {
+        self.selections_mut().define_with_results(name, selection, results);
         self.request_redraw();
     }
 

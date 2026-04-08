@@ -16,6 +16,10 @@ pub struct SelectionEntry {
     pub expression: String,
     /// Whether the selection indicators are visible
     pub visible: bool,
+    /// Cached per-object evaluation results (object_name → SelectionResult).
+    /// Populated at define time, used by build_eval_context to avoid re-evaluation.
+    #[serde(skip)]
+    pub cached_results: AHashMap<String, SelectionResult>,
 }
 
 impl SelectionEntry {
@@ -24,13 +28,19 @@ impl SelectionEntry {
         Self {
             expression,
             visible: true,
+            cached_results: AHashMap::new(),
         }
     }
 
-    /// Create a new selection entry with specified visibility
-    pub fn with_visibility(expression: String, visible: bool) -> Self {
-        Self { expression, visible }
+    /// Create a new selection entry with cached evaluation results
+    pub fn with_results(expression: String, results: Vec<(String, SelectionResult)>) -> Self {
+        Self {
+            expression,
+            visible: true,
+            cached_results: results.into_iter().collect(),
+        }
     }
+
 }
 
 /// Manager for named selections
@@ -63,13 +73,31 @@ impl SelectionManager {
         self.selections.get(name).map(|e| e.expression.as_str())
     }
 
-    /// Define (store) a named selection expression
+    /// Define (store) a named selection expression.
     ///
     /// If a selection with this name already exists, it will be replaced.
+    /// The cache will be lazily populated on the next `rebuild_caches` /
+    /// `evaluate_visible` call.
     pub fn define(&mut self, name: &str, expression: &str) {
         self.selections.insert(
             name.to_string(),
             SelectionEntry::new(expression.to_string()),
+        );
+    }
+
+    /// Define a named selection with pre-computed evaluation results.
+    ///
+    /// The `results` contain per-object SelectionResult bitvecs evaluated at
+    /// define time, so subsequent lookups avoid re-parsing and re-evaluating.
+    pub fn define_with_results(
+        &mut self,
+        name: &str,
+        expression: &str,
+        results: Vec<(String, SelectionResult)>,
+    ) {
+        self.selections.insert(
+            name.to_string(),
+            SelectionEntry::with_results(expression.to_string(), results),
         );
     }
 
@@ -174,21 +202,22 @@ impl SelectionManager {
 
     /// Evaluate all visible selections for all molecules.
     ///
-    /// Builds a full evaluation context per molecule (implicit object-name
-    /// selections + pre-evaluated named selections) and combines all visible
-    /// selection results with OR.
+    /// Rebuilds stale caches first, then combines cached results with OR.
     ///
     /// Returns a vector of (object_name, SelectionResult) pairs where the
     /// SelectionResult is the union of all visible selections.
     pub fn evaluate_visible(
-        &self,
+        &mut self,
         registry: &ObjectRegistry,
         options: SelectionOptions,
     ) -> Vec<(String, SelectionResult)> {
-        let visible: Vec<(&str, &str)> = self.visible_selections().collect();
-        if visible.is_empty() {
+        let has_visible = self.selections.values().any(|e| e.visible);
+        if !has_visible {
             return Vec::new();
         }
+
+        // Ensure all caches are up to date
+        self.rebuild_caches(registry, options);
 
         let object_names: Vec<String> = registry.names().map(|s| s.to_string()).collect();
         let mut results: Vec<(String, SelectionResult)> = Vec::new();
@@ -197,30 +226,17 @@ impl SelectionManager {
             let Some(mol_obj) = registry.get_molecule(obj_name) else {
                 continue;
             };
-            let ctx = self.build_eval_context(mol_obj.molecule(), obj_name, &object_names, options);
+            let atom_count = mol_obj.molecule().atom_count();
 
-            // Evaluate and OR together all visible selections
+            // Combine all visible selections with OR using cached results
             let mut combined: Option<SelectionResult> = None;
-            for (sel_name, sel_expr) in &visible {
-                let ast = match pymol_select::parse(sel_expr) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        log::debug!("Failed to parse selection '{}': {:?}", sel_name, e);
-                        continue;
-                    }
-                };
-                match pymol_select::evaluate(&ast, &ctx) {
-                    Ok(result) => {
-                        combined = Some(match combined {
-                            Some(existing) => existing.union(&result),
-                            None => result,
+            for (_, entry) in self.selections.iter().filter(|(_, e)| e.visible) {
+                if let Some(cached) = entry.cached_results.get(obj_name) {
+                    if cached.atom_count() == atom_count {
+                        combined = Some(match combined.take() {
+                            Some(existing) => existing.union(cached),
+                            None => cached.clone(),
                         });
-                    }
-                    Err(e) => {
-                        log::debug!(
-                            "Failed to evaluate selection '{}' for '{}': {:?}",
-                            sel_name, obj_name, e
-                        );
                     }
                 }
             }
@@ -235,15 +251,43 @@ impl SelectionManager {
         results
     }
 
+    /// Rebuild stale caches for all selections across all molecules in the registry.
+    pub fn rebuild_caches(&mut self, registry: &ObjectRegistry, options: SelectionOptions) {
+        if self.selections.is_empty() {
+            return;
+        }
+        let object_names: Vec<String> = registry.names().map(|s| s.to_string()).collect();
+        for obj_name in &object_names {
+            let Some(mol_obj) = registry.get_molecule(obj_name) else {
+                continue;
+            };
+            let (_, resolved) = resolve_selections(
+                mol_obj.molecule(),
+                obj_name,
+                &object_names,
+                options,
+                &self.selections,
+            );
+            // Write newly resolved results back into caches
+            for (sel_name, result) in resolved {
+                if let Some(entry) = self.selections.get_mut(&sel_name) {
+                    entry.cached_results.insert(obj_name.to_string(), result);
+                }
+            }
+        }
+    }
+
     /// Build an `EvalContext` for a single molecule within the registry.
     ///
     /// The context includes:
     /// - Implicit object-name selections (all for the target, none for others)
-    /// - Pre-evaluated named selections for reference resolution
+    /// - Cached named selections resolved via multi-pass fixed-point
     /// - The provided `SelectionOptions` for case-sensitivity control
     ///
-    /// This is the shared context-building logic used by both command-level
-    /// selection evaluation and rendering-level visible selection evaluation.
+    /// This method is deliberately `&self` (read-only). It resolves uncached
+    /// selections on the fly but does not persist them. The render path should
+    /// use `evaluate_visible` (which calls `rebuild_caches`) for persistent
+    /// cache updates.
     pub fn build_eval_context<'a>(
         &self,
         mol: &'a pymol_mol::ObjectMolecule,
@@ -251,30 +295,69 @@ impl SelectionManager {
         all_object_names: &[String],
         options: SelectionOptions,
     ) -> EvalContext<'a> {
-        let mut ctx = EvalContext::single(mol);
-        ctx.options = options;
-
-        // Implicit object-name selections
-        let atom_count = mol.atom_count();
-        for other in all_object_names {
-            if other == obj_name {
-                ctx.add_selection(other.clone(), SelectionResult::all(atom_count));
-            } else {
-                ctx.add_selection(other.clone(), SelectionResult::none(atom_count));
-            }
-        }
-
-        // Pre-evaluate all named selections into the context
-        for (sel_name, entry) in &self.selections {
-            if let Ok(ast) = pymol_select::parse(&entry.expression) {
-                if let Ok(result) = pymol_select::evaluate(&ast, &ctx) {
-                    ctx.add_selection(sel_name.clone(), result);
-                }
-            }
-        }
-
+        let (ctx, _) = resolve_selections(mol, obj_name, all_object_names, options, &self.selections);
         ctx
     }
+}
+
+/// Build an `EvalContext` seeded with object-name and cached selections, then
+/// resolve any uncached/stale entries via multi-pass fixed-point evaluation.
+///
+/// Returns `(ctx, resolved)` where `resolved` contains the newly evaluated
+/// `(selection_name, SelectionResult)` pairs that were not found in cache.
+fn resolve_selections<'a>(
+    mol: &'a pymol_mol::ObjectMolecule,
+    obj_name: &str,
+    all_object_names: &[String],
+    options: SelectionOptions,
+    selections: &AHashMap<String, SelectionEntry>,
+) -> (EvalContext<'a>, Vec<(String, SelectionResult)>) {
+    let atom_count = mol.atom_count();
+    let mut ctx = EvalContext::single(mol);
+    ctx.options = options;
+
+    // Implicit object-name selections
+    for other in all_object_names {
+        if other == obj_name {
+            ctx.add_selection(other.clone(), SelectionResult::all(atom_count));
+        } else {
+            ctx.add_selection(other.clone(), SelectionResult::none(atom_count));
+        }
+    }
+
+    // Seed from cached results; collect uncached entries for resolution
+    let mut uncached: Vec<(&String, &SelectionEntry)> = Vec::new();
+    for (sel_name, entry) in selections {
+        if let Some(cached) = entry.cached_results.get(obj_name) {
+            if cached.atom_count() == atom_count {
+                ctx.add_selection(sel_name.clone(), cached.clone());
+                continue;
+            }
+        }
+        uncached.push((sel_name, entry));
+    }
+
+    // Multi-pass: keep resolving until no progress (handles inter-selection deps)
+    let mut resolved: Vec<(String, SelectionResult)> = Vec::new();
+    if !uncached.is_empty() {
+        let mut made_progress = true;
+        while made_progress && !uncached.is_empty() {
+            made_progress = false;
+            uncached.retain(|(sel_name, entry)| {
+                if let Ok(ast) = pymol_select::parse(&entry.expression) {
+                    if let Ok(result) = pymol_select::evaluate(&ast, &ctx) {
+                        ctx.add_selection((*sel_name).clone(), result.clone());
+                        resolved.push(((*sel_name).clone(), result));
+                        made_progress = true;
+                        return false;
+                    }
+                }
+                true
+            });
+        }
+    }
+
+    (ctx, resolved)
 }
 
 #[cfg(test)]
@@ -340,5 +423,86 @@ mod tests {
         assert!(!manager.is_visible("sel1"));
         assert!(!manager.is_visible("sel2"));
         assert!(manager.indicated_selection().is_none());
+    }
+
+    #[test]
+    fn test_build_eval_context_basic_chain_selection() {
+        use pymol_mol::{Atom, AtomResidue, Element, ObjectMolecule, CoordSet};
+        use lin_alg::f32::Vec3;
+        use std::sync::Arc;
+
+        // Create a molecule with two chains (H and L)
+        let mut mol = ObjectMolecule::new("1fdl");
+        let chain_h = Arc::new(AtomResidue::from_parts("H", "ALA", 1, ' ', ""));
+        let chain_l = Arc::new(AtomResidue::from_parts("L", "ALA", 1, ' ', ""));
+
+        for (residue, name) in [(chain_h.clone(), "CA"), (chain_l.clone(), "CA")] {
+            let mut atom = Atom::new(name, Element::Carbon);
+            atom.residue = residue.clone();
+            mol.add_atom(atom);
+        }
+        mol.add_coord_set(CoordSet::from_vec3(&[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+        ]));
+
+        // Empty selection manager (no named selections)
+        let manager = SelectionManager::new();
+        let object_names = vec!["1fdl".to_string()];
+        let options = SelectionOptions::default();
+
+        let ctx = manager.build_eval_context(&mol, "1fdl", &object_names, options);
+
+        // Evaluate "chain H or chain L"
+        let expr = pymol_select::parse("chain H or chain L").unwrap();
+        let result = pymol_select::evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 2, "chain H or chain L should match 2 atoms");
+
+        // Evaluate "chain H" alone
+        let expr = pymol_select::parse("chain H").unwrap();
+        let result = pymol_select::evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 1, "chain H should match 1 atom");
+    }
+
+    #[test]
+    fn test_cached_results_used_in_build_eval_context() {
+        use pymol_mol::{Atom, AtomResidue, Element, ObjectMolecule, CoordSet};
+        use lin_alg::f32::Vec3;
+        use std::sync::Arc;
+
+        let mut mol = ObjectMolecule::new("test");
+        let chain_h = Arc::new(AtomResidue::from_parts("H", "ALA", 1, ' ', ""));
+        let chain_l = Arc::new(AtomResidue::from_parts("L", "ALA", 1, ' ', ""));
+
+        for residue in &[chain_h.clone(), chain_l.clone()] {
+            let mut atom = Atom::new("CA", Element::Carbon);
+            atom.residue = residue.clone();
+            mol.add_atom(atom);
+        }
+        mol.add_coord_set(CoordSet::from_vec3(&[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+        ]));
+
+        let mut manager = SelectionManager::new();
+        let object_names = vec!["test".to_string()];
+        let options = SelectionOptions::default();
+
+        // Define "ab" = "chain H" with cached results
+        let ctx = manager.build_eval_context(&mol, "test", &object_names, options);
+        let expr = pymol_select::parse("chain H").unwrap();
+        let result = pymol_select::evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 1);
+
+        manager.define_with_results("ab", "chain H", vec![("test".to_string(), result)]);
+
+        // Now build context again — "ab" should be resolvable from cache
+        let ctx = manager.build_eval_context(&mol, "test", &object_names, options);
+        assert!(ctx.has_selection("ab"), "named selection 'ab' should be in context");
+
+        // "ab or chain L" should work
+        let expr = pymol_select::parse("ab or chain L").unwrap();
+        let result = pymol_select::evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 2, "ab or chain L should match 2 atoms");
     }
 }

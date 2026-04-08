@@ -358,7 +358,7 @@ impl App {
     }
 
     /// Evaluate all visible selections for all molecules.
-    pub(crate) fn evaluate_visible_selections(&self) -> Vec<(String, SelectionResult)> {
+    pub(crate) fn evaluate_visible_selections(&mut self) -> Vec<(String, SelectionResult)> {
         self.state.selections.evaluate_visible(
             &self.state.registry,
             Default::default(),
