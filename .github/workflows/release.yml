@@ -62,7 +62,9 @@ jobs:
             libxcb-randr0-dev \
             libxcb-xfixes0-dev \
             libasound2-dev \
-            libfontconfig1-dev
+            libfontconfig1-dev \
+            libgtk-3-dev \
+            libxdo-dev
 
       - name: Build with cargo
         run: cargo build --release -p pymol-gui --target ${{ matrix.target }}
@@ -133,7 +135,9 @@ jobs:
             libxcb-randr0-dev \
             libxcb-xfixes0-dev \
             libasound2-dev \
-            libfontconfig1-dev
+            libfontconfig1-dev \
+            libgtk-3-dev \
+            libxdo-dev
 
       - name: Setup Python
         uses: actions/setup-python@v5
