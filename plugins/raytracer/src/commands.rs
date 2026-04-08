@@ -1,7 +1,6 @@
 //! Command implementations for the raytracer plugin.
 //!
-//! Provides the `ray` command (perform raytracing) and `rt_toolbar` command
-//! (show/hide the ray tracing toolbar panel).
+//! Provides the `ray` command (perform raytracing).
 
 use pymol_plugin::prelude::*;
 use pymol_scene::ViewportImage;
@@ -163,64 +162,6 @@ SEE ALSO
             }
         }
 
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RtToolbarCommand
-// ---------------------------------------------------------------------------
-
-pub(crate) struct RtToolbarCommand;
-
-impl Command for RtToolbarCommand {
-    fn name(&self) -> &str {
-        "rt_toolbar"
-    }
-
-    fn arg_hints(&self) -> &[ArgHint] {
-        &[ArgHint::Keywords(&["show", "hide"])]
-    }
-
-    fn help(&self) -> &str {
-        r#"
-DESCRIPTION
-
-    "rt_toolbar" shows or hides the ray tracing toolbar panel.
-
-USAGE
-
-    rt_toolbar show
-    rt_toolbar hide
-
-EXAMPLES
-
-    rt_toolbar show          # Open the ray tracing toolbar
-    rt_toolbar hide          # Close the ray tracing toolbar
-"#
-    }
-
-    fn execute<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        args: &ParsedCommand,
-    ) -> CmdResult {
-        let sub = args.get_str(0).unwrap_or("show");
-        match sub {
-            "show" => {
-                ctx.show_panel("rt_toolbar");
-                ctx.print(" Opening ray tracing toolbar.");
-            }
-            "hide" => {
-                ctx.hide_panel("rt_toolbar");
-                ctx.print(" Closing ray tracing toolbar.");
-            }
-            _ => {
-                return Err(CmdError::execution(
-                    "Usage: rt_toolbar show|hide",
-                ))
-            }
-        }
         Ok(())
     }
 }

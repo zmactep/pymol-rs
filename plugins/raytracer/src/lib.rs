@@ -62,8 +62,8 @@ define_plugin_settings! {
 pymol_plugin! {
     name: "raytracer",
     version: "0.2.4",
-    description: "GPU compute shader raytracing — provides the 'ray' and 'rt_toolbar' commands",
-    commands: [commands::RayCommand, commands::RtToolbarCommand],
+    description: "GPU compute shader raytracing — provides the 'ray' command",
+    commands: [commands::RayCommand],
     components: [
         (toolbar::RtToolbarComponent::new(), {
             let mut c = PanelConfig::right(300.0);
