@@ -7,18 +7,16 @@
 use std::collections::HashSet;
 
 use egui::{Color32, RichText, Ui};
-use pymol_color::NamedColors;
-use pymol_scene::ObjectRegistry;
 use pymol_select::build_sele_command;
 
 use pymol_framework::message::MessageBus;
 use pymol_framework::model::sequence::{
-    ResidueRef, ResidueKind, SeqChain, SeqObject, SequenceModel,
+    ResidueKind, ResidueRef, SeqChain, SeqObject, SequenceModel,
     chain_highlighted_sequence, chain_to_sequence, collect_all_sequences,
     compress_resi_list,
 };
 
-// Re-export SequenceUiState from framework for backwards compatibility
+// Re-export for backwards compatibility
 pub use pymol_framework::model::SequenceUiState;
 
 /// Pale magenta — standard DNA/RNA nucleotides
@@ -39,19 +37,16 @@ pub struct SequencePanel;
 
 impl SequencePanel {
     /// Show the sequence panel, sending messages directly to the bus.
+    ///
+    /// The model is borrowed immutably — cache rebuilds happen in the component
+    /// layer *before* this method is called.
     pub fn show(
         ui: &mut Ui,
-        model: &mut SequenceModel,
+        model: &SequenceModel,
         ui_state: &mut SequenceUiState,
-        registry: &ObjectRegistry,
-        named_colors: &NamedColors,
         has_sele: bool,
         bus: &mut MessageBus,
     ) {
-        if model.needs_rebuild(registry) {
-            model.rebuild_cache(registry);
-        }
-
         if model.sequences.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label(
@@ -64,6 +59,7 @@ impl SequencePanel {
         }
 
         let highlighted = &model.highlighted;
+        let viewer_colors = &mut ui_state.viewer_colors;
         let drag_start = &mut ui_state.drag_start;
         let drag_end = &mut ui_state.drag_end;
 
@@ -169,22 +165,22 @@ impl SequencePanel {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for (obj_idx, seq_obj) in model.sequences.iter().enumerate() {
                             for (chain_idx, chain) in seq_obj.chains.iter().enumerate() {
-                                render_chain_sequence(
-                                    ui,
-                                    &seq_obj.object_name,
+                                let mut cx = ChainRenderContext {
+                                    object_name: &seq_obj.object_name,
                                     chain,
                                     obj_idx,
                                     chain_idx,
                                     cw,
-                                    named_colors,
                                     highlighted,
-                                    &model.sequences,
+                                    all_sequences: &model.sequences,
                                     drag_start,
                                     drag_end,
                                     bus,
                                     has_sele,
-                                    &mut hover_out,
-                                );
+                                    viewer_colors,
+                                    hover_out: &mut hover_out,
+                                };
+                                render_chain_sequence(ui, &mut cx);
                             }
                             ui.add_space(spacing);
                         }
@@ -209,24 +205,26 @@ fn char_width(ui: &Ui) -> f32 {
     galley.size().x
 }
 
-/// Render the sequence of residues for one chain: ruler row + sequence row.
-#[allow(clippy::too_many_arguments)]
-fn render_chain_sequence(
-    ui: &mut Ui,
-    object_name: &str,
-    chain: &SeqChain,
+/// All context needed to render one chain's sequence row.
+struct ChainRenderContext<'a> {
+    object_name: &'a str,
+    chain: &'a SeqChain,
     obj_idx: usize,
     chain_idx: usize,
     cw: f32,
-    named_colors: &NamedColors,
-    highlighted: &HashSet<ResidueRef>,
-    all_sequences: &[SeqObject],
-    drag_start: &mut Option<(usize, usize, usize)>,
-    drag_end: &mut Option<usize>,
-    bus: &mut MessageBus,
+    highlighted: &'a HashSet<ResidueRef>,
+    all_sequences: &'a [SeqObject],
+    drag_start: &'a mut Option<(usize, usize, usize)>,
+    drag_end: &'a mut Option<usize>,
+    bus: &'a mut MessageBus,
     has_sele: bool,
-    hover_out: &mut Option<ResidueRef>,
-) {
+    viewer_colors: &'a mut bool,
+    hover_out: &'a mut Option<ResidueRef>,
+}
+
+/// Render the sequence of residues for one chain: ruler row + sequence row.
+fn render_chain_sequence(ui: &mut Ui, cx: &mut ChainRenderContext) {
+    let chain = cx.chain;
     let n = chain.residues.len();
     if n == 0 {
         return;
@@ -240,7 +238,7 @@ fn render_chain_sequence(
         cumulative += residue.char_width;
     }
     let total_cells = cumulative;
-    let total_width = cw * total_cells as f32;
+    let total_width = cx.cw * total_cells as f32;
 
     // --- Ruler row ---
     let (ruler_rect, _) =
@@ -251,9 +249,9 @@ fn render_chain_sequence(
 
     for (res_idx, residue) in chain.residues.iter().enumerate() {
         if res_idx == 0 || res_idx % 10 == 0 {
-            let x = ruler_rect.min.x + cw * x_offsets[res_idx] as f32;
+            let x = ruler_rect.min.x + cx.cw * x_offsets[res_idx] as f32;
             let label = format!("{}", residue.resv);
-            let label_width = label.len() as f32 * cw * 0.7;
+            let label_width = label.len() as f32 * cx.cw * 0.7;
             if x + label_width <= ruler_rect.max.x {
                 ruler_painter.text(
                     egui::pos2(x, ruler_rect.min.y),
@@ -279,6 +277,7 @@ fn render_chain_sequence(
 
     let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
 
+    let cw = cx.cw;
     let pointer_to_res_idx = |pos: egui::Pos2| -> usize {
         let rel_x = pos.x - seq_rect.min.x;
         let cell = (rel_x / cw).floor().max(0.0) as usize;
@@ -289,9 +288,9 @@ fn render_chain_sequence(
     };
 
     // Determine the active drag range for this chain
-    let drag_range = if let Some((d_obj, d_chain, d_start)) = *drag_start {
-        if d_obj == obj_idx && d_chain == chain_idx {
-            drag_end.map(|d_end| {
+    let drag_range = if let Some((d_obj, d_chain, d_start)) = *cx.drag_start {
+        if d_obj == cx.obj_idx && d_chain == cx.chain_idx {
+            cx.drag_end.map(|d_end| {
                 let lo = d_start.min(d_end);
                 let hi = d_start.max(d_end);
                 lo..=hi
@@ -322,16 +321,17 @@ fn render_chain_sequence(
     }
 
     // Detect hovered residue
-    let hover_res_idx = if drag_start.is_none() && ctrl_held {
+    let hover_res_idx = if cx.drag_start.is_none() && ctrl_held {
         response.hover_pos().map(pointer_to_res_idx)
     } else {
         None
     };
 
     // Pre-filter highlighted residues for this chain
-    let highlighted_resvs: HashSet<i32> = highlighted
+    let highlighted_resvs: HashSet<i32> = cx
+        .highlighted
         .iter()
-        .filter(|r| r.object_name == object_name && r.chain_id == chain.chain_id)
+        .filter(|r| r.object_name == cx.object_name && r.chain_id == chain.chain_id)
         .map(|r| r.resv)
         .collect();
 
@@ -380,10 +380,14 @@ fn render_chain_sequence(
             Color32::WHITE
         } else if is_highlighted || is_in_drag {
             Color32::BLACK
+        } else if *cx.viewer_colors {
+            let [r, g, b] = residue.viewer_color;
+            Color32::from_rgb(r, g, b)
         } else {
             match residue.kind {
                 ResidueKind::AminoAcidCanonical => {
-                    resolve_residue_color(residue, named_colors)
+                    let [r, g, b] = residue.named_color;
+                    Color32::from_rgb(r, g, b)
                 }
                 ResidueKind::NucleotideCanonical => NUCLEOTIDE_COLOR,
                 ResidueKind::AminoAcidNonCanonical
@@ -412,41 +416,41 @@ fn render_chain_sequence(
     if response.drag_started() {
         if let Some(pos) = response.interact_pointer_pos() {
             let res_idx = pointer_to_res_idx(pos);
-            *drag_start = Some((obj_idx, chain_idx, res_idx));
-            *drag_end = Some(res_idx);
+            *cx.drag_start = Some((cx.obj_idx, cx.chain_idx, res_idx));
+            *cx.drag_end = Some(res_idx);
         }
     }
 
     if response.dragged() {
-        if let Some((d_obj, d_chain, _)) = *drag_start {
-            if d_obj == obj_idx && d_chain == chain_idx {
+        if let Some((d_obj, d_chain, _)) = *cx.drag_start {
+            if d_obj == cx.obj_idx && d_chain == cx.chain_idx {
                 if let Some(pos) = response.interact_pointer_pos() {
-                    *drag_end = Some(pointer_to_res_idx(pos));
+                    *cx.drag_end = Some(pointer_to_res_idx(pos));
                 }
             }
         }
     }
 
     if response.drag_stopped() {
-        if let Some((d_obj, d_chain, d_start_idx)) = *drag_start {
-            if d_obj == obj_idx && d_chain == chain_idx {
-                if let Some(d_end_idx) = *drag_end {
+        if let Some((d_obj, d_chain, d_start_idx)) = *cx.drag_start {
+            if d_obj == cx.obj_idx && d_chain == cx.chain_idx {
+                if let Some(d_end_idx) = *cx.drag_end {
                     let lo = d_start_idx.min(d_end_idx);
                     let hi = d_start_idx.max(d_end_idx);
                     let resv_values: Vec<i32> =
                         chain.residues[lo..=hi].iter().map(|r| r.resv).collect();
                     let expr = format!(
                         "model {} and chain {} and resi {}",
-                        object_name,
+                        cx.object_name,
                         chain.chain_id,
                         compress_resi_list(&resv_values)
                     );
-                    if let Some(cmd) = build_sele_command(&expr, ctrl_held, has_sele) {
-                        bus.execute_command(cmd);
+                    if let Some(cmd) = build_sele_command(&expr, ctrl_held, cx.has_sele) {
+                        cx.bus.execute_command(cmd);
                     }
                 }
-                *drag_start = None;
-                *drag_end = None;
+                *cx.drag_start = None;
+                *cx.drag_end = None;
             }
         }
     }
@@ -457,16 +461,16 @@ fn render_chain_sequence(
             let residue = &chain.residues[res_idx];
             let expr = format!(
                 "model {} and chain {} and resi {}",
-                object_name, chain.chain_id, residue.resv
+                cx.object_name, chain.chain_id, residue.resv
             );
-            if let Some(cmd) = build_sele_command(&expr, ctrl_held, has_sele) {
-                bus.execute_command(cmd);
+            if let Some(cmd) = build_sele_command(&expr, ctrl_held, cx.has_sele) {
+                cx.bus.execute_command(cmd);
             }
         }
     }
 
     // Tooltip on hover
-    if drag_start.is_none() {
+    if cx.drag_start.is_none() {
         if let Some(pos) = response.hover_pos() {
             let res_idx = pointer_to_res_idx(pos);
             let residue = &chain.residues[res_idx];
@@ -482,8 +486,8 @@ fn render_chain_sequence(
                 ui.label(&tooltip_text);
             });
 
-            *hover_out = Some(ResidueRef {
-                object_name: object_name.to_string(),
+            *cx.hover_out = Some(ResidueRef {
+                object_name: cx.object_name.to_string(),
                 chain_id: chain.chain_id.clone(),
                 resv: residue.resv,
             });
@@ -503,7 +507,7 @@ fn render_chain_sequence(
                     o.commands
                         .push(egui::OutputCommand::CopyText(seq.clone()));
                 });
-                bus.print_info(format!(
+                cx.bus.print_info(format!(
                     "Copied {} residues from chain {}",
                     seq.len(),
                     chain.chain_id
@@ -519,7 +523,7 @@ fn render_chain_sequence(
                     o.commands
                         .push(egui::OutputCommand::CopyText(seq.clone()));
                 });
-                bus.print_info(format!(
+                cx.bus.print_info(format!(
                     "Copied {} residues from chain {}",
                     seq.len(),
                     chain.chain_id
@@ -530,14 +534,18 @@ fn render_chain_sequence(
 
         ui.separator();
 
+        ui.checkbox(cx.viewer_colors, "Color by viewer");
+
+        ui.separator();
+
         if ui.button("Copy all chains").clicked() {
-            let (text, count) = collect_all_sequences(all_sequences);
+            let (text, count) = collect_all_sequences(cx.all_sequences);
             if !text.is_empty() {
                 ui.ctx().output_mut(|o| {
                     o.commands
                         .push(egui::OutputCommand::CopyText(text));
                 });
-                bus.print_info(format!(
+                cx.bus.print_info(format!(
                     "Copied {} residues to clipboard",
                     count
                 ));
@@ -545,18 +553,4 @@ fn render_chain_sequence(
             ui.close();
         }
     });
-}
-
-/// Resolve a residue's display color from its color index
-fn resolve_residue_color(residue: &pymol_framework::model::SeqResidue, named_colors: &NamedColors) -> Color32 {
-    if residue.color_index >= 0 {
-        if let Some(color) = named_colors.get_by_index(residue.color_index as u32) {
-            return Color32::from_rgb(
-                (color.r * 255.0) as u8,
-                (color.g * 255.0) as u8,
-                (color.b * 255.0) as u8,
-            );
-        }
-    }
-    Color32::from_rgb(200, 200, 200)
 }

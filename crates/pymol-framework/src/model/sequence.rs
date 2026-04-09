@@ -9,9 +9,22 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
+use pymol_color::{
+    ChainColors, Color, ColorIndex, ElementColors, NamedColors, residue_type_color, spectrum_color,
+    ss_color,
+};
+
+/// Everything the model needs from the outside world to rebuild its cache.
+///
+/// Bundles color-lookup tables so that `rebuild_cache` / `build_seq_object`
+/// take a single context reference instead of a growing parameter list.
+pub struct SequenceColorContext<'a> {
+    pub named_colors: &'a NamedColors,
+    pub element_colors: &'a ElementColors,
+}
 use pymol_mol::{
     is_capping_group, is_ion, is_standard_amino_acid, is_standard_nucleotide, is_water,
-    nucleotide_to_char, residue_to_char, three_to_one, ObjectMolecule,
+    nucleotide_to_char, residue_to_char, three_to_one, Atom, ObjectMolecule,
 };
 use pymol_scene::{Object, ObjectRegistry};
 
@@ -56,8 +69,12 @@ pub struct SeqResidue {
     /// Number of character cells this residue occupies in the sequence row
     pub char_width: usize,
     pub atom_range: Range<usize>,
-    /// Base color index of the CA atom (or first atom), for display coloring
-    pub color_index: i32,
+    /// Pre-resolved color for the default residue coloring mode (RGB).
+    /// For canonical amino acids this is the named-color of the representative atom;
+    /// for other kinds the render path uses fixed constants instead.
+    pub named_color: [u8; 3],
+    /// Pre-resolved color matching the 3D viewer (RGB)
+    pub viewer_color: [u8; 3],
     /// Drives color and font size in the sequence viewer
     pub kind: ResidueKind,
 }
@@ -86,6 +103,8 @@ pub struct SequenceUiState {
     pub drag_end: Option<usize>,
     /// Current sequence hover state for change detection
     pub current_hover: Option<ResidueRef>,
+    /// When true, residue symbols are colored to match the 3D viewer
+    pub viewer_colors: bool,
 }
 
 impl Default for SequenceUiState {
@@ -100,6 +119,7 @@ impl SequenceUiState {
             drag_start: None,
             drag_end: None,
             current_hover: None,
+            viewer_colors: false,
         }
     }
 
@@ -120,6 +140,8 @@ pub struct SequenceModel {
     cached_enabled_count: usize,
     /// Registry generation when cache was last built
     cached_generation: u64,
+    /// Checksum of all atoms' base color indices (for fast change detection)
+    cached_color_checksum: u64,
     /// Currently highlighted residues from 3D selection
     pub highlighted: HashSet<ResidueRef>,
 }
@@ -137,6 +159,7 @@ impl SequenceModel {
             cached_object_count: 0,
             cached_enabled_count: 0,
             cached_generation: 0,
+            cached_color_checksum: 0,
             highlighted: HashSet::new(),
         }
     }
@@ -146,8 +169,8 @@ impl SequenceModel {
         self.highlighted = highlighted;
     }
 
-    /// Rebuild the sequence cache from the registry
-    pub fn rebuild_cache(&mut self, registry: &ObjectRegistry) {
+    /// Rebuild the sequence cache from the registry.
+    pub fn rebuild_cache(&mut self, registry: &ObjectRegistry, color_ctx: &SequenceColorContext) {
         self.sequences.clear();
 
         for name in registry.names() {
@@ -156,7 +179,10 @@ impl SequenceModel {
                     continue;
                 }
                 let mol = mol_obj.molecule();
-                let seq_obj = build_seq_object(name, mol);
+                let resv_range = mol_resv_range(mol);
+                let b_range = mol_b_factor_range(mol);
+                let seq_obj =
+                    build_seq_object(name, mol, color_ctx, resv_range, b_range);
                 if !seq_obj.chains.is_empty() {
                     self.sequences.push(seq_obj);
                 }
@@ -166,32 +192,20 @@ impl SequenceModel {
         self.cached_object_count = registry.names().count();
         self.cached_enabled_count = registry.enabled_objects().count();
         self.cached_generation = registry.generation();
+        self.cached_color_checksum = color_checksum(registry);
     }
 
-    /// Check if cache needs rebuilding
-    pub fn needs_rebuild(&self, registry: &ObjectRegistry) -> bool {
+    /// Check if cache needs rebuilding.
+    ///
+    /// When `viewer_colors` is active, also detects color-only changes
+    /// (e.g. `color rainbow`) which don't bump the registry generation counter.
+    pub fn needs_rebuild(&self, registry: &ObjectRegistry, viewer_colors: bool) -> bool {
         registry.names().count() != self.cached_object_count
             || registry.enabled_objects().count() != self.cached_enabled_count
             || registry.generation() != self.cached_generation
+            || (viewer_colors && color_checksum(registry) != self.cached_color_checksum)
     }
 
-    /// Compute the desired panel height based on the number of objects and chains.
-    pub fn desired_height(&mut self, registry: &ObjectRegistry) -> f32 {
-        if self.needs_rebuild(registry) {
-            self.rebuild_cache(registry);
-        }
-        if self.sequences.is_empty() {
-            return 30.0;
-        }
-        let row_height = 18.0;
-        let ruler_height = 10.0;
-        let spacing = 2.0;
-        let chain_height = ruler_height + row_height;
-        let total_chains: usize = self.sequences.iter().map(|s| s.chains.len()).sum();
-        let visible_chains = total_chains.min(4) as f32;
-        let obj_spacing = self.sequences.len() as f32 * spacing;
-        visible_chains * chain_height + obj_spacing + 16.0
-    }
 }
 
 // =============================================================================
@@ -228,12 +242,130 @@ pub fn compress_resi_list(values: &[i32]) -> String {
     parts.join("+")
 }
 
+/// Compute a fast checksum of all atoms' base color indices across enabled molecules.
+///
+/// Uses FNV-style hashing — O(atoms) but no allocations. Detects any color change
+/// including partial selections like `color red, chain A`.
+fn color_checksum(registry: &ObjectRegistry) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325; // FNV offset basis
+    for name in registry.names() {
+        if let Some(mol_obj) = registry.get_molecule(name) {
+            if !mol_obj.is_enabled() {
+                continue;
+            }
+            for atom in mol_obj.molecule().atoms() {
+                hash ^= atom.repr.colors.base as u64;
+                hash = hash.wrapping_mul(0x100000001b3); // FNV prime
+            }
+        }
+    }
+    hash
+}
+
+/// Compute (min, max) residue sequence number range for a molecule.
+fn mol_resv_range(mol: &ObjectMolecule) -> (i32, i32) {
+    let mut min = i32::MAX;
+    let mut max = i32::MIN;
+    for atom in mol.atoms() {
+        let v = atom.residue.resv;
+        if v < min { min = v; }
+        if v > max { max = v; }
+    }
+    if min > max { (1, 100) } else { (min, max) }
+}
+
+/// Compute (min, max) B-factor range for a molecule.
+fn mol_b_factor_range(mol: &ObjectMolecule) -> (f32, f32) {
+    let mut min = f32::MAX;
+    let mut max = f32::MIN;
+    for atom in mol.atoms() {
+        if atom.b_factor < min { min = atom.b_factor; }
+        if atom.b_factor > max { max = atom.b_factor; }
+    }
+    if min > max { (0.0, 100.0) } else { (min, max) }
+}
+
+/// Resolve an atom's named color index to RGB, if it has a named color.
+fn resolve_named_color(atom: &Atom, named_colors: &NamedColors) -> Option<[u8; 3]> {
+    if atom.repr.colors.base >= 0 {
+        if let Some(color) = named_colors.get_by_index(atom.repr.colors.base as u32) {
+            return Some([
+                (color.r * 255.0) as u8,
+                (color.g * 255.0) as u8,
+                (color.b * 255.0) as u8,
+            ]);
+        }
+    }
+    None
+}
+
+/// Resolve an atom's base color index to an RGB triple, matching 3D viewer logic.
+fn resolve_viewer_color(
+    atom: &Atom,
+    named_colors: &NamedColors,
+    element_colors: &ElementColors,
+    resv_range: (i32, i32),
+    b_factor_range: (f32, f32),
+) -> [u8; 3] {
+    let color = match ColorIndex::from(atom.repr.colors.base) {
+        ColorIndex::ByElement | ColorIndex::Atomic => {
+            element_colors.get(atom.element as u8)
+        }
+        ColorIndex::ByChain => ChainColors::get(&atom.residue.chain),
+        ColorIndex::BySS => ss_color(atom.ss_type as u8),
+        ColorIndex::ByResidueType => {
+            residue_type_color(&atom.residue.resn)
+                .unwrap_or_else(|| element_colors.get(atom.element as u8))
+        }
+        ColorIndex::ByResidueIndex => {
+            let (min, max) = resv_range;
+            let range = max - min;
+            if range <= 0 {
+                spectrum_color(0.5)
+            } else {
+                let t = ((atom.residue.resv - min) as f32) / (range as f32);
+                spectrum_color(t)
+            }
+        }
+        ColorIndex::ByBFactor => {
+            let (min, max) = b_factor_range;
+            let range = max - min;
+            if range <= 0.0 {
+                Color::WHITE
+            } else {
+                let t = ((atom.b_factor - min) / range).clamp(0.0, 1.0);
+                if t < 0.5 {
+                    let s = t * 2.0;
+                    Color::new(s, s, 1.0)
+                } else {
+                    let s = (t - 0.5) * 2.0;
+                    Color::new(1.0, 1.0 - s, 1.0 - s)
+                }
+            }
+        }
+        ColorIndex::Named(idx) => {
+            named_colors.get_by_index(idx).unwrap_or(Color::WHITE)
+        }
+    };
+    [
+        (color.r * 255.0) as u8,
+        (color.g * 255.0) as u8,
+        (color.b * 255.0) as u8,
+    ]
+}
+
 /// Build sequence data for one molecule object
 ///
 /// ChainIterator groups *consecutive* atoms by chain ID. In mmCIF/PDB files,
 /// HETATM records often follow all ATOM records, so the same chain ID (e.g. "A")
 /// can appear multiple times. We merge these into a single SeqChain.
-pub fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
+pub fn build_seq_object(
+    object_name: &str,
+    mol: &ObjectMolecule,
+    color_ctx: &SequenceColorContext,
+    resv_range: (i32, i32),
+    b_factor_range: (f32, f32),
+) -> SeqObject {
     let mut chain_index: std::collections::HashMap<String, usize> = Default::default();
     let mut chains: Vec<SeqChain> = Vec::new();
 
@@ -274,16 +406,27 @@ pub fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
             };
             let char_width = display_label.len();
 
-            let color_index = residue_view
+            // Pick representative atom: CA for proteins, first atom otherwise
+            let repr_atom = residue_view
                 .ca()
-                .map(|(_, atom)| atom.repr.colors.base)
-                .unwrap_or_else(|| {
-                    residue_view
-                        .iter()
-                        .next()
-                        .map(|a| a.repr.colors.base)
-                        .unwrap_or(-1)
-                });
+                .map(|(_, atom)| atom)
+                .or_else(|| residue_view.iter().next());
+
+            let named_color = repr_atom
+                .and_then(|a| resolve_named_color(a, color_ctx.named_colors))
+                .unwrap_or([200, 200, 200]);
+
+            let viewer_color = repr_atom
+                .map(|a| {
+                    resolve_viewer_color(
+                        a,
+                        color_ctx.named_colors,
+                        color_ctx.element_colors,
+                        resv_range,
+                        b_factor_range,
+                    )
+                })
+                .unwrap_or([200, 200, 200]);
 
             let seq_residue = SeqResidue {
                 chain: residue_view.chain().to_string(),
@@ -293,7 +436,8 @@ pub fn build_seq_object(object_name: &str, mol: &ObjectMolecule) -> SeqObject {
                 display_label,
                 char_width,
                 atom_range: residue_view.atom_range.clone(),
-                color_index,
+                named_color,
+                viewer_color,
                 kind,
             };
 
