@@ -357,6 +357,19 @@ fn render_chain_sequence(
             );
         }
 
+        if is_highlighted || is_in_drag {
+            let w = cw * residue.char_width as f32;
+            let highlight_rect = egui::Rect::from_min_size(
+                egui::pos2(x, seq_rect.min.y),
+                egui::vec2(w, seq_rect.height()),
+            );
+            painter.rect_filled(
+                highlight_rect,
+                0.0,
+                Color32::from_rgba_premultiplied(255, 119, 255, 80),
+            );
+        }
+
         let font = if residue.char_width == 1 {
             seq_font.clone()
         } else {
@@ -366,7 +379,7 @@ fn render_chain_sequence(
         let color = if is_ctrl_hovered {
             Color32::WHITE
         } else if is_highlighted || is_in_drag {
-            Color32::from_rgb(255, 119, 255)
+            Color32::BLACK
         } else {
             match residue.kind {
                 ResidueKind::AminoAcidCanonical => {
