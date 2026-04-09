@@ -201,15 +201,15 @@ impl<R: Read> TrajectoryReader for TrrReader<R> {
             }
 
             if frame_idx >= opts.start
-                && opts.stop.map_or(true, |s| frame_idx < s)
-                && (frame_idx - opts.start) % interval == 0
+                && opts.stop.is_none_or(|s| frame_idx < s)
+                && (frame_idx - opts.start).is_multiple_of(interval)
             {
                 frames.push(CoordSet::from_coords(coords));
             }
 
             frame_idx += 1;
 
-            if opts.stop.map_or(false, |s| frame_idx >= s) {
+            if opts.stop.is_some_and(|s| frame_idx >= s) {
                 break;
             }
         }

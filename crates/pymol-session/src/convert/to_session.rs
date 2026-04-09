@@ -193,8 +193,8 @@ fn convert_setting_value(
 fn convert_view(view: &[f64; 25]) -> SceneView {
     // PyMOL stores the 4x4 rotation in column-major order — same as our Mat4.data
     let mut rotation = Mat4::new_identity();
-    for i in 0..16 {
-        rotation.data[i] = view[i] as f32;
+    for (i, &v) in view.iter().enumerate().take(16) {
+        rotation.data[i] = v as f32;
     }
 
     let fov_raw = view[24] as f32;
@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn test_molecule_conversion() {
         let mut pse = minimal_pse();
-        pse.names.push(Some(PseNameEntry::Object(PseObject {
+        pse.names.push(Some(PseNameEntry::Object(Box::new(PseObject {
             name: "mol1".into(),
             type_code: 1,
             visible: true,
@@ -548,7 +548,7 @@ mod tests {
                 coord_sets: vec![Some(PseCoordSet { n_atom: 1, coords: vec![1.0, 2.0, 3.0], idx_to_atm: vec![] })],
                 discrete: false, n_discrete: 0, symmetry: None,
             }),
-        })));
+        }))));
 
         let session = pse_to_session(&pse).unwrap();
         assert_eq!(session.registry.len(), 1);
@@ -560,13 +560,13 @@ mod tests {
     #[test]
     fn test_selection_conversion() {
         let mut pse = minimal_pse();
-        pse.names.push(Some(PseNameEntry::Object(PseObject {
+        pse.names.push(Some(PseNameEntry::Object(Box::new(PseObject {
             name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1, ttt: None, settings: vec![],
             data: PseObjectData::Molecule(PseMolecule {
                 atoms: vec![], bonds: vec![], coord_sets: vec![],
                 discrete: false, n_discrete: 0, symmetry: None,
             }),
-        })));
+        }))));
         pse.names.push(Some(PseNameEntry::Selection(PseSelection {
             name: "sele".into(), visible: true, members: vec![(0, vec![0])],
         })));
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn test_ttt_matrix_applied() {
         let mut pse = minimal_pse();
-        pse.names.push(Some(PseNameEntry::Object(PseObject {
+        pse.names.push(Some(PseNameEntry::Object(Box::new(PseObject {
             name: "mol1".into(),
             type_code: 1,
             visible: true,
@@ -627,7 +627,7 @@ mod tests {
                 coord_sets: vec![Some(PseCoordSet { n_atom: 1, coords: vec![0.0, 0.0, 0.0], idx_to_atm: vec![] })],
                 discrete: false, n_discrete: 0, symmetry: None,
             }),
-        })));
+        }))));
 
         let session = pse_to_session(&pse).unwrap();
         let mol_obj = session.registry.get_molecule("mol1").unwrap();
@@ -639,13 +639,13 @@ mod tests {
     #[test]
     fn test_no_ttt_means_identity() {
         let mut pse = minimal_pse();
-        pse.names.push(Some(PseNameEntry::Object(PseObject {
+        pse.names.push(Some(PseNameEntry::Object(Box::new(PseObject {
             name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1, ttt: None, settings: vec![],
             data: PseObjectData::Molecule(PseMolecule {
                 atoms: vec![], bonds: vec![], coord_sets: vec![],
                 discrete: false, n_discrete: 0, symmetry: None,
             }),
-        })));
+        }))));
 
         let session = pse_to_session(&pse).unwrap();
         let mol_obj = session.registry.get_molecule("mol1").unwrap();
@@ -658,7 +658,7 @@ mod tests {
         // Register a custom session color at PyMOL index 9999
         pse.colors.push(PseColor { name: "custom_blue".into(), index: 9999, rgb: [0.0, 0.0, 1.0] });
         // Create a molecule with an atom using that custom color index
-        pse.names.push(Some(PseNameEntry::Object(PseObject {
+        pse.names.push(Some(PseNameEntry::Object(Box::new(PseObject {
             name: "mol1".into(), type_code: 1, visible: true, rep_mask: 1, color: -1, ttt: None, settings: vec![],
             data: PseObjectData::Molecule(PseMolecule {
                 atoms: vec![PseAtom {
@@ -673,7 +673,7 @@ mod tests {
                 coord_sets: vec![Some(PseCoordSet { n_atom: 1, coords: vec![0.0, 0.0, 0.0], idx_to_atm: vec![] })],
                 discrete: false, n_discrete: 0, symmetry: None,
             }),
-        })));
+        }))));
 
         let session = pse_to_session(&pse).unwrap();
         let mol_obj = session.registry.get_molecule("mol1").unwrap();

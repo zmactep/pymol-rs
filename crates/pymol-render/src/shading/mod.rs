@@ -74,6 +74,12 @@ pub struct ShadowPipelineBase {
     pub shadow_matrices: Vec<[[f32; 4]; 4]>,
 }
 
+impl Default for ShadowPipelineBase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShadowPipelineBase {
     pub fn new() -> Self {
         Self {

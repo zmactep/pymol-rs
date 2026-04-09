@@ -131,22 +131,17 @@ macro_rules! impl_setting_enum {
 // ---------------------------------------------------------------------------
 
 /// Mouse selection granularity mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[repr(i32)]
 pub enum MouseSelectionMode {
     Atoms = 0,
+    #[default]
     Residues = 1,
     Chains = 2,
     Segments = 3,
     Objects = 4,
     Molecules = 5,
     CAlphas = 6,
-}
-
-impl Default for MouseSelectionMode {
-    fn default() -> Self {
-        Self::Residues
-    }
 }
 
 impl_setting_enum! {

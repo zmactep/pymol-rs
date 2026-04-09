@@ -50,7 +50,7 @@ pub struct PseUniqueSetting {
 
 #[derive(Debug, Clone)]
 pub enum PseNameEntry {
-    Object(PseObject),
+    Object(Box<PseObject>),
     Selection(PseSelection),
 }
 

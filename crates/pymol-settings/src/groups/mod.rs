@@ -37,7 +37,7 @@ pub use ui::UiSettings;
 ///
 /// Global-only groups live directly on `Settings`.
 /// Object-overridable groups also live here (as the global defaults).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
     // Global-only
     pub shading: ShadingSettings,
@@ -56,21 +56,3 @@ pub struct Settings {
     pub mesh: MeshSettings,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            shading: ShadingSettings::default(),
-            ui: UiSettings::default(),
-            movie: MovieSettings::default(),
-            behavior: BehaviorSettings::default(),
-            cartoon: CartoonSettings::default(),
-            stick: StickSettings::default(),
-            sphere: SphereSettings::default(),
-            surface: SurfaceSettings::default(),
-            ribbon: RibbonSettings::default(),
-            line: LineSettings::default(),
-            dot: DotSettings::default(),
-            mesh: MeshSettings::default(),
-        }
-    }
-}

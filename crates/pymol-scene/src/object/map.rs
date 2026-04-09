@@ -463,9 +463,8 @@ impl MapObject {
                         continue;
                     }
 
-                    for i in 0..12 {
+                    for (i, &(v1, v2)) in EDGE_VERTICES.iter().enumerate() {
                         if edge_table & (1 << i) != 0 {
-                            let (v1, v2) = EDGE_VERTICES[i];
                             let p1 = cube_positions[v1];
                             let p2 = cube_positions[v2];
                             let val1 = cube_values[v1];

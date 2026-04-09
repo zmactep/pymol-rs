@@ -32,15 +32,10 @@ impl<R: Read> TrajectoryReader for XtcReader<R> {
         let mut frame_idx: usize = 0;
         let mut frame = molly::Frame::default();
 
-        loop {
-            match self.reader.read_frame(&mut frame) {
-                Ok(()) => {}
-                Err(_) => break,
-            }
-
+        while self.reader.read_frame(&mut frame).is_ok() {
             if frame_idx >= opts.start
-                && opts.stop.map_or(true, |s| frame_idx < s)
-                && (frame_idx - opts.start) % interval == 0
+                && opts.stop.is_none_or(|s| frame_idx < s)
+                && (frame_idx - opts.start).is_multiple_of(interval)
             {
                 // Convert nm to Angstroms
                 let mut coords = frame.positions.clone();
@@ -52,7 +47,7 @@ impl<R: Read> TrajectoryReader for XtcReader<R> {
 
             frame_idx += 1;
 
-            if opts.stop.map_or(false, |s| frame_idx >= s) {
+            if opts.stop.is_some_and(|s| frame_idx >= s) {
                 break;
             }
         }

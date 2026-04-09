@@ -33,9 +33,9 @@ impl Aabb {
     }
 
     fn expand_sphere(&mut self, center: [f32; 3], radius: f32) {
-        for i in 0..3 {
-            self.min[i] = self.min[i].min(center[i] - radius);
-            self.max[i] = self.max[i].max(center[i] + radius);
+        for (i, &c) in center.iter().enumerate() {
+            self.min[i] = self.min[i].min(c - radius);
+            self.max[i] = self.max[i].max(c + radius);
         }
     }
 

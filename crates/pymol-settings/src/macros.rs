@@ -76,6 +76,7 @@ pub struct SettingDescriptor {
     /// Read override from `ObjectOverrides`. `None` getter → global-only setting.
     pub get_override: Option<fn(&crate::overrides::ObjectOverrides) -> Option<SettingValue>>,
     /// Write override to `ObjectOverrides`.
+    #[allow(clippy::type_complexity)]
     pub set_override:
         Option<fn(&mut crate::overrides::ObjectOverrides, SettingValue) -> Result<(), SettingError>>,
     /// Clear override (revert to global).

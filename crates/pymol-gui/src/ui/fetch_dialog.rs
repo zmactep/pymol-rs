@@ -150,6 +150,12 @@ pub struct FetchDialog {
     focus_input: bool,
 }
 
+impl Default for FetchDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FetchDialog {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();

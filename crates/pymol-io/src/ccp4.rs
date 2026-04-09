@@ -143,7 +143,7 @@ pub fn read_ccp4_from<R: Read>(mut reader: R) -> IoResult<Ccp4Map> {
     if nx == 0 || ny == 0 || nz == 0 {
         return Err(IoError::parse_msg("CCP4 map has zero grid sampling"));
     }
-    if mapc < 1 || mapc > 3 || mapr < 1 || mapr > 3 || maps < 1 || maps > 3 {
+    if !(1..=3).contains(&mapc) || !(1..=3).contains(&mapr) || !(1..=3).contains(&maps) {
         return Err(IoError::parse_msg(format!(
             "Invalid axis mapping: MAPC={}, MAPR={}, MAPS={}",
             mapc, mapr, maps

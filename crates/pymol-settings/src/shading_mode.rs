@@ -13,21 +13,16 @@ use crate::impl_setting_enum;
 /// - **Classic**: multi-light PyMOL model (ambient, direct, reflect, specular, lights).
 /// - **Skripkin**: pure ambient + multi-directional shadow AO (own ambient/specular/shininess).
 /// - **Full**: Classic lighting + per-light directional shadow maps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(i32)]
 pub enum ShadingMode {
     /// Classic PyMOL lighting: multi-light, ambient + direct + reflect + specular.
+    #[default]
     Classic = 0,
     /// Skripkin mode: pure ambient + multi-directional shadow AO, no directional lights.
     Skripkin = 1,
     /// Full mode: Classic multi-light lighting + per-light directional shadow maps.
     Full = 2,
-}
-
-impl Default for ShadingMode {
-    fn default() -> Self {
-        Self::Classic
-    }
 }
 
 impl_setting_enum! {

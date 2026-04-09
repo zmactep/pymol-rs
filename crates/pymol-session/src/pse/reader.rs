@@ -150,7 +150,7 @@ fn read_names(
                     (PseObjectData::Unsupported, PseObjectHeader { visible: true, color: 0, rep_mask: 0, ttt: None, settings: vec![] })
                 };
 
-                names.push(Some(PseNameEntry::Object(PseObject {
+                names.push(Some(PseNameEntry::Object(Box::new(PseObject {
                     name,
                     type_code,
                     visible: hdr.visible,
@@ -159,7 +159,7 @@ fn read_names(
                     ttt: hdr.ttt,
                     settings: hdr.settings,
                     data,
-                })));
+                }))));
             }
         }
     }

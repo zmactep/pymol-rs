@@ -8,20 +8,15 @@
 use serde::{Deserialize, Serialize};
 
 /// Output message kind for categorizing output
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OutputKind {
     /// Informational message (default)
+    #[default]
     Info,
     /// Warning message
     Warning,
     /// Error message
     Error,
-}
-
-impl Default for OutputKind {
-    fn default() -> Self {
-        Self::Info
-    }
 }
 
 /// Output message from client (for GUI output view)
