@@ -218,14 +218,22 @@ EXAMPLES
         // Evaluate the selection to count atoms and cache results
         let (total_count, results) = select_with_context(ctx.viewer, &expanded)?;
 
-        // Store the expanded expression with cached evaluation results
-        ctx.viewer.define_selection_with_results(name, &expanded, results);
+        if total_count == 0 {
+            // Remove empty selections instead of keeping them around
+            ctx.viewer.remove_selection(name);
+            if !ctx.quiet {
+                ctx.print(&format!(" Selector: selection \"{}\" defined with 0 atoms.", name));
+            }
+        } else {
+            // Store the expanded expression with cached evaluation results
+            ctx.viewer.define_selection_with_results(name, &expanded, results);
 
-        // Ensure the selection is visible (show indicators)
-        ctx.viewer.set_selection_visible(name, true);
+            // Ensure the selection is visible (show indicators)
+            ctx.viewer.set_selection_visible(name, true);
 
-        if !ctx.quiet {
-            ctx.print(&format!(" Selector: selection \"{}\" defined with {} atoms.", name, total_count));
+            if !ctx.quiet {
+                ctx.print(&format!(" Selector: selection \"{}\" defined with {} atoms.", name, total_count));
+            }
         }
 
         Ok(())

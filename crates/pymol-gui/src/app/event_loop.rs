@@ -96,7 +96,8 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
-                if !egui_consumed {
+                let egui_using_pointer = self.view.egui.ctx.is_using_pointer();
+                if !egui_using_pointer {
                     self.handle_click_detection(state, button);
                 } else {
                     // Clear stale click state when egui handles the event
