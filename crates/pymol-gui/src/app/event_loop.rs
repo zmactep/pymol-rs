@@ -96,7 +96,13 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
-                self.handle_click_detection(state, button);
+                if !egui_consumed {
+                    self.handle_click_detection(state, button);
+                } else {
+                    // Clear stale click state when egui handles the event
+                    // (e.g. press was on viewport but release lands on a popup)
+                    self.viewport.click_start_pos = None;
+                }
             }
 
             WindowEvent::CursorMoved { .. } => {
