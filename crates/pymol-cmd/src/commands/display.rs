@@ -638,6 +638,8 @@ ARGUMENTS
             chain (chainbow) - color by chain
             ss (secondary_structure) - color by secondary structure
             b (b_factor, bfactor) - color by B-factor
+            residue (aa_type) - color by residue type
+            index (residue_index, rainbow) - color by residue index
     selection = string: atoms to color (default: all)
 
 EXAMPLES

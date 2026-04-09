@@ -58,7 +58,7 @@ mod uniforms;
 mod vertex;
 
 // Re-export main types
-pub use color_resolver::ColorResolver;
+pub use color_resolver::{ColorResolver, resv_range_of};
 pub use shading::{ShadingManager, ShadingPipeline, ShadowPassState};
 pub use context::RenderContext;
 pub use error::RenderError;

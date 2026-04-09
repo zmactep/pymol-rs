@@ -3,7 +3,7 @@
 //! Frame orchestration, shadow passes, molecule preparation,
 //! 3D scene rendering, silhouette post-processing, and egui overlay.
 
-use pymol_render::ColorResolver;
+use pymol_render::{ColorResolver, resv_range_of};
 use pymol_scene::{setup_uniforms, Object};
 use pymol_select::SelectionResult;
 use winit::dpi::PhysicalSize;
@@ -340,10 +340,13 @@ impl App {
         let mut geometry_changed = false;
 
         for name in names {
+            let resv_range = self.state.registry.get_molecule(name)
+                .map(|m| resv_range_of(m.molecule()))
+                .unwrap_or((1, 100));
             let color_resolver = ColorResolver::new(
                 &self.state.named_colors,
                 &self.state.element_colors,
-            );
+            ).with_resv_range(resv_range.0, resv_range.1);
             if let Some(mol_obj) = self.state.registry.get_molecule_mut(name) {
                 if mol_obj.is_dirty() {
                     geometry_changed = true;

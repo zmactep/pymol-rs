@@ -128,13 +128,15 @@ pub enum ColorIndex {
     ByBFactor,
     /// Special color: by residue type
     ByResidueType,
+    /// Special color: by residue index (rainbow spectrum)
+    ByResidueIndex,
     /// Atomic colors (per-atom custom colors)
     Atomic,
 }
 
 /// Primary color scheme names for autocompletion (one per variant).
 /// Keep in sync with [`ColorIndex::from_scheme_name`].
-pub const SCHEME_NAMES: &[&str] = &["atomic", "chain", "ss", "b", "residue"];
+pub const SCHEME_NAMES: &[&str] = &["atomic", "chain", "ss", "b", "residue_type", "residue_index"];
 
 impl ColorIndex {
     /// Parse a color scheme name alias into a `ColorIndex`.
@@ -146,7 +148,8 @@ impl ColorIndex {
             "chain" | "by_chain" | "chainbow" => Some(ColorIndex::ByChain),
             "ss" | "secondary_structure" | "by_ss" | "dssp" => Some(ColorIndex::BySS),
             "b" | "b_factor" | "bfactor" | "by_b" => Some(ColorIndex::ByBFactor),
-            "residue" | "by_residue" | "residue_type" => Some(ColorIndex::ByResidueType),
+            "residue" | "by_residue" | "residue_type" | "aa_type" => Some(ColorIndex::ByResidueType),
+            "index" | "residue_index" | "spectrum" | "rainbow" => Some(ColorIndex::ByResidueIndex),
             _ => None,
         }
     }
@@ -167,6 +170,7 @@ impl From<ColorIndex> for i32 {
             ColorIndex::BySS => -3,
             ColorIndex::ByBFactor => -4,
             ColorIndex::ByResidueType => -5,
+            ColorIndex::ByResidueIndex => -6,
         }
     }
 }
@@ -179,6 +183,7 @@ impl From<i32> for ColorIndex {
             -3 => ColorIndex::BySS,
             -4 => ColorIndex::ByBFactor,
             -5 => ColorIndex::ByResidueType,
+            -6 => ColorIndex::ByResidueIndex,
             c if c >= 0 => ColorIndex::Named(c as u32),
             _ => ColorIndex::default(),
         }

@@ -201,6 +201,58 @@ pub fn ss_color(ss_type: u8) -> Color {
     }
 }
 
+/// Get color for an amino acid residue by type category.
+///
+/// Returns `None` for non-amino-acid residues.
+///
+/// Categories:
+/// - Hydrophobic (ALA, VAL, LEU, ILE, PRO, PHE, MET, TRP) → green
+/// - Positive charged (LYS, ARG, HIS) → blue
+/// - Negative charged (ASP, GLU) → red
+/// - Polar uncharged (SER, THR, ASN, GLN) → light magenta
+/// - Cysteine (CYS) → yellow
+/// - Glycine (GLY) → gray
+pub fn residue_type_color(resn: &str) -> Option<Color> {
+    const HYDROPHOBIC: Color = Color::new(0.2, 0.8, 0.2);
+    const POSITIVE: Color = Color::new(0.2, 0.4, 1.0);
+    const NEGATIVE: Color = Color::new(1.0, 0.2, 0.2);
+    const POLAR: Color = Color::new(0.9, 0.5, 0.9);
+    const CYSTEINE: Color = Color::new(0.9, 0.9, 0.0);
+    const GLYCINE: Color = Color::new(0.6, 0.6, 0.6);
+
+    match resn {
+        "ALA" | "VAL" | "LEU" | "ILE" | "PRO" | "PHE" | "MET" | "TRP" => Some(HYDROPHOBIC),
+        "LYS" | "ARG" | "HIS" | "HID" | "HIE" | "HIP" => Some(POSITIVE),
+        "ASP" | "GLU" => Some(NEGATIVE),
+        "SER" | "THR" | "ASN" | "GLN" => Some(POLAR),
+        "CYS" | "CYX" => Some(CYSTEINE),
+        "GLY" => Some(GLYCINE),
+        _ => None,
+    }
+}
+
+/// Rainbow spectrum color from blue (t=0) through cyan, green, yellow to red (t=1).
+///
+/// Used for residue-index coloring (spectrum along the chain).
+pub fn spectrum_color(t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    // 5-stop linear gradient: blue → cyan → green → yellow → red
+    let (r, g, b) = if t < 0.25 {
+        let s = t / 0.25;
+        (0.0, s, 1.0) // blue → cyan
+    } else if t < 0.5 {
+        let s = (t - 0.25) / 0.25;
+        (0.0, 1.0, 1.0 - s) // cyan → green
+    } else if t < 0.75 {
+        let s = (t - 0.5) / 0.25;
+        (s, 1.0, 0.0) // green → yellow
+    } else {
+        let s = (t - 0.75) / 0.25;
+        (1.0, 1.0 - s, 0.0) // yellow → red
+    };
+    Color::new(r, g, b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +281,48 @@ mod tests {
 
         // Different chains should have different colors
         assert_ne!(color_a, color_b);
+    }
+
+    #[test]
+    fn test_residue_type_color() {
+        // Hydrophobic residues get the same color
+        let ala = residue_type_color("ALA").unwrap();
+        let val = residue_type_color("VAL").unwrap();
+        assert_eq!(ala, val);
+
+        // Different categories get different colors
+        let lys = residue_type_color("LYS").unwrap(); // positive
+        let asp = residue_type_color("ASP").unwrap(); // negative
+        let ser = residue_type_color("SER").unwrap(); // polar
+        let gly = residue_type_color("GLY").unwrap(); // glycine
+        let cys = residue_type_color("CYS").unwrap(); // cysteine
+        assert_ne!(ala, lys);
+        assert_ne!(lys, asp);
+        assert_ne!(asp, ser);
+        assert_ne!(ser, gly);
+        assert_ne!(gly, cys);
+
+        // Non-amino-acid returns None
+        assert!(residue_type_color("HOH").is_none());
+        assert!(residue_type_color("DA").is_none());
+    }
+
+    #[test]
+    fn test_spectrum_color() {
+        // t=0 → blue
+        let blue = spectrum_color(0.0);
+        assert!(blue.b > 0.9 && blue.r < 0.1 && blue.g < 0.1);
+
+        // t=1 → red
+        let red = spectrum_color(1.0);
+        assert!(red.r > 0.9 && red.g < 0.1 && red.b < 0.1);
+
+        // t=0.5 → green
+        let green = spectrum_color(0.5);
+        assert!(green.g > 0.9 && green.r < 0.1 && green.b < 0.1);
+
+        // Clamping
+        let clamped = spectrum_color(-1.0);
+        assert_eq!(clamped, spectrum_color(0.0));
     }
 }

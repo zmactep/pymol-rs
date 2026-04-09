@@ -7,7 +7,7 @@ use std::path::Path;
 
 use pymol_color::{Color, ElementColors, NamedColors};
 use pymol_render::silhouette::SilhouettePipeline;
-use pymol_render::{ColorResolver, RenderContext};
+use pymol_render::{ColorResolver, RenderContext, resv_range_of};
 use pymol_settings::Settings;
 
 use crate::camera::Camera;
@@ -133,7 +133,11 @@ pub fn capture_png_to_file(
     // Prepare molecules for rendering
     let names: Vec<_> = registry.names().map(|s| s.to_string()).collect();
     for name in &names {
-        let color_resolver = ColorResolver::new(named_colors, element_colors);
+        let resv_range = registry.get_molecule(name)
+            .map(|m| resv_range_of(m.molecule()))
+            .unwrap_or((1, 100));
+        let color_resolver = ColorResolver::new(named_colors, element_colors)
+            .with_resv_range(resv_range.0, resv_range.1);
         if let Some(mol_obj) = registry.get_molecule_mut(name) {
             mol_obj.prepare_render(context, color_resolver, settings);
         }

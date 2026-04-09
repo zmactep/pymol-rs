@@ -2,9 +2,21 @@
 //!
 //! Resolves `ColorIndex` values from atoms to final RGBA colors.
 
-use pymol_color::{ChainColors, Color, ColorIndex, ColorRamp, ElementColors, NamedColors};
+use pymol_color::{ChainColors, Color, ColorIndex, ColorRamp, ElementColors, NamedColors, residue_type_color, spectrum_color};
 use pymol_mol::Atom;
 use std::collections::HashMap;
+
+/// Compute the (min, max) residue sequence number range from a molecule's atoms.
+pub fn resv_range_of(mol: &pymol_mol::ObjectMolecule) -> (i32, i32) {
+    let mut min = i32::MAX;
+    let mut max = i32::MIN;
+    for atom in mol.atoms() {
+        let v = atom.residue.resv;
+        if v < min { min = v; }
+        if v > max { max = v; }
+    }
+    if min > max { (1, 100) } else { (min, max) }
+}
 
 /// Resolves color indices to final RGBA values
 ///
@@ -22,6 +34,8 @@ pub struct ColorResolver<'a> {
     default_alpha: f32,
     /// B-factor range for coloring (min, max)
     b_factor_range: (f32, f32),
+    /// Residue sequence number range for spectrum coloring (min, max)
+    resv_range: (i32, i32),
 }
 
 impl<'a> ColorResolver<'a> {
@@ -36,6 +50,7 @@ impl<'a> ColorResolver<'a> {
             color_ramps: HashMap::new(),
             default_alpha: 1.0,
             b_factor_range: (0.0, 100.0),
+            resv_range: (1, 100),
         }
     }
 
@@ -54,6 +69,12 @@ impl<'a> ColorResolver<'a> {
     /// Set the B-factor range for coloring
     pub fn with_b_factor_range(mut self, min: f32, max: f32) -> Self {
         self.b_factor_range = (min, max);
+        self
+    }
+
+    /// Set the residue sequence number range for spectrum coloring
+    pub fn with_resv_range(mut self, min: i32, max: i32) -> Self {
+        self.resv_range = (min, max);
         self
     }
 
@@ -90,12 +111,13 @@ impl<'a> ColorResolver<'a> {
             ColorIndex::ByChain => self.resolve_by_chain(atom),
             ColorIndex::BySS => self.resolve_by_secondary_structure(atom),
             ColorIndex::ByBFactor => self.resolve_by_b_factor(atom),
+            ColorIndex::ByResidueType => self.resolve_by_residue_type(atom),
+            ColorIndex::ByResidueIndex => self.resolve_by_residue_index(atom),
             ColorIndex::Named(idx) => {
                 self.named_colors
                     .get_by_index(idx)
                     .unwrap_or(Color::WHITE)
             }
-            _ => self.element_colors.get(atom.element as u8),
         }
     }
 
@@ -140,6 +162,26 @@ impl<'a> ColorResolver<'a> {
     /// Resolve color for cartoon with an object-level default override
     pub fn resolve_cartoon_with_default(&self, atom: &Atom, default_color: i32) -> [f32; 4] {
         self.resolve_rep_color(atom, atom.repr.colors.cartoon, default_color)
+    }
+
+    /// Resolve color by residue type (amino acid category).
+    ///
+    /// All atoms get the residue-type color. Non-amino-acid residues
+    /// fall back to element (CPK) coloring.
+    fn resolve_by_residue_type(&self, atom: &Atom) -> Color {
+        residue_type_color(&atom.residue.resn)
+            .unwrap_or_else(|| self.element_colors.get(atom.element as u8))
+    }
+
+    /// Resolve color by residue index using a rainbow spectrum.
+    fn resolve_by_residue_index(&self, atom: &Atom) -> Color {
+        let (min, max) = self.resv_range;
+        let range = max - min;
+        if range <= 0 {
+            return spectrum_color(0.5);
+        }
+        let t = ((atom.residue.resv - min) as f32) / (range as f32);
+        spectrum_color(t)
     }
 
     /// Resolve color by B-factor using the blue-white-red ramp
@@ -228,6 +270,60 @@ mod tests {
 
         // Different chains should have different colors
         assert!(color_a[0] != color_b[0] || color_a[1] != color_b[1] || color_a[2] != color_b[2]);
+    }
+
+    #[test]
+    fn test_residue_type_coloring() {
+        let named = NamedColors::default();
+        let elements = ElementColors::default();
+        let resolver = ColorResolver::new(&named, &elements);
+
+        // Carbon in ALA (hydrophobic) → residue-type color (light gray)
+        let mut atom = Atom { element: Element::Carbon, ..Default::default() };
+        atom.set_residue("ALA", 1, "A");
+        atom.repr.colors.base = -5; // ByResidueType
+        let color = resolver.resolve_atom(&atom);
+        assert!(color[1] > color[0] && color[1] > color[2], "ALA carbon should be green (hydrophobic)");
+
+        // Nitrogen in ALA → same residue-type color (all atoms colored)
+        let mut n_atom = Atom { element: Element::Nitrogen, ..Default::default() };
+        n_atom.set_residue("ALA", 1, "A");
+        n_atom.repr.colors.base = -5;
+        let n_color = resolver.resolve_atom(&n_atom);
+        assert_eq!(color, n_color, "All atoms in ALA should get the same residue-type color");
+
+        // Non-AA residue → element color fallback
+        let mut water_c = Atom { element: Element::Carbon, ..Default::default() };
+        water_c.set_residue("HOH", 1, "A");
+        water_c.repr.colors.base = -5;
+        let w_color = resolver.resolve_atom(&water_c);
+        let cpk_c = elements.get(Element::Carbon as u8);
+        assert_eq!(w_color[0], cpk_c.r, "Non-AA carbon should get element color");
+    }
+
+    #[test]
+    fn test_residue_index_coloring() {
+        let named = NamedColors::default();
+        let elements = ElementColors::default();
+        let resolver = ColorResolver::new(&named, &elements)
+            .with_resv_range(1, 100);
+
+        // Atom at start of chain → blue-ish
+        let mut atom = Atom::default();
+        atom.set_residue("ALA", 1, "A");
+        atom.repr.colors.base = -6; // ByResidueIndex
+        let color = resolver.resolve_atom(&atom);
+        assert!(color[2] > 0.9 && color[0] < 0.1, "resv=1 should be blue");
+
+        // Atom at end of chain → red-ish
+        atom.set_residue("ALA", 100, "A");
+        let color = resolver.resolve_atom(&atom);
+        assert!(color[0] > 0.9 && color[2] < 0.1, "resv=100 should be red");
+
+        // Atom in middle → green-ish
+        atom.set_residue("ALA", 50, "A");
+        let color = resolver.resolve_atom(&atom);
+        assert!(color[1] > 0.9, "resv=50 should be green");
     }
 
     #[test]
