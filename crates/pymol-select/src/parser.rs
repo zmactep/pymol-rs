@@ -67,6 +67,43 @@ fn parse_expr(stream: &mut TokenStream, min_prec: u8) -> Result<SelectionExpr, P
             break;
         };
 
+        // Check for distance-binary infix operators (within, beyond, near_to)
+        if let Token::Ident(s) = &tok {
+            if let Some(kw @ (Keyword::Within | Keyword::Beyond | Keyword::NearTo)) = lookup(s) {
+                let prec = kw.precedence();
+                if prec < min_prec {
+                    break;
+                }
+                stream.next(); // consume keyword
+                let dist = parse_number(stream)?;
+                match stream.peek() {
+                    Some(Token::Of) => {
+                        stream.next();
+                    }
+                    _ => {
+                        return Err(ParseError::Expected {
+                            expected: "of".to_string(),
+                            found: format!("{:?}", stream.peek()),
+                        });
+                    }
+                }
+                let right = parse_expr(stream, prec + 1)?;
+                left = match kw {
+                    Keyword::Within => {
+                        SelectionExpr::Within(dist, Box::new(left), Box::new(right))
+                    }
+                    Keyword::Beyond => {
+                        SelectionExpr::Beyond(dist, Box::new(left), Box::new(right))
+                    }
+                    Keyword::NearTo => {
+                        SelectionExpr::NearTo(dist, Box::new(left), Box::new(right))
+                    }
+                    _ => unreachable!(),
+                };
+                continue;
+            }
+        }
+
         let op = match &tok {
             Token::Ident(s) => match lookup(s) {
                 Some(Keyword::And) => BinOp::And,
@@ -1139,12 +1176,51 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_within() {
+    fn test_parse_within_prefix() {
+        // Prefix form: within 5 of X → Within(5, All, X)
         let expr = parse_selection("within 5 of name CA").unwrap();
-        if let SelectionExpr::Within(dist, _, _) = expr {
+        if let SelectionExpr::Within(dist, source, _target) = expr {
             assert!((dist - 5.0).abs() < 0.01);
+            assert!(matches!(*source, SelectionExpr::All));
         } else {
-            panic!("Expected Within");
+            panic!("Expected Within, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_within_infix() {
+        // Infix form: X within 5 of Y → Within(5, X, Y)
+        let expr = parse_selection("name CA within 5 of name CB").unwrap();
+        if let SelectionExpr::Within(dist, source, target) = expr {
+            assert!((dist - 5.0).abs() < 0.01);
+            assert!(matches!(*source, SelectionExpr::Name(_)));
+            assert!(matches!(*target, SelectionExpr::Name(_)));
+        } else {
+            panic!("Expected Within, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_beyond_infix() {
+        let expr = parse_selection("name CA beyond 8 of resi 100").unwrap();
+        if let SelectionExpr::Beyond(dist, source, _target) = expr {
+            assert!((dist - 8.0).abs() < 0.01);
+            assert!(matches!(*source, SelectionExpr::Name(_)));
+        } else {
+            panic!("Expected Beyond, got {:?}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_within_infix_precedence() {
+        // "and" should bind tighter than "within" (within prec=0x30=48, and prec=0x40=64)
+        // so: name CA and name CB within 5 of name N
+        //  → (name CA and name CB) within 5 of name N
+        let expr = parse_selection("name CA and name CB within 5 of name N").unwrap();
+        if let SelectionExpr::Within(_, source, _) = expr {
+            assert!(matches!(*source, SelectionExpr::And(_, _)));
+        } else {
+            panic!("Expected Within at top level, got {:?}", expr);
         }
     }
 
