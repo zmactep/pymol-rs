@@ -1,7 +1,7 @@
 //! Space group symmetry operation lookup and parsing
 //!
 //! Maps space group names to lists of 4×4 transformation matrices (in fractional
-//! coordinates). The symmetry operation data is ported from PyMOL's `xray.py`.
+//! coordinates). Data derived from International Tables for Crystallography, Vol. A.
 
 use super::space_groups_data::{ALIASES, SYM_OPS};
 
