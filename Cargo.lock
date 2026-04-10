@@ -3516,6 +3516,7 @@ dependencies = [
 name = "pymol-algos"
 version = "0.2.8"
 dependencies = [
+ "bitflags 2.10.0",
  "lin_alg",
  "phf",
  "thiserror 2.0.18",
@@ -3647,6 +3648,7 @@ dependencies = [
  "bitflags 2.10.0",
  "lin_alg",
  "phf",
+ "pymol-algos",
  "pymol-settings",
  "rmp-serde",
  "serde",

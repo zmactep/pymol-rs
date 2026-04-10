@@ -431,7 +431,7 @@ fn convert_selection(
 // TTT helpers
 // =============================================================================
 
-/// Convert a PyMOL TTT (16-float) matrix to a [`Mat4`].
+/// Convert a PyMOL TTT (16-float) matrix to a column-major [`Mat4`].
 ///
 /// PyMOL TTT format: `y = R * (x + pre_trans) + post_trans`
 ///   - `[0..3, 4..7, 8..11]` = 3×3 rotation (row-major) with post-translation in column 3
@@ -439,6 +439,7 @@ fn convert_selection(
 ///
 /// The equivalent standard affine transform is `y = R*x + (R*pre + post)`.
 fn ttt_to_mat4(ttt: &[f64; 16]) -> Mat4 {
+    // r is row-major 3×3: r[row*3 + col]
     let r = [
         ttt[0] as f32, ttt[1] as f32, ttt[2] as f32,
         ttt[4] as f32, ttt[5] as f32, ttt[6] as f32,
@@ -451,11 +452,13 @@ fn ttt_to_mat4(ttt: &[f64; 16]) -> Mat4 {
     let ty = r[3] * pre[0] + r[4] * pre[1] + r[5] * pre[2] + ttt[7] as f32;
     let tz = r[6] * pre[0] + r[7] * pre[1] + r[8] * pre[2] + ttt[11] as f32;
 
+    // Column-major Mat4: data[col*4 + row]
+    // r[row*3+col] → M[row,col] → data[col*4 + row]
     Mat4::new([
-        r[0], r[1], r[2], tx,
-        r[3], r[4], r[5], ty,
-        r[6], r[7], r[8], tz,
-        0.0,  0.0,  0.0,  1.0,
+        r[0], r[3], r[6], 0.0, // col 0: M[0,0], M[1,0], M[2,0]
+        r[1], r[4], r[7], 0.0, // col 1: M[0,1], M[1,1], M[2,1]
+        r[2], r[5], r[8], 0.0, // col 2: M[0,2], M[1,2], M[2,2]
+        tx,   ty,   tz,   1.0, // col 3: translation
     ])
 }
 
@@ -631,9 +634,9 @@ mod tests {
 
         let session = pse_to_session(&pse).unwrap();
         let mol_obj = session.registry.get_molecule("mol1").unwrap();
-        // Transform should have the 5.0 X translation
+        // Transform should have the 5.0 X translation (column-major: data[12])
         let t = &mol_obj.state().transform;
-        assert!((t.data[3] - 5.0).abs() < 1e-6, "expected tx=5.0, got {}", t.data[3]);
+        assert!((t.data[12] - 5.0).abs() < 1e-6, "expected tx=5.0, got {}", t.data[12]);
     }
 
     #[test]
@@ -694,6 +697,7 @@ mod tests {
         ];
         let mat = ttt_to_mat4(&ttt);
         // Effective tx = R*pre + post = 1.0*2.0 + 3.0 = 5.0
-        assert!((mat.data[3] - 5.0).abs() < 1e-6);
+        // Column-major: translation at data[12]
+        assert!((mat.data[12] - 5.0).abs() < 1e-6);
     }
 }

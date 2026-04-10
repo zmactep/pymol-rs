@@ -411,8 +411,8 @@ fn align_by_ce(
     }
 
     // Extract aligned Cα coordinates for superposition
-    let mut aligned_mobile: Vec<[f32; 3]> = Vec::new();
-    let mut aligned_target: Vec<[f32; 3]> = Vec::new();
+    let mut aligned_mobile: Vec<Vec3> = Vec::new();
+    let mut aligned_target: Vec<Vec3> = Vec::new();
     let mut superpose_pairs: Vec<(usize, usize)> = Vec::new();
     for &(si, ti) in &ce_result.pairs {
         let idx = aligned_mobile.len();
@@ -462,7 +462,7 @@ fn extract_coords(
     viewer: &dyn ViewerLike,
     obj_name: &str,
     indices: &[AtomIndex],
-) -> CmdResult<Vec<[f32; 3]>> {
+) -> CmdResult<Vec<Vec3>> {
     let mol_obj = viewer
         .objects()
         .get_molecule(obj_name)
@@ -477,7 +477,7 @@ fn extract_coords(
         let v = cs
             .get_atom_coord(idx)
             .ok_or_else(|| CmdError::Execution(format!("Missing coord for atom {}", idx.0)))?;
-        coords.push([v.x, v.y, v.z]);
+        coords.push(v);
     }
     Ok(coords)
 }
@@ -580,16 +580,16 @@ fn print_superpose_result(
 
 /// Build a combined 4×4 transform matrix from rotation + translation.
 ///
-/// The Mat4 from Kabsch has rotation in the 3×3 upper-left.
-/// We embed the translation in column 3 (row-major indices 3, 7, 11).
+/// The Mat4 from Kabsch has rotation in the 3×3 upper-left (column-major).
+/// We embed the translation in column 3 (indices 12, 13, 14).
 fn build_transform_mat4(rotation: &Mat4, translation: &Vec3) -> Mat4 {
     let r = &rotation.data;
-    // Row-major: data[row*4 + col]
+    // Column-major: data[col*4 + row]
     Mat4::new([
-        r[0], r[1], r[2], translation.x,
-        r[4], r[5], r[6], translation.y,
-        r[8], r[9], r[10], translation.z,
-        0.0, 0.0, 0.0, 1.0,
+        r[0], r[1], r[2], 0.0,                                // col 0
+        r[4], r[5], r[6], 0.0,                                // col 1
+        r[8], r[9], r[10], 0.0,                               // col 2
+        translation.x, translation.y, translation.z, 1.0,     // col 3
     ])
 }
 

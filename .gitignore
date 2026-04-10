@@ -2,7 +2,6 @@ __pycache__
 _tests
 _plans
 *.so
-pymol-open-source
 target
 .venv
 CLAUDE.md

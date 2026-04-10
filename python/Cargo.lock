@@ -2164,6 +2164,7 @@ checksum = "b5a041e753da8b807c9255f28de81879c78c876392ff2469cde94799b2896b9d"
 name = "pymol-algos"
 version = "0.2.8"
 dependencies = [
+ "bitflags 2.11.0",
  "lin_alg",
  "phf",
  "thiserror 2.0.18",
@@ -2224,6 +2225,7 @@ dependencies = [
  "bitflags 2.11.0",
  "lin_alg",
  "phf",
+ "pymol-algos",
  "pymol-settings",
  "serde",
  "smallvec",

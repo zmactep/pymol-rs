@@ -3,6 +3,8 @@
 //! Combines Kabsch with iterative outlier rejection, matching
 //! PyMOL's `align` and `super` commands.
 
+use lin_alg::f32::Vec3;
+
 use super::kabsch::{self, KabschResult};
 use crate::AlignError;
 
@@ -50,8 +52,8 @@ pub struct SuperposeResult {
 /// `pairs` is a list of (source_index, target_index) correspondences.
 /// Coordinates are looked up in `source_coords` and `target_coords`.
 pub fn superpose(
-    source_coords: &[[f32; 3]],
-    target_coords: &[[f32; 3]],
+    source_coords: &[Vec3],
+    target_coords: &[Vec3],
     pairs: &[(usize, usize)],
     params: &SuperposeParams,
 ) -> Result<SuperposeResult, AlignError> {
@@ -62,9 +64,9 @@ pub fn superpose(
     // Extract initial paired coordinates
     let mut active_pairs: Vec<(usize, usize)> = pairs.to_vec();
 
-    let extract = |pairs: &[(usize, usize)]| -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
-        let src: Vec<[f32; 3]> = pairs.iter().map(|&(si, _)| source_coords[si]).collect();
-        let tgt: Vec<[f32; 3]> = pairs.iter().map(|&(_, ti)| target_coords[ti]).collect();
+    let extract = |pairs: &[(usize, usize)]| -> (Vec<Vec3>, Vec<Vec3>) {
+        let src: Vec<Vec3> = pairs.iter().map(|&(si, _)| source_coords[si]).collect();
+        let tgt: Vec<Vec3> = pairs.iter().map(|&(_, ti)| target_coords[ti]).collect();
         (src, tgt)
     };
 
@@ -88,21 +90,12 @@ pub fn superpose(
         kabsch::apply_transform(&mut transformed_src, &current_result);
 
         // Reject pairs where distance/RMSD > cutoff (PyMOL convention).
-        // This is a relative threshold: as RMSD decreases across cycles,
-        // the effective distance threshold tightens automatically.
         let rms = current_result.rmsd;
         let mut keep = Vec::new();
         if rms > 1e-6 {
-            for (i, ((ts, t), _pair)) in transformed_src
-                .iter()
-                .zip(tgt.iter())
-                .zip(active_pairs.iter())
-                .enumerate()
-            {
-                let dx = ts[0] - t[0];
-                let dy = ts[1] - t[1];
-                let dz = ts[2] - t[2];
-                let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            for (i, (ts, t)) in transformed_src.iter().zip(tgt.iter()).enumerate() {
+                let d = *ts - *t;
+                let dist = (d.x * d.x + d.y * d.y + d.z * d.z).sqrt();
                 if (dist / rms) <= params.cutoff {
                     keep.push(i);
                 }
@@ -155,14 +148,13 @@ pub fn superpose(
 mod tests {
     use super::*;
 
+    fn v(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
     #[test]
     fn test_no_outliers() {
-        let source = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ];
+        let source = vec![v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0)];
         let target = source.clone();
         let pairs: Vec<(usize, usize)> = (0..4).map(|i| (i, i)).collect();
 
@@ -174,72 +166,38 @@ mod tests {
 
     #[test]
     fn test_with_outliers() {
-        // 8 good pairs (identical), plus 2 pairs where the target is
-        // shifted by 20Å — well beyond the relative cutoff (dist/RMSD > 2.0).
-        let source: Vec<[f32; 3]> = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [1.0, 1.0, 0.0],
-            [1.0, 0.0, 1.0],
-            [0.0, 1.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [0.5, 0.5, 0.5],  // outlier source
-            [0.5, 0.5, 0.0],  // outlier source
+        let source: Vec<Vec3> = vec![
+            v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0),
+            v(1.0, 1.0, 0.0), v(1.0, 0.0, 1.0), v(0.0, 1.0, 1.0), v(1.0, 1.0, 1.0),
+            v(0.5, 0.5, 0.5), v(0.5, 0.5, 0.0),
         ];
-        let target: Vec<[f32; 3]> = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [1.0, 1.0, 0.0],
-            [1.0, 0.0, 1.0],
-            [0.0, 1.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [20.5, 20.5, 20.5], // outlier target — 20Å away
-            [20.5, 20.5, 20.0], // outlier target — 20Å away
+        let target: Vec<Vec3> = vec![
+            v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0),
+            v(1.0, 1.0, 0.0), v(1.0, 0.0, 1.0), v(0.0, 1.0, 1.0), v(1.0, 1.0, 1.0),
+            v(20.5, 20.5, 20.5), v(20.5, 20.5, 20.0),
         ];
 
         let pairs: Vec<(usize, usize)> = (0..10).map(|i| (i, i)).collect();
 
         let result = superpose(
-            &source,
-            &target,
-            &pairs,
-            &SuperposeParams {
-                cycles: 5,
-                cutoff: 2.0,
-            },
-        )
-        .unwrap();
+            &source, &target, &pairs,
+            &SuperposeParams { cycles: 5, cutoff: 2.0 },
+        ).unwrap();
 
-        // Outliers should be rejected
         assert!(result.n_rejected >= 2, "Expected ≥2 rejected, got {}", result.n_rejected);
         assert!(result.final_rmsd < result.initial_rmsd);
     }
 
     #[test]
     fn test_zero_cycles() {
-        let source = vec![
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ];
+        let source = vec![v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0)];
         let target = source.clone();
         let pairs: Vec<(usize, usize)> = (0..4).map(|i| (i, i)).collect();
 
         let result = superpose(
-            &source,
-            &target,
-            &pairs,
-            &SuperposeParams {
-                cycles: 0,
-                cutoff: 2.0,
-            },
-        )
-        .unwrap();
+            &source, &target, &pairs,
+            &SuperposeParams { cycles: 0, cutoff: 2.0 },
+        ).unwrap();
 
         assert_eq!(result.cycles_performed, 0);
         assert_eq!(result.n_rejected, 0);
@@ -247,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_too_few_pairs() {
-        let source = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+        let source = vec![v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)];
         let target = source.clone();
         let pairs: Vec<(usize, usize)> = (0..2).map(|i| (i, i)).collect();
 

@@ -13,3 +13,4 @@ description = "Computational algorithms for PyMOL-RS (alignment, SVD, sequence a
 lin_alg = { workspace = true }
 thiserror = { workspace = true }
 phf = { workspace = true }
+bitflags = { workspace = true }

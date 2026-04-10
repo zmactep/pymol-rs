@@ -491,13 +491,11 @@ impl CoordSet {
 
     /// Apply a 4x4 homogeneous transformation matrix to all coordinates
     ///
-    /// The matrix is expected to be in row-major format:
+    /// The matrix is in column-major format (lin_alg convention):
     /// ```text
-    /// [ m0  m1  m2  m3  ]   where m3, m7, m11 are translation
-    /// [ m4  m5  m6  m7  ]   and m0-m2, m4-m6, m8-m10 are rotation
-    /// [ m8  m9  m10 m11 ]
-    /// [ m12 m13 m14 m15 ]
+    /// data = [col0, col1, col2, col3] flattened
     /// ```
+    /// Translation is at data[12], data[13], data[14].
     pub fn transform(&mut self, matrix: &Mat4) {
         for i in 0..self.n_index {
             apply_mat4(&mut self.coords, i * 3, matrix);
@@ -549,7 +547,7 @@ impl CoordSet {
 // Transformation Helpers (private)
 // =============================================================================
 
-/// Apply a 4x4 transformation matrix to a coordinate at the given base index.
+/// Apply a 4x4 transformation matrix (column-major) to a coordinate at the given base index.
 /// This is an inline helper to eliminate code duplication in transform methods.
 #[inline]
 fn apply_mat4(coords: &mut [f32], base: usize, matrix: &Mat4) {
@@ -557,11 +555,13 @@ fn apply_mat4(coords: &mut [f32], base: usize, matrix: &Mat4) {
     let y = coords[base + 1];
     let z = coords[base + 2];
 
-    coords[base] = matrix.data[0] * x + matrix.data[1] * y + matrix.data[2] * z + matrix.data[3];
+    // Column-major: data[col*4 + row], so M[row][col] = data[col*4 + row]
+    coords[base] =
+        matrix.data[0] * x + matrix.data[4] * y + matrix.data[8] * z + matrix.data[12];
     coords[base + 1] =
-        matrix.data[4] * x + matrix.data[5] * y + matrix.data[6] * z + matrix.data[7];
+        matrix.data[1] * x + matrix.data[5] * y + matrix.data[9] * z + matrix.data[13];
     coords[base + 2] =
-        matrix.data[8] * x + matrix.data[9] * y + matrix.data[10] * z + matrix.data[11];
+        matrix.data[2] * x + matrix.data[6] * y + matrix.data[10] * z + matrix.data[14];
 }
 
 /// Apply a TTT transformation to a coordinate at the given base index.
@@ -647,7 +647,7 @@ fn rodrigues_rotation(axis: Vec3, angle: f32) -> Option<RotationElements> {
 /// * `origin` - Center of rotation
 ///
 /// # Returns
-/// A 4x4 homogeneous transformation matrix (row-major: data[row*4 + col] = M[row][col])
+/// A 4x4 homogeneous transformation matrix (column-major: data[col*4 + row])
 pub fn rotation_matrix(axis: Vec3, angle: f32, origin: Vec3) -> Mat4 {
     let r = match rodrigues_rotation(axis, angle) {
         Some(r) => r,
@@ -660,39 +660,41 @@ pub fn rotation_matrix(axis: Vec3, angle: f32, origin: Vec3) -> Mat4 {
     let ty = origin.y - (r.r10 * origin.x + r.r11 * origin.y + r.r12 * origin.z);
     let tz = origin.z - (r.r20 * origin.x + r.r21 * origin.y + r.r22 * origin.z);
 
-    // Build matrix directly in row-major format: data[row*4 + col] = M[row][col]
+    // Build matrix in column-major format: data[col*4 + row]
     let mut result = Mat4::new_identity();
+    // Column 0
     result.data[0] = r.r00;
-    result.data[1] = r.r01;
-    result.data[2] = r.r02;
-    result.data[3] = tx;
-    result.data[4] = r.r10;
+    result.data[1] = r.r10;
+    result.data[2] = r.r20;
+    // Column 1
+    result.data[4] = r.r01;
     result.data[5] = r.r11;
-    result.data[6] = r.r12;
-    result.data[7] = ty;
-    result.data[8] = r.r20;
-    result.data[9] = r.r21;
+    result.data[6] = r.r21;
+    // Column 2
+    result.data[8] = r.r02;
+    result.data[9] = r.r12;
     result.data[10] = r.r22;
-    result.data[11] = tz;
+    // Column 3 (translation)
+    result.data[12] = tx;
+    result.data[13] = ty;
+    result.data[14] = tz;
 
     result
 }
 
 /// Create a translation matrix
 ///
-/// Creates a row-major 4x4 translation matrix where:
-/// - data[row*4 + col] = M[row][col]
-/// - Translation is in the last column: data[3], data[7], data[11]
+/// Creates a column-major 4x4 translation matrix where translation
+/// is in column 3: data[12], data[13], data[14].
 pub fn translation_matrix(delta: Vec3) -> Mat4 {
     let mut result = Mat4::new_identity();
-    // Set translation in the last column (row-major: data[row*4 + 3])
-    result.data[3] = delta.x;
-    result.data[7] = delta.y;
-    result.data[11] = delta.z;
+    result.data[12] = delta.x;
+    result.data[13] = delta.y;
+    result.data[14] = delta.z;
     result
 }
 
-/// Convert a PyMOL TTT matrix to a standard 4x4 homogeneous matrix
+/// Convert a PyMOL TTT matrix to a standard 4x4 homogeneous matrix (column-major)
 ///
 /// TTT format: pre-translate, rotate, post-translate
 /// Standard: just rotation + translation
@@ -722,43 +724,25 @@ pub fn ttt_to_mat4(ttt: &[f32; 16]) -> Mat4 {
     let ty = r10 * pre_x + r11 * pre_y + r12 * pre_z + post_y;
     let tz = r20 * pre_x + r21 * pre_y + r22 * pre_z + post_z;
 
-    // Build matrix directly in row-major format
-    let mut result = Mat4::new_identity();
-    result.data[0] = r00;
-    result.data[1] = r01;
-    result.data[2] = r02;
-    result.data[3] = tx;
-    result.data[4] = r10;
-    result.data[5] = r11;
-    result.data[6] = r12;
-    result.data[7] = ty;
-    result.data[8] = r20;
-    result.data[9] = r21;
-    result.data[10] = r22;
-    result.data[11] = tz;
-
-    result
+    // Build column-major Mat4: data[col*4 + row]
+    Mat4::new([
+        r00, r10, r20, 0.0, // col 0
+        r01, r11, r21, 0.0, // col 1
+        r02, r12, r22, 0.0, // col 2
+        tx,  ty,  tz,  1.0, // col 3
+    ])
 }
 
-/// Convert a standard 4x4 matrix to PyMOL TTT format (with zero pre-translation)
+/// Convert a standard 4x4 column-major matrix to PyMOL TTT format (with zero pre-translation)
 pub fn mat4_to_ttt(matrix: &Mat4) -> [f32; 16] {
+    let d = &matrix.data;
+    // Column-major: M[row][col] = d[col*4 + row]
+    // TTT row-major layout: [r00, r01, r02, post_x, r10, r11, r12, post_y, ...]
     [
-        matrix.data[0],
-        matrix.data[1],
-        matrix.data[2],
-        matrix.data[3],  // post_x
-        matrix.data[4],
-        matrix.data[5],
-        matrix.data[6],
-        matrix.data[7],  // post_y
-        matrix.data[8],
-        matrix.data[9],
-        matrix.data[10],
-        matrix.data[11], // post_z
-        0.0,
-        0.0,
-        0.0, // pre-translation (zero)
-        1.0,
+        d[0],  d[4],  d[8],  d[12], // row 0: M[0,0], M[0,1], M[0,2], post_x
+        d[1],  d[5],  d[9],  d[13], // row 1: M[1,0], M[1,1], M[1,2], post_y
+        d[2],  d[6],  d[10], d[14], // row 2: M[2,0], M[2,1], M[2,2], post_z
+        0.0,   0.0,   0.0,   1.0,   // pre-translation (zero)
     ]
 }
 

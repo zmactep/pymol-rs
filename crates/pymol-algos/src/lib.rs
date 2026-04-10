@@ -10,14 +10,11 @@
 pub mod linalg;
 pub mod align;
 pub mod symmetry;
+pub mod dss;
 
 // Re-export linalg submodules at crate root for backward compatibility
 pub use linalg::svd3;
-pub use linalg::{
-    Svd3,
-    mat3x3_to_mat4, left_multiply_mat4, transform_mat4, is_identity_mat4,
-    transform_3x3, invert_3x3,
-};
+pub use linalg::Svd3;
 
 // Re-export alignment submodules at crate root for backward compatibility
 pub use align::substitution_matrix;
@@ -33,6 +30,9 @@ pub use align::{
 // Re-export symmetry submodules at crate root for convenience
 pub use symmetry::crystal;
 pub use symmetry::space_groups;
+
+// Re-export DSS types at crate root
+pub use dss::{dss as assign_dss, AngleWindow, BackboneResidue, DssParams, SsType};
 
 /// Errors from alignment algorithms
 #[derive(Debug, thiserror::Error)]

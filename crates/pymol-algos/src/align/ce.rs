@@ -7,6 +7,8 @@
 //!
 //! This is a faithful port of PyMOL's `ccealignmodule.cpp`.
 
+use lin_alg::f32::Vec3;
+
 use super::kabsch;
 use crate::AlignError;
 
@@ -62,8 +64,8 @@ pub struct CeResult {
 /// Returns aligned residue pairs that can be fed to `superpose()` for
 /// the final rigid-body fit with outlier rejection.
 pub fn ce_align(
-    source_ca: &[[f32; 3]],
-    target_ca: &[[f32; 3]],
+    source_ca: &[Vec3],
+    target_ca: &[Vec3],
     params: &CeParams,
 ) -> Result<CeResult, AlignError> {
     let len_a = source_ca.len();
@@ -109,17 +111,15 @@ pub fn ce_align(
 
 /// Compute full NxN pairwise distance matrix.
 /// Equivalent to PyMOL's `calcDM`.
-fn calc_dm(coords: &[[f32; 3]]) -> Vec<Vec<f32>> {
+fn calc_dm(coords: &[Vec3]) -> Vec<Vec<f32>> {
     let n = coords.len();
     let mut dm = vec![vec![0.0f32; n]; n];
     for i in 0..n {
         for j in (i + 1)..n {
-            let dx = coords[i][0] - coords[j][0];
-            let dy = coords[i][1] - coords[j][1];
-            let dz = coords[i][2] - coords[j][2];
-            let d = (dx * dx + dy * dy + dz * dz).sqrt();
-            dm[i][j] = d;
-            dm[j][i] = d;
+            let d = coords[i] - coords[j];
+            let dist = (d.x * d.x + d.y * d.y + d.z * d.z).sqrt();
+            dm[i][j] = dist;
+            dm[j][i] = dist;
         }
     }
     dm
@@ -127,12 +127,6 @@ fn calc_dm(coords: &[[f32; 3]]) -> Vec<Vec<f32>> {
 
 /// Compute CE similarity matrix.
 /// Equivalent to PyMOL's `calcS`.
-///
-/// For each fragment pair (iA, iB), compares intra-fragment distance patterns.
-/// Skips adjacent residue distances (constant ~3.8Å CA-CA bond).
-/// S[iA][iB] = mean |d_A[iA+row][iA+col] - d_B[iB+row][iB+col]|
-/// for row=0..w-3, col=row+2..w-1.
-/// S[iA][iB] = -1.0 if the fragment extends past the protein end.
 fn calc_s(
     dm_a: &[Vec<f32>],
     dm_b: &[Vec<f32>],
@@ -141,7 +135,6 @@ fn calc_s(
     win_size: usize,
 ) -> Vec<Vec<f32>> {
     let w = win_size;
-    // Number of distance pairs compared (skipping adjacent)
     let sum_size = ((w - 1) * (w - 2)) as f32 / 2.0;
 
     let mut s = vec![vec![-1.0f32; len_b]; len_a];
@@ -149,13 +142,10 @@ fn calc_s(
     for i_a in 0..len_a {
         for i_b in 0..len_b {
             if i_a > len_a - w || i_b > len_b - w {
-                continue; // S[i_a][i_b] stays -1.0
+                continue;
             }
 
             let mut score = 0.0f32;
-            // Skip distance from residue to its immediate neighbor (row, row+1)
-            // PyMOL: for (row = 0; row < wSize - 2; row++)
-            //          for (col = row + 2; col < wSize; col++)
             for row in 0..(w - 2) {
                 for col in (row + 2)..w {
                     score += (dm_a[i_a + row][i_a + col] - dm_b[i_b + row][i_b + col]).abs();
@@ -171,8 +161,6 @@ fn calc_s(
 
 /// Find optimal AFP paths through the similarity matrix.
 /// Equivalent to PyMOL's `findPath`.
-///
-/// Returns up to `max_paths` best paths, each as a list of (first, second) AFP pairs.
 fn find_path(
     s: &[Vec<f32>],
     dm_a: &[Vec<f32>],
@@ -190,31 +178,24 @@ fn find_path(
     let smaller = len_a.min(len_b);
     let win_sum = ((win_size - 1) * (win_size - 2)) / 2;
 
-    // Best path seen so far (across all seeds)
     let mut best_path: Vec<(usize, usize)> = Vec::new();
     let mut best_path_score: f64 = SENTINEL_SCORE;
     let mut best_path_length: usize = 0;
 
-    // Ring buffer of top paths
     let mut path_buffer: Vec<Option<Vec<(usize, usize)>>> = vec![None; max_kept];
     let mut score_buffer = vec![SENTINEL_SCORE; max_kept];
     let mut len_buffer = vec![0usize; max_kept];
     let mut buffer_index: usize = 0;
     let mut buffer_size: usize = 0;
 
-    // winCache: precomputed cumulative weight denominators
     let win_cache: Vec<i64> = (0..smaller)
         .map(|i| ((i + 1) * i * win_size / 2 + (i + 1) * win_sum) as i64)
         .collect();
 
-    // allScoreBuffer: partial gapped scores per path position per gap index
     let mut all_score_buffer = vec![vec![SENTINEL_SCORE; gap_max * 2 + 1]; smaller];
-
-    // tIndex: tracks which gap index was chosen at each path position
     let mut t_index = vec![0usize; smaller];
 
     for i_a in 0..len_a {
-        // Pruning: can't possibly build a longer path than best_path_length from here
         if best_path_length > 1 && i_a > len_a - win_size * (best_path_length - 1) {
             break;
         }
@@ -229,13 +210,11 @@ fn find_path(
                 break;
             }
 
-            // Start a new path from (iA, iB)
             let mut cur_path = vec![(0usize, 0usize); smaller];
             cur_path[0] = (i_a, i_b);
             let mut cur_path_length: usize = 1;
             t_index[0] = 0;
 
-            // Reset allScoreBuffer for this path
             for row in all_score_buffer.iter_mut().take(smaller) {
                 for val in row.iter_mut().take(gap_max * 2 + 1) {
                     *val = SENTINEL_SCORE;
@@ -247,14 +226,12 @@ fn find_path(
                 let mut gap_best_score: f64 = SENTINEL_SCORE;
                 let mut gap_best_index: Option<usize> = None;
 
-                // Try all gaps (g used for both indexing and arithmetic)
                 #[allow(clippy::needless_range_loop)]
                 for g in 0..(gap_max * 2 + 1) {
                     let last = cur_path[cur_path_length - 1];
                     let mut j_a = last.0 + win_size;
                     let mut j_b = last.1 + win_size;
 
-                    // Alternating gap offset: even g+1 gaps A, odd g+1 gaps B
                     #[allow(clippy::manual_div_ceil)]
                     let gap_offset = (g + 1) / 2;
                     if (g + 1) % 2 == 0 {
@@ -263,7 +240,6 @@ fn find_path(
                         j_b += gap_offset;
                     }
 
-                    // Boundary checks
                     if j_a > len_a - win_size || j_b > len_b - win_size {
                         continue;
                     }
@@ -273,18 +249,14 @@ fn find_path(
                         continue;
                     }
 
-                    // Score extension using cross-fragment distances
                     let mut cur_score: f64 = 0.0;
                     for &prev in cur_path.iter().take(cur_path_length) {
-                        // First atom of prev fragment vs first atom of new fragment
                         cur_score += (dm_a[prev.0][j_a] as f64
                             - dm_b[prev.1][j_b] as f64)
                             .abs();
-                        // Last atom of prev fragment vs last atom of new fragment
                         cur_score += (dm_a[prev.0 + win_size - 1][j_a + win_size - 1] as f64
                             - dm_b[prev.1 + win_size - 1][j_b + win_size - 1] as f64)
                             .abs();
-                        // Anti-diagonal: k=1..winSize-2
                         for k in 1..(win_size - 1) {
                             cur_score += (dm_a[prev.0 + k][j_a + win_size - 1 - k] as f64
                                 - dm_b[prev.1 + k][j_b + win_size - 1 - k] as f64)
@@ -298,7 +270,6 @@ fn find_path(
                         continue;
                     }
 
-                    // Store gapped best
                     if cur_score < gap_best_score {
                         cur_path[cur_path_length] = (j_a, j_b);
                         gap_best_score = cur_score;
@@ -307,7 +278,6 @@ fn find_path(
                     }
                 }
 
-                // Calculate cumulative total score
                 if let Some(gbi) = gap_best_index {
                     #[allow(clippy::manual_div_ceil)]
                     let j_gap = (gbi + 1) / 2;
@@ -319,13 +289,11 @@ fn find_path(
                         (prev.0 + win_size, prev.1 + win_size + j_gap)
                     };
 
-                    // score1: weighted combination of cross-fragment score with local S score
                     let score1 = (all_score_buffer[cur_path_length - 1][gbi]
                         * (win_size * cur_path_length) as f64
                         + s[g_a][g_b] as f64 * win_sum as f64)
                         / (win_size * cur_path_length + win_sum) as f64;
 
-                    // score2: cumulative weighted average with previous path score
                     let prev_score = if cur_path_length > 1 {
                         all_score_buffer[cur_path_length - 2][t_index[cur_path_length - 1]]
                     } else {
@@ -339,17 +307,14 @@ fn find_path(
 
                     let cur_total_score = score2;
 
-                    // Heuristic: path getting sloppy, stop
                     if cur_total_score > d1 {
                         done = true;
-                        // gap_best_index effectively -1
                     } else {
                         all_score_buffer[cur_path_length - 1][gbi] = cur_total_score;
                         t_index[cur_path_length] = gbi;
                         cur_path_length += 1;
                     }
 
-                    // Update best path if this one is better
                     if !done
                         && (cur_path_length > best_path_length
                             || (cur_path_length == best_path_length
@@ -360,13 +325,11 @@ fn find_path(
                         best_path = cur_path[..cur_path_length].to_vec();
                     }
                 } else {
-                    // No good extension found
                     done = true;
                     cur_path_length = cur_path_length.saturating_sub(1);
                 }
             }
 
-            // Add to ring buffer if best path is good enough
             if best_path_length > len_buffer[buffer_index]
                 || (best_path_length == len_buffer[buffer_index]
                     && best_path_score < score_buffer[buffer_index])
@@ -397,18 +360,14 @@ fn find_path(
         }
     }
 
-    // Collect non-empty paths from buffer
     path_buffer.into_iter().flatten().collect()
 }
 
 /// Select the best path by computing Kabsch RMSD for each.
 /// Equivalent to PyMOL's `findBest`.
-///
-/// Expands each AFP path into individual residue pairs, computes RMSD via Kabsch,
-/// returns the path with lowest RMSD.
 fn find_best(
-    source_ca: &[[f32; 3]],
-    target_ca: &[[f32; 3]],
+    source_ca: &[Vec3],
+    target_ca: &[Vec3],
     paths: &[Vec<(usize, usize)>],
     win_size: usize,
 ) -> Option<(Vec<(usize, usize)>, f32)> {
@@ -420,7 +379,6 @@ fn find_best(
             continue;
         }
 
-        // Expand AFPs into individual residue pairs
         let mut src_coords = Vec::new();
         let mut tgt_coords = Vec::new();
         let mut pairs = Vec::new();
@@ -441,7 +399,6 @@ fn find_best(
             continue;
         }
 
-        // Compute Kabsch RMSD
         match kabsch::kabsch(&src_coords, &tgt_coords, None) {
             Ok(result) => {
                 if result.rmsd < best_rmsd
@@ -476,39 +433,41 @@ fn z_score(n_aligned: usize, rmsd: f32, len_source: usize, len_target: usize) ->
 mod tests {
     use super::*;
 
+    fn v(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
     /// Generate an alpha-helix-like Cα trace with realistic ~3.8Å CA-CA spacing.
-    /// Parameters match a real alpha helix: radius ~2.3Å, rise ~1.5Å/residue,
-    /// turn ~100°/residue.
-    fn make_helix(n: usize, offset: [f32; 3]) -> Vec<[f32; 3]> {
+    fn make_helix(n: usize, offset: Vec3) -> Vec<Vec3> {
         (0..n)
             .map(|i| {
                 let t = i as f32;
-                [
-                    2.3 * (t * 1.745).cos() + offset[0],
-                    2.3 * (t * 1.745).sin() + offset[1],
-                    1.5 * t + offset[2],
-                ]
+                v(
+                    2.3 * (t * 1.745).cos() + offset.x,
+                    2.3 * (t * 1.745).sin() + offset.y,
+                    1.5 * t + offset.z,
+                )
             })
             .collect()
     }
 
     /// Generate a beta-strand-like Cα trace (extended, 3.3Å spacing)
-    fn make_strand(n: usize, offset: [f32; 3]) -> Vec<[f32; 3]> {
+    fn make_strand(n: usize, offset: Vec3) -> Vec<Vec3> {
         (0..n)
             .map(|i| {
                 let t = i as f32;
-                [
-                    3.3 * t + offset[0],
-                    offset[1] + if i % 2 == 0 { 0.5 } else { -0.5 },
-                    offset[2],
-                ]
+                v(
+                    3.3 * t + offset.x,
+                    offset.y + if i % 2 == 0 { 0.5 } else { -0.5 },
+                    offset.z,
+                )
             })
             .collect()
     }
 
     #[test]
     fn test_calc_dm_symmetric() {
-        let coords = make_helix(5, [0.0, 0.0, 0.0]);
+        let coords = make_helix(5, v(0.0, 0.0, 0.0));
         let dm = calc_dm(&coords);
         assert_eq!(dm.len(), 5);
         for (i, row) in dm.iter().enumerate().take(5) {
@@ -521,101 +480,72 @@ mod tests {
 
     #[test]
     fn test_calc_s_dimensions() {
-        let a = make_helix(15, [0.0, 0.0, 0.0]);
-        let b = make_helix(20, [5.0, 5.0, 5.0]);
+        let a = make_helix(15, v(0.0, 0.0, 0.0));
+        let b = make_helix(20, v(5.0, 5.0, 5.0));
         let dm_a = calc_dm(&a);
         let dm_b = calc_dm(&b);
         let s = calc_s(&dm_a, &dm_b, a.len(), b.len(), 8);
         assert_eq!(s.len(), 15);
         assert_eq!(s[0].len(), 20);
-        // Valid positions should not be -1.0
         assert!(s[0][0] >= 0.0);
-        // Past-end positions should be -1.0
         assert_eq!(s[14][0], -1.0);
     }
 
     #[test]
     fn test_calc_s_identical_fragments() {
-        let coords = make_helix(20, [0.0, 0.0, 0.0]);
+        let coords = make_helix(20, v(0.0, 0.0, 0.0));
         let dm = calc_dm(&coords);
         let s = calc_s(&dm, &dm, coords.len(), coords.len(), 8);
-        // Same fragment at same position should score 0
         assert!(s[0][0].abs() < 1e-6);
         assert!(s[5][5].abs() < 1e-6);
     }
 
     #[test]
     fn test_identical_structures() {
-        let coords = make_helix(20, [0.0, 0.0, 0.0]);
+        let coords = make_helix(20, v(0.0, 0.0, 0.0));
         let result = ce_align(&coords, &coords, &CeParams::default()).unwrap();
-        assert!(
-            result.n_aligned >= 15,
-            "Expected >=15 aligned, got {}",
-            result.n_aligned
-        );
-        assert!(
-            result.rmsd < 0.1,
-            "Expected low RMSD for identical, got {}",
-            result.rmsd
-        );
+        assert!(result.n_aligned >= 15, "Expected >=15 aligned, got {}", result.n_aligned);
+        assert!(result.rmsd < 0.1, "Expected low RMSD for identical, got {}", result.rmsd);
     }
 
     #[test]
     fn test_translated_structure() {
-        let source = make_helix(25, [0.0, 0.0, 0.0]);
-        let target = make_helix(25, [10.0, 20.0, 30.0]);
+        let source = make_helix(25, v(0.0, 0.0, 0.0));
+        let target = make_helix(25, v(10.0, 20.0, 30.0));
         let result = ce_align(&source, &target, &CeParams::default()).unwrap();
-        // Distance matrices are translation-invariant
-        assert!(
-            result.n_aligned >= 18,
-            "Expected >=18 aligned, got {}",
-            result.n_aligned
-        );
-        assert!(
-            result.rmsd < 0.5,
-            "Expected low RMSD for translated, got {}",
-            result.rmsd
-        );
+        assert!(result.n_aligned >= 18, "Expected >=18 aligned, got {}", result.n_aligned);
+        assert!(result.rmsd < 0.5, "Expected low RMSD for translated, got {}", result.rmsd);
     }
 
     #[test]
     fn test_different_lengths() {
-        // Use longer helices so there are enough fragment positions for CE
-        let source = make_helix(25, [0.0, 0.0, 0.0]);
-        let target = make_helix(40, [5.0, 5.0, 5.0]);
+        let source = make_helix(25, v(0.0, 0.0, 0.0));
+        let target = make_helix(40, v(5.0, 5.0, 5.0));
         let result = ce_align(&source, &target, &CeParams::default()).unwrap();
-        assert!(
-            result.n_aligned >= 8,
-            "Expected >=8 aligned, got {}",
-            result.n_aligned
-        );
+        assert!(result.n_aligned >= 8, "Expected >=8 aligned, got {}", result.n_aligned);
     }
 
     #[test]
     fn test_dissimilar_structures() {
-        let helix = make_helix(20, [0.0, 0.0, 0.0]);
-        let strand = make_strand(20, [0.0, 0.0, 0.0]);
+        let helix = make_helix(20, v(0.0, 0.0, 0.0));
+        let strand = make_strand(20, v(0.0, 0.0, 0.0));
         let result = ce_align(&helix, &strand, &CeParams::default());
         if let Ok(r) = result {
-            assert!(
-                r.z_score < 5.0,
-                "Z-score should be low for dissimilar, got {}",
-                r.z_score
-            );
-        } // Err is also acceptable
+            assert!(r.z_score < 5.0, "Z-score should be low for dissimilar, got {}", r.z_score);
+        }
     }
 
     #[test]
     fn test_too_short() {
-        let short = make_helix(5, [0.0, 0.0, 0.0]);
+        let short = make_helix(5, v(0.0, 0.0, 0.0));
         let result = ce_align(&short, &short, &CeParams::default());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_custom_params() {
-        let source = make_helix(20, [0.0, 0.0, 0.0]);
-        let target = make_helix(20, [5.0, 0.0, 0.0]);
+        let source = make_helix(20, v(0.0, 0.0, 0.0));
+        let target = make_helix(20, v(5.0, 0.0, 0.0));
         let params = CeParams {
             win_size: 6,
             gap_max: 10,
@@ -624,11 +554,7 @@ mod tests {
             max_paths: 10,
         };
         let result = ce_align(&source, &target, &params).unwrap();
-        assert!(
-            result.n_aligned >= 8,
-            "Expected >=8 aligned, got {}",
-            result.n_aligned
-        );
+        assert!(result.n_aligned >= 8, "Expected >=8 aligned, got {}", result.n_aligned);
     }
 
     #[test]

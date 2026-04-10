@@ -3,13 +3,15 @@
 //! Maps space group names to lists of 4×4 transformation matrices (in fractional
 //! coordinates). Data derived from International Tables for Crystallography, Vol. A.
 
+use lin_alg::f32::Mat4;
+
 use super::space_groups_data::{ALIASES, SYM_OPS};
 
 /// Get the symmetry operation matrices for a space group.
 ///
-/// Each matrix is a 4×4 row-major array representing a symmetry operation
-/// in fractional coordinates. Returns `None` if the space group is unknown.
-pub fn get_symops(space_group: &str) -> Option<Vec<[f32; 16]>> {
+/// Each matrix is a 4×4 Mat4 (column-major, lin_alg convention) representing a symmetry
+/// operation in fractional coordinates. Returns `None` if the space group is unknown.
+pub fn get_symops(space_group: &str) -> Option<Vec<Mat4>> {
     let canonical = canonicalize(space_group);
     let ops = SYM_OPS.get(canonical.as_str())?;
     Some(ops.iter().map(|op| parse_symop(op)).collect())
@@ -40,27 +42,28 @@ pub fn canonicalize(sg: &str) -> String {
     normalized
 }
 
-/// Parse a symmetry operation string like `"-x+1/2,y,-z"` into a 4×4 row-major matrix
+/// Parse a symmetry operation string like `"-x+1/2,y,-z"` into a 4×4 column-major Mat4
 ///
 /// Each comma-separated component defines one row of the 3×3 rotation part
 /// plus the translation. For example, `-x+1/2` means coefficient -1 for x,
 /// 0 for y, 0 for z, and translation 1/2.
-pub fn parse_symop(op: &str) -> [f32; 16] {
-    let mut mat = [0.0f32; 16];
-    mat[15] = 1.0;
+pub fn parse_symop(op: &str) -> Mat4 {
+    let mut data = [0.0f32; 16];
+    data[15] = 1.0;
 
     for (row, expr) in op.split(',').enumerate() {
         if row >= 3 {
             break;
         }
         let (coeffs, trans) = parse_expr(expr.trim());
-        mat[row * 4] = coeffs[0]; // x coefficient
-        mat[row * 4 + 1] = coeffs[1]; // y coefficient
-        mat[row * 4 + 2] = coeffs[2]; // z coefficient
-        mat[row * 4 + 3] = trans; // translation
+        // Column-major: data[col*4 + row]
+        data[row] = coeffs[0];      // x coefficient → col 0
+        data[4 + row] = coeffs[1];  // y coefficient → col 1
+        data[8 + row] = coeffs[2];  // z coefficient → col 2
+        data[12 + row] = trans;     // translation → col 3
     }
 
-    mat
+    Mat4::new(data)
 }
 
 /// Parse a single symmetry expression component like `-x+1/2` or `y-z`
@@ -160,57 +163,59 @@ mod tests {
     #[test]
     fn test_parse_identity() {
         let mat = parse_symop("x,y,z");
-        // Should be identity
-        assert_eq!(mat[0], 1.0); // x -> x
-        assert_eq!(mat[5], 1.0); // y -> y
-        assert_eq!(mat[10], 1.0); // z -> z
-        // No translation
-        assert_eq!(mat[3], 0.0);
-        assert_eq!(mat[7], 0.0);
-        assert_eq!(mat[11], 0.0);
+        // Column-major: M[row,col] = data[col*4 + row]
+        // Diagonal: M[0,0]=data[0], M[1,1]=data[5], M[2,2]=data[10]
+        assert_eq!(mat.data[0], 1.0);  // x -> x
+        assert_eq!(mat.data[5], 1.0);  // y -> y
+        assert_eq!(mat.data[10], 1.0); // z -> z
+        // No translation (col 3): data[12], data[13], data[14]
+        assert_eq!(mat.data[12], 0.0);
+        assert_eq!(mat.data[13], 0.0);
+        assert_eq!(mat.data[14], 0.0);
     }
 
     #[test]
     fn test_parse_negative_with_translation() {
         let mat = parse_symop("-x+1/2,-y+1/2,z");
-        assert_eq!(mat[0], -1.0); // -x
-        assert_eq!(mat[3], 0.5); // +1/2
-        assert_eq!(mat[5], -1.0); // -y
-        assert_eq!(mat[7], 0.5); // +1/2
-        assert_eq!(mat[10], 1.0); // z
-        assert_eq!(mat[11], 0.0);
+        // Column-major: M[row,col] = data[col*4 + row]
+        assert_eq!(mat.data[0], -1.0);  // M[0,0] = -x
+        assert_eq!(mat.data[12], 0.5);  // M[0,3] = +1/2
+        assert_eq!(mat.data[5], -1.0);  // M[1,1] = -y
+        assert_eq!(mat.data[13], 0.5);  // M[1,3] = +1/2
+        assert_eq!(mat.data[10], 1.0);  // M[2,2] = z
+        assert_eq!(mat.data[14], 0.0);  // M[2,3] = 0
     }
 
     #[test]
     fn test_parse_mixed() {
         let mat = parse_symop("-x,y+1/2,-z+1/2");
-        assert_eq!(mat[0], -1.0);
-        assert_eq!(mat[3], 0.0);
-        assert_eq!(mat[5], 1.0);
-        assert_eq!(mat[7], 0.5);
-        assert_eq!(mat[10], -1.0);
-        assert_eq!(mat[11], 0.5);
+        assert_eq!(mat.data[0], -1.0);  // M[0,0]
+        assert_eq!(mat.data[12], 0.0);  // M[0,3]
+        assert_eq!(mat.data[5], 1.0);   // M[1,1]
+        assert_eq!(mat.data[13], 0.5);  // M[1,3]
+        assert_eq!(mat.data[10], -1.0); // M[2,2]
+        assert_eq!(mat.data[14], 0.5);  // M[2,3]
     }
 
     #[test]
     fn test_parse_third_fraction() {
         let mat = parse_symop("x+1/3,y+2/3,z+2/3");
-        assert_eq!(mat[0], 1.0);
-        assert!((mat[3] - 1.0 / 3.0).abs() < 1e-6);
-        assert_eq!(mat[5], 1.0);
-        assert!((mat[7] - 2.0 / 3.0).abs() < 1e-6);
-        assert_eq!(mat[10], 1.0);
-        assert!((mat[11] - 2.0 / 3.0).abs() < 1e-6);
+        assert_eq!(mat.data[0], 1.0);   // M[0,0]
+        assert!((mat.data[12] - 1.0 / 3.0).abs() < 1e-6); // M[0,3]
+        assert_eq!(mat.data[5], 1.0);   // M[1,1]
+        assert!((mat.data[13] - 2.0 / 3.0).abs() < 1e-6); // M[1,3]
+        assert_eq!(mat.data[10], 1.0);  // M[2,2]
+        assert!((mat.data[14] - 2.0 / 3.0).abs() < 1e-6); // M[2,3]
     }
 
     #[test]
     fn test_get_symops_p1() {
         let ops = get_symops("P 1").unwrap();
         assert_eq!(ops.len(), 1);
-        // Identity
-        assert_eq!(ops[0][0], 1.0);
-        assert_eq!(ops[0][5], 1.0);
-        assert_eq!(ops[0][10], 1.0);
+        // Identity: diagonal elements
+        assert_eq!(ops[0].data[0], 1.0);
+        assert_eq!(ops[0].data[5], 1.0);
+        assert_eq!(ops[0].data[10], 1.0);
     }
 
     #[test]
@@ -221,7 +226,6 @@ mod tests {
 
     #[test]
     fn test_get_symops_alias() {
-        // "P212121" should resolve to "P 21 21 21"
         let ops = get_symops("P212121").unwrap();
         assert_eq!(ops.len(), 4);
     }
@@ -249,8 +253,8 @@ mod tests {
         let ops = get_symops("P -1").unwrap();
         assert_eq!(ops.len(), 2);
         // Second op should be -x,-y,-z (inversion)
-        assert_eq!(ops[1][0], -1.0);
-        assert_eq!(ops[1][5], -1.0);
-        assert_eq!(ops[1][10], -1.0);
+        assert_eq!(ops[1].data[0], -1.0);
+        assert_eq!(ops[1].data[5], -1.0);
+        assert_eq!(ops[1].data[10], -1.0);
     }
 }

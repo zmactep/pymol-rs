@@ -11,6 +11,7 @@ description = "Molecular data structures for PyMOL-RS"
 
 [dependencies]
 lin_alg = { workspace = true }
+pymol-algos = { workspace = true }
 pymol-settings = { workspace = true }
 thiserror = { workspace = true }
 bitflags = { workspace = true }

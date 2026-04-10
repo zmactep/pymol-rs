@@ -10,7 +10,6 @@
 //! - Special keywords: `backbone`, `sidechain`, `polymer`, `organic`
 
 use lin_alg::f32::{Mat4, Vec3};
-use pymol_algos::linalg::left_multiply_mat4;
 use pymol_mol::{rotation_ttt, ttt_to_mat4, AtomIndex};
 use pymol_scene::{DirtyFlags, Object};
 
@@ -124,18 +123,18 @@ EXAMPLES
         let is_object = ctx.viewer.objects().contains(selection);
 
         if movie_active && is_object {
-            // Build translation matrix and compose onto object's TTT
+            // Build translation matrix (column-major: translation at [12,13,14])
             let translation = Mat4 {
                 data: [
-                    1.0, 0.0, 0.0, shift.x,
-                    0.0, 1.0, 0.0, shift.y,
-                    0.0, 0.0, 1.0, shift.z,
-                    0.0, 0.0, 0.0, 1.0,
+                    1.0, 0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    shift.x, shift.y, shift.z, 1.0,
                 ],
             };
             if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(selection) {
                 let current = mol_obj.state().transform.clone();
-                mol_obj.state_mut().set_transform(left_multiply_mat4(&translation, &current));
+                mol_obj.state_mut().set_transform(translation * current);
                 mol_obj.invalidate(DirtyFlags::COORDS);
             }
             ctx.viewer.request_redraw();
