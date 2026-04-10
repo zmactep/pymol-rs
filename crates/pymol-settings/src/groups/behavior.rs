@@ -11,6 +11,9 @@ define_settings_group! {
             name = "ignore_case_chain";
         auto_dss: bool = true,
             name = "auto_dss";
+        dss_algorithm: crate::DssAlgorithm = crate::DssAlgorithm::PyMol,
+            name = "dss_algorithm",
+            hints = crate::DssAlgorithm;
         bonding_vdw_cutoff: f32 = 0.2,
             name = "bonding_vdw_cutoff",
             min = 0.0, max = 1.0;

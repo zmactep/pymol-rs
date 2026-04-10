@@ -1,6 +1,6 @@
 //! Object commands: delete, rename, create, copy, group, ungroup
 
-use pymol_mol::dss::{assign_secondary_structure, DssSettings};
+use pymol_mol::dss::{assign_secondary_structure, assigner_for};
 use pymol_mol::{AtomIndex, ObjectMolecule};
 use pymol_scene::{DirtyFlags, MoleculeObject};
 
@@ -1559,7 +1559,8 @@ EXAMPLES
             .map(|s| s.to_string())
             .collect();
 
-        let settings = DssSettings::default();
+        let algorithm = ctx.viewer.settings().behavior.dss_algorithm;
+        let assigner = assigner_for(algorithm);
         let mut total_updated = 0usize;
 
         // Apply DSS to all molecule objects
@@ -1567,7 +1568,7 @@ EXAMPLES
         for name in mol_names {
             if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&name) {
                 let mol = mol_obj.molecule_mut();
-                let updated = assign_secondary_structure(mol, state_idx, &settings);
+                let updated = assign_secondary_structure(mol, state_idx, assigner.as_ref());
                 total_updated += updated;
             }
         }

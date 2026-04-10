@@ -3529,6 +3529,7 @@ dependencies = [
  "criterion",
  "flate2",
  "once_cell",
+ "pymol-algos",
  "pymol-color",
  "pymol-io",
  "pymol-mol",

@@ -11,11 +11,14 @@
 //!
 //! # Algorithms
 //!
-//! - [`dss`] — PyMOL's DSS algorithm (H-bonds + phi/psi dihedral angles)
+//! - [`PyMolDss`] — PyMOL's DSS algorithm (H-bonds + phi/psi dihedral angles)
+//! - [`Dssp`] — DSSP algorithm (Kabsch & Sander, stub)
 
+mod dssp;
 mod pymol;
 
-pub use pymol::{dss, AngleWindow, DssParams};
+pub use dssp::{Dssp, DsspParams};
+pub use pymol::{dss, AngleWindow, DssParams, PyMolDss};
 
 use lin_alg::f32::Vec3;
 
@@ -44,6 +47,18 @@ pub struct BackboneResidue {
     /// Whether this residue is peptide-bonded to the previous entry in the slice.
     /// Used for chain break detection within algorithms.
     pub bonded_to_prev: bool,
+}
+
+/// Trait for secondary structure assignment algorithms.
+///
+/// Implementations carry their own configuration (constructed at creation time)
+/// and produce a `Vec<SsType>` parallel to the input residues.
+pub trait SecondaryStructureAssigner {
+    /// Assign secondary structure to the given backbone residues.
+    ///
+    /// Returns a `Vec` of the same length as `residues`, where `output[i]`
+    /// is the assignment for `residues[i]`.
+    fn assign(&self, residues: &[BackboneResidue]) -> Vec<SsType>;
 }
 
 /// Secondary structure type assigned by an algorithm

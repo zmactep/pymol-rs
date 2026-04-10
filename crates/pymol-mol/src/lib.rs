@@ -75,7 +75,7 @@ pub use residue::{
 pub use secondary::SecondaryStructure;
 
 // Re-export DSS types
-pub use dss::{assign_secondary_structure, DssSettings};
+pub use dss::{assign_secondary_structure, assigner_for};
 
 /// Re-export commonly used types for convenience
 pub mod prelude {

@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 
-use pymol_mol::dss::{assign_secondary_structure, DssSettings};
+use pymol_algos::PyMolDss;
+use pymol_mol::dss::assign_secondary_structure;
 use pymol_mol::RepMask;
 use pymol_render::picking::Ray;
 use pymol_render::{
@@ -81,11 +82,12 @@ fn dss_bench(c: &mut Criterion) {
     // Force lazy init before benchmarking
     let _ = &*MOLECULE;
 
+    let assigner = PyMolDss::default();
     group.bench_function("assign_secondary_structure", |b| {
         b.iter_batched(
             || MOLECULE.clone(),
             |mut mol| {
-                assign_secondary_structure(&mut mol, 0, &DssSettings::default());
+                assign_secondary_structure(&mut mol, 0, &assigner);
                 black_box(mol.atom_count());
             },
             BatchSize::LargeInput,

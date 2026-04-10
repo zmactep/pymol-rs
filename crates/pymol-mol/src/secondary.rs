@@ -142,6 +142,17 @@ impl SecondaryStructure {
     }
 }
 
+impl From<pymol_algos::dss::SsType> for SecondaryStructure {
+    fn from(ss: pymol_algos::dss::SsType) -> Self {
+        use pymol_algos::dss::SsType;
+        match ss {
+            SsType::Loop => SecondaryStructure::Loop,
+            SsType::Helix => SecondaryStructure::Helix,
+            SsType::Sheet => SecondaryStructure::Sheet,
+        }
+    }
+}
+
 impl fmt::Display for SecondaryStructure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_char())

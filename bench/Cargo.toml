@@ -8,6 +8,7 @@ publish = false
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+pymol-algos = { workspace = true }
 pymol-io = { workspace = true }
 pymol-mol = { workspace = true }
 pymol-select = { workspace = true }

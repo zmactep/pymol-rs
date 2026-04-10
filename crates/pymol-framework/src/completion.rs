@@ -249,7 +249,7 @@ fn complete_setting_value(
     let first_words: Vec<&str> = first_seg.split_whitespace().collect();
     let setting_name = if first_words.len() >= 2 { first_words[1] } else { return CompletionResult::empty(prefix_start); };
 
-    // Look up setting type
+    // Look up setting type — try legacy definitions first, then typed registry
     if let Some(id) = pymol_settings::get_setting_id(setting_name) {
         if let Some(setting) = pymol_settings::get_setting(id) {
             // Settings with named value variants (e.g., shading_mode: classic/skripkin)
@@ -269,6 +269,20 @@ fn complete_setting_value(
                 }
                 _ => return CompletionResult::empty(prefix_start),
             };
+        }
+    }
+
+    // Fall through to typed registry (for settings not in legacy definitions)
+    if let Some(desc) = pymol_settings::registry::lookup_by_name(setting_name) {
+        if desc.has_value_hints() {
+            let hints: Vec<&str> = desc.hint_names().collect();
+            return complete_from_static(prefix, prefix_start, &hints);
+        }
+        match desc.setting_type {
+            pymol_settings::SettingType::Bool => {
+                return complete_from_static(prefix, prefix_start, &["on", "off"]);
+            }
+            _ => return CompletionResult::empty(prefix_start),
         }
     }
 

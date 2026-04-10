@@ -75,6 +75,31 @@ impl Default for DssParams {
 }
 
 // ============================================================================
+// Trait Implementation
+// ============================================================================
+
+/// PyMOL DSS secondary structure assigner.
+///
+/// Wraps the [`dss`] function with its parameters as a
+/// [`SecondaryStructureAssigner`](super::SecondaryStructureAssigner) implementation.
+#[derive(Default)]
+pub struct PyMolDss {
+    pub params: DssParams,
+}
+
+impl PyMolDss {
+    pub fn new(params: DssParams) -> Self {
+        Self { params }
+    }
+}
+
+impl super::SecondaryStructureAssigner for PyMolDss {
+    fn assign(&self, residues: &[BackboneResidue]) -> Vec<SsType> {
+        dss(residues, &self.params)
+    }
+}
+
+// ============================================================================
 // Dihedral Angle Calculation
 // ============================================================================
 

@@ -5,7 +5,8 @@ use once_cell::sync::Lazy;
 
 use pymol_color::NamedColors;
 use pymol_color::ElementColors;
-use pymol_mol::dss::{assign_secondary_structure, DssSettings};
+use pymol_algos::PyMolDss;
+use pymol_mol::dss::assign_secondary_structure;
 use pymol_mol::ObjectMolecule;
 use pymol_render::ColorResolver;
 use pymol_settings::{ResolvedSettings, Settings};
@@ -57,7 +58,7 @@ pub static MOLECULE: Lazy<ObjectMolecule> = Lazy::new(|| {
 /// Parsed molecule with secondary structure assigned.
 pub static MOLECULE_WITH_DSS: Lazy<ObjectMolecule> = Lazy::new(|| {
     let mut mol = MOLECULE.clone();
-    assign_secondary_structure(&mut mol, 0, &DssSettings::default());
+    assign_secondary_structure(&mut mol, 0, &PyMolDss::default());
     mol
 });
 

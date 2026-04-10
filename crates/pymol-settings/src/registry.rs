@@ -189,6 +189,7 @@ fn build_descriptors() -> Vec<SettingDescriptor> {
     reg!("ignore_case", bool, global = |s| s.behavior.ignore_case);
     reg!("ignore_case_chain", bool, global = |s| s.behavior.ignore_case_chain);
     reg!("auto_dss", bool, global = |s| s.behavior.auto_dss);
+    reg!("dss_algorithm", crate::DssAlgorithm, global = |s| s.behavior.dss_algorithm, hints = crate::DssAlgorithm);
     reg!("bonding_vdw_cutoff", f32, global = |s| s.behavior.bonding_vdw_cutoff, min = 0.0, max = 1.0);
 
     // =========================================================================

@@ -1,10 +1,14 @@
 //! Secondary structure assignment bridge
 //!
-//! Extracts backbone data from an [`ObjectMolecule`], delegates to the DSS
-//! algorithm in `pymol-algos`, and applies the results back to the molecule.
+//! Extracts backbone data from an [`ObjectMolecule`], delegates to a
+//! [`SecondaryStructureAssigner`] implementation in `pymol-algos`, and applies
+//! the results back to the molecule.
 
 use lin_alg::f32::Vec3;
-use pymol_algos::dss::{BackboneResidue, SsType};
+use pymol_algos::dss::{
+    BackboneResidue, Dssp, PyMolDss, SecondaryStructureAssigner, SsType,
+};
+use pymol_settings::DssAlgorithm;
 
 use crate::coordset::CoordSet;
 use crate::index::AtomIndex;
@@ -12,30 +16,35 @@ use crate::molecule::ObjectMolecule;
 use crate::residue::ResidueView;
 use crate::secondary::SecondaryStructure;
 
-// Re-export algorithm types for backward compatibility
-pub use pymol_algos::dss::{AngleWindow, DssParams as DssSettings};
-
 // ============================================================================
 // Public API
 // ============================================================================
 
-/// Assign secondary structure to a molecule using the DSS algorithm
+/// Create a secondary structure assigner from the `dss_algorithm` setting value.
+pub fn assigner_for(algorithm: DssAlgorithm) -> Box<dyn SecondaryStructureAssigner> {
+    match algorithm {
+        DssAlgorithm::PyMol => Box::new(PyMolDss::default()),
+        DssAlgorithm::Dssp => Box::new(Dssp::default()),
+    }
+}
+
+/// Assign secondary structure to a molecule using the given assigner.
 ///
-/// Extracts backbone residue data, runs the PyMOL DSS algorithm, and writes
-/// the resulting secondary structure assignments back to each atom's `ss_type`.
+/// Extracts backbone residue data, runs the assigner, and writes the resulting
+/// secondary structure assignments back to each atom's `ss_type`.
 ///
 /// Returns the number of atoms whose secondary structure was changed.
 pub fn assign_secondary_structure(
     molecule: &mut ObjectMolecule,
     state: usize,
-    settings: &DssSettings,
+    assigner: &dyn SecondaryStructureAssigner,
 ) -> usize {
     let backbone = extract_backbone(molecule, state);
     if backbone.is_empty() {
         return 0;
     }
 
-    let assignments = pymol_algos::dss::dss(&backbone, settings);
+    let assignments = assigner.assign(&backbone);
 
     apply_ss(molecule, &backbone, &assignments)
 }
@@ -178,12 +187,7 @@ fn apply_ss(
 ) -> usize {
     let mut ss_map = ahash::AHashMap::new();
     for (bb, &ss) in backbone.iter().zip(assignments.iter()) {
-        let ss = match ss {
-            SsType::Helix => SecondaryStructure::Helix,
-            SsType::Sheet => SecondaryStructure::Sheet,
-            SsType::Loop => SecondaryStructure::Loop,
-        };
-        ss_map.insert((bb.chain.clone(), bb.resv), ss);
+        ss_map.insert((bb.chain.clone(), bb.resv), SecondaryStructure::from(ss));
     }
 
     let mut updated_count = 0;

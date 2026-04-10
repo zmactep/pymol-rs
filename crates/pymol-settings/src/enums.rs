@@ -157,6 +157,29 @@ impl_setting_enum! {
     default: Residues
 }
 
+// ---------------------------------------------------------------------------
+// DssAlgorithm enum
+// ---------------------------------------------------------------------------
+
+/// Algorithm for secondary structure assignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[repr(i32)]
+pub enum DssAlgorithm {
+    /// PyMOL's DSS algorithm (H-bonds + phi/psi dihedral angles)
+    #[default]
+    PyMol = 0,
+    /// DSSP algorithm (Kabsch & Sander)
+    Dssp = 1,
+}
+
+impl_setting_enum! {
+    DssAlgorithm {
+        PyMol = 0 => "pymol",
+        Dssp = 1 => "dssp",
+    }
+    default: PyMol
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

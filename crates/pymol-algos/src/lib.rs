@@ -32,7 +32,10 @@ pub use symmetry::crystal;
 pub use symmetry::space_groups;
 
 // Re-export DSS types at crate root
-pub use dss::{dss as assign_dss, AngleWindow, BackboneResidue, DssParams, SsType};
+pub use dss::{
+    dss as assign_dss, AngleWindow, BackboneResidue, Dssp, DsspParams, DssParams, PyMolDss,
+    SecondaryStructureAssigner, SsType,
+};
 
 /// Errors from alignment algorithms
 #[derive(Debug, thiserror::Error)]

@@ -63,7 +63,7 @@ pub use definitions::{get_setting, get_setting_id, setting_names, SETTINGS, SETT
 pub use error::SettingError;
 pub use setting::{Setting, SettingLevel, SettingType, SettingValue};
 pub use side_effects::SideEffectCategory;
-pub use enums::{MouseSelectionMode, SettingEnum};
+pub use enums::{DssAlgorithm, MouseSelectionMode, SettingEnum};
 pub use shading_mode::ShadingMode;
 pub use store::{GlobalSettings, SerializedSetting, UniqueId, UniqueSettings};
 

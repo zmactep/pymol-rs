@@ -4,7 +4,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use pymol_io::FileFormat;
-use pymol_mol::dss::{assign_secondary_structure, DssSettings};
+use pymol_mol::dss::{assign_secondary_structure, assigner_for};
 use pymol_mol::ObjectMolecule;
 use pymol_render::Grid3D;
 use pymol_scene::{MapData, MapObject, MoleculeObject};
@@ -33,13 +33,12 @@ pub fn expand_path(path: &str) -> PathBuf {
 
 /// Apply DSS (Define Secondary Structure) algorithm to a molecule
 ///
-/// This recalculates secondary structure based on backbone phi/psi angles,
-/// similar to PyMOL's auto_dss functionality. It overwrites the secondary
-/// structure assignments from the PDB/CIF file with computed values.
-fn apply_dss(mol: &mut ObjectMolecule) {
-    let settings = DssSettings::default();
-    let state = 0; // First state
-    assign_secondary_structure(mol, state, &settings);
+/// This recalculates secondary structure based on backbone geometry,
+/// using the algorithm specified by the `dss_algorithm` setting.
+/// It overwrites the secondary structure assignments from the PDB/CIF file.
+fn apply_dss(mol: &mut ObjectMolecule, algorithm: pymol_settings::DssAlgorithm) {
+    let assigner = assigner_for(algorithm);
+    assign_secondary_structure(mol, 0, assigner.as_ref());
 }
 
 /// Register I/O commands
@@ -267,9 +266,9 @@ EXAMPLES
 
         // Apply DSS (Define Secondary Structure) if auto_dss is enabled
         // This recalculates secondary structure based on backbone geometry
-        let auto_dss = ctx.viewer.settings().behavior.auto_dss;
-        if auto_dss {
-            apply_dss(&mut mol);
+        let behavior = &ctx.viewer.settings().behavior;
+        if behavior.auto_dss {
+            apply_dss(&mut mol, behavior.dss_algorithm);
         }
 
         // Create molecule object and add to viewer
@@ -1062,9 +1061,9 @@ EXAMPLES
                 .map_err(|e| CmdError::FileFormat(e.to_string()))?;
 
             // Apply DSS if auto_dss is enabled
-            let auto_dss = ctx.viewer.settings().behavior.auto_dss;
-            if auto_dss {
-                apply_dss(&mut mol);
+            let behavior = &ctx.viewer.settings().behavior;
+            if behavior.auto_dss {
+                apply_dss(&mut mol, behavior.dss_algorithm);
             }
 
             // Add to viewer
