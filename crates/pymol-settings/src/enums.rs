@@ -170,12 +170,15 @@ pub enum DssAlgorithm {
     PyMol = 0,
     /// DSSP algorithm (Kabsch & Sander)
     Dssp = 1,
+    /// Dummy algorithm — assigns Loop to every residue
+    None = 2,
 }
 
 impl_setting_enum! {
     DssAlgorithm {
         PyMol = 0 => "pymol",
         Dssp = 1 => "dssp",
+        None = 2 => "none",
     }
     default: PyMol
 }

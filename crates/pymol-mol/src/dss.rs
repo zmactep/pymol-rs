@@ -6,7 +6,7 @@
 
 use lin_alg::f32::Vec3;
 use pymol_algos::dss::{
-    BackboneResidue, Dssp, PyMolDss, SecondaryStructureAssigner, SsType,
+    BackboneResidue, Dssp, NoOp, PyMolDss, SecondaryStructureAssigner, SsType,
 };
 use pymol_settings::DssAlgorithm;
 
@@ -25,6 +25,7 @@ pub fn assigner_for(algorithm: DssAlgorithm) -> Box<dyn SecondaryStructureAssign
     match algorithm {
         DssAlgorithm::PyMol => Box::new(PyMolDss::default()),
         DssAlgorithm::Dssp => Box::new(Dssp::default()),
+        DssAlgorithm::None => Box::new(NoOp),
     }
 }
 

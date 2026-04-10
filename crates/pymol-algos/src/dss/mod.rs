@@ -13,11 +13,14 @@
 //!
 //! - [`PyMolDss`] — PyMOL's DSS algorithm (H-bonds + phi/psi dihedral angles)
 //! - [`Dssp`] — DSSP algorithm (Kabsch & Sander, stub)
+//! - [`Noop`] — Dummy algorithm (everything is a loop)
 
 mod dssp;
+mod noop;
 mod pymol;
 
 pub use dssp::{Dssp, DsspParams};
+pub use noop::NoOp;
 pub use pymol::{dss, AngleWindow, DssParams, PyMolDss};
 
 use lin_alg::f32::Vec3;
