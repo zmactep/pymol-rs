@@ -100,6 +100,23 @@ impl NamedColors {
         index
     }
 
+    /// Set a named color: update if the name already exists, register if new.
+    pub fn set(&mut self, name: &str, color: Color) -> u32 {
+        let key = name.to_lowercase();
+        if let Some(&existing_idx) = self.by_name.get(&key) {
+            self.colors[existing_idx as usize] = color;
+            existing_idx
+        } else {
+            self.register(name, color)
+        }
+    }
+
+    /// Remove a named color by name.
+    /// The underlying Vec entry is preserved to avoid invalidating other indices.
+    pub fn unregister(&mut self, name: &str) -> bool {
+        self.by_name.remove(&name.to_lowercase()).is_some()
+    }
+
     /// Get a color by name
     pub fn get_by_name(&self, name: &str) -> Option<(u32, Color)> {
         self.by_name
@@ -175,5 +192,39 @@ mod tests {
         // Test case insensitivity
         let (_, red2) = colors.get_by_name("RED").unwrap();
         assert_eq!(red, red2);
+    }
+
+    #[test]
+    fn test_set_color_new() {
+        let mut colors = NamedColors::new();
+        let idx = colors.set("mywhite", Color::new(1.0, 1.0, 1.0));
+        let (found_idx, found_color) = colors.get_by_name("mywhite").unwrap();
+        assert_eq!(idx, found_idx);
+        assert_eq!(found_color, Color::new(1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn test_set_color_update() {
+        let mut colors = NamedColors::new();
+        let idx1 = colors.set("mycolor", Color::new(1.0, 0.0, 0.0));
+        let idx2 = colors.set("mycolor", Color::new(0.0, 1.0, 0.0));
+        assert_eq!(idx1, idx2);
+        let (_, found_color) = colors.get_by_name("mycolor").unwrap();
+        assert_eq!(found_color, Color::new(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn test_unregister_color() {
+        let mut colors = NamedColors::new();
+        colors.set("mycolor", Color::new(1.0, 0.0, 0.0));
+        assert!(colors.get_by_name("mycolor").is_some());
+        assert!(colors.unregister("mycolor"));
+        assert!(colors.get_by_name("mycolor").is_none());
+    }
+
+    #[test]
+    fn test_unregister_nonexistent() {
+        let mut colors = NamedColors::new();
+        assert!(!colors.unregister("nonexistent"));
     }
 }

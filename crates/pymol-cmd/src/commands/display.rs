@@ -1,4 +1,4 @@
-//! Display commands: show, hide, enable, disable, color, bg_color, label
+//! Display commands: show, hide, enable, disable, color, set_color, bg_color, label
 
 use pymol_mol::{three_to_one, Atom, RepMask};
 use pymol_scene::{DirtyFlags, Object};
@@ -29,6 +29,7 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(DisableCommand);
     registry.register(ToggleCommand);
     registry.register(ColorCommand);
+    registry.register(SetColorCommand);
     registry.register(BgColorCommand);
     registry.register(LabelCommand);
 }
@@ -803,6 +804,112 @@ EXAMPLES
 
         if !ctx.quiet {
             ctx.print(&format!(" Background color set to {}", color_name));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// set_color command
+// ============================================================================
+
+struct SetColorCommand;
+
+impl Command for SetColorCommand {
+    fn name(&self) -> &str {
+        "set_color"
+    }
+
+    fn aliases(&self) -> &[&str] {
+        &["set_colour"]
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Color]
+    }
+
+    fn help(&self) -> &str {
+        r#"
+DESCRIPTION
+
+    "set_color" defines a new named color or removes an existing one.
+
+USAGE
+
+    set_color name, [ r, g, b ]
+    set_color name
+
+ARGUMENTS
+
+    name = string: the color name to define or remove
+    [r, g, b] = list of integers (0-255): the RGB color value
+
+NOTES
+
+    If only a name is provided, the named color is removed.
+    If a name and RGB list are provided, the named color is created or updated.
+
+EXAMPLES
+
+    set_color mywhite, [255, 255, 255]
+    set_color darkred, [128, 0, 0]
+    set_color mywhite
+"#
+    }
+
+    fn execute<'v, 'r>(
+        &self,
+        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
+        args: &ParsedCommand,
+    ) -> CmdResult {
+        let color_name = args
+            .get_str(0)
+            .or_else(|| args.get_named_str("name"))
+            .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
+
+        if let Some(crate::args::ArgValue::List(items)) = args.get_arg(1) {
+            if items.len() != 3 {
+                return Err(CmdError::invalid_arg(
+                    "rgb",
+                    format!("expected [r, g, b] (3 values), got {} values", items.len()),
+                ));
+            }
+
+            let r = items[0]
+                .as_int()
+                .ok_or_else(|| CmdError::invalid_arg("r", "expected an integer"))? as u8;
+            let g = items[1]
+                .as_int()
+                .ok_or_else(|| CmdError::invalid_arg("g", "expected an integer"))? as u8;
+            let b = items[2]
+                .as_int()
+                .ok_or_else(|| CmdError::invalid_arg("b", "expected an integer"))? as u8;
+
+            let color = pymol_color::Color::from_rgb8(r, g, b);
+            let idx = ctx.viewer.named_colors_mut().set(color_name, color);
+
+            ctx.viewer.request_redraw();
+
+            if !ctx.quiet {
+                ctx.print(&format!(
+                    " Color: \"{}\" defined as [{}, {}, {}] (index {})",
+                    color_name, r, g, b, idx
+                ));
+            }
+        } else {
+            let removed = ctx.viewer.named_colors_mut().unregister(color_name);
+
+            if !ctx.quiet {
+                if removed {
+                    ctx.print(&format!(" Color: \"{}\" removed", color_name));
+                } else {
+                    ctx.print_warning(&format!(
+                        " Color: \"{}\" not found (nothing removed)",
+                        color_name
+                    ));
+                }
+            }
         }
 
         Ok(())
