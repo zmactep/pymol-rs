@@ -1,7 +1,7 @@
 //! Named selection management
 //!
 //! This module provides storage and evaluation of named selections,
-//! similar to PyMOL's selection system.
+//! (named atom selection management).
 
 use ahash::AHashMap;
 use pymol_select::{EvalContext, SelectionOptions, SelectionResult};

@@ -1,8 +1,7 @@
 //! Wire surface representation for mesh visualization
 //!
 //! Generates a molecular surface (same as surface representation) but renders
-//! it as wireframe lines instead of filled triangles, matching PyMOL's mesh
-//! representation behavior.
+//! it as wireframe lines instead of filled triangles (mesh representation).
 
 use std::collections::HashSet;
 
@@ -22,8 +21,7 @@ use pymol_settings::ResolvedSettings;
 /// Wire surface representation (mesh wireframe)
 ///
 /// Generates a molecular surface and renders it as wireframe lines.
-/// This matches PyMOL's "mesh" representation which shows the surface
-/// as a wireframe grid rather than filled triangles.
+/// Renders the molecular surface as a wireframe grid rather than filled triangles.
 pub struct WireSurfaceRep {
     /// Vertex data (CPU side) - pairs of LineVertex for each edge
     vertices: Vec<LineVertex>,

@@ -210,7 +210,7 @@ impl Movie {
     }
 
     /// Effective frame count: movie frames if defined, otherwise max object states.
-    /// Mirrors PyMOL's `SceneCountFrames()`.
+    /// Returns movie frame count if defined, else max object states.
     pub fn effective_frame_count(&self) -> usize {
         if self.frames.is_empty() {
             self.n_object_states
@@ -220,14 +220,14 @@ impl Movie {
     }
 
     /// Whether an explicit movie sequence exists (via mset).
-    /// Mirrors PyMOL's `MovieDefined()`.
+    /// Whether an explicit movie sequence exists.
     pub fn has_movie(&self) -> bool {
         !self.frames.is_empty()
     }
 
     /// Convert frame index to 0-indexed state index.
     /// Uses mset mapping if defined, otherwise identity.
-    /// Mirrors PyMOL's `MovieFrameToIndex()`.
+    /// Uses mset mapping if defined, otherwise identity.
     pub fn frame_to_state(&self, frame: usize) -> usize {
         if frame < self.frames.len() {
             self.frames[frame].state_index.saturating_sub(1) // 1-indexed → 0-indexed

@@ -3,7 +3,7 @@
 //! Given two sets of corresponding 3D points, finds the rotation and
 //! translation that minimizes RMSD.
 
-use lin_alg::f32::{Mat4, Vec3, Vec4};
+use lin_alg::f32::{Mat3, Mat4, Vec3, Vec4};
 
 use crate::AlignError;
 use crate::linalg::svd3::svd3;
@@ -70,92 +70,65 @@ pub fn kabsch(
     let centered_tgt: Vec<Vec3> = target.iter().map(|t| *t - centroid_tgt).collect();
 
     // 3. Compute cross-covariance matrix H = Σ (w_i * p_i ⊗ q_i)
-    // H[col][row] (column-major) where H = Pᵀ · W · Q
-    // H_jk = Σ_i w_i * src_i[j] * tgt_i[k]
-    // In column-major: H[col][row] = Σ_i w_i * src_i[row] * tgt_i[col]
-    let mut h = [[0.0f32; 3]; 3];
+    // H = Pᵀ · W · Q, column-major
+    let mut h_cols = [Vec3::new_zero(); 3];
     for i in 0..n {
         let w = weights.map_or(1.0, |ws| ws[i]);
-        let s = centered_src[i];
+        let s = centered_src[i] * w;
         let t = centered_tgt[i];
-        let sv = [s.x, s.y, s.z];
-        let tv = [t.x, t.y, t.z];
-        for col in 0..3 {
-            for row in 0..3 {
-                h[col][row] += w * sv[row] * tv[col];
-            }
-        }
+        h_cols[0] += s * t.x;
+        h_cols[1] += s * t.y;
+        h_cols[2] += s * t.z;
     }
+    let h = Mat3::from_cols(h_cols[0], h_cols[1], h_cols[2]);
 
     // 4. SVD of H
-    let svd = svd3(&h);
+    let h_arr = [
+        [h.data[0], h.data[1], h.data[2]],
+        [h.data[3], h.data[4], h.data[5]],
+        [h.data[6], h.data[7], h.data[8]],
+    ];
+    let svd = svd3(&h_arr);
 
     // 5. Rotation R = V · diag(1, 1, d) · Uᵀ where d = det(V·Uᵀ)
-    // Reconstruct V from Vᵀ: V[col][row] = Vt[row][col]
-    let vt = &svd.vt;
-    let u = &svd.u;
+    let u_mat = Mat3::from(svd.u);
+    let vt_mat = Mat3::from(svd.vt);
 
     // Compute det(V · Uᵀ) to handle reflections
-    let det_u = u[0][0] * (u[1][1] * u[2][2] - u[1][2] * u[2][1])
-        - u[1][0] * (u[0][1] * u[2][2] - u[0][2] * u[2][1])
-        + u[2][0] * (u[0][1] * u[1][2] - u[0][2] * u[1][1]);
-
-    // V[col][row] = Vt[row][col], so det(V):
-    let v00 = vt[0][0]; let v10 = vt[1][0]; let v20 = vt[2][0];
-    let v01 = vt[0][1]; let v11 = vt[1][1]; let v21 = vt[2][1];
-    let v02 = vt[0][2]; let v12 = vt[1][2]; let v22 = vt[2][2];
-    let det_v = v00 * (v11 * v22 - v12 * v21)
-        - v01 * (v10 * v22 - v12 * v20)
-        + v02 * (v10 * v21 - v11 * v20);
+    let det_u = u_mat.determinant();
+    let det_v = vt_mat.transpose().determinant();
 
     let d = if det_u * det_v < 0.0 { -1.0f32 } else { 1.0f32 };
 
     // R = V · diag(1,1,d) · Uᵀ
-    // Build rotation in column-major
-    let mut rot = [[0.0f32; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            let diag = [1.0, 1.0, d];
-            let mut sum = 0.0f32;
-            for k in 0..3 {
-                sum += vt[i][k] * diag[k] * u[k][j];
-            }
-            rot[j][i] = sum;
-        }
-    }
+    let diag = Mat3::new([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, d]);
+    let rot_mat = vt_mat.transpose() * diag * u_mat.transpose();
 
     // 6. Translation t = centroid_target - R · centroid_source
-    let r_cs = Vec3::new(
-        rot[0][0] * centroid_src.x + rot[1][0] * centroid_src.y + rot[2][0] * centroid_src.z,
-        rot[0][1] * centroid_src.x + rot[1][1] * centroid_src.y + rot[2][1] * centroid_src.z,
-        rot[0][2] * centroid_src.x + rot[1][2] * centroid_src.y + rot[2][2] * centroid_src.z,
-    );
-    let translation = centroid_tgt - r_cs;
+    let translation = centroid_tgt - rot_mat.clone() * centroid_src;
 
     // 7. Compute RMSD
-    let mut sum_sq = 0.0f32;
-    let mut tw = 0.0f32;
-    for i in 0..n {
-        let w = weights.map_or(1.0, |ws| ws[i]);
-        let s = centered_src[i];
-        let rotated = Vec3::new(
-            rot[0][0] * s.x + rot[1][0] * s.y + rot[2][0] * s.z,
-            rot[0][1] * s.x + rot[1][1] * s.y + rot[2][1] * s.z,
-            rot[0][2] * s.x + rot[1][2] * s.y + rot[2][2] * s.z,
-        );
-        let diff = rotated - centered_tgt[i];
-        sum_sq += w * (diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-        tw += w;
-    }
-    let rmsd = (sum_sq / tw).sqrt();
+    let rotated_src: Vec<Vec3> = centered_src.iter().map(|s| rot_mat.clone() * *s).collect();
+    let rmsd = if let Some(w) = weights {
+        let (sum_sq, tw) = rotated_src
+            .iter()
+            .zip(centered_tgt.iter())
+            .zip(w.iter())
+            .fold((0.0f32, 0.0f32), |(ss, tw), ((r, t), &wi)| {
+                (ss + wi * (*r - *t).magnitude_squared(), tw + wi)
+            });
+        (sum_sq / tw).sqrt()
+    } else {
+        self::rmsd(&rotated_src, &centered_tgt)
+    };
 
-    // Build column-major Mat4: data[col*4 + row]
-    // rot[col][row] is already column-major 3×3 — place directly
+    // Build Mat4 from rotation Mat3
+    let rd = &rot_mat.data;
     let rotation = Mat4::new([
-        rot[0][0], rot[0][1], rot[0][2], 0.0, // col 0
-        rot[1][0], rot[1][1], rot[1][2], 0.0, // col 1
-        rot[2][0], rot[2][1], rot[2][2], 0.0, // col 2
-        0.0,       0.0,       0.0,       1.0, // col 3
+        rd[0], rd[1], rd[2], 0.0, // col 0
+        rd[3], rd[4], rd[5], 0.0, // col 1
+        rd[6], rd[7], rd[8], 0.0, // col 2
+        0.0,   0.0,   0.0,  1.0, // col 3
     ]);
 
     Ok(KabschResult {
@@ -176,10 +149,7 @@ pub fn rmsd(coords_a: &[Vec3], coords_b: &[Vec3]) -> f32 {
     let sum: f32 = coords_a
         .iter()
         .zip(coords_b.iter())
-        .map(|(a, b)| {
-            let d = *a - *b;
-            d.x * d.x + d.y * d.y + d.z * d.z
-        })
+        .map(|(a, b)| (*a - *b).magnitude_squared())
         .sum();
     (sum / n as f32).sqrt()
 }
@@ -187,12 +157,10 @@ pub fn rmsd(coords_a: &[Vec3], coords_b: &[Vec3]) -> f32 {
 /// Apply a Kabsch transformation to coordinates in-place
 pub fn apply_transform(coords: &mut [Vec3], result: &KabschResult) {
     let m = &result.rotation;
-    let t = &result.translation;
+    let t = result.translation;
     for coord in coords.iter_mut() {
         let v = m.clone() * Vec4::new(coord.x, coord.y, coord.z, 1.0);
-        coord.x = v.x + t.x;
-        coord.y = v.y + t.y;
-        coord.z = v.z + t.z;
+        *coord = Vec3::new(v.x, v.y, v.z) + t;
     }
 }
 

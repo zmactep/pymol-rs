@@ -1,7 +1,7 @@
 //! PyMOL-RS Color System
 //!
 //! This crate provides color management for PyMOL-RS, including:
-//! - Named colors (PyMOL's built-in color palette)
+//! - Named colors (built-in color palette)
 //! - Color ramps for continuous coloring
 //! - Per-atom coloring schemes (by element, chain, etc.)
 

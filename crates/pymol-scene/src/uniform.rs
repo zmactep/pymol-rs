@@ -7,15 +7,13 @@ use crate::camera::Camera;
 use pymol_render::GlobalUniforms;
 use pymol_settings::Settings;
 
-/// Compute reflect scale factor to maintain consistent brightness (PyMOL algorithm)
+/// Compute reflect scale factor to maintain consistent brightness.
 ///
-/// This scales the `reflect` value inversely based on the light directions to ensure
-/// that the total light contribution stays constant regardless of light count.
+/// Scales the `reflect` value inversely based on light directions so that the
+/// total light contribution stays constant regardless of light count.
 ///
-/// From PyMOL's `SceneGetReflectScaleValue` in Scene.cpp:
-/// - For each light, adds (1 - z_normalized) where z is the light direction's z component
-/// - Multiplies sum by 0.5
-/// - Returns 1.0 / sum
+/// For each light: adds `(1 - z_normalized)` where z is the light direction's z component,
+/// multiplies sum by 0.5, and returns `1.0 / sum`.
 pub fn compute_reflect_scale(light_count: i32, light_dirs: &[[f32; 3]]) -> f32 {
     let num_pos_lights = (light_count - 1).max(0) as usize;
     if num_pos_lights > 0 {
@@ -103,7 +101,7 @@ fn setup_fog(
 
 /// Setup uniforms for Classic shading mode.
 ///
-/// Reads all classic PyMOL lighting settings: light_count, ambient, direct, reflect,
+/// Reads all classic lighting settings: light_count, ambient, direct, reflect,
 /// specular, shininess, multi-light directions, fog, depth cue.
 pub fn setup_classic_uniforms(
     camera: &Camera,
@@ -128,7 +126,7 @@ pub fn setup_classic_uniforms(
 
     uniforms.set_lights(light_count, spec_count, &light_dirs);
 
-    // Classic PyMOL dual-light model
+    // Classic dual-light model
     let ambient = classic.ambient;
     let direct = classic.direct;
     let reflect = classic.reflect;
@@ -137,7 +135,7 @@ pub fn setup_classic_uniforms(
     let spec_direct = classic.spec_direct;
     let spec_direct_power = classic.spec_direct_power;
 
-    // PyMOL brightness consistency adjustments
+    // Brightness consistency adjustments
     let reflect_scale = compute_reflect_scale(light_count, &light_dirs);
     let reflect_scaled = reflect * reflect_scale;
 

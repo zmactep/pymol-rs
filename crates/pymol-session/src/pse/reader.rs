@@ -177,7 +177,7 @@ struct PseObjectHeader {
 
 /// Returns (data, header) extracted from the object data list.
 ///
-/// The header at list[0] is a CObject serialized by `ObjectFromPyList`:
+/// The header at list[0] is a CObject with PSE format layout:
 ///   [0]=type, [1]=name, [2]=Color, [3]=visRep, [7]=TTTFlag, [9]=Enabled, [11]=TTT(16 floats)
 fn read_object_data(
     type_code: i64,
@@ -195,7 +195,7 @@ fn read_object_data(
         _ => return Ok((PseObjectData::Unsupported, default_header)),
     };
 
-    // Extract fields from header (list[0]) per PyMOL's ObjectFromPyList
+    // Extract fields from header (list[0]) per PSE format object layout
     let header = list[0].as_list();
     let visible = header
         .and_then(|h| h.get(9))
@@ -234,7 +234,7 @@ fn read_object_data(
         None
     };
 
-    // Per-object settings from header[8] (CObject.Setting in PyMOL)
+    // Per-object settings from header[8] (PSE format object settings)
     let obj_settings = header
         .and_then(|h| h.get(8))
         .map(|v| read_settings(Some(v)).unwrap_or_default())
@@ -439,7 +439,7 @@ fn read_colors(value: Option<&PickleValue>) -> Result<Vec<PseColor>, SessionErro
     let mut colors = Vec::new();
     for item in list {
         let entry = item.as_list().or_else(|| item.as_tuple()).unwrap_or(&[]);
-        // PyMOL's ColorAsPyList format: [name, index, [r,g,b], custom, lut_flag, [lut_rgb], fixed]
+        // PSE color list format: [name, index, [r,g,b], custom, lut_flag, [lut_rgb], fixed]
         if entry.len() < 3 {
             continue;
         }

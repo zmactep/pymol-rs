@@ -7,7 +7,7 @@ use std::fmt;
 
 /// Secondary structure type for protein residues
 ///
-/// Based on DSSP classification used in PDB files and PyMOL.
+/// Based on DSSP classification as used in PDB files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SecondaryStructure {
@@ -31,7 +31,7 @@ pub enum SecondaryStructure {
 }
 
 impl SecondaryStructure {
-    /// Create from single character code (as used in PDB/PyMOL)
+    /// Create from single character code (as used in PDB/DSSP)
     ///
     /// - 'H' = Helix (alpha helix)
     /// - 'S' or 'E' = Sheet (extended beta strand)
@@ -66,7 +66,7 @@ impl SecondaryStructure {
         }
     }
 
-    /// Convert to PyMOL-style two-character code
+    /// Convert to two-character code (PSE format compatible)
     pub fn to_pymol_code(&self) -> &'static str {
         match self {
             SecondaryStructure::Loop => "L ",

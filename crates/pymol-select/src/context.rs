@@ -10,13 +10,13 @@ use crate::result::SelectionResult;
 
 /// Options controlling selection matching behavior.
 ///
-/// Mirrors PyMOL's `ignore_case` and `ignore_case_chain` settings.
+/// Controls case-sensitivity for selection matching.
 /// Construct from `GlobalSettings` at call sites that have access to pymol-settings.
 #[derive(Debug, Clone, Copy)]
 pub struct SelectionOptions {
-    /// Ignore case for name/resn/elem/alt etc. (PyMOL default: true)
+    /// Ignore case for name/resn/elem/alt etc. (default: true)
     pub ignore_case: bool,
-    /// Ignore case for chain/segi (PyMOL default: false)
+    /// Ignore case for chain/segi (default: false)
     pub ignore_case_chain: bool,
 }
 

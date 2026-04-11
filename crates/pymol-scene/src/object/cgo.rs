@@ -1,7 +1,7 @@
 //! Compiled Graphics Object (CGO)
 //!
 //! CGO objects allow custom graphics primitives to be rendered.
-//! They use an instruction-based approach similar to PyMOL's CGO system.
+//! They use an instruction-based approach (compiled graphics object system).
 
 use lin_alg::f32::Vec3;
 use pymol_render::{
@@ -29,7 +29,7 @@ pub enum PrimitiveMode {
 /// CGO instruction opcodes
 ///
 /// These are the primitives that can be rendered via CGO.
-/// The API is similar to PyMOL's CGO system.
+/// Compiled graphics object (CGO) instruction set.
 #[derive(Debug, Clone)]
 pub enum CgoOp {
     /// Begin a primitive block (like glBegin)

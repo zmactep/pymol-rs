@@ -1,6 +1,6 @@
 //! Command parser using nom
 //!
-//! Parses PyMOL command strings into structured `ParsedCommand` objects.
+//! Parses command strings into structured `ParsedCommand` objects.
 //!
 //! # Supported Syntax
 //!
@@ -32,7 +32,7 @@ use crate::error::ParseError;
 /// - `\` followed by newline (standard line continuation)
 /// - `\` followed by whitespace (collapsed line continuation, e.g. when newlines are removed)
 ///
-/// This allows PyMOL-style multi-line commands like:
+/// This allows multi-line commands like:
 /// ```text
 /// set_view (\
 ///   1.0, 0.0, 0.0,\
@@ -72,7 +72,7 @@ fn normalize_continuations(input: &str) -> String {
 
 /// Join lines that end with backslash (line continuation).
 ///
-/// This handles PyMOL's line continuation syntax where a line ending with `\`
+/// This handles standard line continuation syntax where a line ending with `\`
 /// continues on the next line. This is useful for preprocessing script files
 /// before line-by-line execution.
 ///
@@ -281,7 +281,7 @@ fn parse_command_name(input: &str) -> IResult<&str, &str> {
 
 /// Parse command arguments (comma-separated or space-separated list)
 ///
-/// PyMOL accepts both comma and space as argument separators in many commands.
+/// Both comma and space are accepted as argument separators in many commands.
 /// For example, `mset 1 x60` uses space separation while `color red, chain A`
 /// uses comma separation. This parser handles both.
 fn parse_arguments(input: &str) -> IResult<&str, Vec<(Option<String>, ArgValue)>> {

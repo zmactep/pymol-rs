@@ -3,10 +3,12 @@
 //! Extracts C-alpha (CA) positions and carbonyl oxygen (O) directions from
 //! protein residues to create guide points for cartoon rendering.
 //!
-//! This module also implements PyMOL-style smoothing algorithms:
-//! - Helix axis centering (ExtrudeShiftToAxis)
-//! - Sheet flattening (RepCartoonFlattenSheets)
-//! - Loop smoothing (RepCartoonSmoothLoops)
+//! Backbone smoothing: Laplacian position/orientation smoothing, sheet
+//! flattening, normal consistency enforcement.
+//!
+//! - Helix axis centering
+//! - Sheet flattening (iterative window-based Laplacian smoothing)
+//! - Loop smoothing (progressive windowed Laplacian smoothing)
 
 use lin_alg::f32::Vec3;
 use pymol_mol::{AtomIndex, CoordSet, ObjectMolecule, RepMask, SecondaryStructure};
@@ -404,7 +406,7 @@ pub fn smooth_orientations(segment: &mut BackboneSegment, cycles: u32) {
     }
 }
 
-/// Apply all PyMOL-style smoothing operations to a backbone segment.
+/// Apply all backbone smoothing operations to a segment.
 ///
 /// **Note:** This function is used only by the **ribbon** representation
 /// (via `build_cartoon_geometry`). The cartoon representation uses
@@ -412,10 +414,10 @@ pub fn smooth_orientations(segment: &mut BackboneSegment, cycles: u32) {
 ///
 /// This applies smoothing in the correct order:
 /// 1. Helix smoothing (heavy orientation smoothing to prevent ribbon twist)
-/// 2. Sheet flattening (make sheets planar) - RepCartoonFlattenSheets
-/// 3. Loop smoothing (progressive window smoothing) - RepCartoonSmoothLoops
-/// 4. Normal refinement (orthogonalize and fix kinks) - RepCartoonRefineNormals
-pub fn apply_pymol_smoothing(segment: &mut BackboneSegment, settings: &CartoonSmoothSettings) {
+/// 2. Sheet flattening (iterative window-based Laplacian smoothing; Taubin, SIGGRAPH 1995)
+/// 3. Loop smoothing (progressive windowed Laplacian smoothing)
+/// 4. Normal refinement (Gram-Schmidt orthogonalization with greedy flip-prevention)
+pub fn apply_backbone_smoothing(segment: &mut BackboneSegment, settings: &CartoonSmoothSettings) {
     if segment.len() < 2 {
         return;
     }
@@ -423,31 +425,31 @@ pub fn apply_pymol_smoothing(segment: &mut BackboneSegment, settings: &CartoonSm
     // 1. Smooth helices (heavy orientation smoothing to prevent ribbon twist)
     smooth_helices(segment, settings.smooth_cycles);
 
-    // 2. Flatten sheets (RepCartoonFlattenSheets)
+    // 2. Flatten sheets (iterative window-based Laplacian smoothing)
     flatten_sheets(segment, settings.flat_cycles);
 
-    // 3. Smooth loops (RepCartoonSmoothLoops) — gated by cartoon_smooth_loops setting
+    // 3. Smooth loops (progressive windowed Laplacian smoothing) — gated by cartoon_smooth_loops setting
     if settings.smooth_loops {
         smooth_loops(segment, settings.smooth_first, settings.smooth_last, settings.smooth_cycles);
     }
 
-    // 4. Refine normals (RepCartoonRefineNormals)
+    // 4. Refine normals (Gram-Schmidt orthogonalization with greedy flip-prevention)
     if settings.refine_normals {
         refine_normals(segment);
     }
 }
 
 // ============================================================================
-// Helix Axis Centering (ExtrudeShiftToAxis equivalent)
+// Helix Axis Centering
 // ============================================================================
 
 // ============================================================================
-// Sheet Flattening (RepCartoonFlattenSheets equivalent)
+// Sheet Flattening
 // ============================================================================
 
-/// Flatten sheet regions to make them planar (RepCartoonFlattenSheets)
+/// Flatten sheet regions to make them planar
 ///
-/// This implements PyMOL's RepCartoonFlattenSheets algorithm exactly:
+/// Iterative window-based Laplacian smoothing (Taubin, SIGGRAPH 1995):
 /// - Uses a fixed window size of 1 for iterative averaging
 /// - For each flat_cycles iteration:
 ///   1. Average positions with window [-1, 1]
@@ -472,7 +474,7 @@ fn flatten_sheets(segment: &mut BackboneSegment, flat_cycles: u32) {
             continue;
         }
 
-        // PyMOL uses fixed window size f=1
+        // Fixed window size f=1
         let f = 1usize;
 
         // Apply flat_cycles iterations of smoothing
@@ -504,7 +506,7 @@ fn flatten_sheets(segment: &mut BackboneSegment, flat_cycles: u32) {
                 tmp_orientations[b] = sum / (2 * f + 1) as f32;
             }
 
-            // Apply smoothed orientations (without normalizing yet, like PyMOL)
+            // Apply smoothed orientations (without normalizing yet)
             for b in (first + f)..=(last.saturating_sub(f)).min(len - 1) {
                 segment.guide_points[b].orientation = tmp_orientations[b];
             }
@@ -562,12 +564,12 @@ fn compute_local_tangent(segment: &BackboneSegment, idx: usize) -> Vec3 {
 }
 
 // ============================================================================
-// Loop Smoothing (RepCartoonSmoothLoops equivalent)
+// Loop Smoothing
 // ============================================================================
 
-/// Smooth loop regions with progressive window sizes (RepCartoonSmoothLoops)
+/// Smooth loop regions with progressive window sizes
 ///
-/// This implements PyMOL's RepCartoonSmoothLoops algorithm exactly:
+/// Progressive windowed Laplacian smoothing:
 /// - Outer loop: window sizes from smooth_first to smooth_last
 /// - Inner loop: smooth_cycles iterations per window size
 /// - Averages positions and orientations within the window
@@ -720,12 +722,12 @@ fn smooth_helices(segment: &mut BackboneSegment, _smooth_cycles: u32) {
 }
 
 // ============================================================================
-// Normal Refinement (RepCartoonRefineNormals equivalent)
+// Normal Refinement
 // ============================================================================
 
-/// Refine orientation vectors to prevent flips and kinks (RepCartoonRefineNormals)
+/// Refine orientation vectors to prevent flips and kinks
 ///
-/// This implements PyMOL's RepCartoonRefineNormals algorithm exactly:
+/// Normal consistency via Gram-Schmidt orthogonalization with greedy flip-prevention:
 /// 1. Make orientations orthogonal to tangents (for interior residues only)
 /// 2. Generate alternative inverted orientations (but NOT for helices)
 /// 3. Forward iterate through pairs to select optimal orientation
@@ -817,7 +819,6 @@ fn refine_normals(segment: &mut BackboneSegment) {
 
     // Step 4: Detect and soften kinks
     // A kink occurs when dot(prev, curr) * dot(curr, next) < -0.10
-    // This is PyMOL's threshold value
     for i in 1..len - 1 {
         let tangent = tangents[i];
         let prev = segment.guide_points[i - 1].orientation;
@@ -974,11 +975,11 @@ mod tests {
     #[test]
     fn test_cartoon_smooth_settings_default() {
         let settings = CartoonSmoothSettings::default();
-        // These match PyMOL's defaults exactly
+        // Verify default smoothing settings
         assert_eq!(settings.smooth_cycles, 2);
         assert_eq!(settings.flat_cycles, 4);
         assert_eq!(settings.smooth_first, 1);
-        assert_eq!(settings.smooth_last, 1);  // PyMOL default
+        assert_eq!(settings.smooth_last, 1);
         assert!(settings.refine_normals);
     }
 
@@ -1079,7 +1080,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_pymol_smoothing() {
+    fn test_apply_backbone_smoothing() {
         let mut segment = BackboneSegment::new("A");
 
         // Create a helix-like segment
@@ -1101,7 +1102,7 @@ mod tests {
         }
 
         let settings = CartoonSmoothSettings::default();
-        apply_pymol_smoothing(&mut segment, &settings);
+        apply_backbone_smoothing(&mut segment, &settings);
 
         // After smoothing, positions should be closer to the axis
         // Verify that the segment is still valid

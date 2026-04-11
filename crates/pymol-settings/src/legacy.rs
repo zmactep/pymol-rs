@@ -1,9 +1,9 @@
 //! Legacy bridge for PSE session import/export.
 //!
-//! Maps between PyMOL's flat `(id, SettingValue)` session format and the new
-//! typed `Settings` / `ObjectOverrides` structs. The mapping from PyMOL numeric
-//! IDs to setting names lives exclusively here — the rest of the codebase uses
-//! string-based lookup via the registry.
+//! Maps between the PSE session format's flat `(id, SettingValue)` representation
+//! and the typed `Settings` / `ObjectOverrides` structs. The mapping from legacy
+//! numeric IDs to setting names lives exclusively here — the rest of the codebase
+//! uses string-based lookup via the registry.
 
 use std::sync::LazyLock;
 
@@ -14,10 +14,10 @@ use crate::overrides::ObjectOverrides;
 use crate::registry;
 use crate::store::SerializedSetting;
 
-/// PyMOL legacy ID ↔ setting name mapping.
+/// PSE legacy ID ↔ setting name mapping.
 ///
-/// Only original PyMOL settings (IDs < 798) are included. PyMOL-RS-specific
-/// settings (shading_mode, skripkin_*, shadow_*, silhouette_*) have no PyMOL
+/// Only original settings (IDs < 798) are included. PyMOL-RS-specific
+/// settings (shading_mode, skripkin_*, shadow_*, silhouette_*) have no legacy
 /// equivalent and are excluded from PSE import/export.
 static LEGACY_MAP: &[(&str, u16)] = &[
     // Behavior
@@ -150,17 +150,17 @@ static ID_TO_NAME: LazyLock<AHashMap<u16, &'static str>> = LazyLock::new(|| {
     LEGACY_MAP.iter().map(|&(name, id)| (id, name)).collect()
 });
 
-/// Setting name → legacy PyMOL ID.
+/// Setting name → PSE legacy ID.
 static NAME_TO_ID: LazyLock<AHashMap<&'static str, u16>> = LazyLock::new(|| {
     LEGACY_MAP.iter().map(|&(name, id)| (name, id)).collect()
 });
 
-/// Look up a setting name by PyMOL legacy ID.
+/// Look up a setting name by PSE legacy ID.
 pub fn name_for_id(id: u16) -> Option<&'static str> {
     ID_TO_NAME.get(&id).copied()
 }
 
-/// Look up a PyMOL legacy ID by setting name.
+/// Look up a PSE legacy ID by setting name.
 pub fn id_for_name(name: &str) -> Option<u16> {
     NAME_TO_ID.get(name).copied()
 }
@@ -189,9 +189,9 @@ pub fn apply_session_list(settings: &mut Settings, list: &[SerializedSetting]) {
 
 /// Export typed `Settings` to a PSE session list.
 ///
-/// Only includes settings that have PyMOL legacy IDs (present in LEGACY_MAP).
+/// Only includes settings that have PSE legacy IDs (present in LEGACY_MAP).
 /// PyMOL-RS-specific settings (skripkin_*, shadow_*, silhouette_*, shading_mode)
-/// are excluded since they have no PyMOL equivalent.
+/// are excluded since they have no legacy equivalent.
 pub fn export_session(settings: &Settings) -> Vec<SerializedSetting> {
     LEGACY_MAP
         .iter()
@@ -225,7 +225,7 @@ pub fn import_object_overrides(list: &[SerializedSetting]) -> ObjectOverrides {
 
 /// Export per-object overrides to a PSE session list.
 ///
-/// Only includes overrides that are actually set (non-None) and have PyMOL IDs.
+/// Only includes overrides that are actually set (Non-None) and have PSE legacy IDs.
 pub fn export_object_overrides(overrides: &ObjectOverrides) -> Vec<SerializedSetting> {
     LEGACY_MAP
         .iter()

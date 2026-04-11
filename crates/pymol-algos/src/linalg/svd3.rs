@@ -5,6 +5,8 @@
 //!
 //! All matrices use column-major layout: `m[col][row]`.
 
+use lin_alg::f64::{Mat3 as Mat3d, Vec3 as Vec3d};
+
 /// Result of 3×3 SVD decomposition: A = U · diag(S) · Vᵀ
 #[derive(Debug, Clone)]
 pub struct Svd3 {
@@ -43,7 +45,7 @@ pub fn svd3(matrix: &[[f32; 3]; 3]) -> Svd3 {
     // Ensure V is right-handed (det(V) = +1)
     let det_v = triple_product(&v_cols[0], &v_cols[1], &v_cols[2]);
     if det_v < 0.0 {
-        v_cols[2] = [-v_cols[2][0], -v_cols[2][1], -v_cols[2][2]];
+        v_cols[2] = (-Vec3d::from(v_cols[2])).to_arr();
     }
 
     // 4. U columns: u_i = A · v_i / sigma_i
@@ -51,8 +53,7 @@ pub fn svd3(matrix: &[[f32; 3]; 3]) -> Svd3 {
     for i in 0..3 {
         if sigma[i] > 1e-10 {
             let av = mat_vec_mul(&a, &v_cols[i]);
-            let inv_s = 1.0 / sigma[i];
-            u_cols[i] = [av[0] * inv_s, av[1] * inv_s, av[2] * inv_s];
+            u_cols[i] = (Vec3d::from(av) * (1.0 / sigma[i])).to_arr();
         }
     }
 
@@ -71,7 +72,7 @@ pub fn svd3(matrix: &[[f32; 3]; 3]) -> Svd3 {
     // Ensure U is right-handed
     let det_u = triple_product(&u_cols[0], &u_cols[1], &u_cols[2]);
     if det_u < 0.0 {
-        u_cols[2] = [-u_cols[2][0], -u_cols[2][1], -u_cols[2][2]];
+        u_cols[2] = (-Vec3d::from(u_cols[2])).to_arr();
     }
 
     // 5. Build output in column-major format
@@ -110,64 +111,39 @@ fn mat_to_f64(m: &[[f32; 3]; 3]) -> [[f64; 3]; 3] {
 
 /// Compute AᵀA where A is column-major. Result is column-major symmetric.
 fn mat_mul_ata(a: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
-    // (AᵀA)_{ij} = Σ_k A_{ki}·A_{kj} = dot(col_i, col_j)
-    // Store in column-major: result[col][row] = (AᵀA)_{row,col}
-    let mut result = [[0.0f64; 3]; 3];
-    for col in 0..3 {
-        for row in 0..3 {
-            result[col][row] = a[row][0] * a[col][0] + a[row][1] * a[col][1] + a[row][2] * a[col][2];
-        }
-    }
-    result
+    let m = Mat3d::from(*a);
+    let result = m.transpose() * m;
+    [
+        [result.data[0], result.data[1], result.data[2]],
+        [result.data[3], result.data[4], result.data[5]],
+        [result.data[6], result.data[7], result.data[8]],
+    ]
 }
 
 /// Multiply column-major matrix A by vector v: result = A · v
 fn mat_vec_mul(a: &[[f64; 3]; 3], v: &[f64; 3]) -> [f64; 3] {
-    [
-        a[0][0] * v[0] + a[1][0] * v[1] + a[2][0] * v[2],
-        a[0][1] * v[0] + a[1][1] * v[1] + a[2][1] * v[2],
-        a[0][2] * v[0] + a[1][2] * v[1] + a[2][2] * v[2],
-    ]
+    (Mat3d::from(*a) * Vec3d::from(*v)).to_arr()
 }
 
 fn cross(a: &[f64; 3], b: &[f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn dot(a: &[f64; 3], b: &[f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    Vec3d::from(*a).cross(Vec3d::from(*b)).to_arr()
 }
 
 fn triple_product(a: &[f64; 3], b: &[f64; 3], c: &[f64; 3]) -> f64 {
-    a[0] * (b[1] * c[2] - b[2] * c[1])
-        - a[1] * (b[0] * c[2] - b[2] * c[0])
-        + a[2] * (b[0] * c[1] - b[1] * c[0])
+    Vec3d::from(*a).dot(Vec3d::from(*b).cross(Vec3d::from(*c)))
 }
 
 fn normalize(v: &mut [f64; 3]) {
-    let len = dot(v, v).sqrt();
+    let vec = Vec3d::from(*v);
+    let len = vec.magnitude();
     if len > 1e-15 {
-        v[0] /= len;
-        v[1] /= len;
-        v[2] /= len;
+        let n = vec * (1.0 / len);
+        *v = n.to_arr();
     }
 }
 
 fn arbitrary_perpendicular(v: &[f64; 3]) -> [f64; 3] {
-    let candidate = if v[0].abs() < v[1].abs() && v[0].abs() < v[2].abs() {
-        [1.0, 0.0, 0.0]
-    } else if v[1].abs() < v[2].abs() {
-        [0.0, 1.0, 0.0]
-    } else {
-        [0.0, 0.0, 1.0]
-    };
-    let mut perp = cross(v, &candidate);
-    normalize(&mut perp);
-    perp
+    Vec3d::from(*v).any_perpendicular().to_arr()
 }
 
 /// Jacobi eigenvalue algorithm for 3×3 symmetric matrices.

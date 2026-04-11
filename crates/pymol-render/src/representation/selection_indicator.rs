@@ -1,7 +1,7 @@
 //! Selection indicator representation
 //!
-//! Renders pink/magenta indicators at selected atom positions,
-//! similar to PyMOL's selection visualization.
+//! Renders pink/magenta indicators at selected atom positions
+//! (atom selection indicator overlay).
 
 use crate::buffer::GrowableBuffer;
 use crate::vertex::DotVertex;

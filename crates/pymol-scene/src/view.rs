@@ -1,7 +1,7 @@
 //! Named view management
 //!
 //! This module provides named view storage for storing and recalling
-//! camera states, similar to PyMOL's `view` command.
+//! camera states (named view storage).
 //!
 //! Unlike scenes, views only store the camera state (18 values):
 //! rotation, position, origin, clipping planes, and FOV.

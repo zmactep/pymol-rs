@@ -21,7 +21,7 @@ pub enum SurfaceType {
 }
 
 impl SurfaceType {
-    /// Create from PyMOL surface_type setting value
+    /// Create from surface_type setting value
     pub fn from_setting(value: i32) -> Self {
         match value {
             1 => SurfaceType::SolventAccessible,

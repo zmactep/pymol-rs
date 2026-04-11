@@ -9,7 +9,7 @@
 //!
 //! # Architecture
 //!
-//! The crate follows PyMOL's original data model where:
+//! The data model: molecules contain coordinate sets, each an independent conformer/state.
 //! - Atoms are stored in a flat array with residue/chain info inline
 //! - Bonds reference atoms by index
 //! - Multiple coordinate sets (states) can exist for trajectory/ensemble data

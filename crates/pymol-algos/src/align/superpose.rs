@@ -1,7 +1,7 @@
 //! Iterative superposition with outlier rejection
 //!
-//! Combines Kabsch with iterative outlier rejection, matching
-//! PyMOL's `align` and `super` commands.
+//! Combines Kabsch superposition (Acta Crystallogr. A32:922-923, 1976) with
+//! iterative outlier rejection for robust structural alignment.
 
 use lin_alg::f32::Vec3;
 
@@ -95,7 +95,7 @@ pub fn superpose(
         if rms > 1e-6 {
             for (i, (ts, t)) in transformed_src.iter().zip(tgt.iter()).enumerate() {
                 let d = *ts - *t;
-                let dist = (d.x * d.x + d.y * d.y + d.z * d.z).sqrt();
+                let dist = d.magnitude();
                 if (dist / rms) <= params.cutoff {
                     keep.push(i);
                 }

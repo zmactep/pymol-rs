@@ -16,10 +16,10 @@ pub fn normalize_safe(v: Vec3) -> Vec3 {
     }
 }
 
-/// PyMOL's smooth easing function for tapering and interpolation
+/// Parameterized smoothstep function for tapering and interpolation
 ///
 /// Creates an ease-in/ease-out curve for smooth transitions.
-/// Matches PyMOL's `smooth(x, power)` function from Vector.cpp.
+/// Standard sigmoid interpolation: f(x, p) maps [0,1]->[0,1] with adjustable steepness.
 ///
 /// # Arguments
 /// * `x` - Input value in range [0, 1]

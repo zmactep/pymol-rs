@@ -1,6 +1,6 @@
 //! Keyword definitions for the selection language
 //!
-//! Defines all keywords recognized by PyMOL's selection language,
+//! Defines all keywords recognized by the selection language,
 //! including their aliases and operator types.
 
 use phf::phf_map;

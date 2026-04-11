@@ -1,13 +1,16 @@
-//! PyMOL's DSS (Define Secondary Structure) algorithm
+//! PyMOL DSS (Define Secondary Structure) algorithm
 //!
 //! Assigns secondary structure using backbone hydrogen bonds as the primary
 //! mechanism with phi/psi dihedral angles as a secondary filter.
 //!
-//! # References
+//! # Attribution
 //!
-//! - PyMOL's layer3/Selector.cpp — SelectorAssignSS function
-//! - PyMOL's layer2/ObjectMolecule2.cpp — ObjectMoleculeGetCheckHBond function
-//! - PyMOL's layer1/SettingInfo.h — Default angle thresholds
+//! Derived from PyMOL's DSS algorithm (Schrödinger LLC).
+//!
+//! # Scientific basis
+//!
+//! - H-bond patterns: Kabsch & Sander, Biopolymers 22(12):2577-637, 1983
+//! - Phi/psi targets: Lovell et al., Proteins 50(3):437-450, 2003
 
 use std::collections::HashMap;
 
@@ -17,7 +20,7 @@ use lin_alg::f32::Vec3;
 use super::{BackboneResidue, SsType};
 
 // ============================================================================
-// DSS Settings (from PyMOL's SettingInfo.h)
+// DSS Settings (PyMOL DSS empirical parameters)
 // ============================================================================
 
 /// Phi/psi angle window used to include or exclude a residue from a
@@ -105,7 +108,7 @@ impl super::SecondaryStructureAssigner for PyMolDss {
 
 /// Calculate the dihedral angle between four points
 ///
-/// Based on PyMOL's get_dihedral3f function from layer0/Vector.cpp
+/// Standard dihedral angle computation from four atom positions.
 ///
 /// # Returns
 /// Dihedral angle in radians, range [-PI, PI]
@@ -163,7 +166,7 @@ struct PhiPsi {
 }
 
 // ============================================================================
-// Classification Flags (matching PyMOL's cSS* flags from Selector.cpp)
+// Classification Flags
 // ============================================================================
 
 bitflags! {
@@ -194,7 +197,7 @@ const HELIX_HBOND_FLAGS: SsFlags = SsFlags::HELIX_3_HBOND
 const SS_MAX_HBOND: usize = 6;
 const SS_BREAK_SIZE: usize = 5;
 
-// H-bond criteria (Kabsch & Sander inspired, from PyMOL's SelectorAssignSS)
+// H-bond geometric criteria (PyMOL DSS empirical parameters)
 const HBOND_MAX_ANGLE: f32 = 63.0;
 const HBOND_MAX_DIST_AT_MAX_ANGLE: f32 = 3.2;
 const HBOND_MAX_DIST_AT_ZERO: f32 = 4.0;
@@ -384,7 +387,7 @@ impl ResidueData {
 // DSS Algorithm
 // ============================================================================
 
-/// Assign secondary structure using PyMOL's DSS algorithm
+/// Assign secondary structure using the PyMOL-derived DSS algorithm
 ///
 /// Takes pre-extracted backbone residue data and returns a parallel array of
 /// secondary structure assignments. `output[i]` corresponds to `residues[i]`.

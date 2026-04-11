@@ -85,8 +85,8 @@ pub struct MacroSpec {
 
 /// A selection expression AST node
 ///
-/// This enum represents all possible selection expressions in PyMOL's
-/// selection language. The AST is built by the parser and evaluated
+/// This enum represents all possible selection expressions in the
+/// PyMOL-compatible selection algebra. The AST is built by the parser and evaluated
 /// by the evaluator.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]

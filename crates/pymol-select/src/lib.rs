@@ -1,6 +1,6 @@
 //! PyMOL Selection Language Parser and Evaluator
 //!
-//! This crate provides a complete implementation of PyMOL's selection language,
+//! This crate provides a PyMOL-compatible selection language implementation,
 //! allowing you to select atoms based on properties, spatial relationships,
 //! and logical combinations.
 //!

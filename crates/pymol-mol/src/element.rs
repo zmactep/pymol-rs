@@ -266,7 +266,9 @@ struct ElementData {
 }
 
 /// Element data table indexed by atomic number
-/// Data from PyMOL's ElementTable in AtomInfo.cpp
+///
+/// Sources: IUPAC Periodic Table (2021). VdW radii: Bondi, J. Phys. Chem.
+/// 68:441-451, 1964; Mantina et al., J. Phys. Chem. A 113:5806-5812, 2009.
 static ELEMENT_DATA: &[ElementData] = &[
     ElementData { name: "lonepair", symbol: "LP", vdw: 0.50, mass: 0.0 },           // 0
     ElementData { name: "hydrogen", symbol: "H", vdw: 1.20, mass: 1.00794 },        // 1

@@ -1,30 +1,39 @@
 //! Combinatorial Extension (CE) structural alignment
 //!
-//! Implements the CE algorithm (Shindyalov & Bourne, 1998) for structure-based
-//! protein alignment. Works on Cα coordinates, finding residue correspondences
-//! purely from 3D structure by comparing local distance-matrix fingerprints
-//! and chaining compatible fragment matches.
+//! Aligns protein structures by Cα distance-matrix fingerprints and
+//! combinatorial path extension.
 //!
-//! This is a faithful port of PyMOL's `ccealignmodule.cpp`.
+//! # References
+//!
+//! - Shindyalov IN, Bourne PE (1998). "Protein structure alignment by
+//!   incremental combinatorial extension (CE) of the optimal path."
+//!   Protein Engineering 11(9):739-747.
+//! - Zhang Y, Skolnick J (2004). "Scoring function for automated assessment
+//!   of protein structure template quality." Proteins 57(4):702-710.
+//!   (Z-score normalization)
+
+use std::cmp::Ordering;
 
 use lin_alg::f32::Vec3;
 
 use super::kabsch;
 use crate::AlignError;
 
+/// Maximum candidate paths retained during search.
 const MAX_KEPT: usize = 20;
-const SENTINEL_SCORE: f64 = 1e6;
 
-/// Parameters for the CE structural alignment algorithm
+/// Parameters for the CE structural alignment algorithm.
+///
+/// Default values match those recommended by Shindyalov & Bourne (1998).
 #[derive(Debug, Clone)]
 pub struct CeParams {
-    /// Fragment window size (number of residues per fragment)
+    /// Fragment window size (number of residues per aligned fragment pair)
     pub win_size: usize,
     /// Maximum gap allowed between consecutive AFPs in the path
     pub gap_max: usize,
-    /// Distance cutoff for fragment similarity scoring (Angstroms)
+    /// Distance cutoff D_0 for single-AFP similarity (Å) — Eq. 9
     pub d0: f32,
-    /// Distance cutoff for path extension (Angstroms)
+    /// Distance cutoff D_1 for path extension and whole-path scoring (Å) — Eq. 10–11
     pub d1: f32,
     /// Maximum number of best paths to keep
     pub max_paths: usize,
@@ -76,22 +85,25 @@ pub fn ce_align(
         return Err(AlignError::TooFewAtoms(len_a.min(len_b)));
     }
 
-    // Step 1: Compute full NxN distance matrices
-    let dm_a = calc_dm(source_ca);
-    let dm_b = calc_dm(target_ca);
+    // Step 1: Compute intra-molecular Cα distance matrices
+    let dm_a = distance_matrix(source_ca);
+    let dm_b = distance_matrix(target_ca);
 
-    // Step 2: Compute CE similarity matrix
-    let s = calc_s(&dm_a, &dm_b, len_a, len_b, w);
+    // Step 2: Compute single-AFP similarity matrix D_ii (Eq. 7 variant —
+    // full non-neighboring intra-fragment distances)
+    let sim = afp_similarity_matrix(&dm_a, &dm_b, len_a, len_b, w);
 
-    // Step 3: Find best AFP paths
-    let paths = find_path(&s, &dm_a, &dm_b, len_a, len_b, params);
+    // Step 3: Find optimal AFP paths by combinatorial extension (Eq. 9–11)
+    let paths = extend_paths(&sim, &dm_a, &dm_b, len_a, len_b, params);
 
     if paths.is_empty() {
         return Err(AlignError::NoMatches);
     }
 
     // Step 4: Select path with best Kabsch RMSD
-    let (pairs, rmsd) = find_best(source_ca, target_ca, &paths, w)
+    // NOTE: The paper's final optimization (gap relocation ±m/2 and
+    // iterative Needleman-Wunsch DP refinement) is not implemented.
+    let (pairs, rmsd) = select_best_path(source_ca, target_ca, &paths, w)
         .ok_or(AlignError::NoMatches)?;
 
     let n_aligned = pairs.len();
@@ -109,15 +121,17 @@ pub fn ce_align(
     })
 }
 
-/// Compute full NxN pairwise distance matrix.
-/// Equivalent to PyMOL's `calcDM`.
-fn calc_dm(coords: &[Vec3]) -> Vec<Vec<f32>> {
+// ============================================================================
+// Intra-molecular distance matrix
+// ============================================================================
+
+/// Compute symmetric NxN pairwise Cα distance matrix.
+fn distance_matrix(coords: &[Vec3]) -> Vec<Vec<f32>> {
     let n = coords.len();
     let mut dm = vec![vec![0.0f32; n]; n];
     for i in 0..n {
         for j in (i + 1)..n {
-            let d = coords[i] - coords[j];
-            let dist = (d.x * d.x + d.y * d.y + d.z * d.z).sqrt();
+            let dist = (coords[i] - coords[j]).magnitude();
             dm[i][j] = dist;
             dm[j][i] = dist;
         }
@@ -125,9 +139,22 @@ fn calc_dm(coords: &[Vec3]) -> Vec<Vec<f32>> {
     dm
 }
 
-/// Compute CE similarity matrix.
-/// Equivalent to PyMOL's `calcS`.
-fn calc_s(
+// ============================================================================
+// AFP similarity matrix — single-AFP distance D_ii (Eq. 7 variant)
+// ============================================================================
+
+/// Compute single-AFP similarity scores D_ii using the full non-neighboring
+/// distance set (Eq. 7 variant, Shindyalov & Bourne 1998).
+///
+/// For each pair of starting positions (i_a, i_b) — one fragment from each
+/// protein — computes the average absolute difference of all unique
+/// non-neighboring intra-fragment Cα distance pairs. This uses
+/// (m-1)(m-2)/2 pairs per fragment (all |k-l| >= 2), unlike the
+/// "independent" set (Eq. 6) which uses only m anti-diagonal distances.
+///
+/// Lower scores indicate more similar local structure.
+/// A value of -1.0 indicates the fragment extends beyond the sequence end.
+fn afp_similarity_matrix(
     dm_a: &[Vec<f32>],
     dm_b: &[Vec<f32>],
     len_a: usize,
@@ -135,288 +162,303 @@ fn calc_s(
     win_size: usize,
 ) -> Vec<Vec<f32>> {
     let w = win_size;
-    let sum_size = ((w - 1) * (w - 2)) as f32 / 2.0;
+    let pair_count = ((w - 1) * (w - 2)) as f32 / 2.0;
 
-    let mut s = vec![vec![-1.0f32; len_b]; len_a];
+    let mut sim = vec![vec![-1.0f32; len_b]; len_a];
 
-    for i_a in 0..len_a {
-        for i_b in 0..len_b {
-            if i_a > len_a - w || i_b > len_b - w {
-                continue;
-            }
+    for i_a in 0..=len_a.saturating_sub(w) {
+        for i_b in 0..=len_b.saturating_sub(w) {
+            let score: f32 = (0..(w - 2))
+                .flat_map(|row| ((row + 2)..w).map(move |col| (row, col)))
+                .map(|(row, col)| {
+                    (dm_a[i_a + row][i_a + col] - dm_b[i_b + row][i_b + col]).abs()
+                })
+                .sum();
 
-            let mut score = 0.0f32;
-            for row in 0..(w - 2) {
-                for col in (row + 2)..w {
-                    score += (dm_a[i_a + row][i_a + col] - dm_b[i_b + row][i_b + col]).abs();
-                }
-            }
-
-            s[i_a][i_b] = score / sum_size;
+            sim[i_a][i_b] = score / pair_count;
         }
     }
 
-    s
+    sim
 }
 
-/// Find optimal AFP paths through the similarity matrix.
-/// Equivalent to PyMOL's `findPath`.
-fn find_path(
-    s: &[Vec<f32>],
+// ============================================================================
+// Path helpers
+// ============================================================================
+
+/// Resolve a gap index to AFP anchor positions (Eq. 1–5).
+///
+/// Implements path continuity conditions: no gap (Eq. 1), gap in A only
+/// (Eq. 2), or gap in B only (Eq. 3), bounded by the gap limit G (Eq. 4–5).
+/// Gap indices alternate insertion between structures:
+/// g=0 → +0 in B, g=1 → +1 in A, g=2 → +1 in B, g=3 → +2 in A, ...
+fn resolve_gap(last: (usize, usize), win_size: usize, gap_idx: usize) -> (usize, usize) {
+    let offset = (gap_idx + 1) / 2;
+    let (mut j_a, mut j_b) = (last.0 + win_size, last.1 + win_size);
+    if (gap_idx + 1) % 2 == 0 {
+        j_a += offset;
+    } else {
+        j_b += offset;
+    }
+    (j_a, j_b)
+}
+
+/// Compute inter-fragment distance D_ij between a candidate AFP at (j_a, j_b)
+/// and all existing path anchors, using the independent distance set (Eq. 6).
+///
+/// For each pair of AFPs, computes m anti-diagonal distance comparisons
+/// (one per residue position), averaged over m × n_path. This corresponds
+/// to the "Ind." (independent) method in Table I of the paper.
+fn fragment_d_score(
+    path: &[(usize, usize)],
+    j_a: usize,
+    j_b: usize,
+    dm_a: &[Vec<f32>],
+    dm_b: &[Vec<f32>],
+    w: usize,
+) -> f64 {
+    let total: f64 = path
+        .iter()
+        .map(|&(pa, pb)| {
+            let first = (dm_a[pa][j_a] as f64 - dm_b[pb][j_b] as f64).abs();
+            let last = (dm_a[pa + w - 1][j_a + w - 1] as f64
+                - dm_b[pb + w - 1][j_b + w - 1] as f64)
+                .abs();
+            let mid: f64 = (1..(w - 1))
+                .map(|k| {
+                    (dm_a[pa + k][j_a + w - 1 - k] as f64
+                        - dm_b[pb + k][j_b + w - 1 - k] as f64)
+                        .abs()
+                })
+                .sum();
+            first + last + mid
+        })
+        .sum();
+    total / (w * path.len()) as f64
+}
+
+// ============================================================================
+// Combinatorial extension of the alignment path (Eq. 9–11)
+// ============================================================================
+
+/// Grow an AFP path greedily from a seed.
+///
+/// Returns all intermediate path snapshots (at each extension step) so that
+/// `select_best_path` can evaluate truncation points at different lengths.
+/// This matches the original CE algorithm's behavior of considering paths
+/// at every length, not just the final greedy result.
+fn grow_path(
+    sim: &[Vec<f32>],
+    dm_a: &[Vec<f32>],
+    dm_b: &[Vec<f32>],
+    len_a: usize,
+    len_b: usize,
+    seed: (usize, usize),
+    seed_score: f64,
+    params: &CeParams,
+    norm: &[f64],
+) -> Vec<(Vec<(usize, usize)>, f64)> {
+    let w = params.win_size;
+    let d0 = params.d0 as f64;
+    let d1 = params.d1 as f64;
+    let win_sum = ((w - 1) * (w - 2)) / 2;
+    let n_gaps = params.gap_max * 2 + 1;
+
+    let mut path = vec![seed];
+    let mut cumulative_scores: Vec<f64> = Vec::new();
+    let mut snapshots: Vec<(Vec<(usize, usize)>, f64)> = Vec::new();
+
+    loop {
+        let last = *path.last().unwrap();
+
+        // Find the best gap extension: single AFP must satisfy D_an < D_0
+        // (Eq. 9), then inter-fragment D-score must satisfy Eq. 10.
+        let best = (0..n_gaps)
+            .filter_map(|g| {
+                let (j_a, j_b) = resolve_gap(last, w, g);
+                if j_a + w > len_a || j_b + w > len_b {
+                    return None;
+                }
+                let afp_sim = sim[j_a][j_b] as f64;
+                if afp_sim >= d0 || afp_sim < 0.0 {
+                    return None; // Eq. 9: D_an < D_0
+                }
+                let d = fragment_d_score(&path, j_a, j_b, dm_a, dm_b, w);
+                (d < d1).then_some(((j_a, j_b), afp_sim, d)) // Eq. 10
+            })
+            .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(Ordering::Equal));
+
+        let Some(((j_a, j_b), afp_sim, d_score)) = best else {
+            break;
+        };
+
+        // Incrementally update whole-path score (approximates Eq. 11:
+        // (1/n²) ΣΣ D_ij < D_1), combining inter-AFP D-scores (Eq. 6)
+        // with intra-AFP similarities (Eq. 7).
+        let score1 = (d_score * (w * path.len()) as f64 + afp_sim * win_sum as f64)
+            / (w * path.len() + win_sum) as f64;
+
+        let prev = cumulative_scores.last().copied().unwrap_or(seed_score);
+        let step = path.len();
+        let cumulative =
+            (prev * norm[step - 1] + score1 * (norm[step] - norm[step - 1])) / norm[step];
+
+        if cumulative > d1 {
+            break; // Eq. 11: whole-path score exceeds D_1
+        }
+
+        path.push((j_a, j_b));
+        cumulative_scores.push(cumulative);
+
+        // Snapshot the path at this length for later evaluation
+        snapshots.push((path.clone(), cumulative));
+    }
+
+    snapshots
+}
+
+/// Extend AFP paths through the similarity matrix.
+///
+/// Starting from each seed AFP with score < d0, greedily extends the path
+/// by appending the best-scoring neighboring AFP within the gap limit.
+/// The cumulative D-score (average inter-fragment distance deviation)
+/// must remain below d1 for the path to continue growing.
+///
+/// Returns the set of best candidate paths found, each represented as
+/// a list of (i_a, i_b) AFP anchor positions.
+fn extend_paths(
+    sim: &[Vec<f32>],
     dm_a: &[Vec<f32>],
     dm_b: &[Vec<f32>],
     len_a: usize,
     len_b: usize,
     params: &CeParams,
 ) -> Vec<Vec<(usize, usize)>> {
-    let win_size = params.win_size;
-    let gap_max = params.gap_max;
+    let w = params.win_size;
     let d0 = params.d0 as f64;
-    let d1 = params.d1 as f64;
     let max_kept = params.max_paths.min(MAX_KEPT);
-
     let smaller = len_a.min(len_b);
-    let win_sum = ((win_size - 1) * (win_size - 2)) / 2;
+    let win_sum = ((w - 1) * (w - 2)) / 2;
 
-    let mut best_path: Vec<(usize, usize)> = Vec::new();
-    let mut best_path_score: f64 = SENTINEL_SCORE;
-    let mut best_path_length: usize = 0;
-
-    let mut path_buffer: Vec<Option<Vec<(usize, usize)>>> = vec![None; max_kept];
-    let mut score_buffer = vec![SENTINEL_SCORE; max_kept];
-    let mut len_buffer = vec![0usize; max_kept];
-    let mut buffer_index: usize = 0;
-    let mut buffer_size: usize = 0;
-
-    let win_cache: Vec<i64> = (0..smaller)
-        .map(|i| ((i + 1) * i * win_size / 2 + (i + 1) * win_sum) as i64)
+    // Precompute cumulative normalization factors for D-score averaging
+    let norm: Vec<f64> = (0..smaller)
+        .map(|i| ((i + 1) * i * w / 2 + (i + 1) * win_sum) as f64)
         .collect();
 
-    let mut all_score_buffer = vec![vec![SENTINEL_SCORE; gap_max * 2 + 1]; smaller];
-    let mut t_index = vec![0usize; smaller];
+    let mut best_len = 0usize;
+    let mut candidates: Vec<(Vec<(usize, usize)>, f64)> = Vec::new();
 
     for i_a in 0..len_a {
-        if best_path_length > 1 && i_a > len_a - win_size * (best_path_length - 1) {
+        // Early termination: can't form a longer path than the best found
+        if best_len > 1 && i_a + w * (best_len - 1) > len_a {
             break;
         }
 
         for i_b in 0..len_b {
-            let s_val = s[i_a][i_b] as f64;
-            if s_val >= d0 || s_val == -1.0 {
+            let seed_score = sim[i_a][i_b] as f64;
+            if seed_score >= d0 || seed_score < 0.0 {
                 continue;
             }
 
-            if best_path_length > 1 && i_b > len_b - win_size * (best_path_length - 1) {
+            if best_len > 1 && i_b + w * (best_len - 1) > len_b {
                 break;
             }
 
-            let mut cur_path = vec![(0usize, 0usize); smaller];
-            cur_path[0] = (i_a, i_b);
-            let mut cur_path_length: usize = 1;
-            t_index[0] = 0;
-
-            for row in all_score_buffer.iter_mut().take(smaller) {
-                for val in row.iter_mut().take(gap_max * 2 + 1) {
-                    *val = SENTINEL_SCORE;
-                }
+            let snapshots = grow_path(
+                sim, dm_a, dm_b, len_a, len_b, (i_a, i_b), seed_score, params, &norm,
+            );
+            for (path, score) in snapshots {
+                best_len = best_len.max(path.len());
+                candidates.push((path, score));
             }
 
-            let mut done = false;
-            while !done {
-                let mut gap_best_score: f64 = SENTINEL_SCORE;
-                let mut gap_best_index: Option<usize> = None;
-
-                #[allow(clippy::needless_range_loop)]
-                for g in 0..(gap_max * 2 + 1) {
-                    let last = cur_path[cur_path_length - 1];
-                    let mut j_a = last.0 + win_size;
-                    let mut j_b = last.1 + win_size;
-
-                    #[allow(clippy::manual_div_ceil)]
-                    let gap_offset = (g + 1) / 2;
-                    if (g + 1) % 2 == 0 {
-                        j_a += gap_offset;
-                    } else {
-                        j_b += gap_offset;
-                    }
-
-                    if j_a > len_a - win_size || j_b > len_b - win_size {
-                        continue;
-                    }
-
-                    let s_jab = s[j_a][j_b] as f64;
-                    if s_jab >= d0 || s_jab == -1.0 {
-                        continue;
-                    }
-
-                    let mut cur_score: f64 = 0.0;
-                    for &prev in cur_path.iter().take(cur_path_length) {
-                        cur_score += (dm_a[prev.0][j_a] as f64
-                            - dm_b[prev.1][j_b] as f64)
-                            .abs();
-                        cur_score += (dm_a[prev.0 + win_size - 1][j_a + win_size - 1] as f64
-                            - dm_b[prev.1 + win_size - 1][j_b + win_size - 1] as f64)
-                            .abs();
-                        for k in 1..(win_size - 1) {
-                            cur_score += (dm_a[prev.0 + k][j_a + win_size - 1 - k] as f64
-                                - dm_b[prev.1 + k][j_b + win_size - 1 - k] as f64)
-                                .abs();
-                        }
-                    }
-
-                    cur_score /= (win_size * cur_path_length) as f64;
-
-                    if cur_score >= d1 {
-                        continue;
-                    }
-
-                    if cur_score < gap_best_score {
-                        cur_path[cur_path_length] = (j_a, j_b);
-                        gap_best_score = cur_score;
-                        gap_best_index = Some(g);
-                        all_score_buffer[cur_path_length - 1][g] = cur_score;
-                    }
-                }
-
-                if let Some(gbi) = gap_best_index {
-                    #[allow(clippy::manual_div_ceil)]
-                    let j_gap = (gbi + 1) / 2;
-                    let (g_a, g_b) = if (gbi + 1) % 2 == 0 {
-                        let prev = cur_path[cur_path_length - 1];
-                        (prev.0 + win_size + j_gap, prev.1 + win_size)
-                    } else {
-                        let prev = cur_path[cur_path_length - 1];
-                        (prev.0 + win_size, prev.1 + win_size + j_gap)
-                    };
-
-                    let score1 = (all_score_buffer[cur_path_length - 1][gbi]
-                        * (win_size * cur_path_length) as f64
-                        + s[g_a][g_b] as f64 * win_sum as f64)
-                        / (win_size * cur_path_length + win_sum) as f64;
-
-                    let prev_score = if cur_path_length > 1 {
-                        all_score_buffer[cur_path_length - 2][t_index[cur_path_length - 1]]
-                    } else {
-                        s[i_a][i_b] as f64
-                    };
-
-                    let score2 = (prev_score * win_cache[cur_path_length - 1] as f64
-                        + score1
-                            * (win_cache[cur_path_length] - win_cache[cur_path_length - 1]) as f64)
-                        / win_cache[cur_path_length] as f64;
-
-                    let cur_total_score = score2;
-
-                    if cur_total_score > d1 {
-                        done = true;
-                    } else {
-                        all_score_buffer[cur_path_length - 1][gbi] = cur_total_score;
-                        t_index[cur_path_length] = gbi;
-                        cur_path_length += 1;
-                    }
-
-                    if !done
-                        && (cur_path_length > best_path_length
-                            || (cur_path_length == best_path_length
-                                && cur_total_score < best_path_score))
-                    {
-                        best_path_length = cur_path_length;
-                        best_path_score = cur_total_score;
-                        best_path = cur_path[..cur_path_length].to_vec();
-                    }
-                } else {
-                    done = true;
-                    cur_path_length = cur_path_length.saturating_sub(1);
-                }
-            }
-
-            if best_path_length > len_buffer[buffer_index]
-                || (best_path_length == len_buffer[buffer_index]
-                    && best_path_score < score_buffer[buffer_index])
-            {
-                buffer_index = if buffer_index == max_kept - 1 {
-                    0
-                } else {
-                    buffer_index + 1
-                };
-                buffer_size = if buffer_size < max_kept {
-                    buffer_size + 1
-                } else {
-                    max_kept
-                };
-
-                let path_copy = best_path.clone();
-
-                let idx = if buffer_index == 0 && buffer_size == max_kept {
-                    max_kept - 1
-                } else {
-                    buffer_index - 1
-                };
-
-                path_buffer[idx] = Some(path_copy);
-                score_buffer[idx] = best_path_score;
-                len_buffer[idx] = best_path_length;
+            // Periodically trim to bound memory
+            if candidates.len() >= max_kept * 4 {
+                sort_and_trim(&mut candidates, max_kept);
             }
         }
     }
 
-    path_buffer.into_iter().flatten().collect()
+    sort_and_trim(&mut candidates, max_kept);
+    candidates.into_iter().map(|(path, _)| path).collect()
 }
 
-/// Select the best path by computing Kabsch RMSD for each.
-/// Equivalent to PyMOL's `findBest`.
-fn find_best(
+/// Sort candidates by quality (longer paths first, lower scores first)
+/// and truncate to `max`.
+fn sort_and_trim(candidates: &mut Vec<(Vec<(usize, usize)>, f64)>, max: usize) {
+    candidates.sort_by(|a, b| {
+        b.0.len()
+            .cmp(&a.0.len())
+            .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal))
+    });
+    candidates.truncate(max);
+}
+
+// ============================================================================
+// Path selection by Kabsch RMSD
+// ============================================================================
+
+/// Expand an AFP anchor path into residue-level pairs and evaluate by
+/// Kabsch RMSD.
+fn expand_and_evaluate(
+    source_ca: &[Vec3],
+    target_ca: &[Vec3],
+    path: &[(usize, usize)],
+    win_size: usize,
+) -> Option<(Vec<(usize, usize)>, f32)> {
+    let pairs: Vec<(usize, usize)> = path
+        .iter()
+        .flat_map(|&(first, second)| {
+            (0..win_size).filter_map(move |k| {
+                let (si, ti) = (first + k, second + k);
+                (si < source_ca.len() && ti < target_ca.len()).then_some((si, ti))
+            })
+        })
+        .collect();
+
+    if pairs.len() < 3 {
+        return None;
+    }
+
+    let src: Vec<Vec3> = pairs.iter().map(|&(si, _)| source_ca[si]).collect();
+    let tgt: Vec<Vec3> = pairs.iter().map(|&(_, ti)| target_ca[ti]).collect();
+
+    kabsch::kabsch(&src, &tgt, None)
+        .ok()
+        .map(|r| (pairs, r.rmsd))
+}
+
+/// Select the best candidate path by computing Kabsch RMSD for each.
+///
+/// Expands AFP anchor paths into full residue-level correspondences,
+/// then evaluates each via optimal rigid-body superposition (Kabsch).
+/// Prefers more aligned residues first, then lower RMSD as tiebreaker.
+fn select_best_path(
     source_ca: &[Vec3],
     target_ca: &[Vec3],
     paths: &[Vec<(usize, usize)>],
     win_size: usize,
 ) -> Option<(Vec<(usize, usize)>, f32)> {
-    let mut best_rmsd = f32::MAX;
-    let mut best_pairs: Option<Vec<(usize, usize)>> = None;
-
-    for path in paths {
-        if path.is_empty() {
-            continue;
-        }
-
-        let mut src_coords = Vec::new();
-        let mut tgt_coords = Vec::new();
-        let mut pairs = Vec::new();
-
-        for &(first, second) in path {
-            for k in 0..win_size {
-                let si = first + k;
-                let ti = second + k;
-                if si < source_ca.len() && ti < target_ca.len() {
-                    src_coords.push(source_ca[si]);
-                    tgt_coords.push(target_ca[ti]);
-                    pairs.push((si, ti));
-                }
-            }
-        }
-
-        if src_coords.len() < 3 {
-            continue;
-        }
-
-        match kabsch::kabsch(&src_coords, &tgt_coords, None) {
-            Ok(result) => {
-                if result.rmsd < best_rmsd
-                    || (result.rmsd == best_rmsd
-                        && pairs.len() > best_pairs.as_ref().map_or(0, |p| p.len()))
-                {
-                    best_rmsd = result.rmsd;
-                    best_pairs = Some(pairs);
-                }
-            }
-            Err(_) => continue,
-        }
-    }
-
-    best_pairs.map(|p| (p, best_rmsd))
+    paths
+        .iter()
+        .filter(|path| !path.is_empty())
+        .filter_map(|path| expand_and_evaluate(source_ca, target_ca, path, win_size))
+        .max_by(|(pairs_a, rmsd_a), (pairs_b, rmsd_b)| {
+            pairs_a
+                .len()
+                .cmp(&pairs_b.len())
+                .then_with(|| rmsd_b.partial_cmp(rmsd_a).unwrap_or(Ordering::Equal))
+        })
 }
 
-/// Compute Z-score for alignment quality assessment.
+// ============================================================================
+// Z-score (Zhang & Skolnick, 2004)
+// ============================================================================
+
+/// Compute alignment quality Z-score.
+///
+/// Uses the length-dependent d0 normalization from Zhang & Skolnick (2004):
+/// `d0 = 1.24 * (L_min - 15)^(1/3) - 1.8`
 fn z_score(n_aligned: usize, rmsd: f32, len_source: usize, len_target: usize) -> f32 {
     let l_min = len_source.min(len_target) as f32;
     if l_min < 1.0 || rmsd < 1e-6 {
@@ -466,9 +508,9 @@ mod tests {
     }
 
     #[test]
-    fn test_calc_dm_symmetric() {
+    fn test_distance_matrix_symmetric() {
         let coords = make_helix(5, v(0.0, 0.0, 0.0));
-        let dm = calc_dm(&coords);
+        let dm = distance_matrix(&coords);
         assert_eq!(dm.len(), 5);
         for (i, row) in dm.iter().enumerate().take(5) {
             assert_eq!(row[i], 0.0);
@@ -479,12 +521,12 @@ mod tests {
     }
 
     #[test]
-    fn test_calc_s_dimensions() {
+    fn test_afp_similarity_dimensions() {
         let a = make_helix(15, v(0.0, 0.0, 0.0));
         let b = make_helix(20, v(5.0, 5.0, 5.0));
-        let dm_a = calc_dm(&a);
-        let dm_b = calc_dm(&b);
-        let s = calc_s(&dm_a, &dm_b, a.len(), b.len(), 8);
+        let dm_a = distance_matrix(&a);
+        let dm_b = distance_matrix(&b);
+        let s = afp_similarity_matrix(&dm_a, &dm_b, a.len(), b.len(), 8);
         assert_eq!(s.len(), 15);
         assert_eq!(s[0].len(), 20);
         assert!(s[0][0] >= 0.0);
@@ -492,10 +534,10 @@ mod tests {
     }
 
     #[test]
-    fn test_calc_s_identical_fragments() {
+    fn test_afp_similarity_identical_fragments() {
         let coords = make_helix(20, v(0.0, 0.0, 0.0));
-        let dm = calc_dm(&coords);
-        let s = calc_s(&dm, &dm, coords.len(), coords.len(), 8);
+        let dm = distance_matrix(&coords);
+        let s = afp_similarity_matrix(&dm, &dm, coords.len(), coords.len(), 8);
         assert!(s[0][0].abs() < 1e-6);
         assert!(s[5][5].abs() < 1e-6);
     }

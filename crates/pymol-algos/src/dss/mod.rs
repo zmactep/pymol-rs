@@ -11,7 +11,7 @@
 //!
 //! # Algorithms
 //!
-//! - [`PyMolDss`] — PyMOL's DSS algorithm (H-bonds + phi/psi dihedral angles)
+//! - [`PyMolDss`] — PyMOL-derived DSS algorithm (H-bonds + phi/psi; see pymol.rs for attribution)
 //! - [`Dssp`] — DSSP algorithm (Kabsch & Sander, stub)
 //! - [`Noop`] — Dummy algorithm (everything is a loop)
 

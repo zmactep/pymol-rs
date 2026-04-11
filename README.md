@@ -230,6 +230,16 @@ PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
     cargo build --release -p raytracer-plugin -p hello-plugin -p ipc-plugin -p python-plugin
 ```
 
+## Relationship with PyMOL
+
+PyMOL-RS started as a direct Rust port of PyMOL, actively using algorithms from [pymol-open-source](https://github.com/schrodinger/pymol-open-source). Since then, the project has diverged substantially:
+
+- **All molecular algorithms** (CE structural alignment, Kabsch superposition, sequence alignment, space group expansion, surface generation) have been **rewritten from original scientific papers** rather than transliterated from the PyMOL C code.
+- **Rendering** has been redesigned around GPU impostors and WebGPU compute pipelines — a fundamentally different approach from PyMOL's OpenGL-based rendering.
+- **What remains from PyMOL:** the DSS (secondary structure assignment) algorithm and the settings table used exclusively for `.pse` session import. PyMOL-RS uses its own settings system internally; the PyMOL settings table exists only to parse legacy session files.
+
+The project has deep respect for PyMOL's legacy and shares its Open Source spirit, but it follows an entirely different development path. Keeping the codebase free of direct PyMOL code borrowings is an explicit goal — new functionality is derived from primary sources (academic papers, specifications) rather than ported from the original C/C++ implementation.
+
 ## License
 
 [BSD 3-Clause](LICENSE)

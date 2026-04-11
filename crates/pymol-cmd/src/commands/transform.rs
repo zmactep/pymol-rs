@@ -40,7 +40,7 @@ impl Command for TranslateCommand {
 DESCRIPTION
 
     "translate" translates the atomic coordinates of atoms in a selection.
-    Supports full PyMOL selection expressions.
+    Supports full selection expressions.
 
 USAGE
 
@@ -338,12 +338,12 @@ ARGUMENTS
     state = -1: only the current state is modified {default}
 
     homogenous = 0/1: matrix format {default: 0}
-        0 = PyMOL TTT format (pre-translate, rotate, post-translate)
+        0 = TTT format (pre-translate, rotate, post-translate)
         1 = Standard homogenous 4x4 matrix
 
 NOTES
 
-    When homogenous=0, the matrix is in PyMOL's TTT format:
+    When homogenous=0, the matrix is in TTT format:
     - [0-2, 4-6, 8-10]: 3x3 rotation matrix
     - [3, 7, 11]: post-rotation translation
     - [12, 13, 14]: pre-rotation translation
@@ -676,7 +676,7 @@ fn apply_translation_to_atoms(
             mol.translate_atoms(0, atoms, *delta);
         }
         s if s > 0 => {
-            // Specific state (1-indexed in PyMOL, 0-indexed internally)
+            // Specific state (1-indexed in commands, 0-indexed internally)
             let state_idx = (s - 1) as usize;
             if state_idx < num_states {
                 mol.translate_atoms(state_idx, atoms, *delta);

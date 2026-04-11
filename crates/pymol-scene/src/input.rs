@@ -150,7 +150,7 @@ pub struct InputState {
     pub zoom_sensitivity: f32,
     /// Clip sensitivity (units per pixel)
     pub clip_sensitivity: f32,
-    /// Pan sensitivity multiplier (dimensionless; 1.0 = PyMOL-equivalent behaviour).
+    /// Pan sensitivity multiplier (dimensionless; 1.0 = default behaviour).
     /// Applied on top of screen_vertex_scale, which already accounts for camera
     /// distance and viewport size so that the scene tracks the cursor exactly.
     pub pan_sensitivity: f32,
@@ -259,7 +259,7 @@ impl InputState {
     /// Check if ctrl or cmd (macOS) is held.
     ///
     /// On macOS, ⌘ maps to the `logo` modifier.
-    /// We treat both as the "pan" modifier to match PyMOL's Ctrl+drag behavior.
+    /// We treat both as the "pan" modifier for Ctrl+drag panning.
     pub fn ctrl_or_cmd_held(&self) -> bool {
         self.modifiers.ctrl || self.modifiers.logo
     }
@@ -279,9 +279,9 @@ impl InputState {
     /// This consumes the accumulated deltas and returns the corresponding
     /// camera movements. Call this once per frame.
     ///
-    /// The default mapping follows PyMOL conventions:
+    /// The default mapping follows standard three-button viewing conventions:
     /// - Left drag:             Rotate (X/Y rotation)
-    /// - Ctrl+Left drag:        Pan XY (matches PyMOL three_button_viewing `move`)
+    /// - Ctrl+Left drag:        Pan XY
     /// - Cmd+Left drag (macOS): Pan XY (⌘ maps to logo modifier)
     /// - Shift+Left drag:       Pan XY
     /// - Middle drag:           Pan XY
@@ -314,7 +314,7 @@ impl InputState {
                     // Shift+Left: Pan (negate: moving origin opposite to drag direction)
                     deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
                 } else if self.ctrl_or_cmd_held() {
-                    // Ctrl+Left / Cmd+Left (macOS): Pan XY — matches PyMOL three_button_viewing
+                    // Ctrl+Left / Cmd+Left (macOS): Pan XY
                     deltas.push(CameraDelta::Translate(Vec3::new(-dx, dy, 0.0)));
                 } else {
                     // Left: Rotate

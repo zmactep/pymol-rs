@@ -13,14 +13,14 @@ pub struct NamedColors {
 }
 
 impl NamedColors {
-    /// Create a new named color registry with PyMOL's default colors
+    /// Create a new named color registry with default colors
     pub fn new() -> Self {
         let mut registry = NamedColors {
             colors: Vec::with_capacity(256),
             by_name: AHashMap::new(),
         };
 
-        // Register PyMOL's standard colors
+        // Register standard colors
         registry.register_defaults();
         registry
     }
@@ -49,7 +49,7 @@ impl NamedColors {
         self.register("gray80", Color::new(0.8, 0.8, 0.8));
         self.register("gray90", Color::new(0.9, 0.9, 0.9));
 
-        // PyMOL specific colors
+        // Element-specific colors
         self.register("carbon", Color::new(0.2, 1.0, 0.2));
         self.register("nitrogen", Color::new(0.2, 0.2, 1.0));
         self.register("oxygen", Color::new(1.0, 0.3, 0.3));

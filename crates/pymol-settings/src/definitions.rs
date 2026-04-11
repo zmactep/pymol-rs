@@ -1,7 +1,7 @@
 //! Setting definitions - all 798 PyMOL settings
 //!
-//! This module contains the complete list of settings ported from PyMOL's SettingInfo.h
-//! Setting indices are stable for session compatibility.
+//! This module contains the complete list of settings.
+//! Setting indices are stable for PSE session format compatibility.
 
 use crate::setting::{Setting, SettingLevel, SettingType, SettingValue};
 
@@ -953,7 +953,7 @@ macro_rules! s_string {
 // Use shorter level aliases
 use SettingLevel::*;
 
-/// All setting definitions - ported from PyMOL's SettingInfo.h
+/// All setting definitions (indices stable for PSE session format compatibility)
 pub static SETTINGS: &[Setting] = &[
     // 0-49
     s_float!(0, "bonding_vdw_cutoff", Unused, 0.2),

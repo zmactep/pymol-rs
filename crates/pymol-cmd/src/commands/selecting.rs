@@ -207,7 +207,7 @@ EXAMPLES
 
         // If the expression references its own name (e.g., `select sele, sele or resi 24`),
         // expand the self-reference by substituting the old expression. This prevents
-        // circular references in the stored expression, matching PyMOL's behavior where
+        // circular references in the stored expression — selections are evaluated
         // selections are evaluated immediately and stored as results.
         let expanded = if let Some(old_expr) = ctx.viewer.get_selection(name) {
             expand_self_reference(selection, name, old_expr)

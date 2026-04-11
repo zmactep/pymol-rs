@@ -1,17 +1,16 @@
-//! PyMOL standard color index → RGB mapping table.
+//! PSE format color index → RGB mapping table.
 //!
-//! PyMOL assigns sequential integer indices to its built-in colors during
-//! initialization in `Color.cpp`.  The indices are determined by the
-//! registration order, starting from 0.  This table lets us convert those
-//! indices to RGB values during PSE import.
+//! The PSE session format assigns sequential integer indices to built-in colors.
+//! The indices are determined by the registration order, starting from 0.
+//! This table lets us convert those indices to RGB values during PSE import.
 
-/// (pymol_index, r, g, b) — values and order taken from PyMOL's `Color.cpp` `ColorInit`.
+/// (color_index, r, g, b) — PSE format color index mapping, determined by session file analysis.
 ///
 /// Only the first 57 named colors are listed here (indices 0–56).
 /// After that come grey00–grey99 (indices 57–156), lightmagenta (157),
 /// then large generated spectrum ranges (s000–s999, r000–r999, etc.).
 pub static PYMOL_COLORS: &[(i64, f32, f32, f32)] = &[
-    // Named colors (registered sequentially in ColorInit)
+    // Named colors (registered sequentially by index)
     (0,  1.0,   1.0,   1.0),    // white
     (1,  0.0,   0.0,   0.0),    // black
     (2,  0.0,   0.0,   1.0),    // blue

@@ -18,7 +18,7 @@ use crate::residue::{ChainIterator, ResidueIterator};
 
 /// A molecular object containing atoms, bonds, and coordinate sets
 ///
-/// This is the Rust equivalent of PyMOL's `ObjectMolecule`.
+/// Molecular data model (atoms, bonds, coordinate sets).
 /// It provides a container for all molecular data including:
 /// - Atom properties (name, element, residue, etc.)
 /// - Bond connectivity
@@ -487,7 +487,7 @@ impl ObjectMolecule {
     /// Classify atoms as protein, nucleic acid, solvent, organic, or inorganic
     ///
     /// This method sets `AtomFlags` on atoms based on their residue names and
-    /// other properties. It follows PyMOL's `SelectorClassifyAtoms` logic:
+    /// other properties. Classification logic:
     ///
     /// - Known amino acid residues (non-HETATM) → `PROTEIN | POLYMER`
     /// - Known nucleic acid residues (non-HETATM) → `NUCLEIC | POLYMER`
@@ -561,7 +561,7 @@ impl ObjectMolecule {
                 if let Some(atom) = self.atoms.get_mut(idx) {
                     atom.state.flags |= mask;
                     // Mark non-polymer atoms as hetatm for proper representation
-                    // (mirrors PyMOL's need_hetatm_classification post-processing)
+                    // Non-polymer atoms need HETATM classification for proper representation
                     if is_non_polymer {
                         atom.state.hetatm = true;
                     }
@@ -664,14 +664,14 @@ impl ObjectMolecule {
         }
     }
 
-    /// Apply a PyMOL-style TTT matrix to all coordinates in a state
+    /// Apply a TTT (Translate-Transform-Translate) matrix to all coordinates in a state
     pub fn transform_ttt(&mut self, state: usize, ttt: &[f32; 16]) {
         if let Some(cs) = self.coord_sets.get_mut(state) {
             cs.transform_ttt(ttt);
         }
     }
 
-    /// Apply a PyMOL-style TTT matrix to specific atoms in a state
+    /// Apply a TTT (Translate-Transform-Translate) matrix to specific atoms in a state
     pub fn transform_ttt_atoms(&mut self, state: usize, atoms: &[AtomIndex], ttt: &[f32; 16]) {
         if let Some(cs) = self.coord_sets.get_mut(state) {
             cs.transform_ttt_atoms(atoms, ttt);

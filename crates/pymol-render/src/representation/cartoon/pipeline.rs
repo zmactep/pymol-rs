@@ -1,12 +1,15 @@
-//! PyMOL-compatible cartoon pipeline
+//! Cartoon rendering pipeline
 //!
-//! Implements the exact sequence from RepCartoon.cpp:
+//! Based on the ribbon smoothing approach described in:
+//! Carson, "Ribbons", Methods in Enzymology 277:493-505, 1997.
+//!
+//! Pipeline stages:
 //! 1. Compute differences, normals, tangents from guide points
 //! 2. Compute round helix orientations (using tangent vectors)
 //! 3. Refine normals (orthogonalize, fix flips)
 //! 4. Flatten sheets, smooth loops
 //! 5. Re-compute tangents after position modifications
-//! 6. Per-run interpolation (CartoonGenerateSample) and mesh generation
+//! 6. Per-run interpolation and mesh generation
 
 use lin_alg::f32::Vec3;
 use pymol_mol::SecondaryStructure;
@@ -77,7 +80,7 @@ impl Default for PipelineSettings {
 // CartoonType — maps SS type + settings to rendering style
 // ============================================================================
 
-/// Cartoon rendering type (matches PyMOL's cur_car values)
+/// Cartoon rendering type for each secondary structure element
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartoonType {
     Loop,
@@ -118,10 +121,9 @@ fn cartoon_type_for(ss: SecondaryStructure, settings: &CartoonGeometrySettings) 
 // Phase 2: Compute Differences, Normals, Tangents
 // ============================================================================
 
-/// Compute difference vectors and their lengths between consecutive guide points.
+/// Compute consecutive point differences and normalize.
 ///
 /// Returns (distances, normalized_directions) — both Vec<f32>/Vec<Vec3> of length n-1.
-/// Matches RepCartoonComputeDifferencesAndNormals.
 fn compute_differences_and_normals(gps: &[GuidePoint]) -> (Vec<f32>, Vec<Vec3>) {
     let n = gps.len();
     if n < 2 {
@@ -148,9 +150,8 @@ fn compute_differences_and_normals(gps: &[GuidePoint]) -> (Vec<f32>, Vec<Vec3>) 
     (dl, nv)
 }
 
-/// Compute tangent vectors from normalized direction vectors.
+/// Tangent estimation by averaging adjacent normalized differences.
 ///
-/// Matches RepCartoonComputeTangents exactly:
 /// - First: tv[0] = nv[0]
 /// - Interior: tv[i] = normalize(nv[i] + nv[i-1])
 /// - Last: tv[n-1] = nv[n-2]
@@ -188,11 +189,11 @@ fn compute_tangents(nv: &[Vec3], n: usize) -> Vec<Vec3> {
 // Phase 3: Round Helix Orientations
 // ============================================================================
 
-/// Compute round helix orientations using sliding window of 4-5 CA positions.
+/// Sliding-window helix axis orientation using 4-5 consecutive CA positions.
 ///
-/// Matches RepCartoonComputeRoundHelices exactly:
 /// - Maintains sliding window v1..v5 of helix CA positions
 /// - Computes weighted center from 4 CAs: 0.2130*(v1+v4) + 0.2870*(v2+v3)
+///   Weights derived from alpha-helix geometry (3.6 residues/turn, 5.4A pitch)
 /// - Helix axis = normalize(prev_center - center)
 /// - Orientation = normalize(cross(axis, tangent))
 #[allow(unused_assignments)]
@@ -316,9 +317,8 @@ fn compute_round_helix_orientations(gps: &mut [GuidePoint], tv: &[Vec3]) {
 // Phase 4: Refine Normals
 // ============================================================================
 
-/// Refine orientation vectors to prevent flips and kinks.
+/// Normal consistency via Gram-Schmidt orthogonalization.
 ///
-/// Matches RepCartoonRefineNormals exactly:
 /// 1. Make orientations orthogonal to tangents (interior residues only)
 /// 2. Generate alternative inverted orientations (NOT for helices)
 /// 3. Forward iterate: pick orientation with highest dot product with previous
@@ -357,7 +357,7 @@ fn refine_normals(gps: &mut [GuidePoint], tv: &[Vec3], nv: &[Vec3]) {
     // Step 3: Forward iterate through pairs to select optimal orientation
     for a in 1..n - 1 {
         // nv is the chain direction vectors (normalized differences)
-        // PyMOL removes chain component from both previous orientation and candidates
+        // Remove chain component from both previous orientation and candidates
         let chain_dir = if a > 0 && a - 1 < nv.len() {
             nv[a - 1]
         } else {
@@ -447,10 +447,10 @@ fn refine_normals(gps: &mut [GuidePoint], tv: &[Vec3], nv: &[Vec3]) {
 // Phase 5: Flatten Sheets, Smooth Loops
 // ============================================================================
 
-/// Flatten sheet regions to make them planar.
+/// Laplacian sheet flattening.
 ///
-/// Matches RepCartoonFlattenSheets: iterative window averaging of positions
-/// and orientations, then removing tangent component from orientations.
+/// Iterative window averaging of positions and orientations,
+/// then removing tangent component from orientations.
 #[allow(clippy::needless_range_loop)]
 fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
     let n = gps.len();
@@ -462,7 +462,7 @@ fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
     let runs = find_sheet_runs(gps);
 
     for (first, last) in runs {
-        let f = 1usize; // PyMOL uses fixed window f=1
+        let f = 1usize; // Fixed window f=1
 
         for _ in 0..flat_cycles {
             // Temporary buffers
@@ -494,7 +494,7 @@ fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
             }
 
             // Remove tangent component from orientations
-            // PyMOL computes tangent from smoothed positions: tmp[b] = normalize(pv[b+1] - pv[b-1])
+            // Compute tangent from smoothed positions: tmp[b] = normalize(pv[b+1] - pv[b-1])
             for b in (first + f)..=(last.saturating_sub(f)) {
                 let prev = if b > 0 { b - 1 } else { 0 };
                 let next = (b + 1).min(n - 1);
@@ -508,11 +508,10 @@ fn flatten_sheets(gps: &mut [GuidePoint], flat_cycles: u32) {
     }
 }
 
-/// Smooth loop regions with progressive window sizes.
+/// Progressive windowed smoothing for loop regions.
 ///
-/// Matches RepCartoonSmoothLoops: identifies loop regions (ss == NONE/Loop),
-/// extends them by 1 residue into adjacent SS regions if within same segment,
-/// then applies windowed averaging.
+/// Identifies loop regions (non-helix, non-sheet), extends them by 1 residue
+/// into adjacent SS regions if within same segment, then applies windowed averaging.
 #[allow(clippy::needless_range_loop)]
 fn smooth_loops(
     gps: &mut [GuidePoint],
@@ -530,7 +529,7 @@ fn smooth_loops(
     let mut tmp = vec![Vec3::new(0.0, 0.0, 0.0); n];
 
     for (mut first, mut last) in runs {
-        // PyMOL extends loop regions by 1 into adjacent segments
+        // Extend loop regions by 1 into adjacent segments
         first = first.saturating_sub(1);
         if last < n - 1 {
             last += 1;
@@ -622,7 +621,7 @@ struct ExtrudePoint {
     color: [f32; 4],
 }
 
-/// CartoonGenerateSample — interpolate between two guide points.
+/// Interpolate between two guide points using Hermite-like blending.
 ///
 /// For each pair of guide atoms, generates `sampling` interpolated points.
 /// The first invocation (n_p==0) also generates a starting point (total: sampling+1
@@ -662,8 +661,7 @@ fn cartoon_generate_sample(
             let pos = pos1 * f1 + pos2 * f0 + (*tv1 * f3 - *tv2 * f2) * f4;
 
             // Store orientation (will be used later for frame construction)
-            // PyMOL: copy3f(vo, vn - 6) — copies the orientation of guide point 1
-            // This is only for the very first point, it gets the raw orientation
+            // First interpolated point inherits the raw orientation of guide point 1
             let orient = orient1;
 
             buffer.push(ExtrudePoint {
@@ -696,7 +694,6 @@ fn cartoon_generate_sample(
         });
 
         // Last sample: override orientation with gp2's raw orientation
-        // PyMOL: if(b == sampling - 1) copy3f(vo + 3, vn - 6)
         if b == sampling - 1 {
             buffer.last_mut().unwrap().orientation = orient2;
         }
@@ -705,12 +702,11 @@ fn cartoon_generate_sample(
     }
 }
 
-/// Refine interpolated positions after each CartoonGenerateSample call.
+/// Smooth interpolated positions perpendicular to the ribbon plane.
 ///
-/// Matches CartoonGenerateRefine (RepCartoon.cpp line 2165):
 /// Smooths positions along the axis perpendicular to the ribbon plane
 /// (cross product of consecutive guide point orientations).
-/// This removes the "wobble" from the helical Cα trace.
+/// This removes the "wobble" from the helical CA trace.
 fn cartoon_generate_refine(
     buffer: &mut [ExtrudePoint],
     n_p: usize,
@@ -764,9 +760,9 @@ fn cartoon_generate_refine(
     }
 }
 
-/// Compute tangent vectors from interpolated positions.
+/// Compute tangents from interpolated positions.
 ///
-/// Matches ExtrudeComputeTangents: uses adjacent differences, averaged at interior.
+/// Uses adjacent differences, averaged at interior points.
 fn compute_tangents_from_positions(positions: &[Vec3]) -> Vec<Vec3> {
     let n = positions.len();
     if n < 2 {
@@ -834,7 +830,7 @@ fn extrude_run(
     // Generate mesh based on cartoon type
     match car_type {
         CartoonType::Oval => {
-            // PyMOL: wide axis (oval_length=1.35) along binormal, thin (oval_width=0.25) along normal
+            // Wide axis (oval_length=1.35) along binormal, thin (oval_width=0.25) along normal
             // Profile::ellipse(width=normal_axis, height=binormal_axis)
             let profile = Profile::ellipse(geom.helix_width, geom.helix_height, geom.quality);
             extrude_tube(all_vertices, all_indices, &frames, &profile);
@@ -1047,8 +1043,8 @@ fn calculate_dumbbell_taper_inline(
 /// - **Thin dimension** (`width`) along the normal (first local coord)
 /// - **Face normals** pointing along ±normal (radially outward)
 ///
-/// This matches PyMOL's convention when used with round helix orientations,
-/// producing a flat ribbon with two visible faces (top and bottom).
+/// When used with round helix orientations, this produces a flat ribbon
+/// with two visible faces (top and bottom).
 ///
 /// The profile has 4 vertices forming 2 faces, connected by `generate_face_strips`.
 fn make_rotated_dumbbell(width: f32, length: f32) -> Profile {
@@ -1177,7 +1173,7 @@ fn extrude_tube(
 
 /// Complete cartoon pipeline for one backbone segment.
 ///
-/// Implements the full PyMOL cartoon rendering pipeline:
+/// Implements the full cartoon rendering pipeline:
 /// 1. Compute differences, normals, tangents
 /// 2. Compute round helix orientations
 /// 3. Refine normals
@@ -1226,8 +1222,8 @@ pub fn generate_segment_cartoon(
 
 /// Generate mesh from guide points using per-run extrusion.
 ///
-/// Implements GenerateRepCartoonCGO: iterates through guide points,
-/// detects cartoon type changes, interpolates each run, then extrudes.
+/// Iterates through guide points, detects cartoon type changes,
+/// interpolates each run, then extrudes into mesh geometry.
 fn generate_per_run_mesh(
     gps: &[GuidePoint],
     tv: &[Vec3],
@@ -1252,7 +1248,7 @@ fn generate_per_run_mesh(
     let power_a = settings.power_a;
     let power_b = settings.power_b;
 
-    // PyMOL-style loop: determine cartoon type from the PAIR (a, a+1).
+    // Determine cartoon type from the PAIR (a, a+1).
     //
     // **Boundary pair rule**: when two adjacent guide points have different SS types
     // (e.g. Helix→Loop, Sheet→Loop), the pair is rendered as Loop type. This creates
@@ -1307,7 +1303,7 @@ fn generate_per_run_mesh(
                 power_b,
             );
 
-            // Refine positions (CartoonGenerateRefine) — only for same-type pairs
+            // Refine positions — only for same-type pairs
             let car_a = cartoon_type_for(gps[a].ss_type, geom);
             let car_b = cartoon_type_for(gps[a + 1].ss_type, geom);
             if settings.refine > 0 && car_a == car_b {

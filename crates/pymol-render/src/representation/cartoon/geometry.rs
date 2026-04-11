@@ -38,9 +38,9 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Create an elliptical profile (for helices) - PyMOL-compatible
+    /// Create an elliptical profile (for helices)
     ///
-    /// Matches PyMOL's ExtrudeOval function:
+    /// Elliptical cross-section for helix extrusion:
     /// - Position: (binormal = cos(θ) * width, normal = sin(θ) * length)
     /// - Normal: (binormal = cos(θ) * length, normal = sin(θ) * width)
     ///
@@ -58,16 +58,16 @@ impl Profile {
             let cos_a = angle.cos();
             let sin_a = angle.sin();
 
-            // Point on ellipse - PyMOL mapping:
-            // PyMOL: (binormal = cos * width, normal = sin * length)
-            // Rust (x=normal, y=binormal): x = sin * width, y = cos * height
+            // Point on ellipse:
+            // Parametric form: (binormal = cos * width, normal = sin * length)
+            // In (x=normal, y=binormal) coords: x = sin * width, y = cos * height
             let x = width * sin_a;   // normal direction (wide, ~1.35)
             let y = height * cos_a;  // binormal direction (thin, ~0.25)
             points.push((x, y));
 
-            // Normal to ellipse - PyMOL's formula (swapped width/length for shading):
-            // PyMOL: (binormal = cos * length, normal = sin * width)
-            // Rust (x=normal, y=binormal): nx = sin * height, ny = cos * width
+            // Normal to ellipse (swapped width/length for correct shading):
+            // Gradient: (binormal = cos * length, normal = sin * width)
+            // In (x=normal, y=binormal) coords: nx = sin * height, ny = cos * width
             let nx = height * sin_a;
             let ny = width * cos_a;
             let len = (nx * nx + ny * ny).sqrt();
@@ -151,16 +151,17 @@ impl Profile {
         Profile { points, normals, profile_type: ProfileType::Round }
     }
 
-    /// Create a flat-faced rectangular profile (for sheets) matching PyMOL's ExtrudeRectangle
+    /// Create a flat-faced rectangular profile (for sheets)
     ///
-    /// This creates a flat ribbon with 4 faces organized as face pairs for PyMOL-style
-    /// rendering. Each face has 2 vertices with the same normal.
+    /// Flat rectangular cross-section with per-face normals.
+    /// This creates a flat ribbon with 4 faces organized as face pairs.
+    /// Each face has 2 vertices with the same normal.
     ///
     /// Called as `flat_rectangle(sheet_height, sheet_width)`:
     /// - `thickness`: Half-extent in the normal direction (ribbon width, LARGE ~1.4)
     /// - `width`: Half-extent in the binormal direction (ribbon thickness, SMALL ~0.4)
     ///
-    /// This matches PyMOL's ExtrudeRectangle(width, length) where:
+    /// Parameter mapping:
     /// - length (cartoon_rect_length=1.4) → Z/normal direction → our first coord (thickness)
     /// - width (cartoon_rect_width=0.4) → Y/binormal direction → our second coord (width)
     ///
@@ -170,7 +171,7 @@ impl Profile {
     /// - Face 4-5: Side edge at -t normal (narrow edge of ribbon)
     /// - Face 6-7: Flat bottom surface at -w binormal (wide visible face)
     pub fn flat_rectangle(thickness: f32, width: f32) -> Self {
-        // PyMOL uses cos(π/4) scaling for the rectangular shape
+        // cos(π/4) scaling for the rectangular shape
         let cos45 = std::f32::consts::FRAC_1_SQRT_2;
         let t = cos45 * thickness;  // half-extent in normal dir (LARGE = ribbon width)
         let w = cos45 * width;      // half-extent in binormal dir (SMALL = ribbon thickness)
@@ -203,7 +204,9 @@ impl Profile {
         Profile { points, normals, profile_type: ProfileType::Flat4Face }
     }
 
-    /// Create a dumbbell profile (for fancy helices) matching PyMOL's ExtrudeDumbbell1
+    /// Create a dumbbell profile (for fancy helices)
+    ///
+    /// Dumbbell (flat ribbon) cross-section for fancy helix rendering.
     ///
     /// This creates a flat ribbon with top/bottom faces only (no side faces).
     /// Used when cartoon_fancy_helices is enabled.
@@ -216,7 +219,7 @@ impl Profile {
     /// - Second coord (BINORMAL direction): face position at ±w (ribbon thickness)
     /// - Face normals point in ±binormal direction (perpendicular to flat surfaces)
     ///
-    /// PyMOL renders dumbbells as:
+    /// Dumbbell rendering consists of:
     /// 1. A flat ribbon (this profile) - top and bottom faces only
     /// 2. Two separate edge tubes (handled by generate_dumbbell_edge_tubes)
     ///
@@ -228,7 +231,7 @@ impl Profile {
     /// IMPORTANT: Both faces must have vertices in the same order (left-to-right)
     /// for consistent triangle winding in generate_face_strips.
     pub fn dumbbell(width: f32, length: f32) -> Self {
-        // PyMOL's dumbbell uses cos(π/4) and sin(π/4) for positioning
+        // Dumbbell uses cos(π/4) and sin(π/4) for positioning
         let w = std::f32::consts::FRAC_1_SQRT_2 * width;
         let l = std::f32::consts::FRAC_1_SQRT_2 * length;
 
@@ -337,8 +340,8 @@ pub struct CartoonGeometrySettings {
 impl CartoonGeometrySettings {
     /// Set the arrow length based on spline subdivisions
     ///
-    /// The arrow head length matches PyMOL's sampling parameter.
-    /// PyMOL uses sampling (~subdivisions) as arrow head length.
+    /// The arrow head length is the cross-section subdivision count.
+    /// Uses sampling (~subdivisions) as arrow head length.
     /// arrow_length = arrow_residues * (subdivisions + 1)
     pub fn with_subdivisions(mut self, subdivisions: u32) -> Self {
         self.arrow_length = self.arrow_residues * (subdivisions as usize + 1);
@@ -400,7 +403,7 @@ pub fn generate_cartoon_mesh(
     } else {
         Vec::new()
     };
-    // Number of frames to taper at helix ends (PyMOL calls this "sampling")
+    // Number of frames to taper at helix ends (the "sampling" parameter)
     let helix_taper_frames = 8usize;
 
     for (i, frame_meta) in frames.iter().enumerate() {
@@ -716,7 +719,7 @@ fn is_at_arrow_tip(frame_idx: usize, sheet_termini: &[(usize, usize)]) -> bool {
 
 /// Calculate the taper factor for dumbbell profiles at helix ends
 ///
-/// PyMOL tapers the Z (normal) component of the dumbbell profile at helix ends
+/// Tapers the Z (normal) component of the dumbbell profile at helix ends
 /// using the smooth() easing function. This creates smooth end caps.
 ///
 /// # Arguments
@@ -811,7 +814,7 @@ fn apply_transition_blending(
     };
 
     // Skip blending for helix transitions (creates arrow-like flaring)
-    // PyMOL uses sharp transitions at helix boundaries
+    // Sharp transitions at secondary structure boundaries for helices
     let involves_helix = is_helix(before_ss) || is_helix(after_ss);
 
     if involves_helix {
@@ -819,7 +822,7 @@ fn apply_transition_blending(
     }
 
     // Skip blending for sheet transitions (flat_rectangle has different vertex count)
-    // This matches PyMOL's sharp-edge behavior for sheets
+    // Sharp-edge behavior for sheets (flat_rectangle has different vertex count)
     let involves_sheet = before_ss == SecondaryStructure::Sheet
         || after_ss == SecondaryStructure::Sheet;
 
@@ -926,7 +929,7 @@ pub fn connect_rings(indices: &mut Vec<u32>, ring1_start: u32, ring2_start: u32,
     }
 }
 
-/// Generate mesh using face-based strips (PyMOL-style)
+/// Generate mesh using face-based strips for flat profiles
 ///
 /// For flat profiles organized as face pairs, this generates separate triangle strips
 /// for each face without wrapping around. This is the correct approach for sheets
@@ -1439,8 +1442,8 @@ pub fn cap_tube_end(
             // Skip cap generation for dumbbell helices - tapering provides visual termination
             // The ribbon tapers to a line at helix ends, and edge tubes taper to center
             // This avoids the triangular artifacts that occurred with wedge caps
-            // PyMOL also doesn't render explicit caps here - the visual termination comes
-            // from the tapered geometry converging at the transition point
+            // No explicit caps needed - the visual termination comes from
+            // the tapered geometry converging at the transition point
         }
     }
 }
@@ -1460,13 +1463,12 @@ pub fn find_nucleic_ribbon_regions(frames: &[FrameWithMetadata]) -> Vec<(usize, 
     find_ss_regions(frames, |ss| ss == SecondaryStructure::NucleicRibbon)
 }
 
-/// Generate edge tube geometry for dumbbell helices (PyMOL-style)
+/// Generate edge tube geometry for dumbbell helices
 ///
-/// Creates two cylindrical tubes along the edges of dumbbell helices.
-/// The tubes are offset from the backbone by `±sin(π/4) * dumbbell_length`
-/// in the normal direction, with smooth tapering at helix ends.
-///
-/// Matches PyMOL's ExtrudeDumbbellEdge function behavior.
+/// Edge tube geometry with smooth tapering. Creates two cylindrical tubes
+/// along the edges of dumbbell helices. The tubes are offset from the backbone
+/// by `±sin(π/4) * dumbbell_length` in the normal direction, with smooth
+/// tapering at helix ends.
 ///
 /// # Arguments
 /// * `frames` - Reference frames along the backbone
@@ -1488,7 +1490,7 @@ pub fn generate_dumbbell_edge_tubes(
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
-    // PyMOL edge tube offset: sin(π/4) * dumbbell_length
+    // Edge tube offset: sin(π/4) * dumbbell_length
     // This positions the tubes at the lateral edges of the dumbbell ribbon
     let sin45 = std::f32::consts::FRAC_1_SQRT_2;
     let base_offset = sin45 * settings.dumbbell_length;
@@ -1500,7 +1502,7 @@ pub fn generate_dumbbell_edge_tubes(
     let tube_quality = 16u32;
     let tube_profile = Profile::circle(tube_radius, tube_quality);
 
-    // Number of frames to taper at helix ends (PyMOL's "sampling")
+    // Number of frames to taper at helix ends (the "sampling" parameter)
     let taper_frames = 8usize;
 
     for &(start, end) in helix_regions {
@@ -1516,7 +1518,7 @@ pub fn generate_dumbbell_edge_tubes(
                 let frame_meta = &frames[i];
                 let ring_start = vertices.len();
 
-                // Calculate tapered offset using PyMOL's smooth function
+                // Calculate tapered offset using the smooth easing function
                 // Edge tubes taper to 0 at helix ends, converging to center point
                 // This provides the visual transition while the main ribbon stays at full width
                 let frame_in_region = i - start;
@@ -1604,10 +1606,10 @@ pub fn generate_dumbbell_edge_tubes(
     (vertices, indices)
 }
 
-/// Add flat disc end cap to an edge tube (PyMOL cCylCap::Flat style)
+/// Add flat disc end cap to an edge tube
 ///
 /// Creates a simple flat circular cap using a triangle fan from center to edge vertices.
-/// This matches PyMOL's flat cap style for dumbbell edge tubes.
+/// Flat cap style for dumbbell edge tubes.
 fn cap_edge_tube_end(
     vertices: &mut Vec<MeshVertex>,
     indices: &mut Vec<u32>,

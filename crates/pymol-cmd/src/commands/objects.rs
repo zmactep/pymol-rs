@@ -1501,7 +1501,7 @@ impl Command for DssCommand {
 DESCRIPTION
 
     "dss" calculates secondary structure assignments using backbone
-    phi/psi dihedral angles, similar to PyMOL's DSS algorithm.
+    phi/psi dihedral angles, using the DSS algorithm.
 
     This overwrites any existing secondary structure assignments from
     the PDB/CIF file with computed values based on backbone geometry.

@@ -6,8 +6,8 @@
 //!
 //! # Architecture
 //!
-//! The settings system mirrors PyMOL's original design with 813 settings organized
-//! into a hierarchical inheritance model:
+//! The settings system has 813 settings organized into a hierarchical inheritance
+//! model (indices stable for PSE format compatibility):
 //!
 //! ```text
 //! global < object < object-state

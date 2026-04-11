@@ -1,7 +1,7 @@
 //! Scene snapshot management
 //!
 //! This module provides named scene snapshots for storing and recalling
-//! visualization states, similar to PyMOL's `scene` command.
+//! visualization states (named state snapshots).
 
 use ahash::AHashMap;
 use bitflags::bitflags;

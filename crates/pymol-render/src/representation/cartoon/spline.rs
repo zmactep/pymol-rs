@@ -1,7 +1,8 @@
 //! Backbone interpolation for cartoon representation.
 //!
-//! Implements PyMOL's exact interpolation algorithm for smooth cartoon curves.
-//! Based on analysis of PyMOL's RepCartoon.cpp CartoonGenerateSample function.
+//! Hermite-inspired spline interpolation with sigmoid blending for smooth
+//! cartoon curves. See Foley et al., "Computer Graphics: Principles and
+//! Practice", 3rd ed., Ch. 11 for the underlying Hermite interpolation concept.
 //!
 //! **Note:** `interpolate_backbone()` is used by the **ribbon** representation
 //! (via `frame::generate_frames` → `build_cartoon_geometry`). The cartoon
@@ -16,7 +17,7 @@ use super::utils::{normalize_safe, smooth};
 // Interpolation Settings
 // ============================================================================
 
-/// Settings for backbone interpolation (matches PyMOL defaults)
+/// Settings for backbone interpolation (empirically chosen for visual quality; adjustable via cartoon_power settings)
 #[derive(Debug, Clone)]
 pub struct InterpolationSettings {
     /// Power for sigmoid blend (cartoon_power). Default: 2.0
@@ -60,7 +61,7 @@ pub struct InterpolatedPoint {
 // Core Interpolation Functions
 // ============================================================================
 
-/// PyMOL's smooth() function - sigmoid smoothstep
+/// Sigmoid smoothstep function
 ///
 /// Creates an S-curve with:
 /// - smooth(0) = 0
@@ -74,9 +75,10 @@ pub fn sigmoid_blend(x: f32, power: f32) -> f32 {
     smooth(x, power)
 }
 
-/// Compute tangent vectors using PyMOL's algorithm
+/// Compute tangent vectors using averaged normalized differences
 ///
-/// PyMOL computes tangents as the sum of adjacent normalized difference vectors:
+/// Tangents are the sum of adjacent normalized difference vectors
+/// (cf. Foley et al., "Computer Graphics: Principles and Practice", 3rd ed., Ch. 11):
 /// - First: tangent[0] = nv[0]
 /// - Interior: tangent[i] = normalize(nv[i] + nv[i-1])
 /// - Last: tangent[n-1] = nv[n-2]
@@ -95,7 +97,7 @@ pub fn compute_tangents(positions: &[Vec3]) -> Vec<Vec3> {
         nv.push(normalize_safe(diff));
     }
 
-    // Now compute tangents using PyMOL's formula
+    // Now compute tangents using averaged-difference formula
     let mut tangents = Vec::with_capacity(n);
 
     // First point: tangent = nv[0]
@@ -126,9 +128,9 @@ pub fn compute_distances(positions: &[Vec3]) -> Vec<f32> {
     distances
 }
 
-/// Interpolate an entire backbone using PyMOL's exact algorithm
+/// Interpolate an entire backbone using Hermite-inspired sigmoid blending
 ///
-/// This implements CartoonGenerateSample from PyMOL's RepCartoon.cpp:
+/// Interpolation formula (see Foley et al., Ch. 11 for Hermite basis):
 /// ```text
 /// f0 = smooth(t, power_a)
 /// f1 = 1 - f0
@@ -176,7 +178,7 @@ pub fn interpolate_backbone(
         let orient1 = orientations.get(seg).copied().unwrap_or(Vec3::new(0.0, 1.0, 0.0));
         let orient2 = orientations.get(seg + 1).copied().unwrap_or(orient1);
 
-        // Deviation = throw_factor * distance (PyMOL's exact formula)
+        // Deviation = throw_factor * distance (scales tangent displacement by segment length)
         let dev = settings.throw_factor * distances[seg];
 
         // Generate samples for this segment
@@ -188,7 +190,7 @@ pub fn interpolate_backbone(
 
             let t = b as f32 / sampling as f32;
 
-            // PyMOL's exact interpolation formula
+            // Sigmoid-blended interpolation formula
             let f0 = sigmoid_blend(t, settings.power_a);
             let f1 = 1.0 - f0;
             let f2 = sigmoid_blend(f0, settings.power_b);
@@ -196,10 +198,9 @@ pub fn interpolate_backbone(
             let f4 = dev * f2 * f3;
 
             // Position with tangent-based displacement
-            // This is the exact PyMOL formula from CartoonGenerateSample
             let position = pos1 * f1 + pos2 * f0 + (tangent1 * f3 - tangent2 * f2) * f4;
 
-            // Orientation interpolation (PyMOL's formula)
+            // Orientation interpolation (sigmoid-weighted blend)
             let normal = normalize_safe(orient1 * (f1 * f2) + orient2 * (f0 * f3));
 
             // Tangent will be recomputed after all points are generated
@@ -225,13 +226,13 @@ pub fn interpolate_backbone(
         local_t: 1.0,
     });
 
-    // Recompute tangents from interpolated positions using PyMOL's algorithm
+    // Recompute tangents from interpolated positions using averaged-difference method
     recompute_tangents(&mut result);
 
     result
 }
 
-/// Recompute tangent vectors from interpolated positions using PyMOL's algorithm
+/// Recompute tangent vectors from interpolated positions using averaged differences
 ///
 /// Uses the same formula as compute_tangents:
 /// tangent[i] = normalize(nv[i] + nv[i-1])

@@ -885,7 +885,7 @@ fn is_macro_ahead(stream: &mut TokenStream) -> bool {
 
 /// Parse slash macro notation
 ///
-/// Supports two forms matching PyMOL's selection algebra:
+/// Supports two forms of slash macro notation:
 /// - Leading `/`: fields assigned left-to-right: `/object/segi/chain/resn_or_resi/name`
 /// - No leading `/`: fields assigned right-to-left: e.g. `A/100/CA` → chain/resi/name
 ///

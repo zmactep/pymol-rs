@@ -42,7 +42,7 @@ use pymol_mol::{CoordSet, ObjectMolecule};
 use pymol_settings::ResolvedSettings;
 
 use self::backbone::{
-    apply_pymol_smoothing, extract_backbone_segments, extract_nucleic_segments,
+    apply_backbone_smoothing, extract_backbone_segments, extract_nucleic_segments,
     smooth_orientations, CartoonSmoothSettings,
 };
 use self::frame::generate_frames;
@@ -87,7 +87,7 @@ pub fn build_cartoon_geometry(
             continue;
         }
 
-        apply_pymol_smoothing(segment, smooth_settings);
+        apply_backbone_smoothing(segment, smooth_settings);
         smooth_orientations(segment, smooth_settings.smooth_cycles);
 
         let frame_smooth_cycles = smooth_settings.smooth_cycles.max(4);
@@ -220,12 +220,12 @@ impl Representation for CartoonRep {
             CartoonGeometrySettings::default().with_subdivisions(subdivisions);
 
         // Resolve object-level cartoon color defaults from settings
-        // PyMOL priority: nucleic_acid_color == -1 means "use cartoon_color"
+        // Priority: nucleic_acid_color == -1 means "use cartoon_color"
         let cartoon_color = settings.cartoon.color;
         let nucleic_acid_color = settings.cartoon.nucleic_acid_color;
         let effective_nucleic_color = if nucleic_acid_color < 0 { cartoon_color } else { nucleic_acid_color };
 
-        // Use the new PyMOL-compatible pipeline
+        // Use the cartoon pipeline
         let mut segments =
             extract_backbone_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON, cartoon_color);
         let nucleic = extract_nucleic_segments(molecule, coord_set, colors, gap_cutoff, pymol_mol::RepMask::CARTOON, effective_nucleic_color);

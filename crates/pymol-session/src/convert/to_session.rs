@@ -21,13 +21,13 @@ use crate::pse::{
 use crate::SessionError;
 
 // =============================================================================
-// PyMOL → pymol-rs color index remapping
+// PSE → pymol-rs color index remapping
 // =============================================================================
 
-/// Caches the mapping from PyMOL color indices to our NamedColors indices.
+/// Caches the mapping from PSE color indices to our NamedColors indices.
 struct PseColorMapper {
     cache: AHashMap<i64, i32>,
-    /// Session-defined custom colors (from the PSE "colors" list), keyed by PyMOL index.
+    /// Session-defined custom colors (from the PSE "colors" list), keyed by PSE index.
     session_colors: AHashMap<i64, [f32; 3]>,
 }
 
@@ -43,11 +43,11 @@ impl PseColorMapper {
         }
     }
 
-    /// Map a PyMOL color index to our color index.
+    /// Map a PSE color index to our color index.
     ///
     /// Negative values have special meaning (-1=ByElement, etc.) and pass through.
     /// Positive values are looked up first in session-defined colors, then in the
-    /// built-in PyMOL color table, registered in `NamedColors` if needed,
+    /// built-in PSE color table, registered in `NamedColors` if needed,
     /// and the resulting local index is returned.
     fn map(&mut self, pymol_index: i64, named_colors: &mut NamedColors) -> i32 {
         if pymol_index < 0 {
@@ -64,7 +64,7 @@ impl PseColorMapper {
             let color_name = format!("_pse_{}", pymol_index);
             named_colors.register(&color_name, Color::new(r, g, b)) as i32
         } else {
-            // Unknown PyMOL index — fall back to element coloring
+            // Unknown PSE index — fall back to element coloring
             -1
         };
         self.cache.insert(pymol_index, local);
@@ -183,7 +183,7 @@ fn convert_setting_value(
 
 /// Convert PSE 25-float view to [`SceneView`].
 ///
-/// PSE layout (from PyMOL's `SceneView` struct):
+/// PSE layout (25-float view state):
 /// - `[0..16]`  4×4 rotation matrix (column-major, matching GLM/Mat4 convention)
 /// - `[16..19]` camera position
 /// - `[19..22]` rotation origin
@@ -191,7 +191,7 @@ fn convert_setting_value(
 /// - `[23]`     back clip
 /// - `[24]`     FOV (negative = orthographic)
 fn convert_view(view: &[f64; 25]) -> SceneView {
-    // PyMOL stores the 4x4 rotation in column-major order — same as our Mat4.data
+    // PSE stores the 4x4 rotation in column-major order — same as our Mat4.data
     let mut rotation = Mat4::new_identity();
     for (i, &v) in view.iter().enumerate().take(16) {
         rotation.data[i] = v as f32;
@@ -201,7 +201,7 @@ fn convert_view(view: &[f64; 25]) -> SceneView {
 
     SceneView {
         rotation,
-        // PyMOL uses negative z for "camera in front of origin", pymol-rs uses positive z.
+        // PSE uses negative z for "camera in front of origin", pymol-rs uses positive z.
         // Negate to convert between conventions.
         position: Vec3::new(-(view[16] as f32), -(view[17] as f32), -(view[18] as f32)),
         origin: Vec3::new(view[19] as f32, view[20] as f32, view[21] as f32),
@@ -431,9 +431,9 @@ fn convert_selection(
 // TTT helpers
 // =============================================================================
 
-/// Convert a PyMOL TTT (16-float) matrix to a column-major [`Mat4`].
+/// Convert a PSE TTT (16-float) matrix to a column-major [`Mat4`].
 ///
-/// PyMOL TTT format: `y = R * (x + pre_trans) + post_trans`
+/// TTT format: `y = R * (x + pre_trans) + post_trans`
 ///   - `[0..3, 4..7, 8..11]` = 3×3 rotation (row-major) with post-translation in column 3
 ///   - `[12..15]` = pre-translation (applied before rotation)
 ///
@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn test_session_custom_color_mapping() {
         let mut pse = minimal_pse();
-        // Register a custom session color at PyMOL index 9999
+        // Register a custom session color at PSE index 9999
         pse.colors.push(PseColor { name: "custom_blue".into(), index: 9999, rgb: [0.0, 0.0, 1.0] });
         // Create a molecule with an atom using that custom color index
         pse.names.push(Some(PseNameEntry::Object(Box::new(PseObject {

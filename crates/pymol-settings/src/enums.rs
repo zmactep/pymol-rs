@@ -165,7 +165,7 @@ impl_setting_enum! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 #[repr(i32)]
 pub enum DssAlgorithm {
-    /// PyMOL's DSS algorithm (H-bonds + phi/psi dihedral angles)
+    /// PyMOL-derived DSS algorithm (H-bonds + phi/psi dihedral angles)
     #[default]
     PyMol = 0,
     /// DSSP algorithm (Kabsch & Sander)

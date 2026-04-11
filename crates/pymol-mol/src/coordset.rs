@@ -518,7 +518,7 @@ impl CoordSet {
         }
     }
 
-    /// Apply a PyMOL-style TTT (Translate-Transform-Translate) matrix
+    /// Apply a TTT (Translate-Transform-Translate) matrix
     ///
     /// TTT format is a 16-element array where:
     /// - [0-2, 4-6, 8-10]: 3x3 rotation matrix (row-major)
@@ -533,7 +533,7 @@ impl CoordSet {
         }
     }
 
-    /// Apply a PyMOL-style TTT matrix to specific atoms
+    /// Apply a TTT matrix to specific atoms
     pub fn transform_ttt_atoms(&mut self, atoms: &[AtomIndex], ttt: &[f32; 16]) {
         for &atom in atoms {
             if let Some(coord_idx) = self.atom_to_coord(atom) {
@@ -694,7 +694,7 @@ pub fn translation_matrix(delta: Vec3) -> Mat4 {
     result
 }
 
-/// Convert a PyMOL TTT matrix to a standard 4x4 homogeneous matrix (column-major)
+/// Convert a TTT matrix to a standard 4x4 homogeneous matrix (column-major)
 ///
 /// TTT format: pre-translate, rotate, post-translate
 /// Standard: just rotation + translation
@@ -733,7 +733,7 @@ pub fn ttt_to_mat4(ttt: &[f32; 16]) -> Mat4 {
     ])
 }
 
-/// Convert a standard 4x4 column-major matrix to PyMOL TTT format (with zero pre-translation)
+/// Convert a standard 4x4 column-major matrix to TTT format (with zero pre-translation)
 pub fn mat4_to_ttt(matrix: &Mat4) -> [f32; 16] {
     let d = &matrix.data;
     // Column-major: M[row][col] = d[col*4 + row]
@@ -748,7 +748,7 @@ pub fn mat4_to_ttt(matrix: &Mat4) -> [f32; 16] {
 
 /// Build a TTT matrix for rotation about an axis through an origin
 ///
-/// This matches PyMOL's format where:
+/// TTT format layout:
 /// - The rotation matrix is in positions [0-2, 4-6, 8-10]
 /// - The origin goes in positions [3, 7, 11] (post-translation)
 /// - The negative origin goes in positions [12, 13, 14] (pre-translation)

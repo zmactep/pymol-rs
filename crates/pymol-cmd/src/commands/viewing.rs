@@ -444,7 +444,7 @@ EXAMPLES
         cz /= n;
 
         // 3. Build moment of inertia tensor (3×3 symmetric matrix)
-        //    Following PyMOL's approach:
+        //    Moment of inertia tensor:
         //    d[i][i] = Σ(|r|² - r_i²)
         //    d[i][j] = -Σ(r_i * r_j)   for i ≠ j
         let mut inertia = [[0.0f32; 3]; 3];
@@ -737,11 +737,11 @@ EXAMPLES
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, _args: &ParsedCommand) -> CmdResult {
         let view = ctx.viewer.camera().current_view();
 
-        // Format view as PyMOL-style output
+        // Format view as set_view output (compatible with PyMOL)
         let mut output = String::from("### cut below here and paste into PyMOL ###\n");
         output.push_str("set_view (\\\n");
 
-        // Rotation matrix (4x4, but we output 3x3 part for PyMOL compatibility)
+        // Rotation matrix (4x4, but we output 3x3 part for cross-compatibility)
         let r = &view.rotation;
         output.push_str(&format!(
             "  {:12.6}, {:12.6}, {:12.6},\\\n",
@@ -848,7 +848,7 @@ EXAMPLES
         let view = ctx.viewer.camera_mut().view_mut();
 
         // Set rotation matrix (3x3 -> 4x4)
-        // PyMOL uses row-major 3x3, we use column-major 4x4
+        // PSE format uses row-major 3x3, we use column-major 4x4
         let mut rotation_data = [[0.0f32; 4]; 4];
         rotation_data[0] = [values[0], values[1], values[2], 0.0];
         rotation_data[1] = [values[3], values[4], values[5], 0.0];

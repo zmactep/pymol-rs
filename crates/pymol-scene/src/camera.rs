@@ -1,7 +1,7 @@
 //! Camera and view management
 //!
 //! This module provides the camera system for PyMOL-RS, including:
-//! - [`SceneView`]: PyMOL-compatible 25-value view state
+//! - [`SceneView`]: 25-value view state (PSE format compatible)
 //! - [`Camera`]: Interactive camera controller
 //! - [`CameraAnimation`]: Smooth transitions between views
 
@@ -19,9 +19,9 @@ pub enum Projection {
     Orthographic,
 }
 
-/// View state compatible with PyMOL's 25-value SceneViewType
+/// 25-value view state (PSE format compatible)
 ///
-/// PyMOL stores the view as a flat array of 25 floats:
+/// Stored as a flat array of 25 floats:
 /// - [0..16]: 4x4 rotation matrix (column-major)
 /// - `[16..19]`: Position (camera position relative to origin)
 /// - `[19..22]`: Origin (center of rotation in model space)
@@ -55,7 +55,7 @@ impl Default for SceneView {
             origin: Vec3::new(0.0, 0.0, 0.0),
             clip_front: 0.1,
             clip_back: 1000.0,
-            fov: 14.0, // PyMOL default FOV
+            fov: 14.0, // default FOV
         }
     }
 }
@@ -66,7 +66,7 @@ impl SceneView {
         Self::default()
     }
 
-    /// Convert to PyMOL-compatible 25-float array
+    /// Convert to PSE-compatible 25-float array
     pub fn to_pymol_array(&self) -> [f32; 25] {
         let mut arr = [0.0f32; 25];
 
@@ -91,7 +91,7 @@ impl SceneView {
         arr
     }
 
-    /// Create from PyMOL 25-float array
+    /// Create from PSE 25-float array
     pub fn from_pymol_array(arr: &[f32; 25]) -> Self {
         // Convert flat [f32; 16] to [[f32; 4]; 4] (column-major)
         let rotation_data: [[f32; 4]; 4] = [
@@ -406,7 +406,7 @@ impl Camera {
 
     /// Compute world-space units per pixel at the origin depth.
     ///
-    /// Matches PyMOL's `SceneGetScreenVertexScale`: depth * 2*tan(fov/2) / viewport_height.
+    /// Standard perspective projection: depth * 2*tan(fov/2) / viewport_height.
     pub fn screen_vertex_scale(&self, viewport_height: f32) -> f32 {
         let depth = self.view.position.z;
         let fov_rad = self.view.fov.to_radians();

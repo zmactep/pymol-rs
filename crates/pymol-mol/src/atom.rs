@@ -1,6 +1,6 @@
 //! Atom data structure
 //!
-//! Provides the `Atom` struct containing all atom properties from PyMOL's AtomInfoType.
+//! Provides the `Atom` struct containing all atom properties (PDB/mmCIF specification).
 //!
 //! The atom data is organized into logical components:
 //! - [`AtomResidue`] - Shared residue information (chain, resn, resv, etc.)
@@ -27,24 +27,22 @@ impl RepMask {
     /// All representations visible
     pub const ALL: RepMask = RepMask(u32::MAX);
 
-    // Representation bit positions matching PyMOL's C enum order:
-    // cRepCyl=0, cRepSphere=1, cRepSurface=2, cRepLabel=3,
-    // cRepNonbondedSphere=4, cRepCartoon=5, cRepRibbon=6, cRepLine=7
-    /// Sticks (cylinders) representation — PyMOL cRepCyl
+    // Representation bit positions (stable for PSE session format compatibility)
+    /// Sticks (cylinders) representation
     pub const STICKS: RepMask = RepMask(1 << 0);
-    /// Spheres representation — PyMOL cRepSphere
+    /// Spheres representation
     pub const SPHERES: RepMask = RepMask(1 << 1);
-    /// Surface representation — PyMOL cRepSurface
+    /// Surface representation
     pub const SURFACE: RepMask = RepMask(1 << 2);
-    /// Labels representation — PyMOL cRepLabel
+    /// Labels representation
     pub const LABELS: RepMask = RepMask(1 << 3);
-    /// Non-bonded spheres representation — PyMOL cRepNonbondedSphere
+    /// Non-bonded spheres representation
     pub const NONBONDED: RepMask = RepMask(1 << 4);
-    /// Cartoon representation — PyMOL cRepCartoon
+    /// Cartoon representation
     pub const CARTOON: RepMask = RepMask(1 << 5);
-    /// Ribbon representation — PyMOL cRepRibbon
+    /// Ribbon representation
     pub const RIBBON: RepMask = RepMask(1 << 6);
-    /// Lines representation — PyMOL cRepLine
+    /// Lines representation
     pub const LINES: RepMask = RepMask(1 << 7);
     /// Mesh representation
     pub const MESH: RepMask = RepMask(1 << 8);
