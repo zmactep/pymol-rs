@@ -79,6 +79,10 @@ impl Command for ReinitializeCommand {
         &["reinit"]
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["everything", "settings", "objects"])]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -181,6 +185,10 @@ struct RebuildCommand;
 impl Command for RebuildCommand {
     fn name(&self) -> &str {
         "rebuild"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {

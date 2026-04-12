@@ -1,7 +1,7 @@
 //! Scene commands: scene (store/recall/delete/list/rename/clear)
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::error::{CmdError, CmdResult};
 
 /// Register scene commands
@@ -68,6 +68,10 @@ SEE ALSO
 
     get_view, set_view, rock, mplay
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Keywords(&["store", "recall", "delete", "clear", "list", "rename"])]
     }
 
     fn execute<'v, 'r>(

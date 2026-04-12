@@ -414,6 +414,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let selection = args.str_arg(0, "selection");
 

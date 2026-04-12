@@ -528,6 +528,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["near", "far", "move", "slab"]), ArgHint::None]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let mode = args.str_arg(0, "mode")
             .ok_or_else(|| CmdError::MissingArgument("mode".to_string()))?;
@@ -795,6 +799,10 @@ SEE ALSO
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["x", "y", "z"]), ArgHint::None]
+    }
+
     fn execute<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
@@ -873,6 +881,10 @@ SEE ALSO
 
     move, rotate, translate, zoom, center, clip
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["x", "y", "z"]), ArgHint::None]
     }
 
     fn execute<'v, 'r>(
@@ -954,6 +966,10 @@ SEE ALSO
 
     zoom, orient, center, reset
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn execute<'v, 'r>(
@@ -1155,6 +1171,10 @@ SEE ALSO
 
     scene, get_view, set_view
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Keywords(&["store", "recall", "clear"])]
     }
 
     fn execute<'v, 'r>(
@@ -1397,6 +1417,10 @@ SEE ALSO
 
     viewport
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["on", "off", "toggle"])]
     }
 
     fn execute<'v, 'r>(

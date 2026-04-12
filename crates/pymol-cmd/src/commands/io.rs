@@ -978,6 +978,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Object, ArgHint::Keywords(&["pdb", "cif", "mmcif", "bcif"])]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let code = args
             .str_arg(0, "code")

@@ -680,6 +680,10 @@ SEE ALSO
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["on", "off"])]
+    }
+
     fn execute<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
@@ -762,6 +766,10 @@ SEE ALSO
 
     mset, mplay, mpng, scene
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["store", "recall", "clear", "interpolate", "reinterpolate"])]
     }
 
     fn execute<'v, 'r>(
@@ -1004,6 +1012,10 @@ SEE ALSO
 
     mset, mview, mplay
 "#
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Path]
     }
 
     fn execute<'v, 'r>(

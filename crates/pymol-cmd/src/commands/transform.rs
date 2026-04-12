@@ -14,7 +14,7 @@ use pymol_mol::{rotation_ttt, ttt_to_mat4, AtomIndex};
 use pymol_scene::{DirtyFlags, Object};
 
 use crate::args::ParsedCommand;
-use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::helpers::{camera_to_model_vec, state_index_from_user};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
@@ -35,6 +35,10 @@ struct TranslateCommand;
 impl Command for TranslateCommand {
     fn name(&self) -> &str {
         "translate"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
@@ -158,6 +162,10 @@ impl Command for RotateCommand {
         "rotate"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Keywords(&["x", "y", "z"]), ArgHint::None, ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -268,6 +276,10 @@ struct TransformSelectionCommand;
 impl Command for TransformSelectionCommand {
     fn name(&self) -> &str {
         "transform_selection"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {

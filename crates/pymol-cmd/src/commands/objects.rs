@@ -215,6 +215,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Object, ArgHint::None]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let old_name = args.str_arg(0, "old_name")
             .ok_or_else(|| CmdError::MissingArgument("old_name".to_string()))?;
@@ -522,6 +526,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Object, ArgHint::None, ArgHint::Keywords(&["add", "remove", "open", "close", "toggle", "auto", "ungroup", "empty", "purge", "excise"])]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
@@ -703,6 +711,10 @@ EXAMPLES
 "#
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Object]
+    }
+
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
@@ -737,6 +749,10 @@ struct StateCommand;
 impl Command for StateCommand {
     fn name(&self) -> &str {
         "state"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::None, ArgHint::Object]
     }
 
     fn help(&self) -> &str {
@@ -1385,6 +1401,10 @@ struct DssCommand;
 impl Command for DssCommand {
     fn name(&self) -> &str {
         "dss"
+    }
+
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection]
     }
 
     fn help(&self) -> &str {
