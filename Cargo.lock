@@ -1909,7 +1909,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello-plugin"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "pymol-plugin",
 ]
@@ -2172,7 +2172,7 @@ dependencies = [
 
 [[package]]
 name = "ipc-plugin"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "log",
  "pymol-plugin",
@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-algos"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "bitflags 2.10.0",
  "lin_alg",
@@ -3524,7 +3524,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-bench"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "criterion",
  "flate2",
@@ -3541,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-cmd"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "image",
@@ -3563,7 +3563,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-color"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "serde",
@@ -3572,7 +3572,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-framework"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "dirs 5.0.1",
  "egui",
@@ -3589,7 +3589,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-gui"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "clap",
  "dirs 5.0.1",
@@ -3625,7 +3625,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-io"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "byteorder",
  "flate2",
@@ -3643,7 +3643,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-mol"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "bitflags 2.10.0",
@@ -3659,7 +3659,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-plugin"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "log",
  "pymol-cmd",
@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-render"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "bytemuck",
  "env_logger",
@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-scene"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "bitflags 2.10.0",
@@ -3717,7 +3717,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-select"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "bitvec",
@@ -3730,7 +3730,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-session"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "flate2",
@@ -3747,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-settings"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "ahash",
  "serde",
@@ -3817,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "python-plugin"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "egui",
  "log",
@@ -4005,7 +4005,7 @@ dependencies = [
 
 [[package]]
 name = "raytracer-plugin"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "bytemuck",
  "egui",
@@ -5085,7 +5085,7 @@ dependencies = [
 
 [[package]]
 name = "toolbar-plugin"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "egui",
  "image",
