@@ -57,7 +57,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let _code = args.get_int(0).or_else(|| args.get_named_int("code")).unwrap_or(0);
+        let _code = args.int_arg_or(0, "code", 0);
 
         ctx.quit();
         Ok(())
@@ -103,10 +103,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let what = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("what"))
-            .unwrap_or("everything");
+        let what = args.str_arg_or(0, "what", "everything");
 
         match what.to_lowercase().as_str() {
             "everything" | "all" => {
@@ -208,10 +205,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(0, "selection", "all");
 
         // Get objects to rebuild
         let object_names: Vec<String> = if selection == "all" || selection == "*" {
@@ -280,7 +274,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let command = args.get_str(0).or_else(|| args.get_named_str("command"));
+        let command = args.str_arg(0, "command");
 
         if let Some(cmd_name) = command {
             // Show help for specific command
@@ -357,8 +351,7 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let filename = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("filename"))
+            .str_arg(0, "filename")
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
         let path = expand_path(filename);

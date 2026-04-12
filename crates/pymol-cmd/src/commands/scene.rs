@@ -75,37 +75,16 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let key = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("key"))
-            .unwrap_or("");
+        let key = args.str_arg_or(0, "key", "");
 
-        let action = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("action"))
-            .unwrap_or("recall");
+        let action = args.str_arg_or(1, "action", "recall");
 
         // Get optional parameters
-        let _view = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("view"))
-            .unwrap_or(1);
-        let _color = args
-            .get_int(4)
-            .or_else(|| args.get_named_int("color"))
-            .unwrap_or(1);
-        let _rep = args
-            .get_int(5)
-            .or_else(|| args.get_named_int("rep"))
-            .unwrap_or(1);
-        let _frame = args
-            .get_int(6)
-            .or_else(|| args.get_named_int("frame"))
-            .unwrap_or(1);
-        let animate = args
-            .get_float(7)
-            .or_else(|| args.get_named_float("animate"))
-            .unwrap_or(0.5) as f32;
+        let _view = args.int_arg_or(3, "view", 1);
+        let _color = args.int_arg_or(4, "color", 1);
+        let _rep = args.int_arg_or(5, "rep", 1);
+        let _frame = args.int_arg_or(6, "frame", 1);
+        let animate = args.float_arg_or(7, "animate", 0.5) as f32;
 
         // Build storemask from flags (0x3F = ALL)
         // VIEW=0x01, ACTIVE=0x02, COLOR=0x04, REP=0x08, FRAME=0x10
@@ -176,8 +155,7 @@ SEE ALSO
                     return Err(CmdError::MissingArgument("key".to_string()));
                 }
                 let new_key = args
-                    .get_str(2)
-                    .or_else(|| args.get_named_str("new_key"))
+                    .str_arg(2, "new_key")
                     .ok_or_else(|| CmdError::MissingArgument("new_key".to_string()))?;
 
                 ctx.viewer

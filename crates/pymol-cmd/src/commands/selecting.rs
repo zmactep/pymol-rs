@@ -265,13 +265,11 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+            .str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
+            .str_arg(1, "selection")
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
 
         // If the expression references its own name (e.g., `select sele, sele or resi 24`),
@@ -347,9 +345,7 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // Get optional selection name
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"));
+        let name = args.str_arg(0, "selection");
 
         if let Some(name) = name {
             // Remove specific selection
@@ -419,9 +415,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"));
+        let selection = args.str_arg(0, "selection");
 
         match selection {
             Some("none") | Some("") => {

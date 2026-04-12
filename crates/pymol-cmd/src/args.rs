@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+use lin_alg::f32::Vec3;
+
 /// A command argument value
 ///
 /// Arguments can be strings, numbers, booleans, lists, or None (for omitted optional args).
@@ -112,6 +114,33 @@ impl ArgValue {
                 "false" | "off" | "no" | "0" => Some(false),
                 _ => None,
             },
+            _ => None,
+        }
+    }
+
+    /// Try to interpret this value as a 3D vector.
+    ///
+    /// Handles `List([x, y, z])` and `String("[x, y, z]")` formats.
+    pub fn as_vec3(&self) -> Option<Vec3> {
+        match self {
+            ArgValue::List(items) if items.len() >= 3 => {
+                let x = items[0].as_float()? as f32;
+                let y = items[1].as_float()? as f32;
+                let z = items[2].as_float()? as f32;
+                Some(Vec3::new(x, y, z))
+            }
+            ArgValue::String(s) => {
+                let s = s.trim().trim_matches(|c| c == '[' || c == ']');
+                let parts: Vec<&str> = s.split(',').collect();
+                if parts.len() >= 3 {
+                    let x = parts[0].trim().parse::<f32>().ok()?;
+                    let y = parts[1].trim().parse::<f32>().ok()?;
+                    let z = parts[2].trim().parse::<f32>().ok()?;
+                    Some(Vec3::new(x, y, z))
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -303,6 +332,71 @@ impl ParsedCommand {
     /// Get named argument as bool, with default
     pub fn get_named_bool_or(&self, name: &str, default: bool) -> bool {
         self.get_named_bool(name).unwrap_or(default)
+    }
+
+    // ========================================================================
+    // Unified positional-or-named accessors
+    // ========================================================================
+    //
+    // These try the positional argument first, then fall back to the named
+    // argument. They cover the most common command argument pattern:
+    //
+    //   let sel = args.str_arg_or(1, "selection", "all");
+    //
+
+    /// Get a positional-or-named argument as a raw `ArgValue` reference.
+    pub fn arg(&self, pos: usize, name: &str) -> Option<&ArgValue> {
+        self.get_arg(pos).or_else(|| self.get_named(name))
+    }
+
+    /// Get a positional-or-named argument as `&str`.
+    pub fn str_arg(&self, pos: usize, name: &str) -> Option<&str> {
+        self.get_str(pos).or_else(|| self.get_named_str(name))
+    }
+
+    /// Get a positional-or-named argument as `&str`, with a default.
+    pub fn str_arg_or<'a>(&'a self, pos: usize, name: &str, default: &'a str) -> &'a str {
+        self.str_arg(pos, name).unwrap_or(default)
+    }
+
+    /// Get a positional-or-named argument as `i64`.
+    pub fn int_arg(&self, pos: usize, name: &str) -> Option<i64> {
+        self.get_int(pos).or_else(|| self.get_named_int(name))
+    }
+
+    /// Get a positional-or-named argument as `i64`, with a default.
+    pub fn int_arg_or(&self, pos: usize, name: &str, default: i64) -> i64 {
+        self.int_arg(pos, name).unwrap_or(default)
+    }
+
+    /// Get a positional-or-named argument as `f64`.
+    pub fn float_arg(&self, pos: usize, name: &str) -> Option<f64> {
+        self.get_float(pos).or_else(|| self.get_named_float(name))
+    }
+
+    /// Get a positional-or-named argument as `f64`, with a default.
+    pub fn float_arg_or(&self, pos: usize, name: &str, default: f64) -> f64 {
+        self.float_arg(pos, name).unwrap_or(default)
+    }
+
+    /// Get a positional-or-named argument as `bool`.
+    pub fn bool_arg(&self, pos: usize, name: &str) -> Option<bool> {
+        self.get_bool(pos).or_else(|| self.get_named_bool(name))
+    }
+
+    /// Get a positional-or-named argument as `bool`, with a default.
+    pub fn bool_arg_or(&self, pos: usize, name: &str, default: bool) -> bool {
+        self.bool_arg(pos, name).unwrap_or(default)
+    }
+
+    /// Get a positional-or-named argument as a `Vec3`.
+    ///
+    /// Tries the positional argument first, then falls back to the named
+    /// argument. Delegates to [`ArgValue::as_vec3`].
+    pub fn vec3_arg(&self, pos: usize, name: &str) -> Option<Vec3> {
+        self.get_arg(pos)
+            .and_then(|v| v.as_vec3())
+            .or_else(|| self.get_named(name).and_then(|v| v.as_vec3()))
     }
 }
 

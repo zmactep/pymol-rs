@@ -15,6 +15,7 @@ use pymol_mol::{residue_to_char, AtomIndex};
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::helpers::{all_molecule_selections, single_molecule_selection};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
@@ -98,21 +99,14 @@ EXAMPLES
             .get_str(1)
             .ok_or_else(|| CmdError::MissingArgument("target selection".into()))?;
 
-        let cycles = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("cycles"))
-            .unwrap_or(5) as u32;
+        let cycles = args.int_arg_or(2, "cycles", 5) as u32;
 
         let cutoff = args
-            .get_float(3)
-            .or_else(|| args.get_named_float("cutoff"))
+            .float_arg(3, "cutoff")
             .map(|f| f as f32)
             .unwrap_or(2.0);
 
-        let method = args
-            .get_str(4)
-            .or_else(|| args.get_named_str("method"))
-            .unwrap_or("kabsch");
+        let method = args.str_arg_or(4, "method", "kabsch");
 
         let params = SuperposeParams { cycles, cutoff };
 
@@ -529,68 +523,6 @@ fn align_by_ce(
 // ============================================================================
 // Helper functions
 // ============================================================================
-
-/// Get a single molecule object and its selected atom indices from selection results.
-///
-/// Returns an error if the selection matches atoms in more than one object
-/// (used for the `target` argument of align, which must be a single molecule).
-fn single_molecule_selection(
-    results: &[(String, pymol_select::SelectionResult)],
-    sel_name: &str,
-) -> CmdResult<(String, Vec<AtomIndex>)> {
-    let non_empty: Vec<(&String, Vec<AtomIndex>)> = results
-        .iter()
-        .filter_map(|(obj_name, sel_result)| {
-            let indices: Vec<AtomIndex> = sel_result.indices().collect();
-            if indices.is_empty() {
-                None
-            } else {
-                Some((obj_name, indices))
-            }
-        })
-        .collect();
-
-    match non_empty.len() {
-        0 => Err(CmdError::Selection(format!(
-            "No atoms matching '{}'",
-            sel_name
-        ))),
-        1 => Ok((non_empty[0].0.clone(), non_empty[0].1.clone())),
-        n => Err(CmdError::invalid_arg(
-            "target",
-            &format!(
-                "target must select atoms from a single object, but '{}' matches {} objects",
-                sel_name, n
-            ),
-        )),
-    }
-}
-
-/// Get all molecule objects and their selected atom indices from selection results.
-fn all_molecule_selections(
-    results: &[(String, pymol_select::SelectionResult)],
-    sel_name: &str,
-) -> CmdResult<Vec<(String, Vec<AtomIndex>)>> {
-    let selections: Vec<(String, Vec<AtomIndex>)> = results
-        .iter()
-        .filter_map(|(obj_name, sel_result)| {
-            let indices: Vec<AtomIndex> = sel_result.indices().collect();
-            if indices.is_empty() {
-                None
-            } else {
-                Some((obj_name.clone(), indices))
-            }
-        })
-        .collect();
-
-    if selections.is_empty() {
-        return Err(CmdError::Selection(format!(
-            "No atoms matching '{}'",
-            sel_name
-        )));
-    }
-    Ok(selections)
-}
 
 /// Extract coordinates for selected atoms from a molecule object.
 fn extract_coords(

@@ -9,52 +9,11 @@ use pymol_scene::Object; // For extent() method on MoleculeObject
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::helpers::{
+    collect_selection_coords, selection_extent, ResolvedNames, resolve_object_names,
+};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
-
-// ============================================================================
-// Shared helpers for selection-based viewing commands
-// ============================================================================
-
-/// Compute the bounding box (min, max) of atoms matching a selection expression.
-///
-/// Returns `None` if no atoms match or all atoms lack coordinates.
-fn selection_extent(
-    viewer: &dyn ViewerLike,
-    selection: &str,
-) -> CmdResult<Option<(Vec3, Vec3)>> {
-    let selection_results = evaluate_selection(viewer, selection)?;
-
-    let mut min = Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-    let mut max = Vec3::new(f32::MIN, f32::MIN, f32::MIN);
-    let mut has_coords = false;
-
-    for (obj_name, selected) in &selection_results {
-        if selected.count() > 0 {
-            if let Some(mol_obj) = viewer.objects().get_molecule(obj_name) {
-                let mol = mol_obj.molecule();
-                let state = mol.current_state;
-                for idx in selected.indices() {
-                    if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
-                        min.x = min.x.min(coord.x);
-                        min.y = min.y.min(coord.y);
-                        min.z = min.z.min(coord.z);
-                        max.x = max.x.max(coord.x);
-                        max.y = max.y.max(coord.y);
-                        max.z = max.z.max(coord.z);
-                        has_coords = true;
-                    }
-                }
-            }
-        }
-    }
-
-    if has_coords {
-        Ok(Some((min, max)))
-    } else {
-        Ok(None)
-    }
-}
 
 /// Compute the center and max radius of atoms matching a selection expression.
 ///
@@ -98,31 +57,6 @@ fn selection_max_radius(
     }
 
     Ok(Some((center, max_dist_sq.sqrt())))
-}
-
-/// Collect all 3D coordinates of atoms matching a selection expression.
-fn collect_selection_coords(
-    viewer: &dyn ViewerLike,
-    selection: &str,
-) -> CmdResult<Vec<Vec3>> {
-    let selection_results = evaluate_selection(viewer, selection)?;
-    let mut coords = Vec::new();
-
-    for (obj_name, selected) in &selection_results {
-        if selected.count() > 0 {
-            if let Some(mol_obj) = viewer.objects().get_molecule(obj_name) {
-                let mol = mol_obj.molecule();
-                let state = mol.current_state;
-                for idx in selected.indices() {
-                    if let Some(coord) = mol.get_coord(AtomIndex(idx.0), state) {
-                        coords.push(coord);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(coords)
 }
 
 /// Apply an axis-angle rotation to the camera's rotation matrix.
@@ -195,62 +129,28 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(0, "selection", "all");
+        let buffer = args.float_arg_or(1, "buffer", 0.0) as f32;
+        let _state = args.int_arg_or(2, "state", 0);
+        let complete = args.int_arg_or(3, "complete", 0) != 0;
+        let _animate = args.float_arg_or(4, "animate", 0.0);
 
-        let buffer = args
-            .get_float(1)
-            .or_else(|| args.get_named_float("buffer"))
-            .unwrap_or(0.0) as f32;
-
-        let _state = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(0);
-
-        let complete = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("complete"))
-            .unwrap_or(0)
-            != 0;
-
-        let _animate = args
-            .get_float(4)
-            .or_else(|| args.get_named_float("animate"))
-            .unwrap_or(0.0);
-
-        // For "all", zoom to all objects (preserves rotation)
-        if selection == "all" || selection == "*" {
-            ctx.viewer.zoom_all(buffer);
-            if !ctx.quiet {
-                ctx.print(" Zoomed to all objects");
-            }
-            return Ok(());
-        }
-
-        // Try to zoom to a specific object by name
-        if ctx.viewer.objects().contains(selection) {
-            ctx.viewer.zoom_on(selection, buffer);
-            if !ctx.quiet {
-                ctx.print(&format!(" Zoomed to \"{}\"", selection));
-            }
-            return Ok(());
-        }
-
-        // Try pattern matching
-        let matches: Vec<String> = ctx.viewer.objects().matching(selection)
-            .iter().map(|s| s.to_string()).collect();
-        if !matches.is_empty() {
-            // For now, zoom on first match
-            if let Some(name) = matches.first() {
-                ctx.viewer.zoom_on(name, buffer);
+        match resolve_object_names(ctx.viewer.objects(), selection) {
+            ResolvedNames::All => {
+                ctx.viewer.zoom_all(buffer);
                 if !ctx.quiet {
-                    ctx.print(&format!(" Zoomed to \"{}\"", name));
+                    ctx.print(" Zoomed to all objects");
                 }
+                return Ok(());
             }
-            return Ok(());
+            ResolvedNames::Matched(names) => {
+                ctx.viewer.zoom_on(&names[0], buffer);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Zoomed to \"{}\"", names[0]));
+                }
+                return Ok(());
+            }
+            ResolvedNames::Unresolved => {}
         }
 
         // Try as selection expression (resi 28, chain A, name CA, etc.)
@@ -322,41 +222,24 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(0, "selection", "all");
 
-        // Center on all objects
-        if selection == "all" || selection == "*" {
-            ctx.viewer.center_all();
-            if !ctx.quiet {
-                ctx.print(" Centered on all objects");
-            }
-            return Ok(());
-        }
-
-        // Try to center on a specific object by name
-        if ctx.viewer.objects().contains(selection) {
-            ctx.viewer.center_on(selection);
-            if !ctx.quiet {
-                ctx.print(&format!(" Centered on \"{}\"", selection));
-            }
-            return Ok(());
-        }
-
-        // Try pattern matching on object names
-        let matches: Vec<String> = ctx.viewer.objects().matching(selection)
-            .iter().map(|s| s.to_string()).collect();
-        if !matches.is_empty() {
-            // For now, center on first match
-            if let Some(name) = matches.first() {
-                ctx.viewer.center_on(name);
+        match resolve_object_names(ctx.viewer.objects(), selection) {
+            ResolvedNames::All => {
+                ctx.viewer.center_all();
                 if !ctx.quiet {
-                    ctx.print(&format!(" Centered on \"{}\"", name));
+                    ctx.print(" Centered on all objects");
                 }
+                return Ok(());
             }
-            return Ok(());
+            ResolvedNames::Matched(names) => {
+                ctx.viewer.center_on(&names[0]);
+                if !ctx.quiet {
+                    ctx.print(&format!(" Centered on \"{}\"", names[0]));
+                }
+                return Ok(());
+            }
+            ResolvedNames::Unresolved => {}
         }
 
         // Try as selection expression (resi 28, chain A, name CA, etc.)
@@ -415,10 +298,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(0, "selection", "all");
 
         // 1. Collect coordinates from the selection
         let coords = collect_selection_coords(ctx.viewer, selection)?;
@@ -649,16 +529,10 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let mode = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("mode"))
+        let mode = args.str_arg(0, "mode")
             .ok_or_else(|| CmdError::MissingArgument("mode".to_string()))?;
-
-        let distance = args
-            .get_float(1)
-            .or_else(|| args.get_named_float("distance"))
-            .ok_or_else(|| CmdError::MissingArgument("distance".to_string()))?
-            as f32;
+        let distance = args.float_arg(1, "distance")
+            .ok_or_else(|| CmdError::MissingArgument("distance".to_string()))? as f32;
 
         let (clip_front, clip_back) = {
             let view = ctx.viewer.camera_mut().view_mut();
@@ -926,18 +800,10 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        // Parse axis argument (required)
-        let axis = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("axis"))
+        let axis = args.str_arg(0, "axis")
             .ok_or_else(|| CmdError::MissingArgument("axis".to_string()))?;
-
-        // Parse distance argument (required)
-        let distance = args
-            .get_float(1)
-            .or_else(|| args.get_named_float("distance"))
-            .ok_or_else(|| CmdError::MissingArgument("distance".to_string()))?
-            as f32;
+        let distance = args.float_arg(1, "distance")
+            .ok_or_else(|| CmdError::MissingArgument("distance".to_string()))? as f32;
 
         // Create translation vector based on axis
         let delta = match axis.to_lowercase().as_str() {
@@ -1014,18 +880,10 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        // Parse axis argument (required)
-        let axis = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("axis"))
+        let axis = args.str_arg(0, "axis")
             .ok_or_else(|| CmdError::MissingArgument("axis".to_string()))?;
-
-        // Parse angle argument (required)
-        let angle_deg = args
-            .get_float(1)
-            .or_else(|| args.get_named_float("angle"))
-            .ok_or_else(|| CmdError::MissingArgument("angle".to_string()))?
-            as f32;
+        let angle_deg = args.float_arg(1, "angle")
+            .ok_or_else(|| CmdError::MissingArgument("angle".to_string()))? as f32;
 
         // Convert to radians
         let angle_rad = angle_deg * PI / 180.0;
@@ -1118,40 +976,11 @@ SEE ALSO
             return Ok(());
         }
 
-        // Get selection (default: "all")
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(0, "selection", "all");
 
-        // For "all", set origin to center of all objects
-        if selection == "all" || selection == "*" {
-            // Get bounding box of all objects
-            if let Some((min, max)) = ctx.viewer.objects().extent() {
-                let center = Vec3::new(
-                    (min.x + max.x) * 0.5,
-                    (min.y + max.y) * 0.5,
-                    (min.z + max.z) * 0.5,
-                );
-                ctx.viewer.camera_mut().view_mut().origin = center;
-                ctx.viewer.request_redraw();
-
-                if !ctx.quiet {
-                    ctx.print(&format!(
-                        " Origin set to [{:.3}, {:.3}, {:.3}]",
-                        center.x, center.y, center.z
-                    ));
-                }
-            } else if !ctx.quiet {
-                ctx.print(" No objects to set origin from");
-            }
-            return Ok(());
-        }
-
-        // Try to set origin to a specific object's center
-        if ctx.viewer.objects().contains(selection) {
-            if let Some(mol) = ctx.viewer.objects().get_molecule(selection) {
-                if let Some((min, max)) = mol.extent() {
+        match resolve_object_names(ctx.viewer.objects(), selection) {
+            ResolvedNames::All => {
+                if let Some((min, max)) = ctx.viewer.objects().extent() {
                     let center = Vec3::new(
                         (min.x + max.x) * 0.5,
                         (min.y + max.y) * 0.5,
@@ -1159,29 +988,19 @@ SEE ALSO
                     );
                     ctx.viewer.camera_mut().view_mut().origin = center;
                     ctx.viewer.request_redraw();
-
                     if !ctx.quiet {
                         ctx.print(&format!(
-                            " Origin set to \"{}\" at [{:.3}, {:.3}, {:.3}]",
-                            selection, center.x, center.y, center.z
+                            " Origin set to [{:.3}, {:.3}, {:.3}]",
+                            center.x, center.y, center.z
                         ));
                     }
-                    return Ok(());
+                } else if !ctx.quiet {
+                    ctx.print(" No objects to set origin from");
                 }
+                return Ok(());
             }
-        }
-
-        // Try pattern matching
-        let matches: Vec<String> = ctx
-            .viewer
-            .objects()
-            .matching(selection)
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        if !matches.is_empty() {
-            // Use first match
-            if let Some(name) = matches.first() {
+            ResolvedNames::Matched(names) => {
+                let name = &names[0];
                 if let Some(mol) = ctx.viewer.objects().get_molecule(name) {
                     if let Some((min, max)) = mol.extent() {
                         let center = Vec3::new(
@@ -1191,7 +1010,6 @@ SEE ALSO
                         );
                         ctx.viewer.camera_mut().view_mut().origin = center;
                         ctx.viewer.request_redraw();
-
                         if !ctx.quiet {
                             ctx.print(&format!(
                                 " Origin set to \"{}\" at [{:.3}, {:.3}, {:.3}]",
@@ -1202,6 +1020,7 @@ SEE ALSO
                     }
                 }
             }
+            ResolvedNames::Unresolved => {}
         }
 
         // Try as selection expression (resi 28, chain A, name CA, etc.)
@@ -1343,20 +1162,9 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let key = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("key"))
-            .unwrap_or("");
-
-        let action = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("action"))
-            .unwrap_or("recall");
-
-        let animate = args
-            .get_float(2)
-            .or_else(|| args.get_named_float("animate"))
-            .unwrap_or(0.0) as f32;
+        let key = args.str_arg_or(0, "key", "");
+        let action = args.str_arg_or(1, "action", "recall");
+        let animate = args.float_arg_or(2, "animate", 0.0) as f32;
 
         // Handle wildcard key for listing/clearing
         if key == "*" {
@@ -1487,13 +1295,8 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let width = args
-            .get_int(0)
-            .or_else(|| args.get_named_int("width"));
-
-        let height = args
-            .get_int(1)
-            .or_else(|| args.get_named_int("height"));
+        let width = args.int_arg(0, "width");
+        let height = args.int_arg(1, "height");
 
         match (width, height) {
             (None, None) => {
@@ -1601,9 +1404,7 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let toggle = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("toggle"));
+        let toggle = args.str_arg(0, "toggle");
 
         match toggle {
             None | Some("toggle") | Some("-1") => {

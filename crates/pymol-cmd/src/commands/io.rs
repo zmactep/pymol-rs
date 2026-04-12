@@ -103,14 +103,12 @@ EXAMPLES
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // Get filename (required)
         let filename = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("filename"))
+            .str_arg(0, "filename")
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
         // Get object name (optional, defaults to filename stem)
         let object_name = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("object"))
+            .str_arg(1, "object")
             .map(|s| s.to_string())
             .unwrap_or_else(|| {
                 let p = Path::new(filename);
@@ -130,10 +128,7 @@ EXAMPLES
             });
 
         // Get state (optional, 0 = append)
-        let state = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(0);
+        let state = args.int_arg_or(2, "state", 0);
 
         if state != 0 {
             ctx.print(" Warning: state= parameter not yet fully supported, loading all states.");
@@ -141,8 +136,7 @@ EXAMPLES
 
         // Get format (optional, auto-detect)
         let format = args
-            .get_str(3)
-            .or_else(|| args.get_named_str("format"))
+            .str_arg(3, "format")
             .map(|s| match s.to_lowercase().as_str() {
                 "pdb" => FileFormat::Pdb,
                 "sdf" | "mol" => FileFormat::Sdf,
@@ -157,10 +151,7 @@ EXAMPLES
             });
 
         // Get quiet flag
-        let quiet = args
-            .get_bool(4)
-            .or_else(|| args.get_named_bool("quiet"))
-            .unwrap_or(false);
+        let quiet = args.bool_arg_or(4, "quiet", false);
 
         // Expand path and check for session file formats
         let path = expand_path(filename);
@@ -343,30 +334,24 @@ EXAMPLES
     ) -> CmdResult {
         // Get filename (required)
         let filename = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("filename"))
+            .str_arg(0, "filename")
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
         // Get object name (optional, defaults to first loaded molecule)
-        let object_name = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("object"));
+        let object_name = args.str_arg(1, "object");
 
         // PyMOL uses 1-based frame numbers; convert to 0-based
         let start = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("start"))
+            .int_arg(2, "start")
             .map(|s| (s.max(1) - 1) as usize)
             .unwrap_or(0);
 
         let stop = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("stop"))
+            .int_arg(3, "stop")
             .map(|s| s.max(0) as usize);
 
         let interval = args
-            .get_int(4)
-            .or_else(|| args.get_named_int("interval"))
+            .int_arg(4, "interval")
             .map(|i| i.max(1) as usize)
             .unwrap_or(1);
 
@@ -513,19 +498,12 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let filename = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("filename"))
+            .str_arg(0, "filename")
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(1, "selection", "all");
 
-        let state_arg = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(-1);
+        let state_arg = args.int_arg_or(2, "state", -1);
 
         let path = expand_path(filename);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
@@ -705,32 +683,20 @@ EXAMPLES
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // Get filename (required)
         let filename = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("filename"))
+            .str_arg(0, "filename")
             .ok_or_else(|| CmdError::MissingArgument("filename".to_string()))?;
 
         // Get width (optional)
-        let width = args
-            .get_int(1)
-            .or_else(|| args.get_named_int("width"))
-            .map(|v| v as u32);
+        let width = args.int_arg(1, "width").map(|v| v as u32);
 
         // Get height (optional)
-        let height = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("height"))
-            .map(|v| v as u32);
+        let height = args.int_arg(2, "height").map(|v| v as u32);
 
         // Get dpi (optional, not yet used)
-        let _dpi = args
-            .get_float(3)
-            .or_else(|| args.get_named_float("dpi"));
+        let _dpi = args.float_arg(3, "dpi");
 
         // Get quiet flag
-        let quiet = args
-            .get_bool(4)
-            .or_else(|| args.get_named_bool("quiet"))
-            .unwrap_or(false);
+        let quiet = args.bool_arg_or(4, "quiet", false);
 
         // Ensure the path ends with .png
         let path = expand_path(filename);
@@ -835,7 +801,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let path = args.get_str(0).or_else(|| args.get_named_str("path"));
+        let path = args.str_arg(0, "path");
 
         let target = if let Some(p) = path {
             expand_path(p)
@@ -936,10 +902,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let path_str = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("path"))
-            .unwrap_or(".");
+        let path_str = args.str_arg_or(0, "path", ".");
 
         let dir = expand_path(path_str);
 
@@ -1017,19 +980,14 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let code = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("code"))
+            .str_arg(0, "code")
             .ok_or_else(|| CmdError::MissingArgument("code".to_string()))?;
 
-        let name = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("name"))
-            .unwrap_or(code);
+        let name = args.str_arg_or(1, "name", code);
 
         // Parse the type argument (default: bcif)
         let format = args
-            .get_str(2)
-            .or_else(|| args.get_named_str("type"))
+            .str_arg(2, "type")
             .map(|s| match s.to_lowercase().as_str() {
                 "pdb" => pymol_io::FetchFormat::Pdb,
                 "cif" | "mmcif" => pymol_io::FetchFormat::Cif,

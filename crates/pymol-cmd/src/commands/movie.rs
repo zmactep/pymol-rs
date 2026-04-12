@@ -410,10 +410,7 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let frame = args
-            .get_int(0)
-            .or_else(|| args.get_named_int("frame"))
-            .unwrap_or(1) as usize;
+        let frame = args.int_arg_or(0, "frame", 1) as usize;
 
         // PyMOL uses 1-based frame numbers
         ctx.viewer.movie_goto(frame.saturating_sub(1));
@@ -780,8 +777,7 @@ SEE ALSO
             "store" => {
                 // Get frame (1-indexed), default to current frame
                 let frame = args
-                    .get_int(1)
-                    .or_else(|| args.get_named_int("frame"))
+                    .int_arg(1, "frame")
                     .map(|f| (f as usize).saturating_sub(1))
                     .unwrap_or_else(|| ctx.viewer.movie_current_frame());
 
@@ -824,8 +820,7 @@ SEE ALSO
 
             "recall" => {
                 let frame = args
-                    .get_int(1)
-                    .or_else(|| args.get_named_int("frame"))
+                    .int_arg(1, "frame")
                     .map(|f| (f as usize).saturating_sub(1))
                     .unwrap_or_else(|| ctx.viewer.movie_current_frame());
 
@@ -837,10 +832,8 @@ SEE ALSO
 
             "clear" => {
                 let frame = args
-                    .get_int(1)
-                    .or_else(|| args.get_named_int("frame"))
-                    .map(|f| Some((f as usize).saturating_sub(1)))
-                    .unwrap_or(None);
+                    .int_arg(1, "frame")
+                    .map(|f| (f as usize).saturating_sub(1));
 
                 ctx.viewer.movie_clear_view(frame);
                 if !ctx.quiet {
@@ -897,26 +890,18 @@ impl FrameRenderParams {
         height_idx: usize,
     ) -> Self {
         let first = args
-            .get_int(first_idx)
-            .or_else(|| args.get_named_int("first"))
+            .int_arg(first_idx, "first")
             .map(|f| (f as usize).saturating_sub(1))
             .unwrap_or(0);
 
         let last = args
-            .get_int(last_idx)
-            .or_else(|| args.get_named_int("last"))
+            .int_arg(last_idx, "last")
             .map(|f| (f as usize).saturating_sub(1))
             .unwrap_or(total - 1);
 
-        let width = args
-            .get_int(width_idx)
-            .or_else(|| args.get_named_int("width"))
-            .map(|w| w as u32);
+        let width = args.int_arg(width_idx, "width").map(|w| w as u32);
 
-        let height = args
-            .get_int(height_idx)
-            .or_else(|| args.get_named_int("height"))
-            .map(|h| h as u32);
+        let height = args.int_arg(height_idx, "height").map(|h| h as u32);
 
         Self { first, last, width, height }
     }
@@ -1154,17 +1139,9 @@ SEE ALSO
         let mut params = FrameRenderParams::parse(args, total, 1, 2, 5, 6);
         params.make_even();
 
-        let preserve = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("preserve"))
-            .unwrap_or(0)
-            != 0;
+        let preserve = args.int_arg_or(3, "preserve", 0) != 0;
 
-        let quality = args
-            .get_int(4)
-            .or_else(|| args.get_named_int("quality"))
-            .unwrap_or(90)
-            .clamp(0, 100);
+        let quality = args.int_arg_or(4, "quality", 90).clamp(0, 100);
 
         // Get FPS from settings
         let fps = ctx.viewer.settings().movie.movie_fps;

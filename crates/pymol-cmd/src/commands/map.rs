@@ -24,33 +24,20 @@ fn execute_isocontour(
 ) -> CmdResult {
     // isomesh name, map, level [, selection [, buffer [, carve ]]]
     let name = args
-        .get_str(0)
-        .or_else(|| args.get_named_str("name"))
+        .str_arg(0, "name")
         .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
     let map_name = args
-        .get_str(1)
-        .or_else(|| args.get_named_str("map"))
+        .str_arg(1, "map")
         .ok_or_else(|| CmdError::MissingArgument("map".to_string()))?;
 
-    let level = args
-        .get_float(2)
-        .or_else(|| args.get_named_float("level"))
-        .unwrap_or(1.0) as f32;
+    let level = args.float_arg_or(2, "level", 1.0) as f32;
 
-    let selection = args
-        .get_str(3)
-        .or_else(|| args.get_named_str("selection"));
+    let selection = args.str_arg(3, "selection");
 
-    let _buffer = args
-        .get_float(4)
-        .or_else(|| args.get_named_float("buffer"))
-        .unwrap_or(0.0);
+    let _buffer = args.float_arg_or(4, "buffer", 0.0);
 
-    let carve = args
-        .get_float(5)
-        .or_else(|| args.get_named_float("carve"))
-        .unwrap_or(0.0) as f32;
+    let carve = args.float_arg_or(5, "carve", 0.0) as f32;
 
     // Get the source map's grid data
     let grid = {

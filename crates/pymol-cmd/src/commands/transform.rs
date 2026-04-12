@@ -15,6 +15,7 @@ use pymol_scene::{DirtyFlags, Object};
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::helpers::{camera_to_model_vec, state_index_from_user};
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
@@ -84,35 +85,15 @@ EXAMPLES
         // Parse vector argument (required)
         let vector = parse_vector(args, 0, "vector")?;
 
-        // Parse selection (default: "all")
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
-
-        // Parse state (-1=current, 0=all, >0=specific)
-        let state = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(-1);
-
-        // Parse camera flag (default: 1 = use camera coordinates)
-        let camera = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("camera"))
-            .unwrap_or(1);
+        let selection = args.str_arg_or(1, "selection", "all");
+        let state = args.int_arg_or(2, "state", -1);
+        let camera = args.int_arg_or(3, "camera", 1);
 
         // Convert vector from camera coordinates if needed
         let shift = if camera != 0 {
             // Transform vector from camera coordinates to model coordinates
-            let view = ctx.viewer.camera().current_view();
-            let r = &view.rotation;
-            // Multiply by transpose of rotation matrix (inverse for orthogonal matrix)
-            Vec3::new(
-                r.data[0] * vector.x + r.data[4] * vector.y + r.data[8] * vector.z,
-                r.data[1] * vector.x + r.data[5] * vector.y + r.data[9] * vector.z,
-                r.data[2] * vector.x + r.data[6] * vector.y + r.data[10] * vector.z,
-            )
+            let rotation = &ctx.viewer.camera().current_view().rotation;
+            camera_to_model_vec(rotation, vector)
         } else {
             vector
         };
@@ -229,35 +210,18 @@ EXAMPLES
         // Parse axis argument (required)
         let axis = parse_axis(args, 0)?;
 
-        // Parse angle argument (required)
-        let angle_deg = args
-            .get_float(1)
-            .or_else(|| args.get_named_float("angle"))
+        let angle_deg = args.float_arg(1, "angle")
             .ok_or_else(|| CmdError::MissingArgument("angle".to_string()))?;
         let angle = (angle_deg as f32) * std::f32::consts::PI / 180.0;
 
-        // Parse selection (default: "all")
-        let selection = args
-            .get_str(2)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
-
-        // Parse state (-1=current, 0=all, >0=specific)
-        let state = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(-1);
-
-        // Parse camera flag (default: 1 = use camera coordinates)
-        let camera = args
-            .get_int(4)
-            .or_else(|| args.get_named_int("camera"))
-            .unwrap_or(1);
+        let selection = args.str_arg_or(2, "selection", "all");
+        let state = args.int_arg_or(3, "state", -1);
+        let camera = args.int_arg_or(4, "camera", 1);
 
         // Parse origin (default: view origin)
         let origin = if let Some(origin_vec) = args
             .get_named("origin")
-            .and_then(parse_vector_from_arg)
+            .and_then(|v| v.as_vec3())
         {
             origin_vec
         } else {
@@ -267,13 +231,8 @@ EXAMPLES
 
         // Transform axis from camera coordinates if needed
         let rot_axis = if camera != 0 {
-            let view = ctx.viewer.camera().current_view();
-            let r = &view.rotation;
-            Vec3::new(
-                r.data[0] * axis.x + r.data[4] * axis.y + r.data[8] * axis.z,
-                r.data[1] * axis.x + r.data[5] * axis.y + r.data[9] * axis.z,
-                r.data[2] * axis.x + r.data[6] * axis.y + r.data[10] * axis.z,
-            )
+            let rotation = &ctx.viewer.camera().current_view().rotation;
+            camera_to_model_vec(rotation, axis)
         } else {
             axis
         };
@@ -368,26 +327,10 @@ EXAMPLES
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        // Parse selection
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
-
-        // Parse matrix (16 floats)
+        let selection = args.str_arg_or(0, "selection", "all");
         let matrix = parse_matrix(args, 1)?;
-
-        // Parse state (-1=current, 0=all, >0=specific)
-        let state = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(-1);
-
-        // Parse homogenous flag (default: 0 = TTT format)
-        let homogenous = args
-            .get_int(3)
-            .or_else(|| args.get_named_int("homogenous"))
-            .unwrap_or(0);
+        let state = args.int_arg_or(2, "state", -1);
+        let homogenous = args.int_arg_or(3, "homogenous", 0);
 
         // Apply transformation using selection expressions
         let (atom_count, obj_count) = if homogenous != 0 {
@@ -420,49 +363,8 @@ EXAMPLES
 
 /// Parse a vector argument (either [x,y,z] list or x,y,z positional)
 fn parse_vector(args: &ParsedCommand, pos: usize, name: &str) -> Result<Vec3, CmdError> {
-    // Try as a list first
-    if let Some(arg) = args.get_arg(pos) {
-        if let Some(vec) = parse_vector_from_arg(arg) {
-            return Ok(vec);
-        }
-    }
-
-    // Try as named argument
-    if let Some(arg) = args.get_named(name) {
-        if let Some(vec) = parse_vector_from_arg(arg) {
-            return Ok(vec);
-        }
-    }
-
-    Err(CmdError::MissingArgument(name.to_string()))
-}
-
-/// Parse a vector from an argument value
-fn parse_vector_from_arg(arg: &crate::args::ArgValue) -> Option<Vec3> {
-    use crate::args::ArgValue;
-
-    match arg {
-        ArgValue::List(items) if items.len() >= 3 => {
-            let x = items.first()?.as_float()? as f32;
-            let y = items.get(1)?.as_float()? as f32;
-            let z = items.get(2)?.as_float()? as f32;
-            Some(Vec3::new(x, y, z))
-        }
-        ArgValue::String(s) => {
-            // Try to parse "[x, y, z]" format
-            let s = s.trim().trim_matches(|c| c == '[' || c == ']');
-            let parts: Vec<&str> = s.split(',').collect();
-            if parts.len() >= 3 {
-                let x = parts[0].trim().parse::<f32>().ok()?;
-                let y = parts[1].trim().parse::<f32>().ok()?;
-                let z = parts[2].trim().parse::<f32>().ok()?;
-                Some(Vec3::new(x, y, z))
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+    args.vec3_arg(pos, name)
+        .ok_or_else(|| CmdError::MissingArgument(name.to_string()))
 }
 
 /// Parse axis argument (x, y, z, or [ax, ay, az])
@@ -580,6 +482,18 @@ where
 // Helper functions - Atom-level transformations
 // ============================================================================
 
+/// Collect which 0-indexed states to apply a transformation to.
+///
+/// - `0` (or negative) → all states
+/// - Positive N → just state N-1 (if valid)
+fn resolve_state_indices(state: i64, num_states: usize) -> Vec<usize> {
+    match state_index_from_user(state) {
+        None => (0..num_states).collect(),
+        Some(idx) if idx < num_states => vec![idx],
+        Some(_) => Vec::new(),
+    }
+}
+
 /// Apply translation to specific atoms based on state parameter
 fn apply_translation_to_atoms(
     mol: &mut pymol_mol::ObjectMolecule,
@@ -587,30 +501,8 @@ fn apply_translation_to_atoms(
     atoms: &[AtomIndex],
     delta: &Vec3,
 ) {
-    let num_states = mol.state_count();
-    if num_states == 0 {
-        return;
-    }
-
-    match state {
-        0 => {
-            // All states
-            for i in 0..num_states {
-                mol.translate_atoms(i, atoms, *delta);
-            }
-        }
-        -1 => {
-            // Fallback: resolved to display_state in apply_selection_transform
-            mol.translate_atoms(0, atoms, *delta);
-        }
-        s if s > 0 => {
-            // Specific state (1-indexed in commands, 0-indexed internally)
-            let state_idx = (s - 1) as usize;
-            if state_idx < num_states {
-                mol.translate_atoms(state_idx, atoms, *delta);
-            }
-        }
-        _ => {}
+    for i in resolve_state_indices(state, mol.state_count()) {
+        mol.translate_atoms(i, atoms, *delta);
     }
 }
 
@@ -621,29 +513,8 @@ fn apply_ttt_to_atoms(
     atoms: &[AtomIndex],
     ttt: &[f32; 16],
 ) {
-    let num_states = mol.state_count();
-    if num_states == 0 {
-        return;
-    }
-
-    match state {
-        0 => {
-            // All states
-            for i in 0..num_states {
-                mol.transform_ttt_atoms(i, atoms, ttt);
-            }
-        }
-        -1 => {
-            // Fallback: resolved to display_state in apply_selection_transform
-            mol.transform_ttt_atoms(0, atoms, ttt);
-        }
-        s if s > 0 => {
-            let state_idx = (s - 1) as usize;
-            if state_idx < num_states {
-                mol.transform_ttt_atoms(state_idx, atoms, ttt);
-            }
-        }
-        _ => {}
+    for i in resolve_state_indices(state, mol.state_count()) {
+        mol.transform_ttt_atoms(i, atoms, ttt);
     }
 }
 
@@ -654,27 +525,7 @@ fn apply_matrix_to_atoms(
     atoms: &[AtomIndex],
     matrix: &lin_alg::f32::Mat4,
 ) {
-    let num_states = mol.state_count();
-    if num_states == 0 {
-        return;
-    }
-
-    match state {
-        0 => {
-            for i in 0..num_states {
-                mol.transform_atoms(i, atoms, matrix);
-            }
-        }
-        -1 => {
-            // Fallback: resolved to display_state in apply_selection_transform
-            mol.transform_atoms(0, atoms, matrix);
-        }
-        s if s > 0 => {
-            let state_idx = (s - 1) as usize;
-            if state_idx < num_states {
-                mol.transform_atoms(state_idx, atoms, matrix);
-            }
-        }
-        _ => {}
+    for i in resolve_state_indices(state, mol.state_count()) {
+        mol.transform_atoms(i, atoms, matrix);
     }
 }

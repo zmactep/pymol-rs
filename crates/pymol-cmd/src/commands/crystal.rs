@@ -76,29 +76,18 @@ EXAMPLES
         args: &ParsedCommand,
     ) -> CmdResult {
         let prefix = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("prefix"))
+            .str_arg(0, "prefix")
             .ok_or_else(|| CmdError::MissingArgument("prefix".to_string()))?;
         let object = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("object"))
+            .str_arg(1, "object")
             .ok_or_else(|| CmdError::MissingArgument("object".to_string()))?;
         let selection = args
-            .get_str(2)
-            .or_else(|| args.get_named_str("selection"))
+            .str_arg(2, "selection")
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
-        let cutoff = args
-            .get_float(3)
-            .or_else(|| args.get_named_float("cutoff"))
-            .unwrap_or(10.0) as f32;
-        let segi = args
-            .get_int(4)
-            .or_else(|| args.get_named_int("segi"))
-            .unwrap_or(0)
-            != 0;
+        let cutoff = args.float_arg_or(3, "cutoff", 10.0) as f32;
+        let segi = args.int_arg_or(4, "segi", 0) != 0;
         let quiet = args
-            .get_int(5)
-            .or_else(|| args.get_named_int("quiet"))
+            .int_arg(5, "quiet")
             .map(|v| v != 0)
             .unwrap_or(ctx.quiet);
 

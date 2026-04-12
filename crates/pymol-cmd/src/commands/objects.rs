@@ -6,6 +6,7 @@ use pymol_scene::{DirtyFlags, MoleculeObject};
 
 use crate::args::{ArgValue, ParsedCommand};
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::helpers::state_index_from_user;
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
@@ -116,9 +117,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         let mut deleted_objects = 0usize;
@@ -217,14 +216,9 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let old_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("old_name"))
+        let old_name = args.str_arg(0, "old_name")
             .ok_or_else(|| CmdError::MissingArgument("old_name".to_string()))?;
-
-        let new_name = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("new_name"))
+        let new_name = args.str_arg(1, "new_name")
             .ok_or_else(|| CmdError::MissingArgument("new_name".to_string()))?;
 
         // Try renaming as an object first, then as a selection
@@ -286,20 +280,11 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
-
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
+        let selection = args.str_arg(1, "selection")
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
-
-        let source_state = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("source_state"))
-            .unwrap_or(0);
+        let source_state = args.int_arg_or(2, "source_state", 0);
 
         // Evaluate selection
         let results = evaluate_selection(ctx.viewer, selection)?;
@@ -312,13 +297,7 @@ EXAMPLES
                 CmdError::Selection(format!("No atoms matching '{}'", selection))
             })?;
 
-        // Convert 1-indexed source_state to 0-indexed Option
-        // source_state=0 means all states, N>0 means state N (1-indexed)
-        let state_opt = if source_state > 0 {
-            Some((source_state - 1) as usize)
-        } else {
-            None
-        };
+        let state_opt = state_index_from_user(source_state);
 
         // Get source molecule and its representations (read-only borrow)
         let (new_mol, source_reps) = {
@@ -450,14 +429,9 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let target = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("target"))
+        let target = args.str_arg(0, "target")
             .ok_or_else(|| CmdError::MissingArgument("target".to_string()))?;
-
-        let source = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("source"))
+        let source = args.str_arg(1, "source")
             .ok_or_else(|| CmdError::MissingArgument("source".to_string()))?;
 
         // Try as full object copy first (exact name match, no selection parsing)
@@ -549,20 +523,10 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
-
-        let members_str = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("members"))
-            .unwrap_or("");
-
-        let action = args
-            .get_str(2)
-            .or_else(|| args.get_named_str("action"))
-            .unwrap_or("auto");
+        let members_str = args.str_arg_or(1, "members", "");
+        let action = args.str_arg_or(2, "action", "auto");
 
         let member_patterns = parse_members(members_str);
 
@@ -684,24 +648,15 @@ EXAMPLES
                     ctx.print(&format!(" Purged group \"{}\" ({} objects deleted)", name, children.len()));
                 }
             }
-            "excise" => {
+            "excise" | "ungroup" => {
                 // Clear children (they become ungrouped), then delete the group
                 if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
                     group.clear();
                 }
                 ctx.viewer.objects_mut().remove(name);
                 if !ctx.quiet {
-                    ctx.print(&format!(" Excised group \"{}\"", name));
-                }
-            }
-            "ungroup" => {
-                // Same as ungroup command
-                if let Some(group) = ctx.viewer.objects_mut().get_group_mut(name) {
-                    group.clear();
-                }
-                ctx.viewer.objects_mut().remove(name);
-                if !ctx.quiet {
-                    ctx.print(&format!(" Ungrouped \"{}\"", name));
+                    let verb = if action == "excise" { "Excised" } else { "Ungrouped" };
+                    ctx.print(&format!(" {} group \"{}\"", verb, name));
                 }
             }
             _ => {
@@ -749,9 +704,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         if ctx.viewer.objects().get_group(name).is_none() {
@@ -809,9 +762,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let state_num = args
-            .get_int(0)
-            .or_else(|| args.get_named_int("N"))
+        let state_num = args.int_arg(0, "N")
             .ok_or_else(|| CmdError::MissingArgument("N".to_string()))?;
 
         if state_num < 1 {
@@ -819,10 +770,7 @@ EXAMPLES
         }
 
         let state_idx = (state_num - 1) as usize;
-
-        let object = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("object"));
+        let object = args.str_arg(1, "object");
 
         if let Some(obj_name) = object {
             // Set state for a specific object
@@ -895,10 +843,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"));
-
+        let selection = args.str_arg(0, "selection");
         let mut max_states = 0usize;
 
         if let Some(sel) = selection {
@@ -988,9 +933,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let object = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("object"))
+        let object = args.str_arg(0, "object")
             .ok_or_else(|| CmdError::MissingArgument("object".to_string()))?;
 
         let mol_obj = ctx.viewer.objects().get_molecule(object)
@@ -1001,21 +944,13 @@ EXAMPLES
             return Err(CmdError::execution(format!("\"{}\" has no states", object)));
         }
 
-        let first = args
-            .get_int(1)
-            .or_else(|| args.get_named_int("first"))
+        let first = args.int_arg(1, "first")
             .map(|v| (v.max(1) - 1) as usize)
             .unwrap_or(0);
-
-        let last = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("last"))
+        let last = args.int_arg(2, "last")
             .map(|v| (v.max(1) as usize).min(n_states))
             .unwrap_or(n_states);
-
-        let prefix = args
-            .get_str(3)
-            .or_else(|| args.get_named_str("prefix"))
+        let prefix = args.str_arg(3, "prefix")
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("{}_", object));
 
@@ -1165,9 +1100,7 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         let indices = parse_state_spec(args, 1)?;
@@ -1275,27 +1208,12 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
-
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
+        let selection = args.str_arg(1, "selection")
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
-
-        let source_state = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("source_state"))
-            .unwrap_or(0);
-
-        // Convert 1-indexed source_state to 0-indexed Option
-        let state_opt = if source_state > 0 {
-            Some((source_state - 1) as usize)
-        } else {
-            None
-        };
+        let source_state = args.int_arg_or(2, "source_state", 0);
+        let state_opt = state_index_from_user(source_state);
 
         // Evaluate selection
         let results = evaluate_selection(ctx.viewer, selection)?;
@@ -1399,9 +1317,7 @@ SEE ALSO
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
+        let selection = args.str_arg(0, "selection")
             .ok_or_else(|| CmdError::MissingArgument("selection".to_string()))?;
 
         // Evaluate selection across all objects
@@ -1509,23 +1425,9 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let _selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
-
-        let state = args
-            .get_int(1)
-            .or_else(|| args.get_named_int("state"))
-            .unwrap_or(1) as usize;
-
-        // Convert to 0-indexed state
-        let state_idx = if state > 0 { state - 1 } else { 0 };
-
-        let quiet = args
-            .get_bool(2)
-            .or_else(|| args.get_named_bool("quiet"))
-            .unwrap_or(false);
+        let _selection = args.str_arg_or(0, "selection", "all");
+        let state_idx = state_index_from_user(args.int_arg_or(1, "state", 1)).unwrap_or(0);
+        let quiet = args.bool_arg_or(2, "quiet", false);
 
         // Get molecule names first to avoid borrowing conflicts
         let mol_names: Vec<String> = ctx.viewer

@@ -42,6 +42,7 @@ pub mod commands;
 mod dynamic;
 mod error;
 mod executor;
+pub mod helpers;
 mod history;
 mod parser;
 mod script;

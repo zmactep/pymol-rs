@@ -403,7 +403,7 @@ impl SetCommand {
             ) {
                 if y.parse::<f32>().is_ok() && z.parse::<f32>().is_ok() {
                     let combined = format!("[{}, {}, {}]", value_str, y, z);
-                    let shifted_selection = args.get_str(4).or_else(|| args.get_named_str("selection"));
+                    let shifted_selection = args.str_arg(4, "selection");
                     (combined, shifted_selection)
                 } else {
                     (value_str, selection)
@@ -629,8 +629,7 @@ EXAMPLES
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         // === 1. Parse arguments ===
         let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+            .str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         let value_str = args
@@ -638,9 +637,7 @@ EXAMPLES
             .and_then(|v| v.to_string_repr())
             .or_else(|| args.get_named("value").and_then(|v| v.to_string_repr()));
 
-        let selection = args
-            .get_str(2)
-            .or_else(|| args.get_named_str("selection"));
+        let selection = args.str_arg(2, "selection");
 
         // === 2. Intercept pseudo-settings ===
         if name == "state" {
@@ -701,13 +698,12 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+            .str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         // Intercept "get state" — report displayed state for each object
         if name == "state" {
-            let obj_arg = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            let obj_arg = args.str_arg(1, "selection");
             if let Some(obj_name) = obj_arg {
                 if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
                     ctx.print(&format!(" state (int) = {} for \"{}\"", mol_obj.display_state() + 1, obj_name));
@@ -727,7 +723,7 @@ EXAMPLES
 
         // Look up in built-in registry first
         if let Some(desc) = registry::lookup_by_name(name) {
-            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            let selection = args.str_arg(1, "selection");
             if let Some(sel) = selection {
                 if let Some(field_reader) = rep_color_field_read(desc.name) {
                     let selection_results = evaluate_selection(ctx.viewer, sel)?;
@@ -775,7 +771,7 @@ EXAMPLES
         // Fall through to dynamic (plugin) settings
         if let Some(entry) = ctx.dynamic_setting(name).cloned() {
             let desc = &entry.descriptor;
-            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            let selection = args.str_arg(1, "selection");
             let store = entry.store.read().map_err(|e| CmdError::execution(e.to_string()))?;
 
             // Per-object override
@@ -844,13 +840,12 @@ EXAMPLES
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
         let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+            .str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         // Look up in built-in registry first
         if let Some(desc) = registry::lookup_by_name(name) {
-            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            let selection = args.str_arg(1, "selection");
 
             if let Some(sel) = selection {
                 if let Some(field_accessor) = rep_color_field(desc.name) {
@@ -919,7 +914,7 @@ EXAMPLES
         // Fall through to dynamic (plugin) settings
         if let Some(entry) = ctx.dynamic_setting(name).cloned() {
             let desc = &entry.descriptor;
-            let selection = args.get_str(1).or_else(|| args.get_named_str("selection"));
+            let selection = args.str_arg(1, "selection");
 
             if let Some(sel) = selection {
                 if desc.object_overridable {

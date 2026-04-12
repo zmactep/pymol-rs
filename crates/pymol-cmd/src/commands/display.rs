@@ -6,7 +6,10 @@ use pymol_select::AtomIndex;
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
-use crate::commands::selecting::evaluate_selection;
+use crate::helpers::{
+    for_each_selected_molecule_mut, resolve_object_names, set_enabled_with_group_awareness,
+    ResolvedNames,
+};
 use crate::error::{CmdError, CmdResult};
 
 /// Register display commands
@@ -87,14 +90,8 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let rep_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("representation"));
-
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let rep_name = args.str_arg(0, "representation");
+        let selection = args.str_arg_or(1, "selection", "all");
 
         // If no representation specified, show all
         let rep = if let Some(name) = rep_name {
@@ -105,30 +102,18 @@ EXAMPLES
             RepMask::ALL
         };
 
-        // Evaluate selection with named selection support
-        let selection_results = evaluate_selection(ctx.viewer, selection)?;
-
-        let mut total_affected = 0usize;
-
-        // Apply to atoms matching the selection in each object
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    // Set object-level visibility for this rep
-                    mol_obj.state_mut().visible_reps.set_visible(rep);
-                    // Get mutable access and show rep on selected atoms
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            atom.repr.visible_reps.set_visible(rep);
-                        }
+        let total_affected = for_each_selected_molecule_mut(
+            ctx.viewer, selection, DirtyFlags::REPS,
+            |mol_obj, selected| {
+                mol_obj.state_mut().visible_reps.set_visible(rep);
+                let mol_mut = mol_obj.molecule_mut();
+                for idx in selected.indices() {
+                    if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                        atom.repr.visible_reps.set_visible(rep);
                     }
-                    mol_obj.invalidate(DirtyFlags::REPS);
-                    total_affected += count;
                 }
-            }
-        }
+            },
+        )?;
 
         ctx.viewer.request_redraw();
 
@@ -185,14 +170,8 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let rep_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("representation"));
-
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let rep_name = args.str_arg(0, "representation");
+        let selection = args.str_arg_or(1, "selection", "all");
 
         // If no representation specified, hide all
         let rep = if let Some(name) = rep_name {
@@ -203,32 +182,21 @@ EXAMPLES
             RepMask::ALL
         };
 
-        // Evaluate selection with named selection support
-        let selection_results = evaluate_selection(ctx.viewer, selection)?;
-
-        let mut total_affected = 0usize;
-
-        // Apply to atoms matching the selection in each object
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    // Get mutable access and hide rep on selected atoms
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            if rep == RepMask::ALL {
-                                atom.repr.visible_reps = RepMask::NONE;
-                            } else {
-                                atom.repr.visible_reps.set_hidden(rep);
-                            }
+        let total_affected = for_each_selected_molecule_mut(
+            ctx.viewer, selection, DirtyFlags::REPS,
+            |mol_obj, selected| {
+                let mol_mut = mol_obj.molecule_mut();
+                for idx in selected.indices() {
+                    if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                        if rep == RepMask::ALL {
+                            atom.repr.visible_reps = RepMask::NONE;
+                        } else {
+                            atom.repr.visible_reps.set_hidden(rep);
                         }
                     }
-                    mol_obj.invalidate(DirtyFlags::REPS);
-                    total_affected += count;
                 }
-            }
-        }
+            },
+        )?;
 
         ctx.viewer.request_redraw();
 
@@ -289,45 +257,27 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let rep_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("representation"))
+        let rep_name = args.str_arg(0, "representation")
             .ok_or_else(|| CmdError::MissingArgument("representation".to_string()))?;
-
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(1, "selection", "all");
 
         let rep = parse_rep(rep_name).ok_or_else(|| {
             CmdError::invalid_arg("representation", format!("unknown representation: {}", rep_name))
         })?;
 
-        // Evaluate selection with named selection support
-        let selection_results = evaluate_selection(ctx.viewer, selection)?;
-
-        let mut total_affected = 0usize;
-
-        // Apply to atoms matching the selection in each object
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    // Set object-level visibility for this rep
-                    mol_obj.state_mut().visible_reps.set_visible(rep);
-                    // Get mutable access: hide all reps, then show the specified one on selected atoms
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            atom.repr.visible_reps = RepMask::NONE;
-                            atom.repr.visible_reps.set_visible(rep);
-                        }
+        let total_affected = for_each_selected_molecule_mut(
+            ctx.viewer, selection, DirtyFlags::REPS,
+            |mol_obj, selected| {
+                mol_obj.state_mut().visible_reps.set_visible(rep);
+                let mol_mut = mol_obj.molecule_mut();
+                for idx in selected.indices() {
+                    if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                        atom.repr.visible_reps = RepMask::NONE;
+                        atom.repr.visible_reps.set_visible(rep);
                     }
-                    mol_obj.invalidate(DirtyFlags::REPS);
-                    total_affected += count;
                 }
-            }
-        }
+            },
+        )?;
 
         ctx.viewer.request_redraw();
 
@@ -381,42 +331,8 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
-            .unwrap_or("all");
-
-        // Enable matching objects
-        let object_names: Vec<String> = ctx
-            .viewer
-            .objects()
-            .matching(name)
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        for obj_name in &object_names {
-            if ctx.viewer.objects().get_group(obj_name).is_some() {
-                let _ = ctx.viewer.objects_mut().set_group_enabled(obj_name, true);
-            } else {
-                let _ = ctx.viewer.objects_mut().enable(obj_name, true);
-            }
-        }
-
-        // Enable matching selections
-        let matching_sels: Vec<String> = ctx.viewer.selections().matching(name)
-            .iter().map(|s| s.to_string()).collect();
-        for sel_name in &matching_sels {
-            ctx.viewer.selections_mut().set_visible(sel_name, true);
-        }
-
-        ctx.viewer.request_redraw();
-
-        if !ctx.quiet {
-            ctx.print(&format!(" Enabled \"{}\"", name));
-        }
-
-        Ok(())
+        let name = args.str_arg_or(0, "name", "all");
+        set_visibility(ctx, name, true)
     }
 }
 
@@ -458,43 +374,46 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
-            .unwrap_or("all");
+        let name = args.str_arg_or(0, "name", "all");
+        set_visibility(ctx, name, false)
+    }
+}
 
-        // Disable matching objects
-        let object_names: Vec<String> = ctx
-            .viewer
-            .objects()
-            .matching(name)
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        for obj_name in &object_names {
-            if ctx.viewer.objects().get_group(obj_name).is_some() {
-                let _ = ctx.viewer.objects_mut().set_group_enabled(obj_name, false);
-            } else {
-                let _ = ctx.viewer.objects_mut().enable(obj_name, false);
+/// Shared implementation for enable/disable commands.
+fn set_visibility(
+    ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
+    name: &str,
+    enabled: bool,
+) -> CmdResult {
+    match resolve_object_names(ctx.viewer.objects(), name) {
+        ResolvedNames::All => {
+            let all_names: Vec<String> = ctx.viewer.objects().names().map(|s| s.to_string()).collect();
+            for obj_name in &all_names {
+                set_enabled_with_group_awareness(ctx.viewer.objects_mut(), obj_name, enabled);
             }
         }
-
-        // Disable matching selections
-        let matching_sels: Vec<String> = ctx.viewer.selections().matching(name)
-            .iter().map(|s| s.to_string()).collect();
-        for sel_name in &matching_sels {
-            ctx.viewer.selections_mut().set_visible(sel_name, false);
+        ResolvedNames::Matched(names) => {
+            for obj_name in &names {
+                set_enabled_with_group_awareness(ctx.viewer.objects_mut(), obj_name, enabled);
+            }
         }
-
-        ctx.viewer.request_redraw();
-
-        if !ctx.quiet {
-            ctx.print(&format!(" Disabled \"{}\"", name));
-        }
-
-        Ok(())
+        ResolvedNames::Unresolved => {}
     }
+
+    let matching_sels: Vec<String> = ctx.viewer.selections().matching(name)
+        .iter().map(|s| s.to_string()).collect();
+    for sel_name in &matching_sels {
+        ctx.viewer.selections_mut().set_visible(sel_name, enabled);
+    }
+
+    ctx.viewer.request_redraw();
+
+    if !ctx.quiet {
+        let verb = if enabled { "Enabled" } else { "Disabled" };
+        ctx.print(&format!(" {} \"{}\"", verb, name));
+    }
+
+    Ok(())
 }
 
 // ============================================================================
@@ -534,23 +453,13 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
-
-        let mut found = false;
 
         // Try object first
         if let Some(obj) = ctx.viewer.objects().get(name) {
             let currently_enabled = obj.is_enabled();
-            let is_group = obj.object_type() == pymol_scene::ObjectType::Group;
-            if is_group {
-                let _ = ctx.viewer.objects_mut().set_group_enabled(name, !currently_enabled);
-            } else {
-                let _ = ctx.viewer.objects_mut().enable(name, !currently_enabled);
-            }
-            found = true;
+            set_enabled_with_group_awareness(ctx.viewer.objects_mut(), name, !currently_enabled);
 
             if !ctx.quiet {
                 if currently_enabled {
@@ -559,26 +468,19 @@ EXAMPLES
                     ctx.print(&format!(" Enabled \"{}\"", name));
                 }
             }
-        }
-
-        // Try selection
-        if !found {
+        } else if ctx.viewer.selections().names().contains(&name.to_string()) {
+            // Try selection
             let currently_visible = ctx.viewer.selections().is_visible(name);
-            if ctx.viewer.selections().names().contains(&name.to_string()) {
-                ctx.viewer.selections_mut().set_visible(name, !currently_visible);
-                found = true;
+            ctx.viewer.selections_mut().set_visible(name, !currently_visible);
 
-                if !ctx.quiet {
-                    if currently_visible {
-                        ctx.print(&format!(" Disabled selection \"{}\"", name));
-                    } else {
-                        ctx.print(&format!(" Enabled selection \"{}\"", name));
-                    }
+            if !ctx.quiet {
+                if currently_visible {
+                    ctx.print(&format!(" Disabled selection \"{}\"", name));
+                } else {
+                    ctx.print(&format!(" Enabled selection \"{}\"", name));
                 }
             }
-        }
-
-        if !found {
+        } else {
             return Err(CmdError::ObjectNotFound(name.to_string()));
         }
 
@@ -642,15 +544,9 @@ EXAMPLES
     }
 
     fn execute<'v, 'r>(&self, ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>, args: &ParsedCommand) -> CmdResult {
-        let color_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("color"))
+        let color_name = args.str_arg(0, "color")
             .ok_or_else(|| CmdError::MissingArgument("color".to_string()))?;
-
-        let selection = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
+        let selection = args.str_arg_or(1, "selection", "all");
 
         let color_index: i32 = if let Some(ci) = pymol_color::ColorIndex::from_scheme_name(color_name) {
             i32::from(ci)
@@ -661,36 +557,24 @@ EXAMPLES
                 .ok_or_else(|| CmdError::invalid_arg("color", format!("unknown color: {}", color_name)))?
         };
 
-        // Evaluate selection with named selection support
-        let selection_results = evaluate_selection(ctx.viewer, selection)?;
-
-        let mut total_colored = 0usize;
-
-        // Apply color to atoms matching the selection in each object
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    // Get mutable access and set colors on selected atoms
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            atom.repr.colors.base = color_index;
-                            atom.repr.colors.cartoon = color_index;
-                            atom.repr.colors.ribbon = color_index;
-                            atom.repr.colors.stick = color_index;
-                            atom.repr.colors.line = color_index;
-                            atom.repr.colors.sphere = color_index;
-                            atom.repr.colors.surface = color_index;
-                            atom.repr.colors.mesh = color_index;
-                        }
+        let total_colored = for_each_selected_molecule_mut(
+            ctx.viewer, selection, DirtyFlags::COLOR,
+            |mol_obj, selected| {
+                let mol_mut = mol_obj.molecule_mut();
+                for idx in selected.indices() {
+                    if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                        atom.repr.colors.base = color_index;
+                        atom.repr.colors.cartoon = color_index;
+                        atom.repr.colors.ribbon = color_index;
+                        atom.repr.colors.stick = color_index;
+                        atom.repr.colors.line = color_index;
+                        atom.repr.colors.sphere = color_index;
+                        atom.repr.colors.surface = color_index;
+                        atom.repr.colors.mesh = color_index;
                     }
-                    total_colored += count;
-                    // Mark the molecule as needing color rebuild
-                    mol_obj.invalidate(DirtyFlags::COLOR);
                 }
-            }
-        }
+            },
+        )?;
 
         ctx.viewer.request_redraw();
 
@@ -769,9 +653,7 @@ EXAMPLES
             }
         }
 
-        let color_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("color"))
+        let color_name = args.str_arg(0, "color")
             .ok_or_else(|| CmdError::MissingArgument("color".to_string()))?;
 
         // Resolve color: named colors registry, then hex
@@ -850,9 +732,7 @@ EXAMPLES
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let color_name = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("name"))
+        let color_name = args.str_arg(0, "name")
             .ok_or_else(|| CmdError::MissingArgument("name".to_string()))?;
 
         if let Some(crate::args::ArgValue::List(items)) = args.get_arg(1) {
@@ -1050,62 +930,44 @@ EXAMPLES
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let selection = args
-            .get_str(0)
-            .or_else(|| args.get_named_str("selection"))
-            .unwrap_or("all");
-
-        let expr_str = args
-            .get_str(1)
-            .or_else(|| args.get_named_str("expression"));
-
-        let selection_results = evaluate_selection(ctx.viewer, selection)?;
-
-        let mut total_affected = 0usize;
+        let selection = args.str_arg_or(0, "selection", "all");
+        let expr_str = args.str_arg(1, "expression");
 
         if let Some(expr_str) = expr_str {
             // Set labels
             let expr = parse_label_expr(expr_str)?;
 
-            for (obj_name, selected) in selection_results {
-                let count = selected.count();
-                if count > 0 {
-                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                        mol_obj.state_mut().visible_reps.set_visible(RepMask::LABELS);
-                        let mol_mut = mol_obj.molecule_mut();
-                        for idx in selected.indices() {
-                            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                atom.repr.label = eval_label_expr(&expr, atom);
-                                atom.repr.visible_reps.set_visible(RepMask::LABELS);
-                            }
+            let total_affected = for_each_selected_molecule_mut(
+                ctx.viewer, selection, DirtyFlags::REPS,
+                |mol_obj, selected| {
+                    mol_obj.state_mut().visible_reps.set_visible(RepMask::LABELS);
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            atom.repr.label = eval_label_expr(&expr, atom);
+                            atom.repr.visible_reps.set_visible(RepMask::LABELS);
                         }
-                        mol_obj.invalidate(DirtyFlags::REPS);
-                        total_affected += count;
                     }
-                }
-            }
+                },
+            )?;
 
             if !ctx.quiet {
                 ctx.print(&format!(" Label: {} atoms labeled", total_affected));
             }
         } else {
             // Clear labels
-            for (obj_name, selected) in selection_results {
-                let count = selected.count();
-                if count > 0 {
-                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                        let mol_mut = mol_obj.molecule_mut();
-                        for idx in selected.indices() {
-                            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                                atom.repr.label.clear();
-                                atom.repr.visible_reps.set_hidden(RepMask::LABELS);
-                            }
+            let total_affected = for_each_selected_molecule_mut(
+                ctx.viewer, selection, DirtyFlags::REPS,
+                |mol_obj, selected| {
+                    let mol_mut = mol_obj.molecule_mut();
+                    for idx in selected.indices() {
+                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
+                            atom.repr.label.clear();
+                            atom.repr.visible_reps.set_hidden(RepMask::LABELS);
                         }
-                        mol_obj.invalidate(DirtyFlags::REPS);
-                        total_affected += count;
                     }
-                }
-            }
+                },
+            )?;
 
             if !ctx.quiet {
                 ctx.print(&format!(" Label: {} atoms unlabeled", total_affected));
