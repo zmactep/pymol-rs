@@ -15,6 +15,7 @@ use pymol_scene::{DirtyFlags, Object};
 
 use crate::args::ParsedCommand;
 use crate::command::{Command, CommandContext, CommandRegistry, ViewerLike};
+use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
 /// Register transformation commands
@@ -526,12 +527,10 @@ fn parse_matrix(args: &ParsedCommand, pos: usize) -> Result<[f32; 16], CmdError>
 // Helper functions - Selection-based transformations
 // ============================================================================
 
-/// Apply a transformation to atoms matching a selection expression
+/// Apply a transformation to atoms matching a selection expression.
 ///
-/// This function:
-/// 1. Iterates over all molecule objects
-/// 2. Evaluates the selection expression against each molecule
-/// 3. Applies the transform function to matching atoms
+/// Uses `evaluate_selection()` which supports full selection expressions,
+/// named selections, object names, and wildcard patterns (e.g. `1fsd_*`).
 ///
 /// Returns (total_atoms_transformed, num_objects_affected)
 fn apply_selection_transform<F>(
@@ -543,62 +542,18 @@ fn apply_selection_transform<F>(
 where
     F: Fn(&mut pymol_mol::ObjectMolecule, &[AtomIndex], i64),
 {
+    let selection_results = evaluate_selection(ctx.viewer, selection)?;
+
     let mut total_atoms = 0usize;
     let mut affected_objects = 0usize;
 
-    // Collect molecule names first (to avoid borrow issues)
-    let mol_names: Vec<String> = ctx
-        .viewer
-        .objects()
-        .names()
-        .filter_map(|name| {
-            if ctx.viewer.objects().get_molecule(name).is_some() {
-                Some(name.to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Process each molecule
-    for name in mol_names {
-        // Get molecule reference for selection evaluation
-        let atoms: Vec<AtomIndex> = {
-            let mol_obj = match ctx.viewer.objects().get_molecule(&name) {
-                Some(m) => m,
-                None => continue,
-            };
-            let mol = mol_obj.molecule();
-
-            // Evaluate selection expression
-            match pymol_select::select_atoms(mol, selection) {
-                Ok(indices) => indices,
-                Err(e) => {
-                    // If selection fails, it might be an object name - try pattern matching
-                    if is_object_pattern(selection, &name) {
-                        // Select all atoms in this object
-                        (0..mol.atom_count() as u32).map(AtomIndex).collect()
-                    } else {
-                        // For complex selections that fail, skip this molecule
-                        // (it might match atoms in other molecules)
-                        if matches!(e, pymol_select::SelectError::Parse(_)) {
-                            return Err(CmdError::Selection(format!(
-                                "Invalid selection expression: {}",
-                                e
-                            )));
-                        }
-                        continue;
-                    }
-                }
-            }
-        };
-
+    for (obj_name, selected) in selection_results {
+        let atoms: Vec<AtomIndex> = selected.indices().collect();
         if atoms.is_empty() {
             continue;
         }
 
-        // Apply transformation to selected atoms
-        if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&name) {
+        if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
             // Resolve state=-1 (current state) to the object's display state
             let resolved_state = if state == -1 {
                 mol_obj.display_state() as i64 + 1 // convert 0-indexed to 1-indexed
@@ -619,33 +574,6 @@ where
     }
 
     Ok((total_atoms, affected_objects))
-}
-
-/// Check if a selection string is an object name pattern matching the given name
-fn is_object_pattern(selection: &str, name: &str) -> bool {
-    // Exact match
-    if selection == name {
-        return true;
-    }
-    // Simple wildcard match
-    if selection.contains('*') {
-        // Handle simple prefix/suffix wildcards
-        if selection == "*" {
-            return true;
-        }
-        if let Some(prefix) = selection.strip_suffix('*') {
-            return name.starts_with(prefix);
-        }
-        if let Some(suffix) = selection.strip_prefix('*') {
-            return name.ends_with(suffix);
-        }
-        // For more complex patterns, check if the non-wildcard parts match
-        let parts: Vec<&str> = selection.split('*').collect();
-        if parts.len() == 2 {
-            return name.starts_with(parts[0]) && name.ends_with(parts[1]);
-        }
-    }
-    false
 }
 
 // ============================================================================

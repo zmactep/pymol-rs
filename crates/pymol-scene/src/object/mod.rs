@@ -954,29 +954,22 @@ impl ObjectRegistry {
         })
     }
 
-    /// Get object names matching a pattern
+    /// Get object names matching a pattern.
     ///
-    /// Currently supports simple wildcard matching with `*`.
+    /// Supports `*` (any characters) and `?` (single character) wildcards
+    /// via `pymol_select::Pattern::Wildcard`. Pattern `*` or `all` matches
+    /// everything. Names without wildcard characters are matched exactly.
     pub fn matching<'a>(&'a self, pattern: &'a str) -> Vec<&'a str> {
         if pattern == "*" || pattern == "all" {
             return self.render_order.iter().map(|s| s.as_str()).collect();
         }
 
-        // Simple prefix/suffix matching
-        if let Some(prefix) = pattern.strip_suffix('*') {
+        if pattern.contains('*') || pattern.contains('?') {
+            let pat = pymol_select::Pattern::Wildcard(pattern.to_string());
             return self
                 .render_order
                 .iter()
-                .filter(|name| name.starts_with(prefix))
-                .map(|s| s.as_str())
-                .collect();
-        }
-
-        if let Some(suffix) = pattern.strip_prefix('*') {
-            return self
-                .render_order
-                .iter()
-                .filter(|name| name.ends_with(suffix))
+                .filter(|name| pat.matches(name, false))
                 .map(|s| s.as_str())
                 .collect();
         }

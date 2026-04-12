@@ -60,20 +60,6 @@ fn collect_group_descendants(
     }
 }
 
-/// Simple glob matching (prefix* and *suffix patterns)
-fn glob_match(pattern: &str, name: &str) -> bool {
-    if pattern == "*" || pattern == "all" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return name.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return name.ends_with(suffix);
-    }
-    pattern == name
-}
-
 /// Register object commands
 pub fn register(registry: &mut CommandRegistry) {
     registry.register(DeleteCommand);
@@ -162,22 +148,11 @@ EXAMPLES
         }
 
         // Delete matching named selections
-        // "all" deletes all selections too
-        if name == "all" {
-            let sel_names = ctx.viewer.selections().names();
-            deleted_selections = sel_names.len();
-            for sel_name in sel_names {
-                ctx.viewer.remove_selection(&sel_name);
-            }
-        } else {
-            // Try exact match or glob pattern on selections
-            let sel_names = ctx.viewer.selections().names();
-            for sel_name in &sel_names {
-                if sel_name == name || glob_match(name, sel_name) {
-                    ctx.viewer.remove_selection(sel_name);
-                    deleted_selections += 1;
-                }
-            }
+        let matching_sels: Vec<String> = ctx.viewer.selections().matching(name)
+            .iter().map(|s| s.to_string()).collect();
+        for sel_name in &matching_sels {
+            ctx.viewer.remove_selection(sel_name);
+            deleted_selections += 1;
         }
 
         let total = deleted_objects + deleted_selections;

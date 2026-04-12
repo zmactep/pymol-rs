@@ -9,17 +9,6 @@ use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLi
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 
-/// Simple glob matching (prefix* and *suffix patterns)
-fn glob_match(pattern: &str, name: &str) -> bool {
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return name.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return name.ends_with(suffix);
-    }
-    pattern == name
-}
-
 /// Register display commands
 pub fn register(registry: &mut CommandRegistry) {
     registry.register(ShowCommand);
@@ -415,11 +404,10 @@ EXAMPLES
         }
 
         // Enable matching selections
-        let sel_names = ctx.viewer.selections().names();
-        for sel_name in &sel_names {
-            if name == "all" || sel_name == name || glob_match(name, sel_name) {
-                ctx.viewer.selections_mut().set_visible(sel_name, true);
-            }
+        let matching_sels: Vec<String> = ctx.viewer.selections().matching(name)
+            .iter().map(|s| s.to_string()).collect();
+        for sel_name in &matching_sels {
+            ctx.viewer.selections_mut().set_visible(sel_name, true);
         }
 
         ctx.viewer.request_redraw();
@@ -493,11 +481,10 @@ EXAMPLES
         }
 
         // Disable matching selections
-        let sel_names = ctx.viewer.selections().names();
-        for sel_name in &sel_names {
-            if name == "all" || sel_name == name || glob_match(name, sel_name) {
-                ctx.viewer.selections_mut().set_visible(sel_name, false);
-            }
+        let matching_sels: Vec<String> = ctx.viewer.selections().matching(name)
+            .iter().map(|s| s.to_string()).collect();
+        for sel_name in &matching_sels {
+            ctx.viewer.selections_mut().set_visible(sel_name, false);
         }
 
         ctx.viewer.request_redraw();

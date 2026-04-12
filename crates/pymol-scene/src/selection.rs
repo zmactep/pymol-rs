@@ -187,6 +187,22 @@ impl SelectionManager {
         self.selections.iter()
     }
 
+    /// Get selection names matching a wildcard pattern.
+    ///
+    /// Supports `*` (any characters) and `?` (single character) via
+    /// `pymol_select::Pattern::Wildcard`. Pattern `*` or `all` matches everything.
+    pub fn matching(&self, pattern: &str) -> Vec<&str> {
+        if pattern == "*" || pattern == "all" {
+            return self.selections.keys().map(|s| s.as_str()).collect();
+        }
+        let pat = pymol_select::Pattern::Wildcard(pattern.to_string());
+        self.selections
+            .keys()
+            .filter(|name| pat.matches(name, false))
+            .map(|s| s.as_str())
+            .collect()
+    }
+
     /// Get an iterator over visible selections
     pub fn visible_selections(&self) -> impl Iterator<Item = (&str, &str)> {
         self.selections

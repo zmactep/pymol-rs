@@ -30,6 +30,10 @@ impl Command for AlignCommand {
         "align"
     }
 
+    fn arg_hints(&self) -> &[ArgHint] {
+        &[ArgHint::Selection, ArgHint::Selection]
+    }
+
     fn help(&self) -> &str {
         r#"
 DESCRIPTION
@@ -203,8 +207,8 @@ SEE ALSO
         let results1 = evaluate_selection(ctx.viewer, sel1)?;
         let results2 = evaluate_selection(ctx.viewer, sel2)?;
 
-        let (obj1, indices1) = first_molecule_selection(&results1, sel1)?;
-        let (obj2, indices2) = first_molecule_selection(&results2, sel2)?;
+        let (obj1, indices1) = single_molecule_selection(&results1, sel1)?;
+        let (obj2, indices2) = single_molecule_selection(&results2, sel2)?;
 
         if indices1.len() != indices2.len() {
             return Err(CmdError::Execution(format!(
@@ -234,54 +238,82 @@ SEE ALSO
 }
 
 /// Direct Kabsch alignment — selections must have equal atom count.
+///
+/// Aligns each mobile object independently to the target.
 fn align_by_kabsch(
     ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
     mobile_sel: &str,
     target_sel: &str,
     params: &SuperposeParams,
 ) -> CmdResult {
-    // Evaluate selections
     let mobile_results = evaluate_selection(ctx.viewer, mobile_sel)?;
     let target_results = evaluate_selection(ctx.viewer, target_sel)?;
 
-    // Collect (object_name, atom_indices) for mobile
-    let (mobile_obj, mobile_indices) = first_molecule_selection(&mobile_results, mobile_sel)?;
-    let (target_obj, target_indices) = first_molecule_selection(&target_results, target_sel)?;
-
-    if mobile_indices.len() != target_indices.len() {
-        return Err(CmdError::Execution(format!(
-            "Selections have different atom counts: {} vs {} (use method=sequence for unequal sizes)",
-            mobile_indices.len(),
-            target_indices.len()
-        )));
-    }
-
-    let n = mobile_indices.len();
-    if n < 3 {
-        return Err(CmdError::Execution(format!(
-            "Need at least 3 atoms for alignment, got {}",
-            n
-        )));
-    }
-
-    // Extract coordinates
-    let mobile_coords = extract_coords(ctx.viewer, &mobile_obj, &mobile_indices)?;
+    let (target_obj, target_indices) = single_molecule_selection(&target_results, target_sel)?;
     let target_coords = extract_coords(ctx.viewer, &target_obj, &target_indices)?;
 
-    // Build 1:1 pairs
-    let pairs: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect();
+    let mobile_objects = all_molecule_selections(&mobile_results, mobile_sel)?;
+    let mut aligned_count = 0usize;
 
-    // Superpose
-    let result = superpose(&mobile_coords, &target_coords, &pairs, params)
-        .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+    for (mobile_obj, mobile_indices) in &mobile_objects {
+        if mobile_obj == &target_obj {
+            continue;
+        }
 
-    apply_superpose_transform(ctx, &mobile_obj, &result)?;
-    print_superpose_result(ctx, &result, params, &[]);
+        if mobile_indices.len() != target_indices.len() {
+            if mobile_objects.len() == 1 {
+                return Err(CmdError::Execution(format!(
+                    "Selections have different atom counts: {} vs {} (use method=sequence for unequal sizes)",
+                    mobile_indices.len(), target_indices.len()
+                )));
+            }
+            ctx.print_warning(&format!(
+                " Skipping \"{}\": atom count {} != target {}",
+                mobile_obj, mobile_indices.len(), target_indices.len()
+            ));
+            continue;
+        }
+
+        let n = mobile_indices.len();
+        if n < 3 {
+            if mobile_objects.len() == 1 {
+                return Err(CmdError::Execution(format!(
+                    "Need at least 3 atoms for alignment, got {}", n
+                )));
+            }
+            continue;
+        }
+
+        let mobile_coords = extract_coords(ctx.viewer, mobile_obj, mobile_indices)?;
+        let pairs: Vec<(usize, usize)> = (0..n).map(|i| (i, i)).collect();
+
+        let result = superpose(&mobile_coords, &target_coords, &pairs, params)
+            .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+
+        apply_superpose_transform(ctx, mobile_obj, &result)?;
+        if mobile_objects.len() > 1 {
+            ctx.print(&format!(
+                " Executive: \"{}\" RMSD = {:8.3}, {} atoms",
+                mobile_obj, result.final_rmsd, result.n_aligned
+            ));
+        } else {
+            print_superpose_result(ctx, &result, params, &[]);
+        }
+        aligned_count += 1;
+    }
+
+    if aligned_count == 0 {
+        return Err(CmdError::Selection(format!(
+            "No mobile objects to align (target \"{}\" excluded)", target_obj
+        )));
+    }
 
     Ok(())
 }
 
 /// Sequence-based alignment — aligns by matching residue sequences, then fits Cα atoms.
+///
+/// Aligns each mobile object independently to the target.
 fn align_by_sequence(
     ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
     mobile_sel: &str,
@@ -289,74 +321,105 @@ fn align_by_sequence(
     params: &SuperposeParams,
     scoring: &AlignmentScoring,
 ) -> CmdResult {
-    // Evaluate selections
     let mobile_results = evaluate_selection(ctx.viewer, mobile_sel)?;
     let target_results = evaluate_selection(ctx.viewer, target_sel)?;
 
-    let (mobile_obj, mobile_indices) = first_molecule_selection(&mobile_results, mobile_sel)?;
-    let (target_obj, target_indices) = first_molecule_selection(&target_results, target_sel)?;
-
-    // Extract residue sequences and Cα atom indices from selections
-    let (mobile_seq, mobile_ca) =
-        extract_residue_sequence(ctx.viewer, &mobile_obj, &mobile_indices)?;
+    let (target_obj, target_indices) = single_molecule_selection(&target_results, target_sel)?;
     let (target_seq, target_ca) =
         extract_residue_sequence(ctx.viewer, &target_obj, &target_indices)?;
 
-    if mobile_seq.is_empty() || target_seq.is_empty() {
+    if target_seq.is_empty() {
         return Err(CmdError::Execution(
-            "No protein/nucleic acid residues found in one or both selections".into(),
+            "No protein/nucleic acid residues found in target selection".into(),
         ));
     }
 
-    // Sequence alignment
-    let alignment = global_align(&mobile_seq, &target_seq, scoring);
+    let mobile_objects = all_molecule_selections(&mobile_results, mobile_sel)?;
+    let mut aligned_count = 0usize;
 
-    // Collect matched Cα atom indices from sequence alignment
-    let mut mobile_ca_indices: Vec<AtomIndex> = Vec::new();
-    let mut target_ca_indices: Vec<AtomIndex> = Vec::new();
+    for (mobile_obj, mobile_indices) in &mobile_objects {
+        if mobile_obj == &target_obj {
+            continue;
+        }
 
-    for pair in &alignment.pairs {
-        if let AlignedPair::Match { source, target } = pair {
-            if let (Some(&Some(src_ca_idx)), Some(&Some(tgt_ca_idx))) =
-                (mobile_ca.get(*source), target_ca.get(*target))
-            {
-                mobile_ca_indices.push(src_ca_idx);
-                target_ca_indices.push(tgt_ca_idx);
+        let (mobile_seq, mobile_ca) =
+            extract_residue_sequence(ctx.viewer, mobile_obj, mobile_indices)?;
+
+        if mobile_seq.is_empty() {
+            if mobile_objects.len() == 1 {
+                return Err(CmdError::Execution(
+                    "No protein/nucleic acid residues found in mobile selection".into(),
+                ));
+            }
+            continue;
+        }
+
+        let alignment = global_align(&mobile_seq, &target_seq, scoring);
+
+        let mut mobile_ca_indices: Vec<AtomIndex> = Vec::new();
+        let mut target_ca_indices: Vec<AtomIndex> = Vec::new();
+
+        for pair in &alignment.pairs {
+            if let AlignedPair::Match { source, target } = pair {
+                if let (Some(&Some(src_ca_idx)), Some(&Some(tgt_ca_idx))) =
+                    (mobile_ca.get(*source), target_ca.get(*target))
+                {
+                    mobile_ca_indices.push(src_ca_idx);
+                    target_ca_indices.push(tgt_ca_idx);
+                }
             }
         }
+
+        let mobile_ca_coords = extract_coords(ctx.viewer, mobile_obj, &mobile_ca_indices)?;
+        let target_ca_coords = extract_coords(ctx.viewer, &target_obj, &target_ca_indices)?;
+        let ca_pairs: Vec<(usize, usize)> = (0..mobile_ca_coords.len()).map(|i| (i, i)).collect();
+
+        if ca_pairs.len() < 3 {
+            if mobile_objects.len() == 1 {
+                return Err(CmdError::Execution(format!(
+                    "Too few Cα pairs for alignment (need ≥3, got {})",
+                    ca_pairs.len()
+                )));
+            }
+            continue;
+        }
+
+        let result = superpose(&mobile_ca_coords, &target_ca_coords, &ca_pairs, params)
+            .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+
+        apply_superpose_transform(ctx, mobile_obj, &result)?;
+        if mobile_objects.len() > 1 {
+            ctx.print(&format!(
+                " Executive: \"{}\" RMSD = {:8.3}, {} Cα pairs, {:.1}% identity",
+                mobile_obj, result.final_rmsd, ca_pairs.len(),
+                alignment.identity * 100.0
+            ));
+        } else {
+            print_superpose_result(ctx, &result, params, &[
+                format!(
+                    "   Sequence identity: {:.1}% ({} of {} residues)",
+                    alignment.identity * 100.0,
+                    alignment.n_matched,
+                    mobile_seq.len().max(target_seq.len())
+                ),
+                format!("   Matched Cα pairs:  {}", ca_pairs.len()),
+            ]);
+        }
+        aligned_count += 1;
     }
 
-    // Extract coordinates in batch
-    let mobile_ca_coords = extract_coords(ctx.viewer, &mobile_obj, &mobile_ca_indices)?;
-    let target_ca_coords = extract_coords(ctx.viewer, &target_obj, &target_ca_indices)?;
-    let ca_pairs: Vec<(usize, usize)> = (0..mobile_ca_coords.len()).map(|i| (i, i)).collect();
-
-    if ca_pairs.len() < 3 {
-        return Err(CmdError::Execution(format!(
-            "Too few Cα pairs for alignment (need ≥3, got {})",
-            ca_pairs.len()
+    if aligned_count == 0 {
+        return Err(CmdError::Selection(format!(
+            "No mobile objects to align (target \"{}\" excluded)", target_obj
         )));
     }
-
-    // Superpose using Cα pairs
-    let result = superpose(&mobile_ca_coords, &target_ca_coords, &ca_pairs, params)
-        .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
-
-    apply_superpose_transform(ctx, &mobile_obj, &result)?;
-    print_superpose_result(ctx, &result, params, &[
-        format!(
-            "   Sequence identity: {:.1}% ({} of {} residues)",
-            alignment.identity * 100.0,
-            alignment.n_matched,
-            mobile_seq.len().max(target_seq.len())
-        ),
-        format!("   Matched Cα pairs:  {}", ca_pairs.len()),
-    ]);
 
     Ok(())
 }
 
 /// CE structural alignment — structure-based alignment using Combinatorial Extension.
+///
+/// Aligns each mobile object independently to the target.
 fn align_by_ce(
     ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
     mobile_sel: &str,
@@ -364,29 +427,18 @@ fn align_by_ce(
     params: &SuperposeParams,
     args: &ParsedCommand,
 ) -> CmdResult {
-    // Evaluate selections
     let mobile_results = evaluate_selection(ctx.viewer, mobile_sel)?;
     let target_results = evaluate_selection(ctx.viewer, target_sel)?;
 
-    let (mobile_obj, mobile_indices) = first_molecule_selection(&mobile_results, mobile_sel)?;
-    let (target_obj, target_indices) = first_molecule_selection(&target_results, target_sel)?;
-
-    // Extract residue sequences + Cα atom indices
-    let (_, mobile_ca) =
-        extract_residue_sequence(ctx.viewer, &mobile_obj, &mobile_indices)?;
+    let (target_obj, target_indices) = single_molecule_selection(&target_results, target_sel)?;
     let (_, target_ca) =
         extract_residue_sequence(ctx.viewer, &target_obj, &target_indices)?;
-
-    // Collect Cα atom indices for residues that have Cα atoms
-    let mobile_ca_indices: Vec<AtomIndex> = mobile_ca.iter().filter_map(|opt| *opt).collect();
     let target_ca_indices: Vec<AtomIndex> = target_ca.iter().filter_map(|opt| *opt).collect();
-
-    let mobile_ca_coords = extract_coords(ctx.viewer, &mobile_obj, &mobile_ca_indices)?;
     let target_ca_coords = extract_coords(ctx.viewer, &target_obj, &target_ca_indices)?;
 
-    if mobile_ca_coords.is_empty() || target_ca_coords.is_empty() {
+    if target_ca_coords.is_empty() {
         return Err(CmdError::Execution(
-            "No Cα atoms found in one or both selections".into(),
+            "No Cα atoms found in target selection".into(),
         ));
     }
 
@@ -399,39 +451,77 @@ fn align_by_ce(
         ..CeParams::default()
     };
 
-    // Run CE alignment
-    let ce_result = ce_align(&mobile_ca_coords, &target_ca_coords, &ce_params)
-        .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+    let mobile_objects = all_molecule_selections(&mobile_results, mobile_sel)?;
+    let mut aligned_count = 0usize;
 
-    if ce_result.pairs.len() < 3 {
-        return Err(CmdError::Execution(format!(
-            "CE alignment found too few matching residues ({})",
-            ce_result.pairs.len()
+    for (mobile_obj, mobile_indices) in &mobile_objects {
+        if mobile_obj == &target_obj {
+            continue;
+        }
+
+        let (_, mobile_ca) =
+            extract_residue_sequence(ctx.viewer, mobile_obj, mobile_indices)?;
+        let mobile_ca_indices: Vec<AtomIndex> = mobile_ca.iter().filter_map(|opt| *opt).collect();
+        let mobile_ca_coords = extract_coords(ctx.viewer, mobile_obj, &mobile_ca_indices)?;
+
+        if mobile_ca_coords.is_empty() {
+            if mobile_objects.len() == 1 {
+                return Err(CmdError::Execution(
+                    "No Cα atoms found in mobile selection".into(),
+                ));
+            }
+            continue;
+        }
+
+        let ce_result = ce_align(&mobile_ca_coords, &target_ca_coords, &ce_params)
+            .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+
+        if ce_result.pairs.len() < 3 {
+            if mobile_objects.len() == 1 {
+                return Err(CmdError::Execution(format!(
+                    "CE alignment found too few matching residues ({})",
+                    ce_result.pairs.len()
+                )));
+            }
+            continue;
+        }
+
+        // Extract aligned Cα coordinates for superposition
+        let mut aligned_mobile: Vec<Vec3> = Vec::new();
+        let mut aligned_target: Vec<Vec3> = Vec::new();
+        let mut superpose_pairs: Vec<(usize, usize)> = Vec::new();
+        for &(si, ti) in &ce_result.pairs {
+            let idx = aligned_mobile.len();
+            aligned_mobile.push(mobile_ca_coords[si]);
+            aligned_target.push(target_ca_coords[ti]);
+            superpose_pairs.push((idx, idx));
+        }
+
+        let result = superpose(&aligned_mobile, &aligned_target, &superpose_pairs, params)
+            .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
+
+        apply_superpose_transform(ctx, mobile_obj, &result)?;
+        if mobile_objects.len() > 1 {
+            ctx.print(&format!(
+                " Executive: \"{}\" RMSD = {:8.3}, {} CE pairs (Z-score: {:.1})",
+                mobile_obj, result.final_rmsd, ce_result.n_aligned, ce_result.z_score
+            ));
+        } else {
+            print_superpose_result(ctx, &result, params, &[
+                format!(
+                    "   CE alignment:    {} residue pairs (Z-score: {:.1})",
+                    ce_result.n_aligned, ce_result.z_score
+                ),
+            ]);
+        }
+        aligned_count += 1;
+    }
+
+    if aligned_count == 0 {
+        return Err(CmdError::Selection(format!(
+            "No mobile objects to align (target \"{}\" excluded)", target_obj
         )));
     }
-
-    // Extract aligned Cα coordinates for superposition
-    let mut aligned_mobile: Vec<Vec3> = Vec::new();
-    let mut aligned_target: Vec<Vec3> = Vec::new();
-    let mut superpose_pairs: Vec<(usize, usize)> = Vec::new();
-    for &(si, ti) in &ce_result.pairs {
-        let idx = aligned_mobile.len();
-        aligned_mobile.push(mobile_ca_coords[si]);
-        aligned_target.push(target_ca_coords[ti]);
-        superpose_pairs.push((idx, idx));
-    }
-
-    // Superpose with outlier rejection
-    let result = superpose(&aligned_mobile, &aligned_target, &superpose_pairs, params)
-        .map_err(|e: pymol_algos::AlignError| CmdError::Execution(e.to_string()))?;
-
-    apply_superpose_transform(ctx, &mobile_obj, &result)?;
-    print_superpose_result(ctx, &result, params, &[
-        format!(
-            "   CE alignment:    {} residue pairs (Z-score: {:.1})",
-            ce_result.n_aligned, ce_result.z_score
-        ),
-    ]);
 
     Ok(())
 }
@@ -440,21 +530,66 @@ fn align_by_ce(
 // Helper functions
 // ============================================================================
 
-/// Get the first molecule object and its selected atom indices from selection results.
-fn first_molecule_selection(
+/// Get a single molecule object and its selected atom indices from selection results.
+///
+/// Returns an error if the selection matches atoms in more than one object
+/// (used for the `target` argument of align, which must be a single molecule).
+fn single_molecule_selection(
     results: &[(String, pymol_select::SelectionResult)],
     sel_name: &str,
 ) -> CmdResult<(String, Vec<AtomIndex>)> {
-    for (obj_name, sel_result) in results {
-        let indices: Vec<AtomIndex> = sel_result.indices().collect();
-        if !indices.is_empty() {
-            return Ok((obj_name.clone(), indices));
-        }
+    let non_empty: Vec<(&String, Vec<AtomIndex>)> = results
+        .iter()
+        .filter_map(|(obj_name, sel_result)| {
+            let indices: Vec<AtomIndex> = sel_result.indices().collect();
+            if indices.is_empty() {
+                None
+            } else {
+                Some((obj_name, indices))
+            }
+        })
+        .collect();
+
+    match non_empty.len() {
+        0 => Err(CmdError::Selection(format!(
+            "No atoms matching '{}'",
+            sel_name
+        ))),
+        1 => Ok((non_empty[0].0.clone(), non_empty[0].1.clone())),
+        n => Err(CmdError::invalid_arg(
+            "target",
+            &format!(
+                "target must select atoms from a single object, but '{}' matches {} objects",
+                sel_name, n
+            ),
+        )),
     }
-    Err(CmdError::Selection(format!(
-        "No atoms matching '{}'",
-        sel_name
-    )))
+}
+
+/// Get all molecule objects and their selected atom indices from selection results.
+fn all_molecule_selections(
+    results: &[(String, pymol_select::SelectionResult)],
+    sel_name: &str,
+) -> CmdResult<Vec<(String, Vec<AtomIndex>)>> {
+    let selections: Vec<(String, Vec<AtomIndex>)> = results
+        .iter()
+        .filter_map(|(obj_name, sel_result)| {
+            let indices: Vec<AtomIndex> = sel_result.indices().collect();
+            if indices.is_empty() {
+                None
+            } else {
+                Some((obj_name.clone(), indices))
+            }
+        })
+        .collect();
+
+    if selections.is_empty() {
+        return Err(CmdError::Selection(format!(
+            "No atoms matching '{}'",
+            sel_name
+        )));
+    }
+    Ok(selections)
 }
 
 /// Extract coordinates for selected atoms from a molecule object.

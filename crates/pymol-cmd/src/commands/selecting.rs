@@ -80,8 +80,20 @@ pub fn select_with_context(
     let object_names: Vec<String> = viewer.objects().names().map(|s| s.to_string()).collect();
 
     // Parse the selection expression upfront (validates syntax even with no molecules)
-    let parsed_expr = pymol_select::parse(selection)
-        .map_err(|e| CmdError::invalid_arg("selection", format!("parse error: {:?}", e)))?;
+    let parsed_expr = match pymol_select::parse(selection) {
+        Ok(expr) => expr,
+        Err(parse_err) => {
+            // If parsing fails and the input contains wildcard characters,
+            // try to interpret it as an object/selection name pattern
+            if selection.contains('*') || selection.contains('?') {
+                return evaluate_wildcard_pattern(viewer, selection, &object_names);
+            }
+            return Err(CmdError::invalid_arg(
+                "selection",
+                format!("parse error: {:?}", parse_err),
+            ));
+        }
+    };
 
     // Validate all name references in the expression against known selections/objects
     let known_selections = viewer.selection_names();
@@ -127,6 +139,63 @@ pub fn select_with_context(
             Err(e) => {
                 log::debug!("Selection evaluation error for {}: {:?}", obj_name, e);
             }
+        }
+    }
+
+    Ok((total_count, results))
+}
+
+/// Evaluate a wildcard pattern against object names and named selections.
+///
+/// When a selection expression fails to parse but contains `*` or `?`,
+/// this function matches the pattern against object and named selection
+/// names, returning all atoms from matching objects and the union of
+/// cached results from matching named selections.
+fn evaluate_wildcard_pattern(
+    viewer: &dyn ViewerLike,
+    pattern: &str,
+    object_names: &[String],
+) -> CmdResult<(usize, Vec<(String, SelectionResult)>)> {
+    let matching_objects: Vec<&str> = viewer.objects().matching(pattern);
+    let matching_selections: Vec<&str> = viewer.selections().matching(pattern);
+
+    if matching_objects.is_empty() && matching_selections.is_empty() {
+        return Err(CmdError::Selection(format!(
+            "No objects or selections matching pattern '{}'",
+            pattern
+        )));
+    }
+
+    let mut total_count = 0;
+    let mut results: Vec<(String, SelectionResult)> = Vec::new();
+
+    for obj_name in object_names {
+        let Some(mol_obj) = viewer.objects().get_molecule(obj_name) else {
+            continue;
+        };
+        let atom_count = mol_obj.molecule().atom_count();
+
+        // Select all atoms if this object matches the pattern
+        let mut combined = if matching_objects.iter().any(|&m| m == obj_name) {
+            SelectionResult::all(atom_count)
+        } else {
+            SelectionResult::none(atom_count)
+        };
+
+        // Union with cached results from matching named selections
+        for &sel_name in &matching_selections {
+            if let Some(entry) = viewer.selections().get(sel_name) {
+                if let Some(cached) = entry.cached_results.get(obj_name) {
+                    if cached.atom_count() == atom_count {
+                        combined.union_with(cached);
+                    }
+                }
+            }
+        }
+
+        if combined.any() {
+            total_count += combined.count();
+            results.push((obj_name.clone(), combined));
         }
     }
 
