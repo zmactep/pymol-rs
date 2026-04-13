@@ -1,6 +1,6 @@
 {
   "name": "@pymol-rs/viewer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Embeddable WebGPU molecular visualization component powered by PyMOL-RS",
   "type": "module",
   "main": "dist/pymol-rs-viewer.js",
