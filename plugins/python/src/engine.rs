@@ -99,34 +99,46 @@ fn python_candidates() -> Vec<std::path::PathBuf> {
     // 1. VIRTUAL_ENV env var (activated venv)
     if let Some(venv) = std::env::var_os("VIRTUAL_ENV") {
         let venv = std::path::PathBuf::from(venv);
-        candidates.push(venv.join("bin/python3"));
-        candidates.push(venv.join("bin/python"));
+        if cfg!(target_os = "windows") {
+            candidates.push(venv.join("Scripts").join("python.exe"));
+        } else {
+            candidates.push(venv.join("bin/python3"));
+            candidates.push(venv.join("bin/python"));
+        }
     }
 
     // 2. .venv/ in current directory (common convention, even if not activated)
     let cwd_venv = std::path::PathBuf::from(".venv");
     if cwd_venv.is_dir() {
-        candidates.push(cwd_venv.join("bin/python3"));
-        candidates.push(cwd_venv.join("bin/python"));
+        if cfg!(target_os = "windows") {
+            candidates.push(cwd_venv.join("Scripts").join("python.exe"));
+        } else {
+            candidates.push(cwd_venv.join("bin/python3"));
+            candidates.push(cwd_venv.join("bin/python"));
+        }
     }
 
     // 3. System Python from PATH
-    candidates.push("python3".into());
-    candidates.push("python".into());
+    if cfg!(target_os = "windows") {
+        candidates.push("python.exe".into());
+        candidates.push("python3.exe".into());
+    } else {
+        candidates.push("python3".into());
+        candidates.push("python".into());
+    }
 
     candidates
 }
 
 /// Prepend a path to `PYTHONPATH`.
 fn prepend_pythonpath(path: &str) {
-    let existing = std::env::var("PYTHONPATH").unwrap_or_default();
-    let new_path = if existing.is_empty() {
-        path.to_string()
-    } else {
-        format!("{}:{}", path, existing)
-    };
-    log::debug!("Python plugin: setting PYTHONPATH={}", new_path);
-    std::env::set_var("PYTHONPATH", &new_path);
+    let existing = std::env::var_os("PYTHONPATH").unwrap_or_default();
+    let mut paths = vec![std::path::PathBuf::from(path)];
+    paths.extend(std::env::split_paths(&existing));
+    if let Ok(new_path) = std::env::join_paths(&paths) {
+        log::debug!("Python plugin: setting PYTHONPATH={}", new_path.to_string_lossy());
+        std::env::set_var("PYTHONPATH", &new_path);
+    }
 }
 
 /// Configure the Python interpreter's environment before initialization.
@@ -199,10 +211,21 @@ print(sp[0] if sp else '')
         let home = if base_prefix == base_exec_prefix {
             base_prefix.to_string()
         } else {
-            format!("{}:{}", base_prefix, base_exec_prefix)
+            // Python uses ';' as PYTHONHOME separator on Windows, ':' on Unix
+            let sep = if cfg!(target_os = "windows") { ';' } else { ':' };
+            format!("{}{}{}", base_prefix, sep, base_exec_prefix)
         };
         log::debug!("Python plugin: setting PYTHONHOME={}", home);
         std::env::set_var("PYTHONHOME", &home);
+
+        // On Windows, add Python's base directory to PATH so the delay-loaded
+        // python3XX.dll can be found when PyO3 functions are first called.
+        #[cfg(target_os = "windows")]
+        {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{};{}", base_prefix, current_path));
+            log::debug!("Python plugin: added {} to PATH", base_prefix);
+        }
 
         // If this candidate lives in a venv, add its site-packages
         if prefix != base_prefix && !site_packages.is_empty() {
