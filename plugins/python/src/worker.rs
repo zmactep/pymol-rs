@@ -96,6 +96,11 @@ pub enum WorkItem {
     ExecFile { path: String, origin: WorkOrigin },
     /// Install the PluginBackend into `sys._pymolrs_backend`.
     InstallBackend { shared: SharedStateHandle },
+    /// Invoke a Python callable bound to a key (no arguments).
+    InvokeKeybindCallback {
+        callback: Py<PyAny>,
+        origin: WorkOrigin,
+    },
     /// Shut down the worker thread.
     #[allow(dead_code)]
     Shutdown,
@@ -193,6 +198,21 @@ fn worker_loop(
                     origin: WorkOrigin::Setup,
                     result,
                 });
+                busy.store(false, Ordering::Relaxed);
+            }
+
+            WorkItem::InvokeKeybindCallback { callback, origin } => {
+                busy.store(true, Ordering::Relaxed);
+                let result = Python::attach(|py| -> Result<String, String> {
+                    callback.call0(py).map_err(|e| e.to_string())?;
+                    Ok(String::new())
+                });
+                if let Err(e) = result {
+                    let _ = result_tx.send(WorkResult {
+                        origin,
+                        result: Err(e),
+                    });
+                }
                 busy.store(false, Ordering::Relaxed);
             }
 

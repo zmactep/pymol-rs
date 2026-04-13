@@ -47,7 +47,7 @@ pub use camera::{Camera, CameraAnimation, Projection, SceneView, normalize_matri
 pub use capture::capture_png_to_file;
 pub use error::{SceneError, SceneResult, ViewerError, WindowError};
 pub use input::{ButtonState, CameraDelta, InputState, Modifiers, MouseButton, ScrollDelta};
-pub use keybindings::{KeyBinding, KeyBindings, KeyCode};
+pub use keybindings::{parse_key_string, KeyBinding, KeyBindings, KeyCode};
 pub use movie::{LoopMode, Movie, MovieFrame, ObjectKeyframe, PlaybackState, PlayDirection};
 pub use object::{DirtyFlags, GroupObject, Label, LabelAnchor, LabelObject, MapData, MapDisplayMode, MapObject, Measurement, MeasurementObject, MeasurementType, MoleculeObject, MoleculeObjectSnapshot, Object, ObjectRegistry, ObjectRegistrySnapshot, ObjectState, ObjectType};
 pub use pick::{expand_pick_to_selection, pick_expression_for_hit, PickHit, Picker};

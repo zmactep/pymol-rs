@@ -15,8 +15,40 @@ use numpy::{IntoPyArray, PyArray3, PyArrayMethods, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pymol_mol::{Atom, AtomIndex, ObjectMolecule, SecondaryStructure};
+use pymol_plugin::prelude::parse_key_string;
 
 use crate::commands::{AlterBuffer, AtomChange, PropertyValue};
+
+/// Keybinding state for the Python plugin.
+///
+/// Groups all state related to `set_key()` / `unset_key()` hotkey registration.
+pub struct KeybindState {
+    /// Python callbacks registered via `set_key()`, keyed by unique ID.
+    pub callbacks: HashMap<u64, Py<PyAny>>,
+    /// Pending registration requests: `(callback_id, key_string)`.
+    pub requests: Vec<(u64, String)>,
+    /// Pending unregistration requests (key strings).
+    pub unreg_requests: Vec<String>,
+    /// Callback IDs triggered by hotkey closures, drained each poll.
+    pub triggers: Vec<u64>,
+    /// Maps normalized key string to callback ID for rebind/unbind lookup.
+    pub key_to_id: HashMap<String, u64>,
+    /// Next available callback ID.
+    pub next_id: u64,
+}
+
+impl KeybindState {
+    pub fn new() -> Self {
+        Self {
+            callbacks: HashMap::new(),
+            requests: Vec::new(),
+            unreg_requests: Vec::new(),
+            triggers: Vec::new(),
+            key_to_id: HashMap::new(),
+            next_id: 1,
+        }
+    }
+}
 
 /// Shared state between the host (poll) and the Python backend.
 pub struct SharedState {
@@ -32,6 +64,8 @@ pub struct SharedState {
     pub set_image_queue: Option<Option<(Vec<u8>, u32, u32)>>,
     /// Shared buffer for atom mutations from `alter()` — drained by the handler's mutation queue.
     pub alter_buffer: AlterBuffer,
+    /// Keybinding state for `set_key()` / `unset_key()`.
+    pub keybinds: KeybindState,
 }
 
 impl SharedState {
@@ -43,6 +77,7 @@ impl SharedState {
             viewport_image: None,
             set_image_queue: None,
             alter_buffer,
+            keybinds: KeybindState::new(),
         }
     }
 }
@@ -275,6 +310,55 @@ impl PluginBackend {
     fn clear_viewport_image(&self) {
         let mut state = self.shared.lock().unwrap();
         state.set_image_queue = Some(None);
+    }
+
+    /// Bind a key combination to a Python callable.
+    ///
+    /// The key string uses the format `[modifier+]*key`, e.g.
+    /// `"F1"`, `"ctrl+s"`, `"ctrl+shift+r"`.
+    /// The callback is invoked with no arguments when the key is pressed.
+    /// Rebinding the same key replaces the previous callback.
+    fn set_key(&self, key: &str, callback: Py<PyAny>) -> PyResult<()> {
+        // Validate key string early so the user gets immediate feedback
+        let normalized = key.trim().to_lowercase();
+        parse_key_string(&normalized).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid key string: {}", e))
+        })?;
+
+        let mut state = self.shared.lock().unwrap();
+        let kb = &mut state.keybinds;
+
+        // If this key was already bound, remove the old callback
+        if let Some(old_id) = kb.key_to_id.remove(&normalized) {
+            kb.callbacks.remove(&old_id);
+        }
+
+        let id = kb.next_id;
+        kb.next_id += 1;
+
+        kb.callbacks.insert(id, callback);
+        kb.key_to_id.insert(normalized.clone(), id);
+        kb.requests.push((id, normalized.clone()));
+
+        Ok(())
+    }
+
+    /// Unbind a key combination.
+    ///
+    /// Silently succeeds if the key was not bound.
+    fn unset_key(&self, key: &str) -> PyResult<()> {
+        let normalized = key.trim().to_lowercase();
+
+        let mut state = self.shared.lock().unwrap();
+        let kb = &mut state.keybinds;
+
+        if let Some(old_id) = kb.key_to_id.remove(&normalized) {
+            kb.callbacks.remove(&old_id);
+        }
+
+        kb.unreg_requests.push(normalized);
+
+        Ok(())
     }
 }
 

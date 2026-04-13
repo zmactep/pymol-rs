@@ -153,7 +153,7 @@ impl App {
     /// # Arguments
     /// * `headless` - If true, the window will not be displayed initially
     pub fn new(headless: bool) -> Self {
-        let mut app = Self {
+        let app = Self {
             state: Session::new(),
             view: AppView::new(),
             executor: CommandExecutor::new(),
@@ -181,9 +181,6 @@ impl App {
             headless,
             pending_load_file: None,
         };
-
-        // Set up default key bindings
-        app.setup_default_key_bindings();
 
         app
     }

@@ -18,11 +18,6 @@ use pymol_framework::message::AppMessage;
 use super::App;
 
 impl App {
-    /// Setup default keyboard shortcuts
-    pub(crate) fn setup_default_key_bindings(&mut self) {
-        // TODO: Implement default key bindings
-    }
-
     /// Process accumulated input and update camera
     ///
     /// This processes mouse deltas accumulated in InputState and applies them
@@ -202,7 +197,7 @@ impl App {
         if let PhysicalKey::Code(key) = event.physical_key {
             let binding = KeyBinding {
                 key,
-                ctrl: self.viewport.input.ctrl_held(),
+                ctrl: self.viewport.input.ctrl_or_cmd_held(),
                 shift: self.viewport.input.shift_held(),
                 alt: self.viewport.input.alt_held(),
             };

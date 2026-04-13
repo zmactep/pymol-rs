@@ -106,6 +106,147 @@ impl From<KeyCode> for KeyBinding {
     }
 }
 
+/// Parse a key string like `"ctrl+shift+s"` into a [`KeyBinding`].
+///
+/// Format: `[modifier+]*key` where modifiers are `ctrl`/`cmd`, `shift`,
+/// `alt`/`option` (case-insensitive) and key is a letter, digit, function
+/// key, or named key.
+///
+/// # Examples
+///
+/// ```ignore
+/// let binding = parse_key_string("ctrl+s").unwrap();
+/// assert!(binding.ctrl);
+/// assert_eq!(binding.key, KeyCode::KeyS);
+///
+/// let binding = parse_key_string("F5").unwrap();
+/// assert_eq!(binding.key, KeyCode::F5);
+/// ```
+pub fn parse_key_string(s: &str) -> Result<KeyBinding, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty key string".into());
+    }
+
+    let parts: Vec<&str> = s.split('+').collect();
+    if parts.is_empty() {
+        return Err("empty key string".into());
+    }
+
+    let key_part = parts.last().unwrap().trim();
+    if key_part.is_empty() {
+        return Err("missing key after modifiers".into());
+    }
+
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+
+    for &modifier in &parts[..parts.len() - 1] {
+        match modifier.trim().to_lowercase().as_str() {
+            "ctrl" | "cmd" | "meta" => ctrl = true,
+            "shift" => shift = true,
+            "alt" | "option" => alt = true,
+            other => return Err(format!("unknown modifier: '{}'", other)),
+        }
+    }
+
+    let key = parse_key_code(key_part)?;
+
+    Ok(KeyBinding {
+        key,
+        ctrl,
+        shift,
+        alt,
+    })
+}
+
+/// Parse a single key name into a [`KeyCode`].
+fn parse_key_code(s: &str) -> Result<KeyCode, String> {
+    let lower = s.to_lowercase();
+    match lower.as_str() {
+        // Letters
+        "a" => Ok(KeyCode::KeyA),
+        "b" => Ok(KeyCode::KeyB),
+        "c" => Ok(KeyCode::KeyC),
+        "d" => Ok(KeyCode::KeyD),
+        "e" => Ok(KeyCode::KeyE),
+        "f" => Ok(KeyCode::KeyF),
+        "g" => Ok(KeyCode::KeyG),
+        "h" => Ok(KeyCode::KeyH),
+        "i" => Ok(KeyCode::KeyI),
+        "j" => Ok(KeyCode::KeyJ),
+        "k" => Ok(KeyCode::KeyK),
+        "l" => Ok(KeyCode::KeyL),
+        "m" => Ok(KeyCode::KeyM),
+        "n" => Ok(KeyCode::KeyN),
+        "o" => Ok(KeyCode::KeyO),
+        "p" => Ok(KeyCode::KeyP),
+        "q" => Ok(KeyCode::KeyQ),
+        "r" => Ok(KeyCode::KeyR),
+        "s" => Ok(KeyCode::KeyS),
+        "t" => Ok(KeyCode::KeyT),
+        "u" => Ok(KeyCode::KeyU),
+        "v" => Ok(KeyCode::KeyV),
+        "w" => Ok(KeyCode::KeyW),
+        "x" => Ok(KeyCode::KeyX),
+        "y" => Ok(KeyCode::KeyY),
+        "z" => Ok(KeyCode::KeyZ),
+        // Digits
+        "0" => Ok(KeyCode::Digit0),
+        "1" => Ok(KeyCode::Digit1),
+        "2" => Ok(KeyCode::Digit2),
+        "3" => Ok(KeyCode::Digit3),
+        "4" => Ok(KeyCode::Digit4),
+        "5" => Ok(KeyCode::Digit5),
+        "6" => Ok(KeyCode::Digit6),
+        "7" => Ok(KeyCode::Digit7),
+        "8" => Ok(KeyCode::Digit8),
+        "9" => Ok(KeyCode::Digit9),
+        // Function keys
+        "f1" => Ok(KeyCode::F1),
+        "f2" => Ok(KeyCode::F2),
+        "f3" => Ok(KeyCode::F3),
+        "f4" => Ok(KeyCode::F4),
+        "f5" => Ok(KeyCode::F5),
+        "f6" => Ok(KeyCode::F6),
+        "f7" => Ok(KeyCode::F7),
+        "f8" => Ok(KeyCode::F8),
+        "f9" => Ok(KeyCode::F9),
+        "f10" => Ok(KeyCode::F10),
+        "f11" => Ok(KeyCode::F11),
+        "f12" => Ok(KeyCode::F12),
+        // Named keys
+        "escape" | "esc" => Ok(KeyCode::Escape),
+        "space" => Ok(KeyCode::Space),
+        "enter" | "return" => Ok(KeyCode::Enter),
+        "backspace" => Ok(KeyCode::Backspace),
+        "tab" => Ok(KeyCode::Tab),
+        "delete" | "del" => Ok(KeyCode::Delete),
+        "up" => Ok(KeyCode::ArrowUp),
+        "down" => Ok(KeyCode::ArrowDown),
+        "left" => Ok(KeyCode::ArrowLeft),
+        "right" => Ok(KeyCode::ArrowRight),
+        "home" => Ok(KeyCode::Home),
+        "end" => Ok(KeyCode::End),
+        "pageup" | "page_up" => Ok(KeyCode::PageUp),
+        "pagedown" | "page_down" => Ok(KeyCode::PageDown),
+        // Punctuation
+        "minus" | "-" => Ok(KeyCode::Minus),
+        "equal" | "=" => Ok(KeyCode::Equal),
+        "bracketleft" | "[" => Ok(KeyCode::BracketLeft),
+        "bracketright" | "]" => Ok(KeyCode::BracketRight),
+        "comma" | "," => Ok(KeyCode::Comma),
+        "period" | "." => Ok(KeyCode::Period),
+        "slash" | "/" => Ok(KeyCode::Slash),
+        "backslash" | "\\" => Ok(KeyCode::Backslash),
+        "semicolon" | ";" => Ok(KeyCode::Semicolon),
+        "quote" | "'" => Ok(KeyCode::Quote),
+        "backquote" | "`" => Ok(KeyCode::Backquote),
+        _ => Err(format!("unknown key: '{}'", s)),
+    }
+}
+
 /// Storage for keyboard bindings
 ///
 /// A generic container that maps [`KeyBinding`]s to actions of type `A`.
@@ -290,6 +431,99 @@ mod tests {
 
         bindings.clear();
         assert!(bindings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_key_string_simple_letter() {
+        let b = parse_key_string("s").unwrap();
+        assert_eq!(b.key, KeyCode::KeyS);
+        assert!(!b.ctrl);
+        assert!(!b.shift);
+        assert!(!b.alt);
+    }
+
+    #[test]
+    fn test_parse_key_string_case_insensitive() {
+        let b = parse_key_string("S").unwrap();
+        assert_eq!(b.key, KeyCode::KeyS);
+    }
+
+    #[test]
+    fn test_parse_key_string_function_key() {
+        let b = parse_key_string("F5").unwrap();
+        assert_eq!(b.key, KeyCode::F5);
+        assert!(!b.ctrl);
+    }
+
+    #[test]
+    fn test_parse_key_string_ctrl_modifier() {
+        let b = parse_key_string("ctrl+s").unwrap();
+        assert_eq!(b.key, KeyCode::KeyS);
+        assert!(b.ctrl);
+        assert!(!b.shift);
+        assert!(!b.alt);
+    }
+
+    #[test]
+    fn test_parse_key_string_multiple_modifiers() {
+        let b = parse_key_string("ctrl+shift+r").unwrap();
+        assert_eq!(b.key, KeyCode::KeyR);
+        assert!(b.ctrl);
+        assert!(b.shift);
+        assert!(!b.alt);
+    }
+
+    #[test]
+    fn test_parse_key_string_all_modifiers() {
+        let b = parse_key_string("ctrl+shift+alt+a").unwrap();
+        assert_eq!(b.key, KeyCode::KeyA);
+        assert!(b.ctrl);
+        assert!(b.shift);
+        assert!(b.alt);
+    }
+
+    #[test]
+    fn test_parse_key_string_modifier_aliases() {
+        let b = parse_key_string("cmd+option+s").unwrap();
+        assert!(b.ctrl); // cmd maps to ctrl
+        assert!(b.alt); // option maps to alt
+    }
+
+    #[test]
+    fn test_parse_key_string_digit() {
+        let b = parse_key_string("ctrl+1").unwrap();
+        assert_eq!(b.key, KeyCode::Digit1);
+        assert!(b.ctrl);
+    }
+
+    #[test]
+    fn test_parse_key_string_named_keys() {
+        assert_eq!(parse_key_string("space").unwrap().key, KeyCode::Space);
+        assert_eq!(parse_key_string("enter").unwrap().key, KeyCode::Enter);
+        assert_eq!(parse_key_string("return").unwrap().key, KeyCode::Enter);
+        assert_eq!(parse_key_string("escape").unwrap().key, KeyCode::Escape);
+        assert_eq!(parse_key_string("esc").unwrap().key, KeyCode::Escape);
+        assert_eq!(parse_key_string("tab").unwrap().key, KeyCode::Tab);
+        assert_eq!(parse_key_string("delete").unwrap().key, KeyCode::Delete);
+        assert_eq!(parse_key_string("up").unwrap().key, KeyCode::ArrowUp);
+        assert_eq!(parse_key_string("down").unwrap().key, KeyCode::ArrowDown);
+        assert_eq!(parse_key_string("left").unwrap().key, KeyCode::ArrowLeft);
+        assert_eq!(parse_key_string("right").unwrap().key, KeyCode::ArrowRight);
+    }
+
+    #[test]
+    fn test_parse_key_string_errors() {
+        assert!(parse_key_string("").is_err());
+        assert!(parse_key_string("ctrl+").is_err());
+        assert!(parse_key_string("unknown_key").is_err());
+        assert!(parse_key_string("ctrl+badmod+s").is_err());
+    }
+
+    #[test]
+    fn test_parse_key_string_whitespace() {
+        let b = parse_key_string("  ctrl + s  ").unwrap();
+        assert_eq!(b.key, KeyCode::KeyS);
+        assert!(b.ctrl);
     }
 
     #[test]

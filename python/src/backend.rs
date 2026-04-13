@@ -278,4 +278,14 @@ impl StandaloneBackend {
     fn clear_viewport_image(&mut self) {
         self.session.viewport_image = None;
     }
+
+    /// No-op in standalone mode (no GUI event loop).
+    fn set_key(&self, _key: &str, _callback: Py<PyAny>) -> PyResult<()> {
+        Ok(())
+    }
+
+    /// No-op in standalone mode (no GUI event loop).
+    fn unset_key(&self, _key: &str) -> PyResult<()> {
+        Ok(())
+    }
 }

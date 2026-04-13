@@ -18,7 +18,7 @@ use pymol_plugin::registrar::{
     MessageHandler, PluginKeyAction, PluginMetadata, PluginRegistrar, PollContext,
     ViewerMutation,
 };
-use pymol_scene::KeyBindings;
+use pymol_scene::{parse_key_string, KeyBindings};
 
 use pymol_framework::component::SharedContext;
 use crate::component_store::ComponentStore;
@@ -53,8 +53,9 @@ pub struct PluginManager {
     // Hotkeys
     /// Hotkey bindings triggered since last poll (filled by handle_key, drained by poll_all).
     triggered_hotkeys: Vec<KeyBinding>,
-    pending_hotkey_registrations: Vec<(KeyBinding, PluginKeyAction)>,
-    pending_hotkey_unregistrations: Vec<KeyBinding>,
+    /// Pending hotkey registrations as key strings (parsed on GUI side for correct KeyCode).
+    pending_hotkey_registrations: Vec<(String, PluginKeyAction)>,
+    pending_hotkey_unregistrations: Vec<String>,
     // Viewer mutations queued by plugins
     pending_mutations: Vec<ViewerMutation>,
 }
@@ -295,47 +296,6 @@ impl PluginManager {
         let mut hotkey_unreg_queue = Vec::new();
         let mut mutation_queue = Vec::new();
 
-        // Phase 0: Execute triggered hotkey callbacks
-        if !triggered.is_empty() {
-            let mut ctx = PollContext::new(
-                shared,
-                bus,
-                &results,
-                &invocations,
-                &triggered,
-                &mut exec_queue,
-                &mut reg_queue,
-                &mut unreg_queue,
-                &mut notification_queue,
-                &mut hotkey_reg_queue,
-                &mut hotkey_unreg_queue,
-                &mut mutation_queue,
-            );
-
-            for binding in &triggered {
-                for plugin in &mut self.plugins {
-                    if plugin.faulted {
-                        continue;
-                    }
-                    if let Some(PluginKeyAction::Callback(cb)) = plugin.hotkeys.get_mut(binding) {
-                        let result = catch_unwind(AssertUnwindSafe(|| {
-                            cb(&mut ctx);
-                        }));
-                        if let Err(panic_info) = result {
-                            log::error!(
-                                "Plugin '{}' panicked in hotkey callback: {}. Plugin disabled.",
-                                plugin._metadata.name,
-                                panic_payload_to_string(&panic_info),
-                            );
-                            plugin.faulted = true;
-                        }
-                        break; // first match wins
-                    }
-                }
-            }
-        }
-
-        // Phase 1: Regular plugin polling
         let mut ctx = PollContext::new(
             shared,
             bus,
@@ -351,6 +311,30 @@ impl PluginManager {
             &mut mutation_queue,
         );
 
+        // Phase 0: Execute triggered hotkey callbacks
+        for binding in &triggered {
+            for plugin in &mut self.plugins {
+                if plugin.faulted {
+                    continue;
+                }
+                if let Some(PluginKeyAction::Callback(cb)) = plugin.hotkeys.get_mut(binding) {
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        cb(&mut ctx);
+                    }));
+                    if let Err(panic_info) = result {
+                        log::error!(
+                            "Plugin '{}' panicked in hotkey callback: {}. Plugin disabled.",
+                            plugin._metadata.name,
+                            panic_payload_to_string(&panic_info),
+                        );
+                        plugin.faulted = true;
+                    }
+                    break; // first match wins
+                }
+            }
+        }
+
+        // Phase 1: Regular plugin polling
         for plugin in &mut self.plugins {
             if plugin.faulted {
                 continue;
@@ -452,22 +436,35 @@ impl PluginManager {
     }
 
     /// Apply pending hotkey registration/unregistration changes (Phase 3).
+    ///
+    /// Key strings are parsed here on the GUI side so that `parse_key_string`
+    /// uses winit's `KeyCode` enum (plugins compile without the `windowing`
+    /// feature and would produce incorrect discriminant values).
     pub fn apply_hotkey_changes(&mut self) {
         let registrations = std::mem::take(&mut self.pending_hotkey_registrations);
         let unregistrations = std::mem::take(&mut self.pending_hotkey_unregistrations);
 
         // Apply unregistrations — remove from all plugins
-        for key in &unregistrations {
-            for plugin in &mut self.plugins {
-                plugin.hotkeys.unbind(*key);
+        for key_str in &unregistrations {
+            if let Ok(key) = parse_key_string(key_str) {
+                for plugin in &mut self.plugins {
+                    plugin.hotkeys.unbind(key);
+                }
             }
         }
 
         // Apply registrations — bind to the last loaded plugin
         // (runtime registrations go to last plugin since we don't track which plugin requested it)
         if let Some(plugin) = self.plugins.last_mut() {
-            for (key, action) in registrations {
-                plugin.hotkeys.bind(key, action);
+            for (key_str, action) in registrations {
+                match parse_key_string(&key_str) {
+                    Ok(key) => {
+                        plugin.hotkeys.bind(key, action);
+                    }
+                    Err(e) => {
+                        log::warn!("Invalid hotkey string '{}': {}", key_str, e);
+                    }
+                }
             }
         }
     }

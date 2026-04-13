@@ -250,6 +250,37 @@ class Cmd:
         return self._backend.alter(selection, expression, space)
 
     # =====================================================================
+    # Keybindings
+    # =====================================================================
+
+    def set_key(self, key, callback):
+        """Bind a key or key combination to a Python callback.
+
+        The callback is called with no arguments when the key is pressed.
+        Rebinding the same key replaces the previous callback.
+
+        Examples::
+
+            cmd.set_key("F1", my_help_fn)
+            cmd.set_key("ctrl+s", lambda: cmd.save("output.pdb"))
+            cmd.set_key("ctrl+shift+r", reload_fn)
+        """
+        if not callable(callback):
+            raise TypeError("callback must be callable")
+        self._backend.set_key(key, callback)
+
+    def unset_key(self, key):
+        """Unbind a key or key combination.
+
+        No error if the key was not bound.
+
+        Examples::
+
+            cmd.unset_key("ctrl+s")
+        """
+        self._backend.unset_key(key)
+
+    # =====================================================================
     # General execution
     # =====================================================================
 

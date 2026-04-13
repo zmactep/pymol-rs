@@ -13,7 +13,7 @@ pub use pymol_cmd::{FormatHandler, PluginReaderFn, PluginWriterFn, ScriptHandler
 use pymol_framework::component::{EguiComponent, SharedContext};
 use pymol_framework::layout::PanelConfig;
 use pymol_framework::message::{AppMessage, MessageBus};
-pub use pymol_scene::{KeyBinding, KeyCode};
+pub use pymol_scene::{parse_key_string, KeyBinding, KeyCode};
 pub use pymol_settings::{DynamicSettingDescriptor, DynamicSettingStore, SharedSettingStore};
 
 /// A boxed closure that mutates the viewer on the main thread.
@@ -89,8 +89,8 @@ pub struct PollContext<'a> {
     pub(crate) reg_queue: &'a mut Vec<DynCmdRegistration>,
     pub(crate) unreg_queue: &'a mut Vec<String>,
     pub(crate) notification_queue: &'a mut Vec<String>,
-    pub(crate) hotkey_reg_queue: &'a mut Vec<(KeyBinding, PluginKeyAction)>,
-    pub(crate) hotkey_unreg_queue: &'a mut Vec<KeyBinding>,
+    pub(crate) hotkey_reg_queue: &'a mut Vec<(String, PluginKeyAction)>,
+    pub(crate) hotkey_unreg_queue: &'a mut Vec<String>,
     pub(crate) mutation_queue: &'a mut Vec<ViewerMutation>,
 }
 
@@ -109,8 +109,8 @@ impl<'a> PollContext<'a> {
         reg_queue: &'a mut Vec<DynCmdRegistration>,
         unreg_queue: &'a mut Vec<String>,
         notification_queue: &'a mut Vec<String>,
-        hotkey_reg_queue: &'a mut Vec<(KeyBinding, PluginKeyAction)>,
-        hotkey_unreg_queue: &'a mut Vec<KeyBinding>,
+        hotkey_reg_queue: &'a mut Vec<(String, PluginKeyAction)>,
+        hotkey_unreg_queue: &'a mut Vec<String>,
         mutation_queue: &'a mut Vec<ViewerMutation>,
     ) -> Self {
         Self {
@@ -165,13 +165,18 @@ impl<'a> PollContext<'a> {
         self.notification_queue.push(msg.into());
     }
 
-    /// Register a hotkey binding (applied after poll returns).
-    pub fn register_hotkey(&mut self, key: impl Into<KeyBinding>, action: PluginKeyAction) {
+    /// Register a hotkey binding by key string (e.g. `"ctrl+s"`).
+    ///
+    /// The string is parsed on the host side (which has the correct `KeyCode`
+    /// enum from winit). Applied after `poll()` returns.
+    pub fn register_hotkey(&mut self, key: impl Into<String>, action: PluginKeyAction) {
         self.hotkey_reg_queue.push((key.into(), action));
     }
 
-    /// Unregister a hotkey binding (applied after poll returns).
-    pub fn unregister_hotkey(&mut self, key: impl Into<KeyBinding>) {
+    /// Unregister a hotkey binding by key string (e.g. `"ctrl+s"`).
+    ///
+    /// Applied after `poll()` returns.
+    pub fn unregister_hotkey(&mut self, key: impl Into<String>) {
         self.hotkey_unreg_queue.push(key.into());
     }
 

@@ -58,7 +58,7 @@ pub mod prelude {
 
     // Plugin API
     pub use crate::registrar::{
-        CommandResult, DynamicCommandInvocation, DynamicSettingDescriptor,
+        parse_key_string, CommandResult, DynamicCommandInvocation, DynamicSettingDescriptor,
         DynamicSettingStore, FormatHandler, HotkeyCallback, KeyBinding, KeyCode,
         MessageHandler, PluginKeyAction, PluginMetadata, PluginReaderFn,
         PluginRegistrar, PluginWriterFn, PollContext, SharedSettingStore,

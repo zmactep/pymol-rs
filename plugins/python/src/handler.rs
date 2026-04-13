@@ -20,6 +20,8 @@ use crate::worker::{
     EditorOutputHandle, OutputEntry, WorkItem, WorkOrigin, WorkResult, WorkerHandle,
 };
 
+use pyo3::prelude::*;
+
 /// Message handler for the Python plugin.
 ///
 /// Polls each frame to drain worker results, synchronize state,
@@ -164,6 +166,62 @@ impl PythonHandler {
         });
     }
 
+    /// Drain keybind trigger IDs and submit callbacks to the worker thread.
+    fn drain_keybind_triggers(&mut self) {
+        let triggers: Vec<u64> = {
+            let mut state = self.shared.lock().unwrap();
+            std::mem::take(&mut state.keybinds.triggers)
+        };
+
+        if triggers.is_empty() {
+            return;
+        }
+
+        // Py<PyAny>::clone() requires the GIL
+        Python::attach(|py| {
+            for id in triggers {
+                let callback: Option<Py<PyAny>> = {
+                    let state = self.shared.lock().unwrap();
+                    state.keybinds.callbacks.get(&id).map(|cb| cb.clone_ref(py))
+                };
+                if let Some(cb) = callback {
+                    self.worker.submit(WorkItem::InvokeKeybindCallback {
+                        callback: cb,
+                        origin: WorkOrigin::Command,
+                    });
+                }
+            }
+        });
+    }
+
+    /// Drain pending keybind registration/unregistration requests.
+    fn drain_keybind_requests(&self, ctx: &mut PollContext<'_>) {
+        let (requests, unreg_requests) = {
+            let mut state = self.shared.lock().unwrap();
+            let r = std::mem::take(&mut state.keybinds.requests);
+            let u = std::mem::take(&mut state.keybinds.unreg_requests);
+            (r, u)
+        };
+
+        // Process unregistrations
+        for key_str in unreg_requests {
+            ctx.unregister_hotkey(key_str);
+        }
+
+        // Process registrations (pass raw strings — parsed on GUI side with correct KeyCode enum)
+        for (id, key_str) in requests {
+            let shared = self.shared.clone();
+            ctx.register_hotkey(
+                key_str,
+                PluginKeyAction::Callback(Box::new(move |_ctx| {
+                    if let Ok(mut state) = shared.lock() {
+                        state.keybinds.triggers.push(id);
+                    }
+                })),
+            );
+        }
+    }
+
     /// Drain queued viewport image set/clear and send via message bus.
     fn drain_image_queue(&self, ctx: &mut PollContext<'_>) {
         let pending = {
@@ -221,5 +279,11 @@ impl MessageHandler for PythonHandler {
 
         // Drain queued viewport image changes
         self.drain_image_queue(ctx);
+
+        // Process keybind triggers from Phase 0 callbacks
+        self.drain_keybind_triggers();
+
+        // Process pending keybind registration/unregistration requests
+        self.drain_keybind_requests(ctx);
     }
 }
