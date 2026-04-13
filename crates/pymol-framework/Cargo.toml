@@ -26,5 +26,5 @@ serde = { workspace = true }
 rmp-serde = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-dirs = "5"
+dirs = { workspace = true }
 log = { workspace = true }

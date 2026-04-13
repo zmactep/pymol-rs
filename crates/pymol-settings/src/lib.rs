@@ -48,6 +48,7 @@ pub mod macros;
 pub mod groups;
 pub mod legacy;
 pub mod overrides;
+pub mod paths;
 pub mod registry;
 
 pub mod dynamic;

@@ -3750,6 +3750,7 @@ name = "pymol-settings"
 version = "0.3.0"
 dependencies = [
  "ahash",
+ "dirs 5.0.1",
  "serde",
  "thiserror 2.0.18",
 ]

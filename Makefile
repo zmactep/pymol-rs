@@ -19,6 +19,7 @@ BINARY         := target/release/pymol-rs
 PLIST_TPL      := macos/Info.plist.in
 PYTHON_VERSION := 3.13
 ENV_FILE       := .env
+PLUGIN_INSTALL_DIR ?= $(HOME)/.pymol-rs/plugins
 
 # Python installation managed by uv (--system skips project venvs)
 PYTHON_DIST = $(shell uv python find --system $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
@@ -66,8 +67,8 @@ plugins:
 	cp target/release/*_plugin.dll      target/release/plugins/ 2>/dev/null || true
 
 plugins-install: plugins
-	mkdir -p ~/.pymol-rs/plugins
-	cp target/release/plugins/* ~/.pymol-rs/plugins/
+	mkdir -p $(PLUGIN_INSTALL_DIR)
+	cp target/release/plugins/* $(PLUGIN_INSTALL_DIR)/
 
 # ── macOS App Bundle ──────────────────────────────────────────────
 

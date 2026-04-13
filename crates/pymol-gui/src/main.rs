@@ -77,12 +77,8 @@ fn main() {
             }
         }
 
-        let user_plugin_dir = args.plugin_dir.unwrap_or_else(|| {
-            let mut dir = dirs::home_dir().unwrap_or_default();
-            dir.push(".pymol-rs");
-            dir.push("plugins");
-            dir
-        });
+        let user_plugin_dir = args.plugin_dir
+            .unwrap_or_else(pymol_settings::paths::plugin_dir);
         if user_plugin_dir.is_dir() {
             app.load_plugins(&user_plugin_dir);
         }

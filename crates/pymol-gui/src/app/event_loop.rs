@@ -88,8 +88,8 @@ impl ApplicationHandler for App {
         }
 
         // Execute startup script if it exists
-        if let Some(home) = dirs::home_dir() {
-            let rc_path = home.join(".pymol-rs").join("pymolrc");
+        {
+            let rc_path = pymol_settings::paths::pymolrc_path();
             if rc_path.is_file() {
                 log::info!("Loading startup script: {}", rc_path.display());
                 if let Err(e) = self.execute_command(

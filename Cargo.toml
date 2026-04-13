@@ -87,6 +87,7 @@ rustyline = "17"
 image = { version = "0.25", default-features = false, features = ["png"] }
 pollster = "0.4"
 shellexpand = "3"
+dirs = "5"
 libloading = "0.8"
 serde = { version = "1", features = ["derive", "rc"] }
 rmp-serde = "1"
