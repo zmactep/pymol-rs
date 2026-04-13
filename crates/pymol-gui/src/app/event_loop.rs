@@ -65,6 +65,20 @@ impl ApplicationHandler for App {
             }
         }
 
+        // Execute startup script if it exists
+        if let Some(home) = dirs::home_dir() {
+            let rc_path = home.join(".pymol-rs").join("pymolrc");
+            if rc_path.is_file() {
+                log::info!("Loading startup script: {}", rc_path.display());
+                if let Err(e) = self.execute_command(
+                    &format!("run \"{}\"", rc_path.display()),
+                    false,
+                ) {
+                    log::warn!("Error in pymolrc: {}", e);
+                }
+            }
+        }
+
         // Load pending file if any (use command executor for consistency)
         if let Some(path) = self.pending_load_file.take() {
             let _ = self.execute_command(&format!("load \"{}\"", path), false);
