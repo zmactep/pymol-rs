@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 
-use pymol_algos::PyMolDss;
+use pymol_algos::{Dssp, PyMolDss};
 use pymol_mol::dss::assign_secondary_structure;
 use pymol_mol::RepMask;
 use pymol_render::picking::Ray;
@@ -88,6 +88,18 @@ fn dss_bench(c: &mut Criterion) {
             || MOLECULE.clone(),
             |mut mol| {
                 assign_secondary_structure(&mut mol, 0, &assigner);
+                black_box(mol.atom_count());
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    let dssp_assigner = Dssp::default();
+    group.bench_function("assign_secondary_structure_dssp", |b| {
+        b.iter_batched(
+            || MOLECULE.clone(),
+            |mut mol| {
+                assign_secondary_structure(&mut mol, 0, &dssp_assigner);
                 black_box(mol.atom_count());
             },
             BatchSize::LargeInput,
