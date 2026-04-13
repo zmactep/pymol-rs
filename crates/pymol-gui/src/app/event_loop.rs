@@ -55,10 +55,23 @@ impl ApplicationHandler for App {
 
         // Activate native menu bar (must happen after window creation).
         // The AppMenu is kept alive in self.native_menu — dropping the
-        // muda::Menu would deallocate the underlying NSMenu.
+        // muda::Menu would deallocate the underlying NSMenu / Win32 menu.
         if let Some(ref app_menu) = self.native_menu {
             #[cfg(target_os = "macos")]
             app_menu.menu.init_for_nsapp();
+
+            #[cfg(target_os = "windows")]
+            {
+                use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                if let Ok(handle) = window.window_handle() {
+                    if let RawWindowHandle::Win32(win32) = handle.as_raw() {
+                        // Safety: the HWND is valid — we just created the window above.
+                        unsafe {
+                            let _ = app_menu.menu.init_for_hwnd(win32.hwnd.get() as isize);
+                        }
+                    }
+                }
+            }
         }
 
         // Initialize GPU
