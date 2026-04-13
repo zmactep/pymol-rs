@@ -5,7 +5,7 @@
 
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use libloading::Library;
@@ -41,6 +41,8 @@ struct LoadedPlugin {
 /// Manages dynamically loaded plugins.
 pub struct PluginManager {
     plugins: Vec<LoadedPlugin>,
+    /// Directories from which plugins were loaded (for resource discovery by plugins).
+    plugin_dirs: Vec<PathBuf>,
     // Deferred command execution
     pending_executions: Vec<CommandExecRequest>,
     command_results: Vec<CommandResult>,
@@ -64,6 +66,7 @@ impl PluginManager {
     pub fn new() -> Self {
         Self {
             plugins: Vec::new(),
+            plugin_dirs: Vec::new(),
             pending_executions: Vec::new(),
             command_results: Vec::new(),
             dynamic_invocations: Arc::new(Mutex::new(Vec::new())),
@@ -88,6 +91,8 @@ impl PluginManager {
         components: &mut ComponentStore,
         layout: &mut Layout,
     ) {
+        self.plugin_dirs.push(dir.to_path_buf());
+
         let entries = match std::fs::read_dir(dir) {
             Ok(entries) => entries,
             Err(e) => {
@@ -302,6 +307,7 @@ impl PluginManager {
             &results,
             &invocations,
             &triggered,
+            &self.plugin_dirs,
             &mut exec_queue,
             &mut reg_queue,
             &mut unreg_queue,

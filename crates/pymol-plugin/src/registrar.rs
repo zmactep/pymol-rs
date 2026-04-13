@@ -5,6 +5,7 @@
 //! and message handlers. After registration, the host drains the registrar
 //! and integrates everything into the running application.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use pymol_cmd::Command;
@@ -84,6 +85,8 @@ pub struct PollContext<'a> {
     pub dynamic_invocations: &'a [DynamicCommandInvocation],
     /// Hotkey bindings triggered since last poll (read-only).
     pub triggered_hotkeys: &'a [KeyBinding],
+    /// Directories from which plugins were loaded (for resource discovery).
+    pub plugin_dirs: &'a [PathBuf],
     // Internal queues — accessed via methods
     pub(crate) exec_queue: &'a mut Vec<CommandExecRequest>,
     pub(crate) reg_queue: &'a mut Vec<DynCmdRegistration>,
@@ -105,6 +108,7 @@ impl<'a> PollContext<'a> {
         command_results: &'a [CommandResult],
         dynamic_invocations: &'a [DynamicCommandInvocation],
         triggered_hotkeys: &'a [KeyBinding],
+        plugin_dirs: &'a [PathBuf],
         exec_queue: &'a mut Vec<CommandExecRequest>,
         reg_queue: &'a mut Vec<DynCmdRegistration>,
         unreg_queue: &'a mut Vec<String>,
@@ -119,6 +123,7 @@ impl<'a> PollContext<'a> {
             command_results,
             dynamic_invocations,
             triggered_hotkeys,
+            plugin_dirs,
             exec_queue,
             reg_queue,
             unreg_queue,
