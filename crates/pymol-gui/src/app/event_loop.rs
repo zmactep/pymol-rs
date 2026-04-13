@@ -16,6 +16,15 @@ use winit::window::{Window, WindowId};
 use super::App;
 use pymol_framework::message::AppMessage;
 
+/// Convert a path to a command-safe string.
+///
+/// On Windows the native separator is `\`, which the command parser treats as
+/// an escape character inside quoted strings.  Replacing with `/` is harmless
+/// on Windows (the OS accepts both separators) and avoids parse failures.
+fn command_safe_path(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.view.window.is_some() {
@@ -71,7 +80,7 @@ impl ApplicationHandler for App {
             if rc_path.is_file() {
                 log::info!("Loading startup script: {}", rc_path.display());
                 if let Err(e) = self.execute_command(
-                    &format!("run \"{}\"", rc_path.display()),
+                    &format!("run \"{}\"", command_safe_path(&rc_path)),
                     false,
                 ) {
                     log::warn!("Error in pymolrc: {}", e);
@@ -81,7 +90,8 @@ impl ApplicationHandler for App {
 
         // Load pending file if any (use command executor for consistency)
         if let Some(path) = self.pending_load_file.take() {
-            let _ = self.execute_command(&format!("load \"{}\"", path), false);
+            let path = path.replace('\\', "/");
+            let _ = self.execute_command(&format!("load \"{}\"", &path), false);
         }
 
         window.request_redraw();
@@ -361,7 +371,7 @@ impl App {
             .add_filter("All files", &["*"]);
 
         if let Some(path) = dialog.pick_file() {
-            let _ = self.execute_command(&format!("run \"{}\"", path.display()), false);
+            let _ = self.execute_command(&format!("run \"{}\"", command_safe_path(&path)), false);
         }
     }
 
@@ -400,15 +410,16 @@ impl App {
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_lowercase();
+            let path_str = command_safe_path(&path);
 
             if Self::TRAJECTORY_EXTS.contains(&ext.as_str()) {
                 let _ = self.execute_command(
-                    &format!("load_traj \"{}\"", path.display()),
+                    &format!("load_traj \"{}\"", path_str),
                     false,
                 );
             } else {
                 let _ = self.execute_command(
-                    &format!("load \"{}\"", path.display()),
+                    &format!("load \"{}\"", path_str),
                     false,
                 );
             }
@@ -434,7 +445,7 @@ impl App {
             .add_filter("All files", &["*"]);
 
         if let Some(path) = dialog.save_file() {
-            let _ = self.execute_command(&format!("save \"{}\"", path.display()), false);
+            let _ = self.execute_command(&format!("save \"{}\"", command_safe_path(&path)), false);
         }
     }
 
@@ -446,7 +457,7 @@ impl App {
             .set_file_name("screenshot.png");
 
         if let Some(path) = dialog.save_file() {
-            let _ = self.execute_command(&format!("png \"{}\"", path.display()), false);
+            let _ = self.execute_command(&format!("png \"{}\"", command_safe_path(&path)), false);
         }
     }
 
@@ -458,7 +469,7 @@ impl App {
             .set_file_name("movie.mp4");
 
         if let Some(path) = dialog.save_file() {
-            let _ = self.execute_command(&format!("mproduce \"{}\"", path.display()), false);
+            let _ = self.execute_command(&format!("mproduce \"{}\"", command_safe_path(&path)), false);
         }
     }
 }
@@ -618,7 +629,7 @@ impl App {
     /// Handle a file dropped onto the window.
     fn handle_file_drop(&mut self, path: std::path::PathBuf) {
         self.drag_hover_path = None;
-        let path_str = path.to_string_lossy();
+        let path_str = command_safe_path(&path);
         log::info!("Drag-and-drop: loading \"{}\"", path_str);
         match self.execute_command(&format!("load \"{}\"", path_str), false) {
             Ok(_) => {}
