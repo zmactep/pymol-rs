@@ -218,8 +218,8 @@ print(sp[0] if sp else '')
         log::debug!("Python plugin: setting PYTHONHOME={}", home);
         std::env::set_var("PYTHONHOME", &home);
 
-        // On Windows, add Python's base directory to PATH so the delay-loaded
-        // python3XX.dll can be found when PyO3 functions are first called.
+        // On Windows, add Python's base directory to PATH so dependent DLLs
+        // (e.g. python3XX.dll) can be found by the system loader.
         #[cfg(target_os = "windows")]
         {
             let current_path = std::env::var("PATH").unwrap_or_default();

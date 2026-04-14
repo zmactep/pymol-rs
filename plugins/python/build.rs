@@ -8,16 +8,10 @@ fn main() {
 
     println!("cargo:rustc-env=PYMOLRS_PYO3_PYTHON_VERSION={version}");
 
-    // On Windows (MSVC), delay-load the Python DLL so the plugin can be loaded
-    // even when python3XX.dll is not on PATH. The DLL will be resolved on first
-    // use, after the plugin's init code has added Python to the DLL search path.
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    if target_os == "windows" && target_env == "msvc" && version != "unknown" {
-        let dll_name = format!("python{}", version.replace('.', ""));
-        println!("cargo:rustc-cdylib-link-arg=/DELAYLOAD:{dll_name}.dll");
-        println!("cargo:rustc-link-lib=delayimp");
-    }
+    // NOTE: We intentionally do NOT use /DELAYLOAD for the Python DLL on Windows.
+    // MSVC delay-load cannot handle data symbol imports (e.g. `_Py_NoneStruct`
+    // used by PyO3 for `Py_None`), which causes LNK1194 at link time.
+    // Python must be on PATH when the plugin is loaded by the host application.
 }
 
 /// Check DEP_*_PYO3_CONFIG env vars set by pyo3-ffi's build script.
