@@ -38,7 +38,11 @@ struct Args {
 
 fn main() {
     // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .filter_module("wgpu_core", log::LevelFilter::Warn)
+        .filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .filter_module("naga", log::LevelFilter::Warn)
+        .init();
 
     log::info!("Starting PyMOL-RS GUI");
 
