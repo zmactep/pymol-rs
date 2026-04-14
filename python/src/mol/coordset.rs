@@ -5,6 +5,8 @@ use pymol_mol::CoordSet;
 
 use crate::convert::coordset_to_py_list;
 
+type BoundingBox = ((f32, f32, f32), (f32, f32, f32));
+
 /// Python wrapper for coordinate set
 #[pyclass(name = "CoordSet")]
 #[derive(Debug, Clone)]
@@ -106,7 +108,7 @@ impl PyCoordSet {
     }
 
     /// Compute bounding box as ((min_x, min_y, min_z), (max_x, max_y, max_z))
-    fn bounding_box(&self) -> Option<((f32, f32, f32), (f32, f32, f32))> {
+    fn bounding_box(&self) -> Option<BoundingBox> {
         if self.coords.is_empty() {
             return None;
         }

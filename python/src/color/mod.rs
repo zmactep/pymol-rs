@@ -72,17 +72,20 @@ impl PyColor {
     }
 
     /// Get as tuple (r, g, b) with values 0.0-1.0
+    #[allow(clippy::wrong_self_convention)]
     fn to_tuple(&self) -> (f32, f32, f32) {
         (self.inner.r, self.inner.g, self.inner.b)
     }
 
     /// Get as tuple (r, g, b) with values 0-255
+    #[allow(clippy::wrong_self_convention)]
     fn to_rgb8(&self) -> (u8, u8, u8) {
         let rgb = self.inner.to_rgb8();
         (rgb[0], rgb[1], rgb[2])
     }
 
     /// Get as RGBA tuple with alpha=1.0
+    #[allow(clippy::wrong_self_convention)]
     fn to_rgba(&self) -> (f32, f32, f32, f32) {
         let rgba = self.inner.to_rgba(1.0);
         (rgba[0], rgba[1], rgba[2], rgba[3])

@@ -13,3 +13,4 @@ dist
 pkg
 package-lock.json
 gh-pages
+python/pymol_rs/widget/static

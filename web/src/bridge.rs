@@ -274,8 +274,8 @@ impl WebViewer {
     /// No-ops while any mouse button is held (camera drag in progress).
     #[wasm_bindgen]
     pub fn process_hover(&mut self, screen_x: f32, screen_y: f32) {
-        // No hover feedback while dragging.
-        if self.input.any_button_pressed() {
+        // No hover feedback when picking is disabled or while dragging.
+        if !self.picking_enabled || self.input.any_button_pressed() {
             return;
         }
 
@@ -339,7 +339,7 @@ impl WebViewer {
                     let (sel, color) = {
                         let mol = mol_obj.molecule();
                         let sel = expand_pick_to_selection(hit, mode, mol);
-                        let overlaps = sele_expr.as_deref().map_or(false, |expr| {
+                        let overlaps = sele_expr.as_deref().is_some_and(|expr| {
                             pymol_select::select(mol, expr)
                                 .map(|sele| sel.intersection(&sele).any())
                                 .unwrap_or(false)
@@ -613,7 +613,18 @@ impl WebViewer {
         };
 
         match mol {
-            Ok(molecule) => {
+            Ok(mut molecule) => {
+                // Apply DSS if auto_dss is enabled (matches desktop load/fetch behavior)
+                let behavior = &self.session.settings.behavior;
+                if behavior.auto_dss {
+                    let assigner = pymol_mol::dss::assigner_for(behavior.dss_algorithm);
+                    pymol_mol::dss::assign_secondary_structure(
+                        &mut molecule,
+                        0,
+                        assigner.as_ref(),
+                    );
+                }
+
                 let mol_obj = MoleculeObject::with_name(molecule, name);
                 self.session.registry.add(mol_obj);
                 self.update_movie_state_count();

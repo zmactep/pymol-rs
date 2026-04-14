@@ -180,7 +180,7 @@ impl StandaloneBackend {
         for name in &names {
             // First: select atoms (immutable borrow)
             let indices: Vec<usize> = {
-                let Some(mol_obj) = self.session.registry.get_molecule(&name) else {
+                let Some(mol_obj) = self.session.registry.get_molecule(name) else {
                     continue;
                 };
                 let mol = mol_obj.molecule();
@@ -194,7 +194,7 @@ impl StandaloneBackend {
 
             // Pre-read coordinates (immutable borrow)
             let coords: Vec<Option<(f32, f32, f32)>> = {
-                let mol = self.session.registry.get_molecule(&name).unwrap().molecule();
+                let mol = self.session.registry.get_molecule(name).unwrap().molecule();
                 let cs = mol.current_coord_set();
                 indices
                     .iter()
@@ -206,12 +206,12 @@ impl StandaloneBackend {
             };
 
             // Iterate: read atom, run expression, apply changes
-            let mol_obj = self.session.registry.get_molecule_mut(&name).unwrap();
+            let mol_obj = self.session.registry.get_molecule_mut(name).unwrap();
             for (i, &idx) in indices.iter().enumerate() {
                 let locals = PyDict::new(py);
                 {
                     let atom = mol_obj.molecule().get_atom(AtomIndex(idx as u32)).unwrap();
-                    set_atom_locals(&locals, atom, coords[i], idx, &name)?;
+                    set_atom_locals(&locals, atom, coords[i], idx, name)?;
                 }
                 py.run(code.as_c_str(), Some(&globals), Some(&locals))?;
                 {

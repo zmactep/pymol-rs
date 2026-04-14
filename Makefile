@@ -4,6 +4,7 @@
        icon app app-full \
        sign sign-full notarize dmg dmg-full \
        web-build web-dev web-clean \
+       widget-assets widget-build \
        version
 
 # ── Variables ─────────────────────────────────────────────────────
@@ -45,16 +46,16 @@ run:
 clean:
 	cargo clean
 	rm -rf python/target target/wheels target/app target/dmg-stage target/$(APP_NAME).dmg
-	rm -rf web/pkg web/dist
+	rm -rf web/pkg web/dist python/pymol_rs/widget/static
 
 # ── Python ────────────────────────────────────────────────────────
 
 python: python-release
 
-python-release:
+python-release: widget-assets
 	cd python && maturin build --release
 
-python-dev:
+python-dev: widget-assets
 	cd python && maturin develop
 
 # ── Plugins ───────────────────────────────────────────────────────
@@ -211,6 +212,22 @@ web-dev:
 web-clean:
 	rm -rf web/pkg web/dist web/node_modules
 
+# ── Widget ───────────────────────────────────────────────────────
+
+# Copy pre-built web dist into the Python package (requires web-build to have run once)
+widget-assets:
+	@if [ ! -f web/dist/pymol_web_bg.wasm ]; then \
+		echo "── Web dist not found, building... ──"; \
+		$(MAKE) web-build; \
+	fi
+	mkdir -p python/pymol_rs/widget/static
+	cp web/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
+	cp web/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
+	cp web/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
+
+# Full rebuild: web + copy assets
+widget-build: web-build widget-assets
+
 # ── Version ──────────────────────────────────────────────────────
 
 version:
@@ -244,6 +261,9 @@ help:
 	@echo "  web-build        Build WASM + TypeScript bundle"
 	@echo "  web-dev          Dev server with hot reload"
 	@echo "  web-clean        Clean web build artifacts"
+	@echo ""
+	@echo "Widget:"
+	@echo "  widget-build     Build web + copy WASM assets for Jupyter widget"
 	@echo ""
 	@echo "Signing credentials (.env):"
 	@echo "  PYMOL_RS_APPLE_TEAMID    Apple Developer Team ID"

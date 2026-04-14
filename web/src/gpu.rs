@@ -17,6 +17,7 @@ pub struct GpuState {
 
 impl GpuState {
     /// Create GPU resources from a `<canvas>` element ID.
+    #[allow(unreachable_code, unused_variables)]
     pub async fn from_canvas(canvas_id: &str) -> Result<Self, String> {
         // Get the canvas element
         let window = web_sys::window().ok_or("No global window")?;
@@ -31,6 +32,12 @@ impl GpuState {
         let width = canvas.client_width().max(1) as u32;
         let height = canvas.client_height().max(1) as u32;
 
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (canvas, width, height);
+            return Err("WebViewer only runs on wasm32".into());
+        }
+
         // Create wgpu instance with WebGPU backend
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::BROWSER_WEBGPU,
@@ -42,11 +49,6 @@ impl GpuState {
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .map_err(|e| format!("Failed to create surface: {}", e))?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let surface: wgpu::Surface<'static> = {
-            let _ = canvas;
-            return Err("WebViewer only runs on wasm32".into());
-        };
 
         // Request adapter
         let adapter = instance

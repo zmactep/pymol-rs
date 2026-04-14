@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -47,6 +50,25 @@ jobs:
         run: cargo test --verbose
         env:
           PYO3_PYTHON: python3
+
+      - name: Install Rust wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build widget assets
+        run: |
+          cd web && npm install && npm run build && cd ..
+          mkdir -p python/pymol_rs/widget/static
+          cp web/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
+          cp web/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
+          cp web/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1

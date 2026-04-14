@@ -48,6 +48,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -121,6 +126,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: plugins-${{ matrix.target }}
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -174,6 +184,7 @@ jobs:
 
   build-wheels:
     name: Build wheel ${{ matrix.os }} ${{ matrix.target }}
+    needs: [build-web]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -193,6 +204,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wheels-${{ matrix.target }}
+          workspaces: python
+
+      - name: Download web build
+        uses: actions/download-artifact@v4
+        with:
+          name: pymol-rs-web
+          path: web-artifact
+
+      - name: Prepare widget assets
+        run: |
+          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
+          mkdir -p python/pymol_rs/widget/static
+          cp web-artifact/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
+          cp web-artifact/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
+          cp web-artifact/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
 
       - name: Setup Python 3.13
         uses: actions/setup-python@v5
@@ -231,6 +265,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32
 
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh

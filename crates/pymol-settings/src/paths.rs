@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 
 /// Default directory name under `$HOME`.
+#[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_CONFIG_DIR_NAME: &str = ".pymol-rs";
 
 /// Returns the application configuration directory.

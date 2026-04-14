@@ -33,6 +33,7 @@ classifiers = [
 
 [project.optional-dependencies]
 numpy = ["numpy>=1.20"]
+widget = ["anywidget>=0.9", "traitlets>=5.0"]
 dev = ["pytest>=7.0", "numpy>=1.20"]
 
 [project.urls]
@@ -43,6 +44,10 @@ Repository = "https://github.com/zmactep/pymol-rs"
 features = ["pyo3/extension-module"]
 python-source = "."
 module-name = "pymol_rs._pymol_rs"
+include = [
+    { path = "pymol_rs/widget/_frontend.js", format = "sdist" },
+    { path = "pymol_rs/widget/static/**", format = ["sdist", "wheel"] },
+]
 
 [project.scripts]
 pymol-rs = "pymol_rs._cli:main"

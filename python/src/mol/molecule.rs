@@ -8,6 +8,8 @@ use super::bond::{PyBond, PyBondIter};
 use super::coordset::PyCoordSet;
 use crate::convert::vec3_to_tuple;
 
+type BoundingBox = ((f32, f32, f32), (f32, f32, f32));
+
 /// Python wrapper for ObjectMolecule
 ///
 /// Represents a molecular object containing atoms, bonds, and coordinates.
@@ -251,7 +253,7 @@ impl PyObjectMolecule {
 
     /// Compute the bounding box
     #[pyo3(signature = (state=None))]
-    fn bounding_box(&self, state: Option<usize>) -> Option<((f32, f32, f32), (f32, f32, f32))> {
+    fn bounding_box(&self, state: Option<usize>) -> Option<BoundingBox> {
         let state_idx = state.unwrap_or(self.inner.current_state);
         self.inner.bounding_box(state_idx).map(|(min, max)| {
             (vec3_to_tuple(min), vec3_to_tuple(max))
