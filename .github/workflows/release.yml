@@ -139,7 +139,7 @@ jobs:
           python-version: "3.13"
 
       - name: Build plugins
-        run: cargo build --release -p hello-plugin -p ipc-plugin -p python-plugin --target ${{ matrix.target }}
+        run: cargo build --release -p raytracer-plugin -p hello-plugin -p ipc-plugin -p python-plugin --target ${{ matrix.target }}
         env:
           PYO3_PYTHON: python3
 
