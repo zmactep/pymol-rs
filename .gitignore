@@ -12,5 +12,6 @@ node_modules
 dist
 pkg
 package-lock.json
+!web/package-lock.json
 gh-pages
 python/pymol_rs/widget/static

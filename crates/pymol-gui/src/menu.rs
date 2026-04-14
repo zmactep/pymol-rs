@@ -4,10 +4,12 @@
 //! in the system menu bar; on Windows/Linux it attaches to the window.
 
 use muda::{
-    AboutMetadata, CheckMenuItem, Icon, Menu, MenuId, MenuItemKind, MenuItem,
+    CheckMenuItem, Menu, MenuId, MenuItemKind, MenuItem,
     PredefinedMenuItem, Submenu,
     accelerator::{Accelerator, Code, Modifiers},
 };
+#[cfg(target_os = "macos")]
+use muda::{AboutMetadata, Icon};
 
 /// IDs for custom menu items that trigger application commands.
 pub struct MenuIds {
@@ -56,6 +58,7 @@ pub struct AppMenu {
 }
 
 /// Load the application icon from the embedded PNG.
+#[cfg(target_os = "macos")]
 fn load_app_icon() -> Option<Icon> {
     let png_bytes = include_bytes!("../../../images/pymol-rs.png");
     let img = image::load_from_memory(png_bytes).ok()?.into_rgba8();
