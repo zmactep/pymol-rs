@@ -53,23 +53,15 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install Linux dependencies
+      - name: Cache APT packages
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libxrandr-dev \
-            libxi-dev \
-            libx11-dev \
-            libx11-xcb-dev \
-            libxcb-randr0-dev \
-            libxcb-xfixes0-dev \
-            libasound2-dev \
-            libfontconfig1-dev \
-            libgtk-3-dev \
-            libxdo-dev
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: >-
+            libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev
+            libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-xfixes0-dev
+            libasound2-dev libfontconfig1-dev libgtk-3-dev libxdo-dev
+          version: 1.0
 
       - name: Build with cargo
         run: cargo build --release -p pymol-gui --target ${{ matrix.target }}
@@ -87,7 +79,7 @@ jobs:
           7z a ../../../pymol-rs-${{ matrix.name }}.zip pymol-rs${{ matrix.ext }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pymol-rs-${{ matrix.name }}
           path: pymol-rs-${{ matrix.name }}.*
@@ -119,7 +111,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -131,26 +123,18 @@ jobs:
         with:
           key: plugins-${{ matrix.target }}
 
-      - name: Install Linux dependencies
+      - name: Cache APT packages
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libxrandr-dev \
-            libxi-dev \
-            libx11-dev \
-            libx11-xcb-dev \
-            libxcb-randr0-dev \
-            libxcb-xfixes0-dev \
-            libasound2-dev \
-            libfontconfig1-dev \
-            libgtk-3-dev \
-            libxdo-dev
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: >-
+            libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev
+            libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-xfixes0-dev
+            libasound2-dev libfontconfig1-dev libgtk-3-dev libxdo-dev
+          version: 1.0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -176,7 +160,7 @@ jobs:
           7z a ../pymol-rs-plugins-${{ matrix.name }}.zip *
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pymol-rs-plugins-${{ matrix.name }}
           path: pymol-rs-plugins-${{ matrix.name }}.*
@@ -203,7 +187,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -215,7 +199,7 @@ jobs:
           workspaces: python
 
       - name: Download web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pymol-rs-web
           path: web-artifact
@@ -229,12 +213,12 @@ jobs:
           cp web-artifact/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
 
       - name: Setup Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Setup Python 3.14
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           allow-prereleases: true
@@ -248,7 +232,7 @@ jobs:
           working-directory: python
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.target }}
           path: python/dist/*.whl
@@ -259,7 +243,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -272,12 +256,15 @@ jobs:
           key: wasm32
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall wasm-pack --no-confirm
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
 
       - name: Install web dependencies
         working-directory: web
@@ -297,7 +284,7 @@ jobs:
           tar -czvf ../pymol-rs-web.tar.gz .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pymol-rs-web
           path: pymol-rs-web.tar.gz
@@ -312,10 +299,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
