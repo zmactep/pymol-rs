@@ -61,7 +61,6 @@ define_plugin_settings! {
 
 pymol_plugin! {
     name: "raytracer",
-    version: "0.2.4",
     description: "GPU compute shader raytracing — provides the 'ray' command",
     commands: [commands::RayCommand],
     components: [

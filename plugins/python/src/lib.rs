@@ -27,7 +27,6 @@ use worker::{EditorOutputHandle, WorkItem, WorkOrigin};
 
 pymol_plugin! {
     name: "python",
-    version: "0.3.0",
     description: "Embedded Python interpreter for scripting and automation",
     commands: [],
     register: |reg| {

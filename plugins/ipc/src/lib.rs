@@ -17,7 +17,6 @@ use server::IpcServer;
 
 pymol_plugin! {
     name: "ipc",
-    version: "0.2.0",
     description: "IPC server for external control via Unix domain socket",
     commands: [],
     register: |reg| {

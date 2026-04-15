@@ -14,7 +14,6 @@ use component::ToolbarComponent;
 
 pymol_plugin! {
     name: "toolbar",
-    version: "0.1.0",
     description: "Quick-action toolbar with configurable icon button groups",
     commands: [],
     components: [

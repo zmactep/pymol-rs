@@ -164,7 +164,7 @@ macro_rules! define_plugin_settings {
 /// ```rust,ignore
 /// pymol_plugin! {
 ///     name: "my-plugin",
-///     version: "0.1.0",
+///     // version is optional — defaults to env!("CARGO_PKG_VERSION")
 ///     description: "What this plugin does",
 ///     commands: [Cmd1, Cmd2],
 ///     // Optional: register GUI components with panel configs
@@ -241,5 +241,28 @@ macro_rules! pymol_plugin {
                     __pymol_register
                 },
             };
+    };
+
+    // Arm without `version:` — defaults to the crate version from Cargo.toml.
+    (
+        name: $name:expr,
+        description: $desc:expr,
+        commands: [$($cmd:expr),* $(,)?]
+        $(, components: [$( ($comp:expr, $config:expr) ),* $(,)?] )?
+        $(, settings: [$( $settings_ty:ty ),* $(,)?] )?
+        $(, hotkeys: [$( ($hk_key:expr, $hk_action:expr) ),* $(,)?] )?
+        $(, register: |$reg:ident| $body:block )?
+        $(,)?
+    ) => {
+        pymol_plugin! {
+            name: $name,
+            version: env!("CARGO_PKG_VERSION"),
+            description: $desc,
+            commands: [$($cmd),*]
+            $(, components: [$( ($comp, $config) ),*] )?
+            $(, settings: [$( $settings_ty ),*] )?
+            $(, hotkeys: [$( ($hk_key, $hk_action) ),*] )?
+            $(, register: |$reg| $body )?
+        }
     };
 }

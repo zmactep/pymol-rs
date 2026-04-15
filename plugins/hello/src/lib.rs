@@ -11,7 +11,6 @@ define_plugin_settings! {
 
 pymol_plugin! {
     name: "hello",
-    version: "0.2.0",
     description: "Example plugin: registers a 'hello' command with a configurable style setting",
     commands: [HelloCommand],
     settings: [HelloSettings],
