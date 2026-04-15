@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! PyMOL-RS GUI Application Entry Point
 //!
 //! Run with:

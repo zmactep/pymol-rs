@@ -234,7 +234,7 @@ bundle-windows: release plugins python-release
 	powershell -NoProfile -Command "Copy-Item -Recurse '$(PYTHON_DIST)' '$(BUNDLE_DIR)/python'"
 	uv venv --python $(PYTHON_VERSION) "$(BUNDLE_DIR)\python-venv"
 	powershell -NoProfile -Command "uv pip install --python '$(BUNDLE_DIR)/python-venv/Scripts/python.exe' $$(Get-ChildItem 'python/target/wheels/pymol_rs-*.whl' | Select-Object -First 1).FullName"
-	powershell -NoProfile -Command "Copy-Item 'windows/PyMOL-RS.cmd' '$(BUNDLE_DIR)/'"
+	powershell -NoProfile -Command "Copy-Item 'windows/PyMOL-RS.vbs' '$(BUNDLE_DIR)/'"
 	@echo ✓ $(BUNDLE_DIR)
 
 # ── Web ──────────────────────────────────────────────────────────
