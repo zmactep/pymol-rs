@@ -304,9 +304,160 @@ jobs:
           path: pymol-rs-web.tar.gz
           if-no-files-found: error
 
+  build-dmg:
+    name: Build macOS DMG
+    needs: [build-web]
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: dmg-aarch64-apple-darwin
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python 3.13 via uv
+        run: uv python install 3.13
+
+      - name: Configure Python for build
+        run: echo "PYO3_PYTHON=$(uv python find 3.13)" >> $GITHUB_ENV
+
+      - name: Install maturin
+        run: uv tool install maturin
+
+      - name: Download web build
+        uses: actions/download-artifact@v8
+        with:
+          name: pymol-rs-web
+          path: web-artifact
+
+      - name: Prepare widget assets
+        run: |
+          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
+          mkdir -p web/dist
+          cp -r web-artifact/dist/* web/dist/
+
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          security create-keychain -p "ci-keychain" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "ci-keychain" $KEYCHAIN_PATH
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "ci-keychain" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          rm -f $RUNNER_TEMP/cert.p12
+
+      - name: Create .env for signing
+        if: ${{ secrets.PYMOL_RS_APPLE_TEAMID != '' }}
+        env:
+          PYMOL_RS_APPLE_TEAMID: ${{ secrets.PYMOL_RS_APPLE_TEAMID }}
+          PYMOL_RS_APPLE_EMAIL: ${{ secrets.PYMOL_RS_APPLE_EMAIL }}
+          PYMOL_RS_APPLE_APP_PASS: ${{ secrets.PYMOL_RS_APPLE_APP_PASS }}
+        run: |
+          printf 'PYMOL_RS_APPLE_TEAMID=%s\nPYMOL_RS_APPLE_EMAIL=%s\nPYMOL_RS_APPLE_APP_PASS=%s\n' \
+            "$PYMOL_RS_APPLE_TEAMID" "$PYMOL_RS_APPLE_EMAIL" "$PYMOL_RS_APPLE_APP_PASS" > .env
+
+      - name: Build DMG
+        run: make dmg-full
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: pymol-rs-dmg-macos-arm64
+          path: target/PyMOL-RS.dmg
+          if-no-files-found: error
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/signing.keychain-db 2>/dev/null || true
+
+  build-bundle-windows:
+    name: Build Windows bundle ${{ matrix.name }}
+    needs: [build-web]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x86_64
+          - os: windows-11-arm
+            name: windows-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install make
+        run: choco install make -y
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: bundle-${{ matrix.name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python 3.13 via uv
+        run: uv python install 3.13
+
+      - name: Configure Python for build
+        run: |
+          $py = uv python find 3.13
+          echo "PYO3_PYTHON=$py" >> $env:GITHUB_ENV
+
+      - name: Install maturin
+        run: uv tool install maturin
+
+      - name: Download web build
+        uses: actions/download-artifact@v8
+        with:
+          name: pymol-rs-web
+          path: web-artifact
+
+      - name: Prepare widget assets
+        run: |
+          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
+          New-Item -ItemType Directory -Force -Path web/dist
+          Copy-Item web-artifact/dist/* web/dist/ -Recurse
+
+      - name: Build bundle
+        run: make bundle-windows
+
+      - name: Package bundle
+        run: |
+          cd target/bundle
+          7z a ../../pymol-rs-bundle-${{ matrix.name }}.zip PyMOL-RS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pymol-rs-bundle-${{ matrix.name }}
+          path: pymol-rs-bundle-${{ matrix.name }}.zip
+          if-no-files-found: error
+
   release:
     name: Create Release
-    needs: [build-executables, build-plugins, build-wheels, build-web]
+    needs: [build-executables, build-plugins, build-wheels, build-web, build-dmg, build-bundle-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -326,6 +477,8 @@ jobs:
           # Move all archives (executables + plugins)
           find artifacts -type f -name 'pymol-rs-*.tar.gz' -exec mv {} release/ \;
           find artifacts -type f -name 'pymol-rs-*.zip' -exec mv {} release/ \;
+          # Move DMG
+          find artifacts -type f -name '*.dmg' -exec mv {} release/ \;
           # Move wheels
           find artifacts -type f -name '*.whl' -exec mv {} release/ \;
           ls -la release/

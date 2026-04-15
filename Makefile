@@ -3,6 +3,7 @@
        plugins plugins-install \
        icon app app-full \
        sign sign-full notarize dmg dmg-full \
+       bundle-windows \
        web-build web-dev web-clean \
        widget-assets widget-build \
        version
@@ -21,6 +22,7 @@ PLIST_TPL      := macos/Info.plist.in
 PYTHON_VERSION := 3.13
 ENV_FILE       := .env
 PLUGIN_INSTALL_DIR ?= $(HOME)/.pymol-rs/plugins
+BUNDLE_DIR     := target/bundle/$(APP_NAME)
 
 ifeq ($(OS),Windows_NT)
 MKDIRP = powershell -NoProfile -Command "$$null = New-Item -ItemType Directory -Force -Path"
@@ -28,8 +30,12 @@ else
 MKDIRP = mkdir -p
 endif
 
-# Python installation managed by uv (--system skips project venvs)
-PYTHON_DIST = $(shell uv python find --system $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
+# Python installation root (uv-managed preferred — smaller than system Python)
+ifeq ($(OS),Windows_NT)
+PYTHON_DIST = $(shell uv python find $(PYTHON_VERSION) 2>/dev/null | sed 's|[\\/][^\\/]*$$||')
+else
+PYTHON_DIST = $(shell uv python find $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
+endif
 
 # ── Build ─────────────────────────────────────────────────────────
 
@@ -215,6 +221,22 @@ dmg: sign
 dmg-full: sign-full
 	$(create-dmg)
 
+# ── Windows Bundle ────────────────────────────────────────────────
+
+bundle-windows: release plugins python-release
+	@echo "── Assembling Windows bundle ──"
+	@rm -rf $(BUNDLE_DIR)
+	@mkdir -p $(BUNDLE_DIR)/plugins
+	cp target/release/pymol-rs.exe $(BUNDLE_DIR)/
+	cp target/release/*_plugin.dll $(BUNDLE_DIR)/plugins/ 2>/dev/null || true
+	cp plugins/*/*.deps $(BUNDLE_DIR)/plugins/ 2>/dev/null || true
+	cp -R "$(PYTHON_DIST)" $(BUNDLE_DIR)/python
+	uv venv --python $(PYTHON_VERSION) $(BUNDLE_DIR)/python-venv
+	uv pip install --python $(BUNDLE_DIR)/python-venv/Scripts/python.exe \
+	    $$(ls python/target/wheels/pymol_rs-*.whl | head -1)
+	cp windows/PyMOL-RS.cmd $(BUNDLE_DIR)/
+	@echo "✓ $(BUNDLE_DIR)"
+
 # ── Web ──────────────────────────────────────────────────────────
 
 web-build:
@@ -267,6 +289,9 @@ help:
 	@echo "  app-full         Full .app (+ plugins + Python + venv)"
 	@echo "  sign / sign-full Code-sign the .app"
 	@echo "  dmg / dmg-full   Distributable DMG (signed + notarized)"
+	@echo ""
+	@echo "Windows bundle:"
+	@echo "  bundle-windows   Bundle (exe + plugins + Python + venv + launcher)"
 	@echo ""
 	@echo "Version:"
 	@echo "  version V=X.Y.Z Update version across all crates and packages"
