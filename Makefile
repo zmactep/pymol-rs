@@ -31,12 +31,19 @@ else
 MKDIRP = mkdir -p
 endif
 
-# Python installation root (uv-managed preferred — smaller than system Python)
+# Python installation root (uv-managed only — no system/Homebrew Python)
 ifeq ($(OS),Windows_NT)
-PYTHON_DIST = $(shell powershell -NoProfile -Command "Split-Path (uv python find $(PYTHON_VERSION))")
+PYTHON_DIST = $(shell powershell -NoProfile -Command "Split-Path (uv python find --python-preference only-managed $(PYTHON_VERSION))")
 else
-PYTHON_DIST = $(shell uv python find $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
+UV_PYTHON_DIR := $(shell uv python dir 2>/dev/null)
+PYTHON_DIST   := $(shell ls -d "$(UV_PYTHON_DIR)"/cpython-$(PYTHON_VERSION)*-*-none 2>/dev/null | sort -V | tail -1)
 endif
+ifeq ($(OS),Windows_NT)
+PYO3_PYTHON := $(PYTHON_DIST)/python.exe
+else
+PYO3_PYTHON := $(PYTHON_DIST)/bin/python3
+endif
+export PYO3_PYTHON
 
 # ── Build ─────────────────────────────────────────────────────────
 
@@ -144,7 +151,7 @@ app: release icon
 app-full: release plugins icon python-release
 	@echo "── Creating bundled venv (uv + Python $(PYTHON_VERSION)) ──"
 	@rm -rf target/app/python-venv
-	uv venv --python $(PYTHON_VERSION) target/app/python-venv
+	uv venv --python-preference only-managed --python $(PYTHON_VERSION) target/app/python-venv
 	uv pip install --python target/app/python-venv/bin/python3 \
 	    $$(ls python/target/wheels/pymol_rs-*.whl | head -1)
 	@echo "── Assembling full $(APP_NAME).app ──"
@@ -243,7 +250,7 @@ bundle-windows: release plugins python-release
 	powershell -NoProfile -Command "Copy-Item 'target/release/*_plugin.dll' '$(BUNDLE_DIR)/plugins/' -ErrorAction SilentlyContinue"
 	powershell -NoProfile -Command "Copy-Item 'plugins/*/*.deps' '$(BUNDLE_DIR)/plugins/' -ErrorAction SilentlyContinue"
 	powershell -NoProfile -Command "Copy-Item -Recurse '$(PYTHON_DIST)' '$(BUNDLE_DIR)/python'"
-	uv venv --python $(PYTHON_VERSION) "$(BUNDLE_DIR)\python-venv"
+	uv venv --python-preference only-managed --python $(PYTHON_VERSION) "$(BUNDLE_DIR)\python-venv"
 	uv pip install --python "$(BUNDLE_DIR)/python-venv/Scripts/python.exe" python/target/wheels/pymol_rs-*.whl
 	powershell -NoProfile -Command "Copy-Item 'windows/PyMOL-RS.vbs' '$(BUNDLE_DIR)/'"
 	@echo ✓ $(BUNDLE_DIR)
