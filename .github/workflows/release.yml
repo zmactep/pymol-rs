@@ -342,7 +342,7 @@ jobs:
           cp -r web-artifact/dist/* web/dist/
 
       - name: Import signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+        if: env.APPLE_CERTIFICATE_BASE64 != ''
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -359,7 +359,7 @@ jobs:
           rm -f $RUNNER_TEMP/cert.p12
 
       - name: Create .env for signing
-        if: ${{ secrets.PYMOL_RS_APPLE_TEAMID != '' }}
+        if: env.PYMOL_RS_APPLE_TEAMID != ''
         env:
           PYMOL_RS_APPLE_TEAMID: ${{ secrets.PYMOL_RS_APPLE_TEAMID }}
           PYMOL_RS_APPLE_EMAIL: ${{ secrets.PYMOL_RS_APPLE_EMAIL }}
