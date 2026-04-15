@@ -5,8 +5,8 @@ build-backend = "maturin"
 [project]
 name = "pymol-rs"
 version = "0.3.3"
-description = "PyMOL-RS: A modern Rust implementation of PyMOL molecular visualization"
-readme = "../README.md"
+description = "PyMOL-RS: Modern molecular visualization in Rust with WebGPU rendering"
+readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-3-Clause" }
 authors = [
