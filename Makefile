@@ -22,6 +22,12 @@ PYTHON_VERSION := 3.13
 ENV_FILE       := .env
 PLUGIN_INSTALL_DIR ?= $(HOME)/.pymol-rs/plugins
 
+ifeq ($(OS),Windows_NT)
+MKDIRP = powershell -NoProfile -Command "$$null = New-Item -ItemType Directory -Force -Path"
+else
+MKDIRP = mkdir -p
+endif
+
 # Python installation managed by uv (--system skips project venvs)
 PYTHON_DIST = $(shell uv python find --system $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
 
@@ -60,9 +66,14 @@ python-dev: widget-assets
 
 # ── Plugins ───────────────────────────────────────────────────────
 
+PLUGIN_CRATES := -p raytracer-plugin -p hello-plugin -p python-plugin -p toolbar-plugin
+ifneq ($(OS),Windows_NT)
+PLUGIN_CRATES += -p ipc-plugin
+endif
+
 plugins:
-	cargo build --release -p raytracer-plugin -p hello-plugin -p ipc-plugin -p python-plugin -p toolbar-plugin
-	mkdir -p target/release/plugins
+	cargo build --release $(PLUGIN_CRATES)
+	$(MKDIRP) target/release/plugins
 	cp target/release/lib*_plugin.dylib target/release/plugins/ 2>/dev/null || \
 	cp target/release/lib*_plugin.so    target/release/plugins/ 2>/dev/null || \
 	cp target/release/*_plugin.dll      target/release/plugins/ 2>/dev/null || true
@@ -71,7 +82,7 @@ ifeq ($(OS),Windows_NT)
 endif
 
 plugins-install: plugins
-	mkdir -p $(PLUGIN_INSTALL_DIR)
+	$(MKDIRP) $(PLUGIN_INSTALL_DIR)
 	cp target/release/plugins/* $(PLUGIN_INSTALL_DIR)/
 
 # ── macOS App Bundle ──────────────────────────────────────────────
@@ -223,7 +234,7 @@ widget-assets:
 		echo "── Web dist not found, building... ──"; \
 		$(MAKE) web-build; \
 	fi
-	mkdir -p python/pymol_rs/widget/static
+	$(MKDIRP) python/pymol_rs/widget/static
 	cp web/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
 	cp web/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
 	cp web/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
