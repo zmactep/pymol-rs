@@ -827,7 +827,7 @@ checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
 
 [[package]]
 name = "pymol-algos"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bitflags",
  "lin_alg",
@@ -837,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-cmd"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "lin_alg",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-color"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "serde",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-framework"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "dirs",
  "log",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-io"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "flate2",
  "lin_alg",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-mol"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "bitflags",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-render"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bytemuck",
  "lin_alg",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-scene"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "bitflags",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-select"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "bitvec",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-session"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "flate2",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-settings"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "dirs",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "pymol-web"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "console_error_panic_hook",
  "console_log",

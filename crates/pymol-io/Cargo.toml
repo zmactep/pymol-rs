@@ -12,8 +12,8 @@ description = "File format parsers and writers for molecular structures"
 [features]
 default = []
 traj = ["dep:molly", "dep:byteorder"]
-fetch = ["dep:ureq"]
-fetch-async = ["dep:reqwest"]
+fetch = ["dep:ureq", "dep:rustls"]
+fetch-async = ["dep:reqwest", "dep:rustls"]
 
 [dependencies]
 pymol-mol = { workspace = true }
@@ -30,7 +30,7 @@ molly = { version = "0.6", optional = true }
 # Optional fetch dependencies
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "gzip"], optional = true }
-rustls = { workspace = true }
+rustls = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
