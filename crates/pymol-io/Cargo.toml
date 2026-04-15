@@ -28,8 +28,9 @@ byteorder = { version = "1", optional = true }
 molly = { version = "0.6", optional = true }
 
 # Optional fetch dependencies
-ureq = { version = "3", optional = true }
-reqwest = { version = "0.13", features = ["gzip"], optional = true }
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "gzip"], optional = true }
+rustls = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

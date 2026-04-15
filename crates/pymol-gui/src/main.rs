@@ -37,6 +37,11 @@ struct Args {
 }
 
 fn main() {
+    // Install ring as the default rustls crypto provider (instead of aws-lc-rs)
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Initialize logging
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .filter_module("wgpu_core", log::LevelFilter::Warn)
