@@ -65,10 +65,10 @@ clean:
 python: python-release
 
 python-release: widget-assets
-	cd python && maturin build --release
+	cd python && uvx maturin build --release
 
 python-dev: widget-assets
-	cd python && maturin develop
+	cd python && uvx maturin develop
 
 # ── Plugins ───────────────────────────────────────────────────────
 
@@ -286,11 +286,15 @@ help:
 	@echo "  debug / release  Build Rust workspace"
 	@echo "  test             Run tests"
 	@echo "  run              Launch GUI (release)"
+	@echo "  clean            Clean all build artifacts"
+	@echo ""
+	@echo "Python:"
 	@echo "  python           Build Python wheel (release)"
 	@echo "  python-dev       Install Python package in dev mode"
-	@echo "  plugins          Build all plugins (release)"
+	@echo ""
+	@echo "Plugins:"
 	@echo "  plugins-install  Build + install plugins to ~/.pymol-rs/plugins"
-	@echo "  clean            Clean all build artifacts"
+	@echo "  plugins          Build all plugins (release)"
 	@echo ""
 	@echo "macOS app bundle:"
 	@echo "  app              Minimal .app (binary + icon)"

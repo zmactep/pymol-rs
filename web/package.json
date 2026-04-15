@@ -24,7 +24,16 @@
   },
   "devDependencies": {
     "typescript": "^5.4",
-    "vite": "^6.0"
+    "vite": "^6.0",
+    "wasm-pack": "^0.14"
+  },
+  "overrides": {
+    "wasm-pack": {
+      "binary-install": {
+        "axios": "^1.15.0",
+        "tar": "^7.5.13"
+      }
+    }
   },
   "keywords": [
     "pymol",

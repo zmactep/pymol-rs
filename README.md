@@ -48,22 +48,24 @@ pip install pymol_rs-<version>-<platform>.whl
 
 ### Build from source
 
+Prerequisites: [Rust](https://rustup.rs/) (cargo), [uv](https://docs.astral.sh/uv/) (Python wheel), [Node.js](https://nodejs.org/) (web version & Jupyter widget). Only cargo is required for the core build — uv and Node.js are needed only for the components listed below.
+
 ```bash
 git clone https://github.com/zmactep/pymol-rs
 cd pymol-rs
 make release && make run
 ```
 
-| Target | Command |
-|--------|---------|
-| Release build | `make release` |
-| Debug build | `make debug` |
-| Python wheel | `make python` (requires [maturin](https://github.com/PyO3/maturin)) |
-| Plugins | `make plugins` |
-| Web widget | `make web-build` |
-| Tests | `make test` |
+| Target | Command | Requires |
+|--------|---------|----------|
+| Release build | `make release` | cargo |
+| Debug build | `make debug` | cargo |
+| Plugins | `make plugins` | cargo |
+| Python wheel | `make python` | cargo, uv |
+| Web widget | `make web-build` | cargo, npm |
+| Tests | `make test` | cargo |
 
-## What works
+## Features
 
 **Formats:** PDB · mmCIF · bCIF · MOL2 · SDF/MOL · XYZ · GRO · CCP4/MRC (+ gzip)
 
@@ -88,6 +90,8 @@ polymer and not solvent
 **Sessions** — save and load your sessions with high-efficiency `.prs` file format or use your old PyMOL sessions with `.pse` parser.
 
 **Ray tracing** — offline GPU ray tracing with BVH acceleration, shadows, and transparency (via the `raytracer` plugin).
+
+**Jupyter widget** — interactive 3D viewer for Jupyter notebooks via [anywidget](https://anywidget.dev/), with full command execution and Python API integration.
 
 **GUI** — egui-based interface with command line, object panel, sequence viewer, mouse picking, and viewport:
 
