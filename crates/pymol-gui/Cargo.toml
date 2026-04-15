@@ -67,3 +67,7 @@ clap = { version = "4", features = ["derive"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow"] }
+
+# Windows executable icon embedding
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"

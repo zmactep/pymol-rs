@@ -1,7 +1,7 @@
 .PHONY: all build release debug test clean run help \
        python python-release python-dev \
        plugins plugins-install \
-       icon app app-full \
+       icon icon-windows app app-full \
        sign sign-full notarize dmg dmg-full \
        bundle-windows \
        web-build web-dev web-clean \
@@ -17,6 +17,7 @@ VERSION        := 0.3.2
 ICON_SRC       := images/pymol-rs.png
 ICONSET        := target/app/AppIcon.iconset
 ICNS           := target/app/AppIcon.icns
+ICO            := images/pymol-rs.ico
 BINARY         := target/release/pymol-rs
 PLIST_TPL      := macos/Info.plist.in
 PYTHON_VERSION := 3.13
@@ -109,6 +110,16 @@ icon: $(ICON_SRC)
 	iconutil -c icns $(ICONSET) -o $(ICNS)
 	@rm -rf $(ICONSET)
 	@echo "✓ $(ICNS)"
+
+icon-windows: $(ICON_SRC)
+	@echo "── Generating .ico ──"
+	magick $(ICON_SRC) \
+	  \( -clone 0 -resize 16x16 \) \
+	  \( -clone 0 -resize 32x32 \) \
+	  \( -clone 0 -resize 48x48 \) \
+	  \( -clone 0 -resize 256x256 \) \
+	  -delete 0 $(ICO)
+	@echo "✓ $(ICO)"
 
 # Shared: assemble base .app structure (binary + icon + Info.plist)
 define assemble-app
@@ -295,6 +306,10 @@ help:
 	@echo "Plugins:"
 	@echo "  plugins-install  Build + install plugins to ~/.pymol-rs/plugins"
 	@echo "  plugins          Build all plugins (release)"
+	@echo ""
+	@echo "Icons:"
+	@echo "  icon             Generate .icns from PNG (macOS, requires sips)"
+	@echo "  icon-windows     Generate .ico from PNG (requires ImageMagick)"
 	@echo ""
 	@echo "macOS app bundle:"
 	@echo "  app              Minimal .app (binary + icon)"

@@ -25,6 +25,22 @@ fn command_safe_path(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Load the application icon for the window title bar and taskbar.
+///
+/// On macOS the icon comes from the .app bundle, so this returns `None`.
+#[cfg(not(target_os = "macos"))]
+fn load_window_icon() -> Option<winit::window::Icon> {
+    let png_bytes = include_bytes!("../../../../images/pymol-rs.png");
+    let img = image::load_from_memory(png_bytes).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    winit::window::Icon::from_rgba(img.into_raw(), width, height).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn load_window_icon() -> Option<winit::window::Icon> {
+    None
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.view.window.is_some() {
@@ -35,7 +51,8 @@ impl ApplicationHandler for App {
         let window_attrs = Window::default_attributes()
             .with_title("PyMOL-RS")
             .with_inner_size(PhysicalSize::new(1024, 768))
-            .with_visible(!self.headless);
+            .with_visible(!self.headless)
+            .with_window_icon(load_window_icon());
 
         let window = Arc::new(
             event_loop
