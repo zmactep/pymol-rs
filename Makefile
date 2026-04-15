@@ -32,7 +32,7 @@ endif
 
 # Python installation root (uv-managed preferred — smaller than system Python)
 ifeq ($(OS),Windows_NT)
-PYTHON_DIST = $(shell uv python find $(PYTHON_VERSION) 2>/dev/null | sed 's|[\\/][^\\/]*$$||')
+PYTHON_DIST = $(shell powershell -NoProfile -Command "Split-Path (uv python find $(PYTHON_VERSION))")
 else
 PYTHON_DIST = $(shell uv python find $(PYTHON_VERSION) 2>/dev/null | sed 's|/bin/python[0-9.]*$$||')
 endif
@@ -80,11 +80,12 @@ endif
 plugins:
 	cargo build --release $(PLUGIN_CRATES)
 	$(MKDIRP) target/release/plugins
-	cp target/release/lib*_plugin.dylib target/release/plugins/ 2>/dev/null || \
-	cp target/release/lib*_plugin.so    target/release/plugins/ 2>/dev/null || \
-	cp target/release/*_plugin.dll      target/release/plugins/ 2>/dev/null || true
 ifeq ($(OS),Windows_NT)
-	cp plugins/*/*.deps target/release/plugins/ 2>/dev/null || true
+	powershell -NoProfile -Command "Copy-Item 'target/release/*_plugin.dll' 'target/release/plugins/' -ErrorAction SilentlyContinue"
+	powershell -NoProfile -Command "Copy-Item 'plugins/*/*.deps' 'target/release/plugins/' -ErrorAction SilentlyContinue"
+else
+	cp target/release/lib*_plugin.dylib target/release/plugins/ 2>/dev/null || \
+	cp target/release/lib*_plugin.so    target/release/plugins/ 2>/dev/null || true
 endif
 
 plugins-install: plugins
@@ -224,26 +225,25 @@ dmg-full: sign-full
 # ── Windows Bundle ────────────────────────────────────────────────
 
 bundle-windows: release plugins python-release
-	@echo "── Assembling Windows bundle ──"
-	@rm -rf $(BUNDLE_DIR)
-	@mkdir -p $(BUNDLE_DIR)/plugins
-	cp target/release/pymol-rs.exe $(BUNDLE_DIR)/
-	cp target/release/*_plugin.dll $(BUNDLE_DIR)/plugins/ 2>/dev/null || true
-	cp plugins/*/*.deps $(BUNDLE_DIR)/plugins/ 2>/dev/null || true
-	cp -R "$(PYTHON_DIST)" $(BUNDLE_DIR)/python
-	uv venv --python $(PYTHON_VERSION) $(BUNDLE_DIR)/python-venv
-	uv pip install --python $(BUNDLE_DIR)/python-venv/Scripts/python.exe \
-	    $$(ls python/target/wheels/pymol_rs-*.whl | head -1)
-	cp windows/PyMOL-RS.cmd $(BUNDLE_DIR)/
-	@echo "✓ $(BUNDLE_DIR)"
+	@echo ── Assembling Windows bundle ──
+	powershell -NoProfile -Command "if (Test-Path '$(BUNDLE_DIR)') { Remove-Item -Recurse -Force '$(BUNDLE_DIR)' }"
+	$(MKDIRP) "$(BUNDLE_DIR)\plugins"
+	powershell -NoProfile -Command "Copy-Item 'target/release/pymol-rs.exe' '$(BUNDLE_DIR)/'"
+	powershell -NoProfile -Command "Copy-Item 'target/release/*_plugin.dll' '$(BUNDLE_DIR)/plugins/' -ErrorAction SilentlyContinue"
+	powershell -NoProfile -Command "Copy-Item 'plugins/*/*.deps' '$(BUNDLE_DIR)/plugins/' -ErrorAction SilentlyContinue"
+	powershell -NoProfile -Command "Copy-Item -Recurse '$(PYTHON_DIST)' '$(BUNDLE_DIR)/python'"
+	uv venv --python $(PYTHON_VERSION) "$(BUNDLE_DIR)\python-venv"
+	powershell -NoProfile -Command "uv pip install --python '$(BUNDLE_DIR)/python-venv/Scripts/python.exe' $$(Get-ChildItem 'python/target/wheels/pymol_rs-*.whl' | Select-Object -First 1).FullName"
+	powershell -NoProfile -Command "Copy-Item 'windows/PyMOL-RS.cmd' '$(BUNDLE_DIR)/'"
+	@echo ✓ $(BUNDLE_DIR)
 
 # ── Web ──────────────────────────────────────────────────────────
 
 web-build:
-	cd web && npm run build
+	cd web && npm install && npm run build
 
 web-dev:
-	cd web && npm run dev
+	cd web && npm install && npm run dev
 
 web-clean:
 	rm -rf web/pkg web/dist web/node_modules
@@ -252,6 +252,13 @@ web-clean:
 
 # Copy pre-built web dist into the Python package (requires web-build to have run once)
 widget-assets:
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "if (-not (Test-Path 'web/dist/pymol_web_bg.wasm')) { Write-Host '── Web dist not found, building... ──'; & '$(MAKE)' web-build }"
+	$(MKDIRP) python\pymol_rs\widget\static
+	powershell -NoProfile -Command "Copy-Item 'web/dist/pymol-rs-viewer.js' 'python/pymol_rs/widget/static/'"
+	powershell -NoProfile -Command "Copy-Item 'web/dist/pymol_web_bg.wasm' 'python/pymol_rs/widget/static/'"
+	powershell -NoProfile -Command "Get-ChildItem 'web/dist/pymol_web-*.js' | Select-Object -First 1 | Copy-Item -Destination 'python/pymol_rs/widget/static/pymol_web_glue.js'"
+else
 	@if [ ! -f web/dist/pymol_web_bg.wasm ]; then \
 		echo "── Web dist not found, building... ──"; \
 		$(MAKE) web-build; \
@@ -260,6 +267,7 @@ widget-assets:
 	cp web/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
 	cp web/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
 	cp web/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
+endif
 
 # Full rebuild: web + copy assets
 widget-build: web-build widget-assets
