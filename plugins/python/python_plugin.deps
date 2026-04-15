@@ -1,0 +1,7 @@
+# Resolve Python's base directory so that python3XX.dll can be found
+# by LoadLibraryExW when loading this plugin on Windows.
+#
+# PyO3 links directly against the Python DLL and delay-loading cannot
+# be used (see build.rs). Each line is a command whose stdout (trimmed)
+# is added to PATH before the plugin DLL is loaded.
+python -c "import sys; print(sys.base_prefix)"

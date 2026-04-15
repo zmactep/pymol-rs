@@ -66,6 +66,9 @@ plugins:
 	cp target/release/lib*_plugin.dylib target/release/plugins/ 2>/dev/null || \
 	cp target/release/lib*_plugin.so    target/release/plugins/ 2>/dev/null || \
 	cp target/release/*_plugin.dll      target/release/plugins/ 2>/dev/null || true
+ifeq ($(OS),Windows_NT)
+	cp plugins/*/*.deps target/release/plugins/ 2>/dev/null || true
+endif
 
 plugins-install: plugins
 	mkdir -p $(PLUGIN_INSTALL_DIR)

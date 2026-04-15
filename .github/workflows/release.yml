@@ -156,6 +156,7 @@ jobs:
         run: |
           mkdir staging
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.lib_glob }}" staging/
+          Copy-Item "plugins/*/*.deps" staging/ -ErrorAction SilentlyContinue
           cd staging
           7z a ../pymol-rs-plugins-${{ matrix.name }}.zip *
 

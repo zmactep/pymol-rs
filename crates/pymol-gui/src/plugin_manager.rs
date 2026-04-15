@@ -129,6 +129,13 @@ impl PluginManager {
         components: &mut ComponentStore,
         layout: &mut Layout,
     ) -> Result<String, String> {
+        // On Windows, apply DLL search paths from a companion .deps file
+        // before loading the library. This allows plugins to declare commands
+        // that resolve directories containing their transitive DLL dependencies
+        // (e.g. python3XX.dll for the Python plugin).
+        #[cfg(target_os = "windows")]
+        apply_deps_search_paths(path);
+
         // Safety: loading a shared library is inherently unsafe.
         // We require same-compiler builds and check ABI + SDK versions.
         let library = unsafe {
@@ -480,6 +487,109 @@ impl Default for PluginManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// On Windows, read a companion `.deps` file next to the plugin DLL and
+/// add resolved directories to `PATH` so that `LoadLibraryExW` can find
+/// transitive DLL dependencies.
+///
+/// The `.deps` file format (one directive per line, `#` for comments):
+/// ```text
+/// python -c "import sys; print(sys.base_prefix)"
+/// ```
+///
+/// Each line is a command to execute. Its stdout (trimmed) is treated as a
+/// directory path to prepend to `PATH`. This is generic — any plugin can
+/// ship a `.deps` file without changes to the plugin manager.
+#[cfg(target_os = "windows")]
+fn apply_deps_search_paths(plugin_path: &Path) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let deps_path = plugin_path.with_extension("deps");
+    let content = match std::fs::read_to_string(&deps_path) {
+        Ok(c) => c,
+        Err(_) => return, // No .deps file — nothing to do
+    };
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let mut added = Vec::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let args = parse_shell_words(line);
+        if args.is_empty() {
+            continue;
+        }
+
+        let output = match std::process::Command::new(&args[0])
+            .args(&args[1..])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            Ok(o) if o.status.success() => o,
+            Ok(o) => {
+                log::debug!("Plugin deps: command exited {}: {}", o.status, line);
+                continue;
+            }
+            Err(e) => {
+                log::debug!("Plugin deps: failed to run: {} ({})", line, e);
+                continue;
+            }
+        };
+
+        let dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !dir.is_empty()
+            && !current_path
+                .split(';')
+                .any(|p| p.eq_ignore_ascii_case(&dir))
+            && !added.iter().any(|p: &String| p.eq_ignore_ascii_case(&dir))
+        {
+            added.push(dir);
+        }
+    }
+
+    if !added.is_empty() {
+        let prepend = added.join(";");
+        std::env::set_var("PATH", format!("{};{}", prepend, current_path));
+        log::debug!(
+            "Plugin deps ({:?}): added to PATH: {}",
+            deps_path.file_name().unwrap_or_default(),
+            prepend
+        );
+    }
+}
+
+/// Split a command line into words, respecting double-quoted strings.
+///
+/// `python -c "import sys; print(sys.base_prefix)"`
+/// → `["python", "-c", "import sys; print(sys.base_prefix)"]`
+#[cfg(target_os = "windows")]
+fn parse_shell_words(line: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in line.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            c if c.is_ascii_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
 }
 
 /// Extract a human-readable message from a panic payload.
