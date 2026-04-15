@@ -1,0 +1,187 @@
+name: Republish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "PyPI version (PEP 440, e.g. 0.3.3.post1)"
+        required: true
+        default: "0.3.3.post1"
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-web:
+    name: Build web assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install
+
+      - name: Build WASM + TypeScript bundle
+        working-directory: web
+        run: npm run build
+
+      - name: Package web bundle
+        run: |
+          mkdir -p staging
+          cp -r web/dist staging/
+          cp -r web/pkg staging/
+          cp web/package.json staging/
+          cd staging
+          tar -czvf ../pymol-rs-web.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pymol-rs-web
+          path: pymol-rs-web.tar.gz
+          if-no-files-found: error
+
+  build-wheels:
+    name: Build wheel ${{ matrix.os }} ${{ matrix.target }}
+    needs: [build-web]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64
+          - os: windows-11-arm
+            target: aarch64
+          - os: macos-latest
+            target: aarch64
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: auto
+          - os: ubuntu-24.04-arm
+            target: aarch64
+            manylinux: auto
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Patch version in pyproject.toml
+        shell: bash
+        run: |
+          sed -i.bak 's/^version = ".*"/version = "${{ inputs.version }}"/' python/pyproject.toml
+          rm -f python/pyproject.toml.bak
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: wheels-${{ matrix.target }}
+          workspaces: python
+
+      - name: Download web build
+        uses: actions/download-artifact@v8
+        with:
+          name: pymol-rs-web
+          path: web-artifact
+
+      - name: Prepare widget assets
+        run: |
+          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
+          mkdir -p python/pymol_rs/widget/static
+          cp web-artifact/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
+          cp web-artifact/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
+          cp web-artifact/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --find-interpreter
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          working-directory: python
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: python/dist/*.whl
+          if-no-files-found: error
+
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Patch version in pyproject.toml
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' python/pyproject.toml
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: python
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: python/dist/*.tar.gz
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download all wheels and sdist
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
