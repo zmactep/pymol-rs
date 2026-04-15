@@ -176,7 +176,7 @@ print(f'{sys.version_info.major}.{sys.version_info.minor}')
 print(sys.base_prefix)
 print(sys.base_exec_prefix)
 print(sys.prefix)
-sp = site.getsitepackages()
+sp = [p for p in site.getsitepackages() if p.endswith('site-packages')]
 print(sp[0] if sp else '')
 ";
 
