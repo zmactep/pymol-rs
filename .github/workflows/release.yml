@@ -387,7 +387,7 @@ jobs:
           PYMOL_RS_APPLE_EMAIL: ${{ secrets.PYMOL_RS_APPLE_EMAIL }}
           PYMOL_RS_APPLE_APP_PASS: ${{ secrets.PYMOL_RS_APPLE_APP_PASS }}
         run: |
-          printf 'PYMOL_RS_APPLE_TEAMID=%s\nPYMOL_RS_APPLE_EMAIL=%s\nPYMOL_RS_APPLE_APP_PASS=%s\n' \
+          printf "PYMOL_RS_APPLE_TEAMID='%s'\nPYMOL_RS_APPLE_EMAIL='%s'\nPYMOL_RS_APPLE_APP_PASS='%s'\n" \
             "$PYMOL_RS_APPLE_TEAMID" "$PYMOL_RS_APPLE_EMAIL" "$PYMOL_RS_APPLE_APP_PASS" > .env
 
       - name: Build DMG

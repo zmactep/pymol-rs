@@ -41,9 +41,9 @@ Grab the latest release for your platform from [Releases](https://github.com/zma
 pymol-rs protein.pdb
 ```
 
-**Python wheel** — includes both the CLI and `pymol_rs` module:
+**Python wheel** — includes both `pymol_rs` module and Jupyter plugin:
 ```bash
-pip install pymol_rs-<version>-<platform>.whl
+pip install pymol_rs
 ```
 
 ### Build from source
@@ -151,14 +151,6 @@ PyMOL-RS runs in the browser via WebAssembly + WebGPU. The viewer is published a
   panels="repl,objects,sequence"
   command="show cartoon; color green, chain A">
 </pymol-rs-viewer>
-```
-
-**Build from source:**
-```bash
-cd web
-npm install
-npm run build     # production build → dist/
-npm run dev       # dev server with hot reload
 ```
 
 ## Architecture

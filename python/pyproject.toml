@@ -45,6 +45,7 @@ features = ["pyo3/extension-module"]
 python-source = "."
 module-name = "pymol_rs._pymol_rs"
 include = [
+    { path = "LICENSE", format = "sdist" },
     { path = "pymol_rs/widget/_frontend.js", format = "sdist" },
     { path = "pymol_rs/widget/static/**", format = ["sdist", "wheel"] },
 ]

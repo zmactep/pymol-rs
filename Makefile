@@ -26,7 +26,7 @@ PLUGIN_INSTALL_DIR ?= $(HOME)/.pymol-rs/plugins
 BUNDLE_DIR     := target/bundle/$(APP_NAME)
 
 ifeq ($(OS),Windows_NT)
-MKDIRP = powershell -NoProfile -Command "$$null = New-Item -ItemType Directory -Force -Path"
+MKDIRP = powershell -NoProfile -Command '$$null = New-Item -ItemType Directory -Force -Path'
 else
 MKDIRP = mkdir -p
 endif
