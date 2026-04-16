@@ -82,6 +82,16 @@ pub enum ObjectType {
     Alignment,
 }
 
+impl ObjectType {
+    /// Whether objects of this type can be picked (clicked/selected).
+    ///
+    /// Map objects (isomesh, isosurface, isodots) are purely visual
+    /// and should not intercept picking rays.
+    pub fn is_pickable(&self) -> bool {
+        !matches!(self, ObjectType::Map)
+    }
+}
+
 impl std::fmt::Display for ObjectType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

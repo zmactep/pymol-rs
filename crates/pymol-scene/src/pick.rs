@@ -108,6 +108,9 @@ impl Picker {
             .collect();
 
         for (name, obj_type) in &names {
+            if !obj_type.is_pickable() {
+                continue;
+            }
             // For molecules, use BVH-accelerated picking
             if let Some(mol_obj) = registry.get_molecule_mut(name) {
                 let bvh = mol_obj.pick_bvh();
