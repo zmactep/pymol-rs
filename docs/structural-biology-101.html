@@ -30,7 +30,9 @@
                 >
                 <ul class="nav-links">
                     <li><a href="../index.html#features">Features</a></li>
-                    <li><a href="../index.html#architecture">Architecture</a></li>
+                    <li>
+                        <a href="../index.html#architecture">Architecture</a>
+                    </li>
                     <li><a href="../docs.html">Docs</a></li>
                     <li>
                         <a
@@ -63,11 +65,14 @@
 
             <!-- CONTENT -->
             <main class="docs-content">
-
                 <!-- 1. INTRO -->
-                <div class="doc-page" id="intro" data-title="Why structure matters"
-                     data-src="../assets/pdb/1CRN.pdb"
-                     data-command="as cartoon; color chain; orient; zoom all, buffer=5">
+                <div
+                    class="doc-page"
+                    id="intro"
+                    data-title="Why structure matters"
+                    data-src="../assets/pdb/1CRN.pdb"
+                    data-command="as cartoon; color chain; orient; zoom all, buffer=5"
+                >
                     <div class="docs-hero">
                         <h1>Structural Biology 101</h1>
                         <p>An interactive guide to the molecular world.</p>
@@ -76,38 +81,53 @@
                         <h2>Why molecular structure matters</h2>
                         <p>
                             Every biological process you can think of — a muscle
-                            contracting, a virus entering a cell, DNA being copied — is
-                            ultimately driven by the three-dimensional shapes of molecules.
-                            An enzyme fits its substrate like a key in a lock. An antibody
-                            recognises a pathogen by the contours of its surface. A drug
-                            works (or doesn't) because of how snugly it nestles into a
-                            protein's binding pocket.
+                            contracting, a virus entering a cell, DNA being
+                            copied — is ultimately driven by the
+                            three-dimensional shapes of molecules. An enzyme
+                            fits its substrate like a key in a lock. An antibody
+                            recognises a pathogen by the contours of its
+                            surface. A drug works (or doesn't) because of how
+                            snugly it nestles into a protein's binding pocket.
                         </p>
                         <p>
-                            Structural biology is the field that figures out these shapes.
-                            Its core principle is simple: <strong>structure determines
-                            function</strong>. If you know the 3D arrangement of atoms in a
-                            molecule, you can begin to understand — and even predict — what
-                            that molecule does.
+                            Structural biology is the field that figures out
+                            these shapes. Its core principle is simple:
+                            <strong>structure determines function</strong>. If
+                            you know the 3D arrangement of atoms in a molecule,
+                            you can begin to understand — and even predict —
+                            what that molecule does.
                         </p>
                         <p>
                             On the right you can see a small protein called
-                            <strong>Crambin</strong>, isolated from the seeds of an
-                            Abyssinian cabbage. It's one of the smallest proteins with a
-                            known crystal structure — just 46 amino acids — which makes it
-                            a perfect starting point. Try rotating it with your mouse. You
-                            can also look at it as a
-                            <span class="cmd-run" data-cmd="as surface; color chain">molecular surface</span>
+                            <strong>Crambin</strong>, isolated from the seeds of
+                            an Abyssinian cabbage. It's one of the smallest
+                            proteins with a known crystal structure — just 46
+                            amino acids — which makes it a perfect starting
+                            point. Try rotating it with your mouse. You can also
+                            look at it as a
+                            <span
+                                class="cmd-run"
+                                data-cmd="as surface; color chain"
+                                >molecular surface</span
+                            >
                             to see its overall shape, or as
-                            <span class="cmd-run" data-cmd="set sphere_scale, 1; as spheres; color cpk">space-filling spheres</span>
+                            <span
+                                class="cmd-run"
+                                data-cmd="set sphere_scale, 1; as spheres; color cpk"
+                                >space-filling spheres</span
+                            >
                             to get a sense of its real volume. Switch back to
-                            <span class="cmd-run" data-cmd="as cartoon; color chain">ribbon view</span>
+                            <span
+                                class="cmd-run"
+                                data-cmd="as cartoon; color chain"
+                                >ribbon view</span
+                            >
                             whenever you like.
                         </p>
                         <p>
-                            In the pages that follow, you'll learn what molecules like this
-                            are made of, how they fold into shape, and where their
-                            structures come from.
+                            In the pages that follow, you'll learn what
+                            molecules like this are made of, how they fold into
+                            shape, and where their structures come from.
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -118,61 +138,100 @@
                 </div>
 
                 <!-- 2. ATOMS AND BONDS -->
-                <div class="doc-page" id="atoms" data-title="Atoms and bonds"
-                     data-src="../assets/pdb/1CRN.pdb"
-                     data-command="set sphere_scale, 0.3; as sticks; show spheres; color cpk; orient; zoom all, buffer=5">
+                <div
+                    class="doc-page"
+                    id="atoms"
+                    data-title="Atoms and bonds"
+                    data-src="../assets/pdb/1CRN.pdb"
+                    data-command="set sphere_scale, 0.3; as sticks; show spheres; color cpk; orient; zoom all, buffer=5"
+                >
                     <div class="docs-section">
                         <h2>Atoms and bonds</h2>
                         <p>
-                            At the most fundamental level, every molecule is a collection of
-                            <strong>atoms</strong> connected by <strong>chemical bonds</strong>.
-                            The atoms you'll encounter most often in biology are carbon (C),
-                            nitrogen (N), oxygen (O), hydrogen (H), and sulfur (S). Each
-                            element plays a different role: carbon forms the backbone
-                            skeleton, nitrogen and oxygen create the polar and reactive
-                            sites, and sulfur can lock parts of the chain together with
-                            disulfide bridges.
+                            At the most fundamental level, every molecule is a
+                            collection of
+                            <strong>atoms</strong> connected by
+                            <strong>chemical bonds</strong>. The atoms you'll
+                            encounter most often in biology are carbon (C),
+                            nitrogen (N), oxygen (O), hydrogen (H), and sulfur
+                            (S). Each element plays a different role: carbon
+                            forms the backbone skeleton, nitrogen and oxygen
+                            create the polar and reactive sites, and sulfur can
+                            lock parts of the chain together with disulfide
+                            bridges.
                         </p>
                         <p>
                             The viewer now shows the same Crambin protein as a
-                            ball-and-stick model: small spheres for atoms connected by
-                            cylindrical bonds. Atoms are coloured by element — a convention
-                            chemists call CPK colouring:
+                            ball-and-stick model: small spheres for atoms
+                            connected by cylindrical bonds. Atoms are coloured
+                            by element — a convention chemists call CPK
+                            colouring:
                         </p>
                         <ul>
                             <li><strong>Carbon</strong> — gray or green</li>
                             <li><strong>Nitrogen</strong> — blue</li>
                             <li><strong>Oxygen</strong> — red</li>
                             <li><strong>Sulfur</strong> — yellow</li>
-                            <li><strong>Hydrogen</strong> — white (often hidden for clarity)</li>
+                            <li>
+                                <strong>Hydrogen</strong> — white (often hidden
+                                for clarity)
+                            </li>
                         </ul>
                         <p>
-                            There are two other common ways to show atomic detail.
+                            There are two other common ways to show atomic
+                            detail.
                         </p>
                         <p>
                             In a
-                            <span class="cmd-run" data-cmd="set sphere_scale, 1; as spheres">space-filling</span>
-                            (or VdW) view, each atom is drawn at its real van der Waals
-                            radius — the spheres overlap and merge into a compact, bumpy
-                            surface. This is the most physically accurate picture of what the
-                            molecule "looks like" to another molecule approaching it.
+                            <span
+                                class="cmd-run"
+                                data-cmd="set sphere_scale, 1; as spheres"
+                                >space-filling</span
+                            >
+                            (or VdW) view, each atom is drawn at its real van
+                            der Waals radius — the spheres overlap and merge
+                            into a compact, bumpy surface. This is the most
+                            physically accurate picture of what the molecule
+                            "looks like" to another molecule approaching it.
                         </p>
                         <p>
                             In a pure
-                            <span class="cmd-run" data-cmd="set sphere_scale, 1; as sticks">stick</span>
-                            view the atoms are implied — you only see the bonds as thin
-                            cylinders. This is the most common representation for examining
-                            bonding geometry and is much easier to read for large molecules.
+                            <span
+                                class="cmd-run"
+                                data-cmd="set sphere_scale, 1; as sticks"
+                                >stick</span
+                            >
+                            view the atoms are implied — you only see the bonds
+                            as thin cylinders. This is the most common
+                            representation for examining bonding geometry and is
+                            much easier to read for large molecules.
                         </p>
                         <p>
                             The
-                            <span class="cmd-run" data-cmd="set sphere_scale, 0.3; as sticks; show spheres">ball-and-stick</span>
-                            view you started with is a compromise between the two — small
-                            spheres for atoms, sticks for bonds.
+                            <span
+                                class="cmd-run"
+                                data-cmd="set sphere_scale, 0.3; as sticks; show spheres"
+                                >ball-and-stick</span
+                            >
+                            view you started with is a compromise between the
+                            two — small spheres for atoms, sticks for bonds.
                         </p>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Atom" target="_blank" rel="noopener">Wikipedia: Atom</a> &middot;
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Chemical_bond" target="_blank" rel="noopener">Wikipedia: Chemical bond</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Atom"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Atom</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Chemical_bond"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Chemical bond</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -183,43 +242,138 @@
                 </div>
 
                 <!-- 3. AMINO ACIDS -->
-                <div class="doc-page" id="amino-acids" data-title="Amino acids"
-                     data-src="../assets/pdb/amino-acid-grid.pdb"
-                     data-command="as sticks; color cpk; label name CA, resn; reset; orient; zoom all, buffer=5">
+                <div
+                    class="doc-page"
+                    id="amino-acids"
+                    data-title="Amino acids"
+                    data-src="../assets/pdb/amino-acid-grid.pdb"
+                    data-command="as sticks; color cpk; label name CA, resn; reset; orient; zoom all, buffer=5"
+                >
                     <div class="docs-section">
                         <h2>Amino acids</h2>
                         <p>
                             Proteins are built from a set of
-                            <span class="cmd-run" data-cmd="as sticks; label name CA, resn; reset; orient; zoom all, buffer=5">20 standard amino acids</span>
-                            — you can think of them as the
-                            letters of the protein alphabet. String them together, and you
-                            get a word; fold that word in three dimensions, and you get a
-                            functional protein.
+                            <span
+                                class="cmd-run"
+                                data-cmd="as sticks; label name CA, resn; reset; orient; zoom all, buffer=5"
+                                >20 standard amino acids</span
+                            >
+                            — you can think of them as the letters of the
+                            protein alphabet. String them together, and you get
+                            a word; fold that word in three dimensions, and you
+                            get a functional protein.
                         </p>
                         <p>
-                            <span class="cmd-run" data-cmd="reset; oreint resn TRP; zoom resn TRP; label resn TRP, name">Every amino acid</span>
+                            <span
+                                class="cmd-run"
+                                data-cmd="reset; oreint resn TRP; zoom resn TRP; label resn TRP, name"
+                                >Every amino acid</span
+                            >
                             shares the same core structure — a
-                            <span class="cmd-run" data-cmd="select backbone, resn TRP and name N+CA+C+O" data-cmd-alt="deselect">backbone</span>
-                            made of nitrogen, carbon-alpha (C&alpha;), and a carbonyl group
-                            (C=O). What makes each of the 20 amino acids unique is the
-                            <span class="cmd-run" data-cmd="select sidechain, resn TRP and not name N+CA+C+O+OXT and not element H" data-cmd-alt="deselect">side chain</span> (also called the R group) attached to
-                            the C&alpha;. Side chains range from a single hydrogen atom
-                            (glycine, the simplest) to bulky aromatic rings (tryptophan, the
-                            largest).
+                            <span
+                                class="cmd-run"
+                                data-cmd="select backbone, resn TRP and name N+CA+C+O"
+                                data-cmd-alt="deselect"
+                                >backbone</span
+                            >
+                            made of nitrogen, carbon-alpha (C&alpha;), and a
+                            carbonyl group (C=O). What makes each of the 20
+                            amino acids unique is the
+                            <span
+                                class="cmd-run"
+                                data-cmd="select sidechain, resn TRP and not name N+CA+C+O+OXT and not element H"
+                                data-cmd-alt="deselect"
+                                >side chain</span
+                            >
+                            (also called the R group) attached to the C&alpha;.
+                            Side chains range from a single hydrogen atom
+                            (glycine, the simplest) to bulky aromatic rings
+                            (tryptophan, the largest).
                         </p>
                         <h3>Side chain properties</h3>
-                        <p>
-                            Side chains determine how an amino acid behaves:
-                        </p>
+                        <p>Side chains determine how an amino acid behaves:</p>
                         <ul>
-                            <li><strong>Hydrophobic</strong> (e.g. <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn LEU" data-cmd-alt="deselect">leucine</span>, <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn VAL" data-cmd-alt="deselect">valine</span>) — avoid water, tend to pack into the protein's interior</li>
-                            <li><strong>Polar</strong> (e.g. <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn SER" data-cmd-alt="deselect">serine</span>, <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn THR" data-cmd-alt="deselect">threonine</span>) — form hydrogen bonds, often found on the surface</li>
-                            <li><strong>Charged</strong> (e.g. <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn GLU" data-cmd-alt="deselect">glutamate</span>, <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn LYS" data-cmd-alt="deselect">lysine</span>) — carry positive or negative charge at physiological pH</li>
-                            <li><strong>Aromatic</strong> (e.g. <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn PHE" data-cmd-alt="deselect">phenylalanine</span>, <span class="cmd-run" data-cmd="scene aa_grid, recall; select sele, resn TYR" data-cmd-alt="deselect">tyrosine</span>) — bulky ring structures with special optical and chemical properties</li>
+                            <li>
+                                <strong>Hydrophobic</strong> (e.g.
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn LEU"
+                                    data-cmd-alt="deselect"
+                                    >leucine</span
+                                >,
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn VAL"
+                                    data-cmd-alt="deselect"
+                                    >valine</span
+                                >) — avoid water, tend to pack into the
+                                protein's interior
+                            </li>
+                            <li>
+                                <strong>Polar</strong> (e.g.
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn SER"
+                                    data-cmd-alt="deselect"
+                                    >serine</span
+                                >,
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn THR"
+                                    data-cmd-alt="deselect"
+                                    >threonine</span
+                                >) — form hydrogen bonds, often found on the
+                                surface
+                            </li>
+                            <li>
+                                <strong>Charged</strong> (e.g.
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn GLU"
+                                    data-cmd-alt="deselect"
+                                    >glutamate</span
+                                >,
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn LYS"
+                                    data-cmd-alt="deselect"
+                                    >lysine</span
+                                >) — carry positive or negative charge at
+                                physiological pH
+                            </li>
+                            <li>
+                                <strong>Aromatic</strong> (e.g.
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn PHE"
+                                    data-cmd-alt="deselect"
+                                    >phenylalanine</span
+                                >,
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="scene aa_grid, recall; select sele, resn TYR"
+                                    data-cmd-alt="deselect"
+                                    >tyrosine</span
+                                >) — bulky ring structures with special optical
+                                and chemical properties
+                            </li>
                         </ul>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Amino_acid" target="_blank" rel="noopener">Wikipedia: Amino acid</a> &middot;
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Peptide_bond" target="_blank" rel="noopener">Wikipedia: Peptide bond</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Amino_acid"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Amino acid</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Peptide_bond"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Peptide bond</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -230,100 +384,154 @@
                 </div>
 
                 <!-- 4. PROTEINS -->
-                <div class="doc-page" id="proteins" data-title="Proteins"
-                     data-src="../assets/pdb/4OJN.pdb"
-                     data-command="hide everything; show sticks, chain A and resi 48+49; color cpk; orient chain A and resi 48+49; zoom chain A and resi 48+49, buffer=3">
+                <div
+                    class="doc-page"
+                    id="proteins"
+                    data-title="Proteins"
+                    data-src="../assets/pdb/4OJN.pdb"
+                    data-command="hide everything; show sticks, chain A and resi 48+49; color cpk; orient chain A and resi 48+49; zoom chain A and resi 48+49, buffer=3"
+                >
                     <div class="docs-section">
                         <h2>Proteins: from chain to shape</h2>
                         <p>
                             In the viewer you see a
-                            <span class="cmd-run" data-cmd="hide everything; show sticks, chain A and resi 48+49; color cpk; orient chain A and resi 48+49; zoom chain A and resi 48+49, buffer=3">dipeptide</span>
-                            — two amino acids from <strong>lactate dehydrogenase</strong>
-                            (PDB: 4OJN), a metabolic enzyme found in nearly every living
-                            cell. The two residues are joined by a
-                            <span class="cmd-run" data-cmd="color magenta, chain A and resi 48 and name C; color magenta, chain A and resi 49 and name N" data-cmd-alt="color cpk">peptide bond</span>
-                            — a covalent link between the carbonyl carbon of one amino acid
-                            and the nitrogen of the next. This is how amino acids chain
-                            together into a <strong>polypeptide</strong>. Now
-                            <span class="cmd-run" data-cmd="as sticks, chain A; color cpk, chain A; orient chain A; zoom chain A, buffer=2">reveal the entire chain</span>
-                            — over 300 residues. The view becomes a dense tangle of atoms
-                            where individual details are lost.
+                            <span
+                                class="cmd-run"
+                                data-cmd="hide everything; show sticks, chain A and resi 48+49; color cpk; orient chain A and resi 48+49; zoom chain A and resi 48+49, buffer=3"
+                                >dipeptide</span
+                            >
+                            — two amino acids from
+                            <strong>lactate dehydrogenase</strong>
+                            (PDB: 4OJN), a metabolic enzyme found in nearly
+                            every living cell. The two residues are joined by a
+                            <span
+                                class="cmd-run"
+                                data-cmd="color magenta, chain A and resi 48 and name C; color magenta, chain A and resi 49 and name N"
+                                data-cmd-alt="color cpk"
+                                >peptide bond</span
+                            >
+                            — a covalent link between the carbonyl carbon of one
+                            amino acid and the nitrogen of the next. This is how
+                            amino acids chain together into a
+                            <strong>polypeptide</strong>. Now
+                            <span
+                                class="cmd-run"
+                                data-cmd="as sticks, chain A; color cpk, chain A; orient chain A; zoom chain A, buffer=2"
+                                >reveal the entire chain</span
+                            >
+                            — over 300 residues. The view becomes a dense tangle
+                            of atoms where individual details are lost.
                         </p>
                         <p>
-                            Clearly, staring at thousands of atoms is not the best way to
-                            understand a protein. Biochemists think about protein
-                            architecture in four levels of increasing scale — from the
-                            sequence of amino acids up to multi-chain assemblies. Let's walk
-                            through each one.
+                            Clearly, staring at thousands of atoms is not the
+                            best way to understand a protein. Biochemists think
+                            about protein architecture in four levels of
+                            increasing scale — from the sequence of amino acids
+                            up to multi-chain assemblies. Let's walk through
+                            each one.
                         </p>
 
                         <h3>Primary structure</h3>
                         <p>
-                            The <strong>primary structure</strong> is simply the linear
-                            sequence of amino acids — a string of letters like
-                            Glu-Leu-Ala-Leu-Val... This sequence, encoded in DNA, contains
-                            all the information the chain needs to fold into its final shape.
+                            The <strong>primary structure</strong> is simply the
+                            linear sequence of amino acids — a string of letters
+                            like Glu-Leu-Ala-Leu-Val... This sequence, encoded
+                            in DNA, contains all the information the chain needs
+                            to fold into its final shape.
                         </p>
 
                         <h3>Secondary structure</h3>
                         <p>
                             Switch to a
-                            <span class="cmd-run" data-cmd="as cartoon, chain A; color ss, chain A; orient chain A; zoom chain A, buffer=3">cartoon view</span>
-                            and the chaos of atoms resolves into recognisable shapes.
-                            Locally, the backbone folds into repeating patterns held together
-                            by hydrogen bonds:
+                            <span
+                                class="cmd-run"
+                                data-cmd="as cartoon, chain A; color ss, chain A; orient chain A; zoom chain A, buffer=3"
+                                >cartoon view</span
+                            >
+                            and the chaos of atoms resolves into recognisable
+                            shapes. Locally, the backbone folds into repeating
+                            patterns held together by hydrogen bonds:
                         </p>
                         <ul>
                             <li>
-                                <strong>&alpha;-helices</strong> — right-handed coils where
-                                each backbone NH hydrogen-bonds to the C=O four residues
-                                earlier. In the cartoon they appear as spiralling ribbons.
-                                <span class="cmd-run" data-cmd="zoom chain A and resi 317, buffer=12">Zoom in on Lys&nbsp;317</span>
-                                to see one up close — it sits in the middle of a long helix
-                                that runs from Thr&nbsp;309 to Lys&nbsp;328.
+                                <strong>&alpha;-helices</strong> — right-handed
+                                coils where each backbone NH hydrogen-bonds to
+                                the C=O four residues earlier. In the cartoon
+                                they appear as spiralling ribbons.
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="zoom chain A and resi 317, buffer=12"
+                                    >Zoom in on Lys&nbsp;317</span
+                                >
+                                to see one up close — it sits in the middle of a
+                                long helix that runs from Thr&nbsp;309 to
+                                Lys&nbsp;328.
                             </li>
                             <li>
-                                <strong>&beta;-sheets</strong> — extended strands lying side
-                                by side, connected by hydrogen bonds between them. They
-                                appear as flat arrows showing the chain direction.
-                                <span class="cmd-run" data-cmd="zoom chain A and resi 48, buffer=12">Zoom in on Leu&nbsp;48</span>
-                                to see a strand within a six-stranded &beta;-sheet at the
-                                core of the enzyme.
+                                <strong>&beta;-sheets</strong> — extended
+                                strands lying side by side, connected by
+                                hydrogen bonds between them. They appear as flat
+                                arrows showing the chain direction.
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="zoom chain A and resi 48, buffer=12"
+                                    >Zoom in on Leu&nbsp;48</span
+                                >
+                                to see a strand within a six-stranded
+                                &beta;-sheet at the core of the enzyme.
                             </li>
                         </ul>
 
                         <h3>Tertiary structure</h3>
                         <p>
-                            <span class="cmd-run" data-cmd="orient chain A; zoom chain A, buffer=3">Zoom back out</span>
-                            to see the <strong>tertiary structure</strong> — the complete
-                            three-dimensional fold of a single polypeptide chain.
-                            Hydrophobic side chains pack into the core while polar residues
-                            face the surrounding water. The overall shape of this fold
-                            determines what the enzyme can bind and how it catalyses its
+                            <span
+                                class="cmd-run"
+                                data-cmd="orient chain A; zoom chain A, buffer=3"
+                                >Zoom back out</span
+                            >
+                            to see the <strong>tertiary structure</strong> — the
+                            complete three-dimensional fold of a single
+                            polypeptide chain. Hydrophobic side chains pack into
+                            the core while polar residues face the surrounding
+                            water. The overall shape of this fold determines
+                            what the enzyme can bind and how it catalyses its
                             reaction.
                         </p>
 
                         <h3>Quaternary structure</h3>
                         <p>
-                            Many proteins function not as lone chains but as multi-chain
-                            assemblies — this is <strong>quaternary structure</strong>.
-                            Lactate dehydrogenase is a
-                            <span class="cmd-run" data-cmd="hide everything; show cartoon, chain A+B+C+D; color ss, chain A+B+C+D; orient chain A+B+C+D; zoom chain A+B+C+D, buffer=3">tetramer of four identical subunits</span>.
-                            In the secondary-structure colouring you can see that each
-                            subunit shares the same fold — the same helices and sheets
-                            repeated four times.
+                            Many proteins function not as lone chains but as
+                            multi-chain assemblies — this is
+                            <strong>quaternary structure</strong>. Lactate
+                            dehydrogenase is a
+                            <span
+                                class="cmd-run"
+                                data-cmd="hide everything; show cartoon, chain A+B+C+D; color ss, chain A+B+C+D; orient chain A+B+C+D; zoom chain A+B+C+D, buffer=3"
+                                >tetramer of four identical subunits</span
+                            >. In the secondary-structure colouring you can see
+                            that each subunit shares the same fold — the same
+                            helices and sheets repeated four times.
                         </p>
                         <p>
-                            At this level of organisation we usually care about the subunits
-                            themselves rather than their internal elements, so it makes sense
-                            to
-                            <span class="cmd-run" data-cmd="color chain">colour by chain</span>
-                            — now each subunit stands out as a distinct unit. The four
-                            chains pack together into a compact assembly; only the complete
-                            tetramer is catalytically active.
+                            At this level of organisation we usually care about
+                            the subunits themselves rather than their internal
+                            elements, so it makes sense to
+                            <span class="cmd-run" data-cmd="color chain"
+                                >colour by chain</span
+                            >
+                            — now each subunit stands out as a distinct unit.
+                            The four chains pack together into a compact
+                            assembly; only the complete tetramer is
+                            catalytically active.
                         </p>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Protein_structure" target="_blank" rel="noopener">Wikipedia: Protein structure</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Protein_structure"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Protein structure</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -334,74 +542,115 @@
                 </div>
 
                 <!-- 5. NUCLEOTIDES -->
-                <div class="doc-page" id="nucleotides" data-title="Nucleotides"
-                     data-src="../assets/pdb/dna-nucleotides.pdb"
-                     data-command="as sticks; color cpk; orient; zoom all, buffer=5">
+                <div
+                    class="doc-page"
+                    id="nucleotides"
+                    data-title="Nucleotides"
+                    data-src="../assets/pdb/dna-nucleotides.pdb"
+                    data-command="as sticks; color cpk; orient; zoom all, buffer=5"
+                >
                     <div class="docs-section">
                         <h2>Nucleotides</h2>
                         <p>
                             If amino acids are the alphabet of proteins, then
-                            <strong>nucleotides</strong> are the alphabet of nucleic acids.
-                            DNA
-                            <span class="cmd-run" data-cmd="delete all; load dna-nucleotides.pdb; as sticks; color cpk; orient; zoom all, buffer=5">uses four</span>:
-                            adenine (A), guanine (G), cytosine (C) and thymine (T)
-                            — you can see all four in the viewer.
+                            <strong>nucleotides</strong> are the alphabet of
+                            nucleic acids. DNA
+                            <span
+                                class="cmd-run"
+                                data-cmd="delete all; load dna-nucleotides.pdb; as sticks; color cpk; orient; zoom all, buffer=5"
+                                >uses four</span
+                            >: adenine (A), guanine (G), cytosine (C) and
+                            thymine (T) — you can see all four in the viewer.
                         </p>
                         <p>
-                            <span class="cmd-run" data-cmd="zoom chain A, buffer=4">Zoom in on adenine</span>
-                            to look at the three parts every nucleotide is built from:
+                            <span
+                                class="cmd-run"
+                                data-cmd="zoom chain A, buffer=4"
+                                >Zoom in on adenine</span
+                            >
+                            to look at the three parts every nucleotide is built
+                            from:
                         </p>
                         <ul>
                             <li>
-                                <span class="cmd-run"
+                                <span
+                                    class="cmd-run"
                                     data-cmd="deselect; select phosphate, name P+OP1+OP2"
                                     data-cmd-alt="deselect"
-                                    data-cmd-group="nuc-parts">Phosphate group</span>
-                                — links nucleotides into a chain and gives DNA its
-                                negative charge
+                                    data-cmd-group="nuc-parts"
+                                    >Phosphate group</span
+                                >
+                                — links nucleotides into a chain and gives DNA
+                                its negative charge
                             </li>
                             <li>
-                                <span class="cmd-run"
+                                <span
+                                    class="cmd-run"
                                     data-cmd="deselect; select sugar, name O5'+C5'+C4'+O4'+C3'+O3'+C2'+C1'"
                                     data-cmd-alt="deselect"
-                                    data-cmd-group="nuc-parts">Sugar</span>
-                                — a five-carbon deoxyribose ring that connects the
-                                phosphate to the base
+                                    data-cmd-group="nuc-parts"
+                                    >Sugar</span
+                                >
+                                — a five-carbon deoxyribose ring that connects
+                                the phosphate to the base
                             </li>
                             <li>
-                                <span class="cmd-run"
+                                <span
+                                    class="cmd-run"
                                     data-cmd="deselect; select base, name N9+C8+N7+C5+C6+N6+N1+C2+N3+C4+O2+O4+N4+O6+N2+C7"
                                     data-cmd-alt="deselect"
-                                    data-cmd-group="nuc-parts">Nitrogenous base</span>
-                                — the "letter" that carries the genetic information
+                                    data-cmd-group="nuc-parts"
+                                    >Nitrogenous base</span
+                                >
+                                — the "letter" that carries the genetic
+                                information
                             </li>
                         </ul>
 
                         <h3>DNA vs RNA</h3>
                         <p>
-                            The chemical difference between DNA and RNA is small but
-                            consequential. Compare
-                            <span class="cmd-run" data-cmd="delete all; load da-vs-ra.pdb; as sticks; color cpk; orient; zoom all, buffer=8">deoxyadenosine (left) with adenosine (right)</span>:
-                            RNA's ribose has an
-                            <span class="cmd-run"
+                            The chemical difference between DNA and RNA is small
+                            but consequential. Compare
+                            <span
+                                class="cmd-run"
+                                data-cmd="delete all; load da-vs-ra.pdb; as sticks; color cpk; orient; zoom all, buffer=8"
+                                >deoxyadenosine (left) with adenosine
+                                (right)</span
+                            >: RNA's ribose has an
+                            <span
+                                class="cmd-run"
                                 data-cmd="select hydroxyl, chain B and name O2'"
-                                data-cmd-alt="deselect">extra hydroxyl group</span>
-                            at the 2' position.
-                            This makes RNA more flexible and reactive, while DNA's missing
-                            hydroxyl makes its double helix more chemically stable —
-                            perfect for long-term information storage.
+                                data-cmd-alt="deselect"
+                                >extra hydroxyl group</span
+                            >
+                            at the 2' position. This makes RNA more flexible and
+                            reactive, while DNA's missing hydroxyl makes its
+                            double helix more chemically stable — perfect for
+                            long-term information storage.
                         </p>
                         <p>
                             The other difference is one base:
-                            <span class="cmd-run" data-cmd="delete all; load dt-vs-u.pdb; as sticks; color cpk; orient; zoom all, buffer=8">thymine (left) vs uracil (right)</span>.
-                            Thymine carries an extra
-                            <span class="cmd-run"
+                            <span
+                                class="cmd-run"
+                                data-cmd="delete all; load dt-vs-u.pdb; as sticks; color cpk; orient; zoom all, buffer=8"
+                                >thymine (left) vs uracil (right)</span
+                            >. Thymine carries an extra
+                            <span
+                                class="cmd-run"
                                 data-cmd="select methyl, chain A and name C7"
-                                data-cmd-alt="deselect">methyl group</span>
+                                data-cmd-alt="deselect"
+                                >methyl group</span
+                            >
                             — DNA uses thymine, RNA uses uracil.
                         </p>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Nucleotide" target="_blank" rel="noopener">Wikipedia: Nucleotide</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Nucleotide"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Nucleotide</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -412,51 +661,101 @@
                 </div>
 
                 <!-- 6. DNA AND RNA -->
-                <div class="doc-page" id="nucleic-acids" data-title="DNA and RNA"
-                     data-src="../assets/pdb/1BNA.pdb"
-                     data-command="as sticks; color cpk; orient; turn z, 80; turn y, 30; zoom all, buffer=5">
+                <div
+                    class="doc-page"
+                    id="nucleic-acids"
+                    data-title="DNA and RNA"
+                    data-src="../assets/pdb/1BNA.pdb"
+                    data-command="as sticks; color cpk; orient; turn z, 80; turn y, 30; zoom all, buffer=5"
+                >
                     <div class="docs-section">
                         <h2>DNA and RNA</h2>
                         <p>
-                            Nucleotides link together through their phosphate and sugar
-                            groups to form long chains. What makes these chains extraordinary
-                            is <strong>base pairing</strong>: the bases on opposite strands
-                            recognise each other through hydrogen bonds. Adenine always pairs
-                            with thymine, and guanine always pairs with cytosine — this is
-                            Watson–Crick base pairing, the foundation of heredity.
+                            Nucleotides link together through their phosphate
+                            and sugar groups to form long chains. What makes
+                            these chains extraordinary is
+                            <strong>base pairing</strong>: the bases on opposite
+                            strands recognise each other through hydrogen bonds.
+                            Adenine always pairs with thymine, and guanine
+                            always pairs with cytosine — this is Watson–Crick
+                            base pairing, the foundation of heredity.
                         </p>
                         <p>
-                            In the viewer you see a <span class="cmd-run" data-cmd="delete all; load 1BNA.pdb; as sticks; color cpk; orient; turn z, 80; turn y, 30; zoom all, buffer=5">fragment of DNA</span> — 12 base pairs of the
-                            classic double helix, one of the first DNA structures solved by
-                            X-ray crystallography (1981). Look at an
-                            <span class="cmd-run" data-cmd="deselect; select sele, (chain A and resi 5) or (chain B and resi 20)" data-cmd-alt="deselect" data-cmd-group="base-pairs">A–T pair</span>
+                            In the viewer you see a
+                            <span
+                                class="cmd-run"
+                                data-cmd="delete all; load 1BNA.pdb; as sticks; color cpk; orient; turn z, 80; turn y, 30; zoom all, buffer=5"
+                                >fragment of DNA</span
+                            >
+                            — 12 base pairs of the classic double helix, one of
+                            the first DNA structures solved by X-ray
+                            crystallography (1981). Look at an
+                            <span
+                                class="cmd-run"
+                                data-cmd="deselect; select sele, (chain A and resi 5) or (chain B and resi 20)"
+                                data-cmd-alt="deselect"
+                                data-cmd-group="base-pairs"
+                                >A–T pair</span
+                            >
                             — two hydrogen bonds hold the bases together. A
-                            <span class="cmd-run" data-cmd="deselect; select sele, (chain A and resi 4) or (chain B and resi 21)" data-cmd-alt="deselect" data-cmd-group="base-pairs">G–C pair</span>
+                            <span
+                                class="cmd-run"
+                                data-cmd="deselect; select sele, (chain A and resi 4) or (chain B and resi 21)"
+                                data-cmd-alt="deselect"
+                                data-cmd-group="base-pairs"
+                                >G–C pair</span
+                            >
                             is stronger — three hydrogen bonds. Switch to a
-                            <span class="cmd-run" data-cmd="as cartoon; color chain">cartoon view</span>
-                            to see the iconic double helix shape: two sugar-phosphate
-                            backbones wind around each other while the base pairs stack
-                            inside. Go back to
-                            <span class="cmd-run" data-cmd="as sticks; color cpk">sticks</span>
+                            <span
+                                class="cmd-run"
+                                data-cmd="as cartoon; color chain"
+                                >cartoon view</span
+                            >
+                            to see the iconic double helix shape: two
+                            sugar-phosphate backbones wind around each other
+                            while the base pairs stack inside. Go back to
+                            <span
+                                class="cmd-run"
+                                data-cmd="as sticks; color cpk"
+                                >sticks</span
+                            >
                             to see the atoms again.
                         </p>
 
                         <h3>RNA</h3>
                         <p>
-                            RNA is usually single-stranded, but it can fold into complex
-                            three-dimensional shapes by base-pairing with itself. A classic
-                            example is
-                            <span class="cmd-run" data-cmd="delete all; load 1EHZ.pdb; as cartoon; color chain; orient; turn x, 90; zoom all, buffer=5">transfer RNA</span>
-                            (tRNA) — the adaptor molecule that carries amino acids to the
-                            ribosome during protein synthesis. Its single chain folds into a
-                            distinctive L-shape, held together by internal base pairs.
-                            Ribosomal RNA forms the catalytic core of the ribosome itself —
-                            the molecular machine that reads the genetic code and builds
-                            proteins.
+                            RNA is usually single-stranded, but it can fold into
+                            complex three-dimensional shapes by base-pairing
+                            with itself. A classic example is
+                            <span
+                                class="cmd-run"
+                                data-cmd="delete all; load 1EHZ.pdb; as cartoon; color chain; orient; turn x, 90; zoom all, buffer=5"
+                                >transfer RNA</span
+                            >
+                            (tRNA) — the adaptor molecule that carries amino
+                            acids to the ribosome during protein synthesis. Its
+                            single chain folds into a distinctive L-shape, held
+                            together by internal base pairs. Ribosomal RNA forms
+                            the catalytic core of the ribosome itself — the
+                            molecular machine that reads the genetic code and
+                            builds proteins.
                         </p>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/DNA" target="_blank" rel="noopener">Wikipedia: DNA</a> &middot;
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/RNA" target="_blank" rel="noopener">Wikipedia: RNA</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/DNA"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: DNA</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/RNA"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: RNA</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -467,83 +766,108 @@
                 </div>
 
                 <!-- 7. EXPERIMENTAL METHODS -->
-                <div class="doc-page" id="methods" data-title="Experimental methods"
-                     data-src="../assets/pdb/1BNA.prs"
-                     data-command="reset; as sticks, 1BNA; color cpk, 1BNA; zoom chain A and resi 5, buffer=3; turn y, 90; clip near, -100; clip far, 80">
+                <div
+                    class="doc-page"
+                    id="methods"
+                    data-title="Experimental methods"
+                    data-src="../assets/pdb/1BNA.prs"
+                    data-command="reset; as sticks, 1BNA; color cpk, 1BNA; zoom chain A and resi 5, buffer=3; turn y, 90; clip near, -100; clip far, 80"
+                >
                     <div class="docs-section">
                         <h2>How structures are determined</h2>
                         <p>
-                            Every structure you've seen in this tutorial — amino acids,
-                            proteins, DNA — was determined experimentally. But you can't see
-                            individual atoms with a light microscope: they're far too small.
-                            So how did scientists figure out where every atom sits in that
-                            DNA double helix?
+                            Every structure you've seen in this tutorial — amino
+                            acids, proteins, DNA — was determined
+                            experimentally. But you can't see individual atoms
+                            with a light microscope: they're far too small. So
+                            how did scientists figure out where every atom sits
+                            in that DNA double helix?
                         </p>
 
                         <h3>X-ray crystallography</h3>
                         <p>
-                            The DNA fragment from the previous section was solved by
-                            <strong>X-ray crystallography</strong> in 1981. The process goes
-                            like this: you grow a crystal of your molecule, shoot a beam of
-                            X-rays through it, and record the diffraction pattern — the way
-                            the rays scatter off the atoms. From this pattern, a computer
-                            reconstructs an <strong>electron density map</strong> — a 3D
-                            cloud showing where electrons (and therefore atoms) are most
-                            likely to be. The viewer shows the DNA structure fitted inside
-                            its <span class="cmd-run" data-cmd="disable 1bna" data-cmd-alt="enable 1bna">electron density</span>. Each atom was placed by hand into the
-                            densest regions of the map.
+                            The DNA fragment from the previous section was
+                            solved by
+                            <strong>X-ray crystallography</strong> in 1981. The
+                            process goes like this: you grow a crystal of your
+                            molecule, shoot a beam of X-rays through it, and
+                            record the diffraction pattern — the way the rays
+                            scatter off the atoms. From this pattern, a computer
+                            reconstructs an
+                            <strong>electron density map</strong> — a 3D cloud
+                            showing where electrons (and therefore atoms) are
+                            most likely to be. The viewer shows the DNA
+                            structure fitted inside its
+                            <span
+                                class="cmd-run"
+                                data-cmd="disable 1bna"
+                                data-cmd-alt="enable 1bna"
+                                >electron density</span
+                            >. Each atom was placed by hand into the densest
+                            regions of the map.
                         </p>
                         <p>
-                            Most known molecular structures were solved this way.
-                            X-ray crystallography remains the workhorse of structural
-                            biology, capable of resolving detail down to 1&#8239;&#197;.
+                            Most known molecular structures were solved this
+                            way. X-ray crystallography remains the workhorse of
+                            structural biology, capable of resolving detail down
+                            to 1&#8239;&#197;.
                         </p>
 
                         <div class="docs-note">
                             <div class="docs-note-title">The angstrom</div>
                             <p>
-                                Structural biologists measure distances in <strong>angstroms</strong>
-                                (&#197;). One angstrom is 10<sup>&#8722;10</sup>&nbsp;m, or
-                                0.1&nbsp;nm — about the radius of a hydrogen atom. A typical
-                                C–C bond is 1.5&#8239;&#197; long, and the diameter of the DNA
-                                double helix is roughly 20&#8239;&#197;. When we say a structure
-                                was solved at "1.9&#8239;&#197; resolution", we mean that
-                                details separated by at least 1.9&#8239;&#197; can be
-                                distinguished — enough to see individual atoms.
+                                Structural biologists measure distances in
+                                <strong>angstroms</strong>
+                                (&#197;). One angstrom is
+                                10<sup>&#8722;10</sup>&nbsp;m, or 0.1&nbsp;nm —
+                                about the radius of a hydrogen atom. A typical
+                                C–C bond is 1.5&#8239;&#197; long, and the
+                                diameter of the DNA double helix is roughly
+                                20&#8239;&#197;. When we say a structure was
+                                solved at "1.9&#8239;&#197; resolution", we mean
+                                that details separated by at least
+                                1.9&#8239;&#197; can be distinguished — enough
+                                to see individual atoms.
                             </p>
                         </div>
 
                         <h3>Cryo-electron microscopy (cryo-EM)</h3>
                         <p>
-                            The method that triggered a <strong>resolution revolution</strong>
-                            in the 2010s. Instead of growing crystals, you flash-freeze
-                            molecules in a thin layer of ice, image thousands of individual
-                            copies with an electron microscope, and computationally average
-                            the images to reconstruct the 3D shape. Cryo-EM excels at large
-                            complexes — ribosomes, viral capsids, membrane proteins — that
-                            are difficult or impossible to crystallise. Modern detectors
-                            routinely reach 2–3&#8239;&#197; resolution.
+                            The method that triggered a
+                            <strong>resolution revolution</strong>
+                            in the 2010s. Instead of growing crystals, you
+                            flash-freeze molecules in a thin layer of ice, image
+                            thousands of individual copies with an electron
+                            microscope, and computationally average the images
+                            to reconstruct the 3D shape. Cryo-EM excels at large
+                            complexes — ribosomes, viral capsids, membrane
+                            proteins — that are difficult or impossible to
+                            crystallise. Modern detectors routinely reach
+                            2–3&#8239;&#197; resolution.
                         </p>
 
                         <h3>NMR spectroscopy</h3>
                         <p>
-                            Nuclear magnetic resonance works in solution, giving you a view
-                            of how the molecule behaves under conditions closer to its
-                            natural environment. NMR is limited to relatively small proteins
-                            (typically under 40&nbsp;kDa) but uniquely reveals dynamics —
-                            which parts of the molecule are rigid and which are flexible.
+                            Nuclear magnetic resonance works in solution, giving
+                            you a view of how the molecule behaves under
+                            conditions closer to its natural environment. NMR is
+                            limited to relatively small proteins (typically
+                            under 40&nbsp;kDa) but uniquely reveals dynamics —
+                            which parts of the molecule are rigid and which are
+                            flexible.
                         </p>
 
                         <h3>Computational prediction</h3>
                         <p>
-                            In 2020, <strong>AlphaFold</strong> from DeepMind showed that AI
-                            can predict protein structures from sequence alone with
-                            near-experimental accuracy. The AlphaFold database now contains
-                            predicted structures for over 200&nbsp;million proteins — far
-                            more than all experimental methods combined have produced in
-                            half a century. These predictions don't replace experiments, but
-                            they give researchers a starting model that can be refined and
-                            validated.
+                            In 2020, <strong>AlphaFold</strong> from DeepMind
+                            showed that AI can predict protein structures from
+                            sequence alone with near-experimental accuracy. The
+                            AlphaFold database now contains predicted structures
+                            for over 200&nbsp;million proteins — far more than
+                            all experimental methods combined have produced in
+                            half a century. These predictions don't replace
+                            experiments, but they give researchers a starting
+                            model that can be refined and validated.
                         </p>
 
                         <table class="docs-table">
@@ -583,9 +907,29 @@
                             </tbody>
                         </table>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/X-ray_crystallography" target="_blank" rel="noopener">Wikipedia: X-ray crystallography</a> &middot;
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Cryogenic_electron_microscopy" target="_blank" rel="noopener">Wikipedia: Cryo-EM</a> &middot;
-                            <a class="ext-link" href="https://alphafold.ebi.ac.uk/" target="_blank" rel="noopener">AlphaFold DB</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/X-ray_crystallography"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: X-ray crystallography</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Cryogenic_electron_microscopy"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Cryo-EM</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://alphafold.ebi.ac.uk/"
+                                target="_blank"
+                                rel="noopener"
+                                >AlphaFold DB</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -596,75 +940,123 @@
                 </div>
 
                 <!-- 8. DATABASES AND FORMATS -->
-                <div class="doc-page" id="databases" data-title="Databases and formats"
-                     data-src="../assets/pdb/1HHO.pdb"
-                     data-command="as cartoon; color chain; color cpk, hetatm; orient; zoom all, buffer=5">
+                <div
+                    class="doc-page"
+                    id="databases"
+                    data-title="Databases and formats"
+                    data-src="../assets/pdb/1HHO.pdb"
+                    data-command="as cartoon; color chain; color cpk, hetatm; orient; zoom all, buffer=5"
+                >
                     <div class="docs-section">
                         <h2>Structure databases and file formats</h2>
                         <p>
-                            Once a structure is solved, it's deposited in a public database
-                            so that anyone in the world can download and study it. The main
-                            repositories are:
+                            Once a structure is solved, it's deposited in a
+                            public database so that anyone in the world can
+                            download and study it. The main repositories are:
                         </p>
                         <ul>
                             <li>
-                                <a class="ext-link" href="https://www.rcsb.org/" target="_blank" rel="noopener">RCSB Protein Data Bank</a> —
-                                the primary archive for experimentally determined structures.
-                                Over 220,000 entries and growing. Each structure gets a
-                                four-character accession code (like 1CRN for Crambin).
+                                <a
+                                    class="ext-link"
+                                    href="https://www.rcsb.org/"
+                                    target="_blank"
+                                    rel="noopener"
+                                    >RCSB Protein Data Bank</a
+                                >
+                                — the primary archive for experimentally
+                                determined structures. Over 220,000 entries and
+                                growing. Each structure gets a four-character
+                                accession code (like 1CRN for Crambin).
                             </li>
                             <li>
-                                <a class="ext-link" href="https://www.ebi.ac.uk/pdbe/" target="_blank" rel="noopener">PDBe</a> —
-                                the European mirror of the PDB, hosted at EMBL-EBI. Besides
-                                coordinates, PDBe provides electron density maps for
-                                crystallographic entries — the raw experimental data from
-                                which structures were built.
+                                <a
+                                    class="ext-link"
+                                    href="https://www.ebi.ac.uk/pdbe/"
+                                    target="_blank"
+                                    rel="noopener"
+                                    >PDBe</a
+                                >
+                                — the European mirror of the PDB, hosted at
+                                EMBL-EBI. Besides coordinates, PDBe provides
+                                electron density maps for crystallographic
+                                entries — the raw experimental data from which
+                                structures were built.
                             </li>
                             <li>
-                                <a class="ext-link" href="https://pdb-redo.eu/" target="_blank" rel="noopener">PDB-REDO</a> —
-                                automatically re-refined and rebuilt versions of PDB entries,
-                                often with improved quality.
+                                <a
+                                    class="ext-link"
+                                    href="https://pdb-redo.eu/"
+                                    target="_blank"
+                                    rel="noopener"
+                                    >PDB-REDO</a
+                                >
+                                — automatically re-refined and rebuilt versions
+                                of PDB entries, often with improved quality.
                             </li>
                             <li>
-                                <a class="ext-link" href="https://alphafold.ebi.ac.uk/" target="_blank" rel="noopener">AlphaFold Protein Structure Database</a> —
-                                predicted structures for ~200 million proteins from the
-                                UniProt database. Incredibly useful when no experimental
-                                structure exists.
+                                <a
+                                    class="ext-link"
+                                    href="https://alphafold.ebi.ac.uk/"
+                                    target="_blank"
+                                    rel="noopener"
+                                    >AlphaFold Protein Structure Database</a
+                                >
+                                — predicted structures for ~200 million proteins
+                                from the UniProt database. Incredibly useful
+                                when no experimental structure exists.
                             </li>
                         </ul>
                         <h3>The PDB file format</h3>
                         <p>
-                            The classic format for storing atomic coordinates is the
-                            <strong>PDB format</strong> — a fixed-column text file dating
-                            back to the 1970s. Each line is exactly 80 characters wide, with
-                            atom positions recorded as x, y, z coordinates in angstroms.
+                            The classic format for storing atomic coordinates is
+                            the
+                            <strong>PDB format</strong> — a fixed-column text
+                            file dating back to the 1970s. Each line is exactly
+                            80 characters wide, with atom positions recorded as
+                            x, y, z coordinates in angstroms.
                         </p>
-                        <div class="pdb-highlight"><pre><span class="pdb-record">ATOM  </span>  <span class="pdb-serial">    1</span> <span class="pdb-name"> N  </span> <span class="pdb-resname">THR</span> <span class="pdb-chain">A</span><span class="pdb-resseq">   1</span>      <span class="pdb-coord"> 17.047  14.099   3.625</span>  1.00 <span class="pdb-bfactor">13.79</span>           N
+                        <div class="pdb-highlight">
+                            <pre><span class="pdb-record">ATOM  </span>  <span class="pdb-serial">    1</span> <span class="pdb-name"> N  </span> <span class="pdb-resname">THR</span> <span class="pdb-chain">A</span><span class="pdb-resseq">   1</span>      <span class="pdb-coord"> 17.047  14.099   3.625</span>  1.00 <span class="pdb-bfactor">13.79</span>           N
 <span class="pdb-record">ATOM  </span>  <span class="pdb-serial">    2</span> <span class="pdb-name"> CA </span> <span class="pdb-resname">THR</span> <span class="pdb-chain">A</span><span class="pdb-resseq">   1</span>      <span class="pdb-coord"> 16.967  12.784   4.338</span>  1.00 <span class="pdb-bfactor">10.80</span>           C
-<span class="pdb-record">ATOM  </span>  <span class="pdb-serial">    3</span> <span class="pdb-name"> C  </span> <span class="pdb-resname">THR</span> <span class="pdb-chain">A</span><span class="pdb-resseq">   1</span>      <span class="pdb-coord"> 15.685  12.755   5.133</span>  1.00  <span class="pdb-bfactor">9.19</span>           C</pre></div>
+<span class="pdb-record">ATOM  </span>  <span class="pdb-serial">    3</span> <span class="pdb-name"> C  </span> <span class="pdb-resname">THR</span> <span class="pdb-chain">A</span><span class="pdb-resseq">   1</span>      <span class="pdb-coord"> 15.685  12.755   5.133</span>  1.00  <span class="pdb-bfactor">9.19</span>           C</pre>
+                        </div>
                         <p>
-                            Each line contains the record type
-                            (<span style="color:var(--accent-magenta)">ATOM</span>),
-                            atom serial number, atom name
-                            (<span style="color:var(--accent-cyan)">N, CA, C</span>),
-                            residue name
-                            (<span style="color:var(--accent-green)">THR</span>),
-                            chain ID
-                            (<span style="color:var(--accent-orange)">A</span>),
-                            residue number, coordinates, a temperature factor (B-factor)
-                            indicating how much the atom vibrates, and the element type
-                            at the end of the line.
+                            Each line contains the record type (<span
+                                style="color: var(--accent-magenta)"
+                                >ATOM</span
+                            >), atom serial number, atom name (<span
+                                style="color: var(--accent-cyan)"
+                                >N, CA, C</span
+                            >), residue name (<span
+                                style="color: var(--accent-green)"
+                                >THR</span
+                            >), chain ID (<span
+                                style="color: var(--accent-orange)"
+                                >A</span
+                            >), residue number, coordinates, a temperature
+                            factor (B-factor) indicating how much the atom
+                            vibrates, and the element type at the end of the
+                            line.
                         </p>
                         <div class="docs-note">
                             <div class="docs-note-title">HETATM records</div>
                             <p>
-                                Non-standard residues — ligands, water molecules (HOH),
-                                metal ions, and modified residues — use <code>HETATM</code>
-                                instead of <code>ATOM</code>. In the viewer you can see them
-                                as
-                                <span class="cmd-run" data-cmd="show spheres, hetatm; color cpk, hetatm">small spheres</span>
+                                Non-standard residues — ligands, water molecules
+                                (HOH), metal ions, and modified residues — use
+                                <code>HETATM</code> instead of
+                                <code>ATOM</code>. In the viewer you can see
+                                them as
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="show spheres, hetatm; color cpk, hetatm"
+                                    >small spheres</span
+                                >
                                 alongside the protein, or
-                                <span class="cmd-run" data-cmd="hide spheres, hetatm">hide them</span>
+                                <span
+                                    class="cmd-run"
+                                    data-cmd="hide spheres, hetatm"
+                                    >hide them</span
+                                >
                                 to focus on the protein itself.
                             </p>
                         </div>
@@ -686,23 +1078,31 @@
                                 <tr>
                                     <td>mmCIF</td>
                                     <td>Dictionary-based text</td>
-                                    <td>No column limits, extensible — now the primary PDB archive format</td>
+                                    <td>
+                                        No column limits, extensible — now the
+                                        primary PDB archive format
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>bCIF</td>
                                     <td>Binary compressed</td>
-                                    <td>10–100x smaller, fast streaming for large assemblies</td>
+                                    <td>
+                                        10–100x smaller, fast streaming for
+                                        large assemblies
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>
                         <h3>Electron density maps</h3>
                         <p>
-                            Atomic coordinates are only half the story. For structures
-                            solved by X-ray crystallography or cryo-EM, the underlying
-                            experimental evidence is an <strong>electron density map</strong>
-                            — a 3D grid of values showing where electrons were detected.
-                            Depositing maps alongside coordinates lets other scientists
-                            verify that the atomic model actually fits the data.
+                            Atomic coordinates are only half the story. For
+                            structures solved by X-ray crystallography or
+                            cryo-EM, the underlying experimental evidence is an
+                            <strong>electron density map</strong>
+                            — a 3D grid of values showing where electrons were
+                            detected. Depositing maps alongside coordinates lets
+                            other scientists verify that the atomic model
+                            actually fits the data.
                         </p>
                         <table class="docs-table">
                             <thead>
@@ -716,29 +1116,59 @@
                                 <tr>
                                     <td>CCP4 / MRC</td>
                                     <td>X-ray &amp; cryo-EM</td>
-                                    <td>Binary grid format, the most widely used for density maps</td>
+                                    <td>
+                                        Binary grid format, the most widely used
+                                        for density maps
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>MTZ</td>
                                     <td>X-ray</td>
-                                    <td>Stores structure factors (Fourier coefficients) — the map is computed on the fly</td>
+                                    <td>
+                                        Stores structure factors (Fourier
+                                        coefficients) — the map is computed on
+                                        the fly
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>DSN6 / BRIX</td>
                                     <td>X-ray</td>
-                                    <td>Legacy format from O and FRODO, still encountered in older datasets</td>
+                                    <td>
+                                        Legacy format from O and FRODO, still
+                                        encountered in older datasets
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>
                         <p>
-                            PDBe provides pre-computed density maps for most crystallographic
-                            entries. For cryo-EM structures, maps are deposited in the
-                            <a class="ext-link" href="https://www.ebi.ac.uk/emdb/" target="_blank" rel="noopener">EMDB</a>
+                            PDBe provides pre-computed density maps for most
+                            crystallographic entries. For cryo-EM structures,
+                            maps are deposited in the
+                            <a
+                                class="ext-link"
+                                href="https://www.ebi.ac.uk/emdb/"
+                                target="_blank"
+                                rel="noopener"
+                                >EMDB</a
+                            >
                             (Electron Microscopy Data Bank).
                         </p>
                         <p>
-                            <a class="ext-link" href="https://www.wwpdb.org/documentation/file-format-content/format33/v3.3.html" target="_blank" rel="noopener">wwPDB format specification</a> &middot;
-                            <a class="ext-link" href="https://www.wwpdb.org/documentation/file-format" target="_blank" rel="noopener">wwPDB file formats</a>
+                            <a
+                                class="ext-link"
+                                href="https://www.wwpdb.org/documentation/file-format-content/format33/v3.3.html"
+                                target="_blank"
+                                rel="noopener"
+                                >wwPDB format specification</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://www.wwpdb.org/documentation/file-format"
+                                target="_blank"
+                                rel="noopener"
+                                >wwPDB file formats</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -749,68 +1179,95 @@
                 </div>
 
                 <!-- 9. MOLECULAR SIMULATIONS -->
-                <div class="doc-page" id="simulations" data-title="Molecular simulations"
-                     data-src="../assets/pdb/1fsd.cif"
-                     data-command="as cartoon; zoom all, buffer=2">
+                <div
+                    class="doc-page"
+                    id="simulations"
+                    data-title="Molecular simulations"
+                    data-src="../assets/pdb/1fsd.cif"
+                    data-command="as cartoon; zoom all, buffer=2"
+                >
                     <div class="docs-section">
                         <h2>Molecular simulations</h2>
                         <p>
-                            Every structure we've looked at so far is a frozen snapshot —
-                            a single arrangement of atoms captured at one moment in time.
-                            But real molecules are in constant motion: bonds vibrate, side
-                            chains rotate, loops open and close. <strong>Molecular
-                            simulations</strong> let us watch these motions unfold on a
-                            computer.
+                            Every structure we've looked at so far is a frozen
+                            snapshot — a single arrangement of atoms captured at
+                            one moment in time. But real molecules are in
+                            constant motion: bonds vibrate, side chains rotate,
+                            loops open and close.
+                            <strong>Molecular simulations</strong> let us watch
+                            these motions unfold on a computer.
                         </p>
 
                         <h3>Molecular dynamics</h3>
                         <p>
-                            The most common approach is <strong>molecular dynamics</strong>
-                            (MD). Starting from an experimental structure, the simulation
-                            applies Newton's equations of motion to every atom. At each tiny
-                            time step — typically one or two femtoseconds
-                            (10<sup>&#8722;15</sup>&nbsp;s) — the forces on every atom are
-                            calculated and the atoms are moved accordingly. Millions of
-                            these steps add up to nanoseconds or even milliseconds of
-                            simulated time, revealing how the molecule breathes, flexes, and
-                            responds to its environment.
+                            The most common approach is
+                            <strong>molecular dynamics</strong>
+                            (MD). Starting from an experimental structure, the
+                            simulation applies Newton's equations of motion to
+                            every atom. At each tiny time step — typically one
+                            or two femtoseconds (10<sup>&#8722;15</sup>&nbsp;s)
+                            — the forces on every atom are calculated and the
+                            atoms are moved accordingly. Millions of these steps
+                            add up to nanoseconds or even milliseconds of
+                            simulated time, revealing how the molecule breathes,
+                            flexes, and responds to its environment.
                         </p>
 
                         <div class="docs-note">
                             <div class="docs-note-title">Force fields</div>
                             <p>
-                                The equations and parameters that describe how atoms interact
-                                — bond stretching, angle bending, electrostatics, van der
-                                Waals forces — are collected into a <strong>force
-                                field</strong>. Common force fields include AMBER, CHARMM,
-                                and GROMOS. Choosing the right force field for your system is
-                                one of the key decisions in setting up a simulation.
+                                The equations and parameters that describe how
+                                atoms interact — bond stretching, angle bending,
+                                electrostatics, van der Waals forces — are
+                                collected into a <strong>force field</strong>.
+                                Common force fields include AMBER, CHARMM, and
+                                GROMOS. Choosing the right force field for your
+                                system is one of the key decisions in setting up
+                                a simulation.
                             </p>
                         </div>
 
                         <h3>What simulations reveal</h3>
                         <p>
-                            Simulations can show things that static structures cannot:
+                            Simulations can show things that static structures
+                            cannot:
                         </p>
                         <ul>
-                            <li>How a protein folds from an unstructured chain into its
-                                native shape</li>
-                            <li>How a drug molecule finds and binds to its target</li>
-                            <li>Conformational changes — the large-scale motions that let
-                                enzymes do their work</li>
-                            <li>How proteins behave in a lipid membrane or under different
-                                conditions of temperature and pH</li>
+                            <li>
+                                How a protein folds from an unstructured chain
+                                into its native shape
+                            </li>
+                            <li>
+                                How a drug molecule finds and binds to its
+                                target
+                            </li>
+                            <li>
+                                Conformational changes — the large-scale motions
+                                that let enzymes do their work
+                            </li>
+                            <li>
+                                How proteins behave in a lipid membrane or under
+                                different conditions of temperature and pH
+                            </li>
                         </ul>
 
                         <h3>Trajectories</h3>
                         <p>
-                            A simulation produces a <strong>trajectory</strong> — a sequence
-                            of coordinate frames, each recording the position of every atom
-                            at a given point in simulated time. Think of it as a
-                            <span class="cmd-run" data-cmd="mplay" data-cmd-alt="mpause">movie</span> of
-                            the molecule. Molecular viewers can play trajectories frame by
-                            frame, letting you see loops swing open, helices unwind, or
-                            ligands slide into a binding pocket.
+                            A simulation produces a
+                            <strong>trajectory</strong> — a sequence of
+                            coordinate frames, each recording the position of
+                            every atom at a given point in simulated time. Think
+                            of it as a
+                            <span
+                                class="cmd-run"
+                                data-cmd="mplay"
+                                data-cmd-alt="mpause"
+                                >movie</span
+                            >
+                            of the molecule. Molecular viewers can play
+                            trajectories frame by frame, letting you see loops
+                            swing open, helices unwind, or ligands slide into a
+                            binding pocket.
                         </p>
                         <table class="docs-table">
                             <thead>
@@ -824,29 +1281,60 @@
                                 <tr>
                                     <td>XTC</td>
                                     <td>GROMACS</td>
-                                    <td>Compressed coordinates, very compact</td>
+                                    <td>
+                                        Compressed coordinates, very compact
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>TRR</td>
                                     <td>GROMACS</td>
-                                    <td>Full precision with velocities and forces</td>
+                                    <td>
+                                        Full precision with velocities and
+                                        forces
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>DCD</td>
                                     <td>NAMD, CHARMM</td>
-                                    <td>Binary format, widely supported across viewers</td>
+                                    <td>
+                                        Binary format, widely supported across
+                                        viewers
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td>NetCDF (NC)</td>
                                     <td>AMBER</td>
-                                    <td>Self-describing binary, portable across platforms</td>
+                                    <td>
+                                        Self-describing binary, portable across
+                                        platforms
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>
                         <p>
-                            <a class="ext-link" href="https://en.wikipedia.org/wiki/Molecular_dynamics" target="_blank" rel="noopener">Wikipedia: Molecular dynamics</a> &middot;
-                            <a class="ext-link" href="https://www.gromacs.org/" target="_blank" rel="noopener">GROMACS</a> &middot;
-                            <a class="ext-link" href="https://ambermd.org/" target="_blank" rel="noopener">AMBER</a>
+                            <a
+                                class="ext-link"
+                                href="https://en.wikipedia.org/wiki/Molecular_dynamics"
+                                target="_blank"
+                                rel="noopener"
+                                >Wikipedia: Molecular dynamics</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://www.gromacs.org/"
+                                target="_blank"
+                                rel="noopener"
+                                >GROMACS</a
+                            >
+                            &middot;
+                            <a
+                                class="ext-link"
+                                href="https://ambermd.org/"
+                                target="_blank"
+                                rel="noopener"
+                                >AMBER</a
+                            >
                         </p>
                     </div>
                     <div class="doc-page-nav">
@@ -855,7 +1343,6 @@
                         <button data-nav="next"></button>
                     </div>
                 </div>
-
             </main>
 
             <!-- VIEWER PANEL -->
@@ -901,13 +1388,11 @@
             const viewer = new PyMolRSViewer(
                 document.getElementById("viewer-container"),
                 {
-                    layout: [
-                        { name: "repl", slot: "repl" },
-                    ],
+                    layout: [{ name: "repl", slot: "repl" }],
                     slots: {
                         repl: document.getElementById("viewer-repl"),
                     },
-                }
+                },
             );
             await viewer.init();
             viewer.execute("bg_color 0a0b0f");

@@ -559,15 +559,14 @@ footer {
     background: var(--bg-surface);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
-    padding: 2.5rem 2rem;
+    padding: 3rem 2rem;
 }
 .install-bar-inner {
-    max-width: 1200px;
+    max-width: 800px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: 1.5rem;
 }
 .install-text {
@@ -577,6 +576,57 @@ footer {
     max-width: 540px;
     line-height: 1.6;
     margin: 0;
+}
+.install-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    width: 100%;
+}
+.install-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.5rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: all 0.25s;
+    cursor: pointer;
+}
+.install-card:hover {
+    border-color: var(--accent-cyan);
+    background: rgba(77, 216, 232, 0.04);
+    box-shadow: 0 0 24px var(--glow-cyan), 0 4px 16px rgba(0, 0, 0, 0.2);
+    transform: translateY(-2px);
+}
+.install-card-icon {
+    width: 28px;
+    height: 28px;
+    opacity: 0.85;
+}
+.install-card:hover .install-card-icon {
+    opacity: 1;
+    color: var(--accent-cyan);
+}
+.install-card-platform {
+    font-weight: 600;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+}
+.install-card-arch {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.install-card-format {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.5;
 }
 .install-note {
     color: var(--text-secondary);
@@ -592,21 +642,22 @@ footer {
     font-family: "JetBrains Mono", monospace;
     font-size: 0.85em;
 }
-.install-buttons {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
+.install-all-link {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    opacity: 0.6;
+    transition: all 0.2s;
 }
-.install-btn {
-    font-size: 0.95rem;
-    padding: 0.7rem 1.6rem;
+.install-all-link:hover {
+    color: var(--accent-cyan);
+    opacity: 1;
 }
-.apple-icon {
-    display: inline-block;
-    width: 15px !important;
-    height: 18px !important;
-    flex: 0 0 15px;
-    vertical-align: middle;
+@media (max-width: 600px) {
+    .install-cards {
+        grid-template-columns: 1fr;
+        max-width: 280px;
+    }
 }
 
 /* ═══════════════════ REPRESENTATIONS ═══════════════════ */

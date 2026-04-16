@@ -1,11 +1,11 @@
 var f = Object.defineProperty;
-var v = (o, e, t) => e in o ? f(o, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : o[e] = t;
-var a = (o, e, t) => v(o, typeof e != "symbol" ? e + "" : e, t);
+var v = (r, e, t) => e in r ? f(r, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : r[e] = t;
+var o = (r, e, t) => v(r, typeof e != "symbol" ? e + "" : e, t);
 class w {
   constructor(e) {
-    a(this, "container");
-    a(this, "pool", []);
-    a(this, "activeCount", 0);
+    o(this, "container");
+    o(this, "pool", []);
+    o(this, "activeCount", 0);
     this.container = document.createElement("div"), this.container.style.position = "absolute", this.container.style.top = "0", this.container.style.left = "0", this.container.style.width = "100%", this.container.style.height = "100%", this.container.style.pointerEvents = "none", this.container.style.overflow = "hidden", e.appendChild(this.container);
   }
   update(e, t) {
@@ -14,8 +14,8 @@ class w {
       s.style.position = "absolute", s.style.whiteSpace = "nowrap", s.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", s.style.textShadow = "0 0 3px rgba(0,0,0,0.8), 0 0 6px rgba(0,0,0,0.5)", s.style.display = "none", this.container.appendChild(s), this.pool.push(s);
     }
     for (let s = 0; s < e.length; s++) {
-      const i = e[s], n = this.pool[s], r = i.x / t, c = i.y / t;
-      n.style.left = `${r}px`, n.style.top = `${c}px`, n.textContent = i.text, i.kind === "atom" ? (n.style.color = "white", n.style.fontSize = "14px", n.style.transform = "translateY(-100%)") : (n.style.color = "#ffff00", n.style.fontSize = "13px", n.style.transform = "translate(-50%, -50%)"), n.style.display = "";
+      const i = e[s], n = this.pool[s], a = i.x / t, c = i.y / t;
+      n.style.left = `${a}px`, n.style.top = `${c}px`, n.textContent = i.text, i.kind === "atom" ? (n.style.color = "white", n.style.fontSize = "14px", n.style.transform = "translateY(-100%)") : (n.style.color = "#ffff00", n.style.fontSize = "13px", n.style.transform = "translate(-50%, -50%)"), n.style.display = "";
     }
     for (let s = e.length; s < this.activeCount; s++)
       this.pool[s].style.display = "none";
@@ -25,19 +25,24 @@ class w {
     this.container.remove();
   }
 }
-class y {
+const y = 25;
+class b {
   constructor(e) {
-    a(this, "wasm", null);
-    a(this, "canvas");
-    a(this, "animFrameId", 0);
-    a(this, "resizeObserver", null);
-    a(this, "labelOverlay");
-    a(this, "_deferred", !1);
-    a(this, "_revealDuration", 150);
+    o(this, "wasm", null);
+    o(this, "canvas");
+    o(this, "animFrameId", 0);
+    o(this, "resizeObserver", null);
+    o(this, "labelOverlay");
+    o(this, "_deferred", !1);
+    o(this, "_revealDuration", 150);
+    o(this, "dpr", 1);
+    o(this, "clickStart", null);
+    /** Called with the raw WASM pick result (PickHitInfo | null) on each click. */
+    o(this, "onPick", null);
     this.container = e, getComputedStyle(e).position === "static" && (e.style.position = "relative"), this.canvas = document.createElement("canvas"), this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8), this.canvas.style.width = "100%", this.canvas.style.height = "100%", this.canvas.style.display = "block", this.canvas.tabIndex = 0, e.appendChild(this.canvas), this.labelOverlay = new w(e);
   }
   async init() {
-    const e = await import("./pymol_web-mVc0P39q.js");
+    const e = await import("./pymol_web-BtKWEboG.js");
     await e.default(), this.syncCanvasSize();
     const t = await e.WebViewer.create(this.canvas.id);
     return this.wasm = t, this.bindEvents(), this.startLoop(), t;
@@ -89,20 +94,33 @@ class y {
   // ---------------------------------------------------------------------------
   bindEvents() {
     const e = this.canvas;
-    e.addEventListener("mousedown", (t) => {
+    this.dpr = window.devicePixelRatio || 1, e.addEventListener("mousedown", (t) => {
       var s;
-      t.preventDefault(), e.focus(), (s = this.wasm) == null || s.on_mouse_down(t.offsetX, t.offsetY, t.button, u(t));
+      t.preventDefault(), e.focus(), (s = this.wasm) == null || s.on_mouse_down(t.offsetX, t.offsetY, t.button, u(t)), t.button === 0 && (this.clickStart = { x: t.offsetX, y: t.offsetY });
     }), e.addEventListener("mousemove", (t) => {
-      var s;
-      (s = this.wasm) == null || s.on_mouse_move(t.offsetX, t.offsetY, u(t));
+      var s, i;
+      (s = this.wasm) == null || s.on_mouse_move(t.offsetX, t.offsetY, u(t)), (i = this.wasm) == null || i.process_hover(t.offsetX * this.dpr, t.offsetY * this.dpr);
     }), e.addEventListener("mouseup", (t) => {
-      var s;
-      (s = this.wasm) == null || s.on_mouse_up(t.offsetX, t.offsetY, t.button);
+      var s, i, n;
+      if ((s = this.wasm) == null || s.on_mouse_up(t.offsetX, t.offsetY, t.button), t.button === 0 && this.clickStart !== null) {
+        const a = t.offsetX - this.clickStart.x, c = t.offsetY - this.clickStart.y;
+        if (a * a + c * c < y) {
+          const l = ((i = this.wasm) == null ? void 0 : i.pick_at_screen(
+            t.offsetX * this.dpr,
+            t.offsetY * this.dpr
+          )) ?? null;
+          (n = this.onPick) == null || n.call(this, l);
+        }
+        this.clickStart = null;
+      }
+    }), e.addEventListener("mouseleave", () => {
+      var t;
+      this.clickStart = null, (t = this.wasm) == null || t.process_hover(-1, -1);
     }), e.addEventListener("wheel", (t) => {
       var s;
       t.preventDefault(), (s = this.wasm) == null || s.on_wheel(t.deltaY, u(t));
     }, { passive: !1 }), e.addEventListener("contextmenu", (t) => t.preventDefault()), this.resizeObserver = new ResizeObserver(() => {
-      this.syncCanvasSize(), this.wasm && this.wasm.resize(this.canvas.width, this.canvas.height);
+      this.dpr = window.devicePixelRatio || 1, this.syncCanvasSize(), this.wasm && this.wasm.resize(this.canvas.width, this.canvas.height);
     }), this.resizeObserver.observe(this.container);
   }
   syncCanvasSize() {
@@ -110,13 +128,13 @@ class y {
     this.canvas.width = Math.round(t.width * e), this.canvas.height = Math.round(t.height * e);
   }
 }
-function u(o) {
+function u(r) {
   let e = 0;
-  return o.shiftKey && (e |= 1), o.ctrlKey && (e |= 2), o.altKey && (e |= 4), o.metaKey && (e |= 8), e;
+  return r.shiftKey && (e |= 1), r.ctrlKey && (e |= 2), r.altKey && (e |= 4), r.metaKey && (e |= 8), e;
 }
-class b {
+class g {
   constructor() {
-    a(this, "listeners", /* @__PURE__ */ new Map());
+    o(this, "listeners", /* @__PURE__ */ new Map());
   }
   on(e, t) {
     this.listeners.has(e) || this.listeners.set(e, /* @__PURE__ */ new Set()), this.listeners.get(e).add(t);
@@ -134,14 +152,14 @@ class b {
       }
   }
 }
-class g {
+class x {
   constructor(e, t) {
-    a(this, "container");
-    a(this, "viewer");
-    a(this, "output");
-    a(this, "input");
-    a(this, "history", []);
-    a(this, "historyIdx", -1);
+    o(this, "container");
+    o(this, "viewer");
+    o(this, "output");
+    o(this, "input");
+    o(this, "history", []);
+    o(this, "historyIdx", -1);
     this.container = e, this.viewer = t, e.innerHTML = `
       <div class="repl-header">Command Line</div>
       <div class="repl-output"></div>
@@ -171,12 +189,12 @@ class g {
     this.container.innerHTML = "";
   }
 }
-const x = ["lines", "sticks", "cartoon", "spheres", "surface"];
+const _ = ["lines", "sticks", "cartoon", "spheres", "surface"];
 class L {
   constructor(e, t) {
-    a(this, "container");
-    a(this, "viewer");
-    a(this, "list");
+    o(this, "container");
+    o(this, "viewer");
+    o(this, "list");
     this.container = e, this.viewer = t, e.innerHTML = `
       <div class="panel-header">Objects</div>
       <div class="object-list"></div>
@@ -190,15 +208,15 @@ class L {
       if (!i) continue;
       const n = document.createElement("div");
       n.className = "object-row";
-      const r = document.createElement("button");
-      r.className = `obj-vis ${i.enabled ? "enabled" : "disabled"}`, r.textContent = i.enabled ? "V" : "-", r.title = i.enabled ? "Hide" : "Show", r.addEventListener("click", () => {
+      const a = document.createElement("button");
+      a.className = `obj-vis ${i.enabled ? "enabled" : "disabled"}`, a.textContent = i.enabled ? "V" : "-", a.title = i.enabled ? "Hide" : "Show", a.addEventListener("click", () => {
         this.viewer.execute(i.enabled ? `disable ${s}` : `enable ${s}`);
       });
       const c = document.createElement("span");
-      if (c.className = "obj-name", c.textContent = i.object_type === "map" ? `${s} (map)` : `${s} (${i.atom_count})`, n.appendChild(r), n.appendChild(c), i.object_type !== "map") {
+      if (c.className = "obj-name", c.textContent = i.object_type === "map" ? `${s} (map)` : `${s} (${i.atom_count})`, n.appendChild(a), n.appendChild(c), i.object_type !== "map") {
         const l = document.createElement("span");
         l.className = "obj-reps";
-        for (const d of x) {
+        for (const d of _) {
           const h = document.createElement("button");
           h.className = "rep-btn", h.textContent = d.charAt(0).toUpperCase(), h.title = d, h.addEventListener("click", () => {
             this.viewer.execute(`show ${d}, ${s}`);
@@ -215,8 +233,8 @@ class L {
       for (const i of t) {
         const n = document.createElement("div");
         n.className = "object-row selection-row";
-        const r = document.createElement("button");
-        r.className = `obj-vis selection-vis ${i.visible ? "enabled" : "disabled"}`, r.textContent = i.visible ? "V" : "-", r.title = i.visible ? "Hide indicators" : "Show indicators", r.addEventListener("click", () => {
+        const a = document.createElement("button");
+        a.className = `obj-vis selection-vis ${i.visible ? "enabled" : "disabled"}`, a.textContent = i.visible ? "V" : "-", a.title = i.visible ? "Hide indicators" : "Show indicators", a.addEventListener("click", () => {
           this.viewer.execute(`toggle ${i.name}`);
         });
         const c = document.createElement("span");
@@ -224,7 +242,7 @@ class L {
         const l = document.createElement("button");
         l.className = "rep-btn selection-delete", l.textContent = "X", l.title = "Delete selection", l.addEventListener("click", () => {
           this.viewer.execute(`deselect ${i.name}`);
-        }), n.appendChild(r), n.appendChild(c), n.appendChild(l), this.list.appendChild(n);
+        }), n.appendChild(a), n.appendChild(c), n.appendChild(l), this.list.appendChild(n);
       }
     }
   }
@@ -234,9 +252,9 @@ class L {
 }
 class C {
   constructor(e, t) {
-    a(this, "container");
-    a(this, "viewer");
-    a(this, "content");
+    o(this, "container");
+    o(this, "viewer");
+    o(this, "content");
     this.container = e, this.viewer = t, e.innerHTML = `
       <div class="panel-header">Sequence</div>
       <div class="sequence-content"></div>
@@ -252,12 +270,12 @@ class C {
       i.className = "seq-chain-header", i.textContent = `${t.object_name} / ${t.chain_id || "?"}`, s.appendChild(i);
       const n = document.createElement("div");
       n.className = "seq-residues";
-      for (const r of t.residues) {
+      for (const a of t.residues) {
         const c = document.createElement("span");
-        if (c.className = "seq-residue", c.textContent = r.one_letter, c.title = `${r.resn} ${r.resv}`, c.addEventListener("click", () => {
-          const l = `${t.object_name} and chain ${t.chain_id} and resi ${r.resv}`;
+        if (c.className = "seq-residue", c.textContent = a.one_letter, c.title = `${a.resn} ${a.resv}`, c.addEventListener("click", () => {
+          const l = `${t.object_name} and chain ${t.chain_id} and resi ${a.resv}`;
           this.viewer.execute(`select sele, ${l}`);
-        }), n.appendChild(c), r.resv % 10 === 0) {
+        }), n.appendChild(c), a.resv % 10 === 0) {
           const l = document.createElement("span");
           l.className = "seq-spacer", l.textContent = " ", n.appendChild(l);
         }
@@ -269,13 +287,13 @@ class C {
     this.container.innerHTML = "";
   }
 }
-class _ {
+class E {
   constructor(e, t) {
-    a(this, "container");
-    a(this, "viewer");
-    a(this, "frameLabel", null);
-    a(this, "slider", null);
-    a(this, "playBtn", null);
+    o(this, "container");
+    o(this, "viewer");
+    o(this, "frameLabel", null);
+    o(this, "slider", null);
+    o(this, "playBtn", null);
     this.container = e, this.viewer = t, e.innerHTML = `
       <div class="panel-header">Movie</div>
       <div class="movie-controls">
@@ -326,43 +344,53 @@ class _ {
     this.container.innerHTML = "";
   }
 }
-class E {
+class S {
   constructor(e, t = {}) {
-    a(this, "core");
-    a(this, "events", new b());
-    a(this, "panels", /* @__PURE__ */ new Map());
-    a(this, "options");
-    this.options = t, this.core = new y(e), t.defer && this.core.setDeferred(!0, t.revealDuration ?? 150);
+    o(this, "core");
+    o(this, "events", new g());
+    o(this, "panels", /* @__PURE__ */ new Map());
+    o(this, "options");
+    this.options = t, this.core = new b(e), t.defer && this.core.setDeferred(!0, t.revealDuration ?? 150);
   }
   async init() {
-    await this.core.init();
-    const e = [];
+    const e = await this.core.init();
+    this.options.picking && e.set_picking_enabled(!0), this.core.onPick = (s) => {
+      const i = s ?? {
+        object_name: null,
+        atom_index: null,
+        chain: null,
+        residue: null,
+        expression: null
+      };
+      this.events.emit("atom-picked", i), this.refreshPanels();
+    };
+    const t = [];
     if (this.options.layout)
-      e.push(...this.options.layout);
+      t.push(...this.options.layout);
     else if (this.options.panels)
-      for (const t of this.options.panels)
-        e.push({ name: t, slot: "right" });
-    for (const t of e) {
-      let s;
-      if (this.options.slots && (s = this.options.slots[t.slot]), s || (s = document.getElementById("sidebar")), !s) continue;
-      const i = document.createElement("div");
-      i.className = `pymol-panel pymol-panel-${t.name}`, t.collapsed && i.classList.add("collapsed"), s.appendChild(i);
-      let n;
-      switch (t.name) {
+      for (const s of this.options.panels)
+        t.push({ name: s, slot: "right" });
+    for (const s of t) {
+      let i;
+      if (this.options.slots && (i = this.options.slots[s.slot]), i || (i = document.getElementById("sidebar")), !i) continue;
+      const n = document.createElement("div");
+      n.className = `pymol-panel pymol-panel-${s.name}`, s.collapsed && n.classList.add("collapsed"), i.appendChild(n);
+      let a;
+      switch (s.name) {
         case "repl":
-          n = new g(i, this);
+          a = new x(n, this);
           break;
         case "objects":
-          n = new L(i, this);
+          a = new L(n, this);
           break;
         case "sequence":
-          n = new C(i, this);
+          a = new C(n, this);
           break;
         case "movie":
-          n = new _(i, this);
+          a = new E(n, this);
           break;
       }
-      this.panels.set(t.name, n);
+      this.panels.set(s.name, a);
     }
     this.events.emit("ready", {});
   }
@@ -374,6 +402,20 @@ class E {
   }
   async show() {
     await this.core.reveal();
+  }
+  // ---------------------------------------------------------------------------
+  // Picking
+  // ---------------------------------------------------------------------------
+  /**
+   * Enable or disable cursor-based atom picking at runtime.
+   *
+   * When enabled, left-click picks atoms, updates the `sele` selection, and
+   * fires `atom-picked` events. Can also be set at construction time via
+   * `ViewerOptions.picking`.
+   */
+  setPicking(e) {
+    var t;
+    (t = this.core.wasmViewer) == null || t.set_picking_enabled(e);
   }
   // ---------------------------------------------------------------------------
   // Commands
@@ -392,7 +434,7 @@ class E {
     if (!t) return this.execute(e);
     try {
       if (t.kind === "fetch") {
-        const s = D(t.code, t.format);
+        const s = O(t.code, t.format);
         await this.loadUrl(s, { name: t.name, format: t.format });
         const i = { level: "info", text: ` Fetched ${t.code} as "${t.name}"` };
         return this.events.emit("command-output", i), { messages: [i] };
@@ -415,9 +457,9 @@ class E {
     const s = await fetch(e);
     if (!s.ok) throw new Error(`Fetch failed: ${s.status} ${s.statusText}`);
     const i = new Uint8Array(await s.arrayBuffer());
-    let r = new URL(e, location.href).pathname.split("/").pop() ?? "structure";
-    r.toLowerCase().endsWith(".gz") && (r = r.slice(0, -3));
-    const c = (t == null ? void 0 : t.name) ?? r.replace(/\.[^.]+$/, ""), l = (t == null ? void 0 : t.format) ?? ((d = r.split(".").pop()) == null ? void 0 : d.toLowerCase()) ?? "pdb";
+    let a = new URL(e, location.href).pathname.split("/").pop() ?? "structure";
+    a.toLowerCase().endsWith(".gz") && (a = a.slice(0, -3));
+    const c = (t == null ? void 0 : t.name) ?? a.replace(/\.[^.]+$/, ""), l = (t == null ? void 0 : t.format) ?? ((d = a.split(".").pop()) == null ? void 0 : d.toLowerCase()) ?? "pdb";
     this.loadData(i, c, l);
   }
   // ---------------------------------------------------------------------------
@@ -470,9 +512,9 @@ class E {
     this.panels.clear(), this.core.destroy();
   }
 }
-function $(o) {
+function k(r) {
   const e = [], t = {};
-  for (const s of o.split(",")) {
+  for (const s of r.split(",")) {
     const i = s.trim();
     if (!i) continue;
     const n = i.indexOf("=");
@@ -480,24 +522,24 @@ function $(o) {
   }
   return { positional: e, named: t };
 }
-function p(o) {
-  const e = o.match(/^\s*(\w+)\s+(.*)/s);
+function p(r) {
+  const e = r.match(/^\s*(\w+)\s+(.*)/s);
   if (!e) return null;
-  const t = e[1].toLowerCase(), { positional: s, named: i } = $(e[2]);
+  const t = e[1].toLowerCase(), { positional: s, named: i } = k(e[2]);
   if (t === "fetch" && s.length >= 1) {
-    const n = s[0], r = s[1] ?? i.name ?? n, c = s[2] ?? i.type ?? "bcif", l = S(c);
-    return { kind: "fetch", code: n, name: r, format: l };
+    const n = s[0], a = s[1] ?? i.name ?? n, c = s[2] ?? i.type ?? "bcif", l = $(c);
+    return { kind: "fetch", code: n, name: a, format: l };
   }
   if (t === "load" && s.length >= 1) {
     const n = s[0];
     if (!/^https?:\/\//i.test(n)) return null;
-    const r = s[1] ?? i.object ?? i.name ?? O(n), c = i.format ?? j(n);
-    return { kind: "load", url: n, name: r, format: c };
+    const a = s[1] ?? i.object ?? i.name ?? P(n), c = i.format ?? j(n);
+    return { kind: "load", url: n, name: a, format: c };
   }
   return null;
 }
-function S(o) {
-  switch (o.toLowerCase()) {
+function $(r) {
+  switch (r.toLowerCase()) {
     case "pdb":
       return "pdb";
     case "cif":
@@ -510,34 +552,34 @@ function S(o) {
       return "bcif";
   }
 }
-const M = "https://models.rcsb.org", k = "https://files.rcsb.org/download";
-function D(o, e) {
-  const t = o.toLowerCase();
-  return e === "bcif" ? `${M}/${t}.bcif.gz` : `${k}/${t}.${e}.gz`;
+const M = "https://models.rcsb.org", D = "https://files.rcsb.org/download";
+function O(r, e) {
+  const t = r.toLowerCase();
+  return e === "bcif" ? `${M}/${t}.bcif.gz` : `${D}/${t}.${e}.gz`;
 }
-function O(o) {
-  let e = new URL(o, location.href).pathname.split("/").pop() ?? "structure";
+function P(r) {
+  let e = new URL(r, location.href).pathname.split("/").pop() ?? "structure";
   return e.toLowerCase().endsWith(".gz") && (e = e.slice(0, -3)), e.replace(/\.[^.]+$/, "");
 }
-function j(o) {
+function j(r) {
   var t;
-  let e = new URL(o, location.href).pathname.split("/").pop() ?? "";
+  let e = new URL(r, location.href).pathname.split("/").pop() ?? "";
   return e.toLowerCase().endsWith(".gz") && (e = e.slice(0, -3)), ((t = e.split(".").pop()) == null ? void 0 : t.toLowerCase()) ?? "pdb";
 }
-function A(o = "pymol-rs-viewer") {
-  customElements.get(o) || customElements.define(
-    o,
+function A(r = "pymol-rs-viewer") {
+  customElements.get(r) || customElements.define(
+    r,
     class extends HTMLElement {
       constructor() {
         super(...arguments);
-        a(this, "viewer", null);
+        o(this, "viewer", null);
       }
       async connectedCallback() {
         const t = this.attachShadow({ mode: "open" }), s = document.createElement("div");
         s.style.width = "100%", s.style.height = "100%", s.style.position = "relative", t.appendChild(s);
-        const i = this.getAttribute("panels"), n = i ? i.split(",").map((h) => h.trim()) : [], r = this.getAttribute("src"), c = this.getAttribute("command"), l = this.getAttribute("defer"), d = l !== null ? l !== "false" : !!(r || c);
-        if (this.viewer = new E(s, { panels: n, defer: d }), await this.viewer.init(), r) {
-          const h = r.split(/\s+/).filter(Boolean);
+        const i = this.getAttribute("panels"), n = i ? i.split(",").map((h) => h.trim()) : [], a = this.getAttribute("src"), c = this.getAttribute("command"), l = this.getAttribute("defer"), d = l !== null ? l !== "false" : !!(a || c);
+        if (this.viewer = new S(s, { panels: n, defer: d }), await this.viewer.init(), a) {
+          const h = a.split(/\s+/).filter(Boolean);
           for (const m of h)
             await this.viewer.loadUrl(m);
         }
@@ -556,6 +598,6 @@ function A(o = "pymol-rs-viewer") {
   );
 }
 export {
-  E as PyMolRSViewer,
+  S as PyMolRSViewer,
   A as registerElement
 };
