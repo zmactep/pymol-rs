@@ -1,4 +1,5 @@
-import { defineConfig, Plugin } from "vite";
+import { defineConfig } from "vite";
+import type { Plugin } from "vite";
 import { resolve } from "path";
 import { copyFileSync } from "fs";
 
@@ -19,15 +20,15 @@ function wasmExternalPlugin(): Plugin {
     // Rewrite the new URL() pattern so Vite's asset pipeline doesn't inline it
     transform(code, id) {
       if (!isBuild) return null;
-      if (!code.includes("pymol_web_bg.wasm")) return null;
+      if (!code.includes("patinae_web_bg.wasm")) return null;
 
-      // Replace: new URL('pymol_web_bg.wasm', import.meta.url)
+      // Replace: new URL('patinae_web_bg.wasm', import.meta.url)
       // Wrap import.meta.url in an identity function to bypass Vite's static
       // analysis (which would inline the wasm as a data URI in library mode),
       // while preserving the correct module-relative URL at runtime.
       const rewritten = code.replace(
-        /new\s+URL\(\s*['"]pymol_web_bg\.wasm['"]\s*,\s*import\.meta\.url\s*\)/g,
-        "new URL('pymol_web_bg.wasm', (x => x)(import.meta.url))",
+        /new\s+URL\(\s*['"]patinae_web_bg\.wasm['"]\s*,\s*import\.meta\.url\s*\)/g,
+        "new URL('patinae_web_bg.wasm', (x => x)(import.meta.url))",
       );
 
       if (rewritten !== code) {
@@ -40,8 +41,8 @@ function wasmExternalPlugin(): Plugin {
       if (!isBuild) return;
       try {
         copyFileSync(
-          resolve(__dirname, "pkg/pymol_web_bg.wasm"),
-          resolve(__dirname, "dist/pymol_web_bg.wasm"),
+          resolve(__dirname, "pkg/patinae_web_bg.wasm"),
+          resolve(__dirname, "dist/patinae_web_bg.wasm"),
         );
       } catch {
         // wasm file may not exist during dev
@@ -56,8 +57,8 @@ export default defineConfig({
   build: {
     lib: {
       entry: resolve(__dirname, "ts/src/index.ts"),
-      name: "PyMolRS",
-      fileName: "pymol-rs-viewer",
+      name: "Patinae",
+      fileName: "patinae-viewer",
       formats: ["es"],
     },
     outDir: "dist",

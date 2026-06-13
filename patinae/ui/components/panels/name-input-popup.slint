@@ -1,0 +1,120 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ObjectsState } from "../../states/objects-state.slint";
+
+// ── Button row (OK / Cancel) ────────────────────────────────────────
+
+component NameInputButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    callback clicked();
+
+    height: 32px;
+    horizontal-stretch: 1;
+    border-radius: Tokens.radius-sm;
+    background: root.primary
+        ? (touch.has-hover ? Theme.cyan.with-alpha(0.3) : Theme.cyan.with-alpha(0.15))
+        : (touch.has-hover ? Theme.bg-inset : transparent);
+    border-width: root.primary ? Tokens.hairline : 0px;
+    border-color: root.primary ? Theme.cyan.with-alpha(0.4) : transparent;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.label;
+        color: root.primary ? Theme.cyan : Theme.text-dim;
+        font-size: Tokens.font-lg;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ── Name input popup (rename / copy / extract) ──────────────────────
+
+export component NameInputPopup inherits Rectangle {
+    width: 240px;
+    height: inner.preferred-height;
+    clip: true;
+    border-radius: Tokens.radius-md;
+    background: Theme.bg-card;
+    border-width: Tokens.hairline;
+    border-color: Theme.line;
+
+    TouchArea {}
+
+    inner := VerticalLayout {
+        padding: Tokens.space-md;
+        spacing: Tokens.space-sm;
+
+        // Title row — clicking it focuses the input
+        title-row := Rectangle {
+            horizontal-stretch: 1;
+            height: 20px;
+            background: transparent;
+
+            Text {
+                width: parent.width;
+                height: 20px;
+                text: ObjectsState.name-input-title;
+                color: Theme.text-dim;
+                font-size: Tokens.font-sm;
+                font-weight: 500;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+
+            title-ta := TouchArea {
+                width: 100%;
+                height: 100%;
+                clicked => { input-field.focus(); }
+            }
+        }
+
+        // Text input
+        input-field := TextInput {
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            height: 30px;
+            font-size: Tokens.font-lg;
+            color: Theme.text;
+            single-line: true;
+            text <=> ObjectsState.name-input-text;
+            selection-background-color: Theme.cyan.with-alpha(0.3);
+            selection-foreground-color: Theme.text;
+
+            accepted => {
+                ObjectsState.name-input-confirm();
+            }
+
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    ObjectsState.popover-close();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        // Button row
+        HorizontalLayout {
+            spacing: Tokens.space-sm;
+
+            cancel-btn := NameInputButton {
+                label: "Cancel";
+                clicked => { ObjectsState.popover-close(); }
+            }
+            confirm-btn := NameInputButton {
+                label: "OK";
+                primary: true;
+                clicked => { ObjectsState.name-input-confirm(); }
+            }
+        }
+    }
+}

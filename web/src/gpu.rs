@@ -1,24 +1,29 @@
 //! Async WebGPU initialization from an HTML canvas element.
+//!
+//! Hosts `patinae_render::RenderState` for the frame pipeline. The surface
+//! owns the canvas-backed swapchain.
+
+#[cfg(target_arch = "wasm32")]
+use std::sync::Arc;
 
 use wasm_bindgen::JsCast;
 use web_sys::HtmlCanvasElement;
 
-use pymol_render::RenderContext;
-use pymol_render::silhouette::SilhouettePipeline;
+use patinae_render::{RenderConfig, RenderState};
 
-/// GPU resources initialized from a canvas element.
+/// GPU resources initialized from a canvas element. The renderer is the
+/// shared `patinae_render::RenderState`; the surface + config drive the
+/// canvas swapchain.
 pub struct GpuState {
-    pub render_context: RenderContext,
+    pub state: RenderState,
     pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
-    pub depth_view: wgpu::TextureView,
-    pub silhouette: SilhouettePipeline,
 }
 
 impl GpuState {
     /// Create GPU resources from a `<canvas>` element ID.
     #[allow(unreachable_code, unused_variables)]
-    pub async fn from_canvas(canvas_id: &str) -> Result<Self, String> {
+    pub async fn from_canvas(canvas_id: &str, config: RenderConfig) -> Result<Self, String> {
         // Get the canvas element
         let window = web_sys::window().ok_or("No global window")?;
         let document = window.document().ok_or("No document")?;
@@ -29,8 +34,8 @@ impl GpuState {
             .dyn_into()
             .map_err(|_| "Element is not a canvas")?;
 
-        let width = canvas.client_width().max(1) as u32;
-        let height = canvas.client_height().max(1) as u32;
+        let width = canvas.width().max(1);
+        let height = canvas.height().max(1);
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -38,6 +43,8 @@ impl GpuState {
             return Err("WebViewer only runs on wasm32".into());
         }
 
+        #[cfg(target_arch = "wasm32")]
+        {
         // Create wgpu instance with WebGPU backend
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::BROWSER_WEBGPU,
@@ -45,7 +52,6 @@ impl GpuState {
         });
 
         // Create surface from canvas (wasm-only API)
-        #[cfg(target_arch = "wasm32")]
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .map_err(|e| format!("Failed to create surface: {}", e))?;
@@ -64,16 +70,14 @@ impl GpuState {
 
         // Request device
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("pymol-web"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: adapter.limits(),
-                    memory_hints: wgpu::MemoryHints::default(),
-                    experimental_features: wgpu::ExperimentalFeatures::default(),
-                    trace: wgpu::Trace::Off,
-                },
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("patinae-web"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter.limits(),
+                memory_hints: wgpu::MemoryHints::default(),
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|e| format!("Failed to create device: {}", e))?;
 
@@ -103,22 +107,24 @@ impl GpuState {
         };
         surface.configure(&device, &surface_config);
 
-        // Create depth texture
-        let depth_view = create_depth_texture(&device, width, height);
-
-        // Create silhouette pipeline
-        let silhouette = SilhouettePipeline::new(&device, format);
-
-        // Create render context
-        let render_context = RenderContext::new(device, queue, format);
+        // patinae-render takes Arc<Device>/Arc<Queue>; wrap the wgpu handles
+        // (which are themselves Arc-backed internally — clone is cheap).
+        let device_arc = Arc::new(device);
+        let queue_arc = Arc::new(queue);
+        let state = RenderState::with_config(
+            device_arc,
+            queue_arc,
+            format,
+            (width, height),
+            config,
+        );
 
         Ok(Self {
-            render_context,
+            state,
             surface,
             surface_config,
-            depth_view,
-            silhouette,
         })
+        }
     }
 
     /// Handle canvas resize.
@@ -133,25 +139,7 @@ impl GpuState {
         self.surface_config.width = width;
         self.surface_config.height = height;
         self.surface
-            .configure(self.render_context.device(), &self.surface_config);
-        self.depth_view = create_depth_texture(self.render_context.device(), width, height);
+            .configure(&self.state.ctx.device, &self.surface_config);
+        self.state.resize((width, height));
     }
-}
-
-fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Depth Texture"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }

@@ -6,7 +6,7 @@ fn main() {
         .or_else(probe_pyo3_python)
         .unwrap_or_else(|| "unknown".to_string());
 
-    println!("cargo:rustc-env=PYMOLRS_PYO3_PYTHON_VERSION={version}");
+    println!("cargo:rustc-env=PATINAE_PYO3_PYTHON_VERSION={version}");
 
     // NOTE: We intentionally do NOT use /DELAYLOAD for the Python DLL on Windows.
     // MSVC delay-load cannot handle data symbol imports (e.g. `_Py_NoneStruct`
@@ -63,7 +63,10 @@ fn probe_pyo3_python() -> Option<String> {
     })?;
 
     let output = std::process::Command::new(&python)
-        .args(["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"])
+        .args([
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ])
         .output()
         .ok()?;
 

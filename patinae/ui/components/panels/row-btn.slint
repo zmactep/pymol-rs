@@ -1,0 +1,65 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ObjectsState } from "../../states/objects-state.slint";
+
+// ── Row button (C for color, R for representations) ─────────────────
+
+export component RowBtn inherits Rectangle {
+    in property <string> letter;
+    in property <string> source: "object";   // "object" | "selection"
+    in property <string> obj-name;
+    in property <string> chain-id: "";
+    in property <string> subchain-label: "";
+    in property <string> subchain-kind: "";
+    in property <int> entry-index: -1;
+    in property <string> selector-clause: "";
+    in property <bool> row-hovered: false;
+    in property <bool> sibling-hovered: false;
+    in property <bool> active: ObjectsState.popover-kind == root.letter
+        && ObjectsState.popover-source == root.source
+        && ObjectsState.popover-obj-name == root.obj-name
+        && ObjectsState.popover-chain-id == root.chain-id
+        && ObjectsState.popover-subchain-label == root.subchain-label;
+    // Any popover (C or R) is open for this row
+    property <bool> row-popover-open: ObjectsState.popover-kind != ""
+        && ObjectsState.popover-source == root.source
+        && ObjectsState.popover-obj-name == root.obj-name
+        && ObjectsState.popover-chain-id == root.chain-id
+        && ObjectsState.popover-subchain-label == root.subchain-label;
+    out property <bool> hovered: btn-touch.has-hover;
+    // When a popover is open, only the active row shows buttons; otherwise normal hover behavior
+    property <bool> shown: root.row-popover-open
+        || (ObjectsState.popover-kind == "" && (root.row-hovered || btn-touch.has-hover || root.sibling-hovered));
+
+    width: Tokens.chain-row-h - 2px;
+    height: Tokens.chain-row-h - 2px;
+    border-radius: Tokens.radius-sm;
+    opacity: root.shown ? 1.0 : 0.0;
+    background: root.active
+        ? Theme.cyan.with-alpha(0.18)
+        : btn-touch.has-hover
+            ? Theme.bg-inset
+            : transparent;
+    border-width: root.active ? Tokens.hairline : 0px;
+    border-color: root.active ? Theme.cyan.with-alpha(0.5) : transparent;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.letter;
+        color: root.active
+            ? Theme.cyan
+            : btn-touch.has-hover ? Theme.text : Theme.text-muted;
+        font-size: Tokens.font-md;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    btn-touch := TouchArea {
+        clicked => {
+            ObjectsState.popover-anchor-y = root.absolute-position.y + root.height;
+            ObjectsState.row-btn-clicked(root.letter, root.source, root.obj-name, root.chain-id, root.subchain-label, root.subchain-kind, root.entry-index, root.selector-clause);
+        }
+    }
+}

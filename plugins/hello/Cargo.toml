@@ -7,10 +7,13 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-description = "Example PyMOL-RS plugin: registers a 'hello' command"
+description = "Example Patinae plugin: registers a 'hello' command"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-pymol-plugin = { path = "../../crates/pymol-plugin" }
+patinae-plugin = { path = "../../crates/patinae-plugin" }
+
+[lints]
+workspace = true

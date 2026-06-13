@@ -1,0 +1,33 @@
+[package]
+name = "patinae-framework"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Shared application infrastructure for Patinae (messaging, components, layout)"
+
+[dependencies]
+patinae-cmd = { workspace = true, default-features = false }
+patinae-mol = { workspace = true }
+patinae-select = { workspace = true }
+patinae-scene = { workspace = true, default-features = false }
+patinae-color = { workspace = true }
+patinae-settings = { workspace = true }
+lin_alg = { workspace = true }
+wgpu = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+rmp-serde = { workspace = true }
+tokio = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs = { workspace = true }
+
+[dev-dependencies]
+patinae-algos = { workspace = true }
+
+[lints]
+workspace = true

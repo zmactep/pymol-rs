@@ -1,0 +1,34 @@
+export global ViewportState {
+    // Rust → Slint
+    in-out property <image> viewport-texture;
+    in-out property <string> device-name;
+    in-out property <string> engine-name;
+    in-out property <string> fps-text: "";
+    in-out property <float> fps-value: 0;
+    // `PATINAE_PERF=1` HUD — tail-latency + per-pass GPU times.
+    in-out property <bool> perf-visible: false;
+    in-out property <string> perf-avg-text: "";
+    in-out property <string> perf-low-1pct-text: "";
+    in-out property <string> perf-low-0_1pct-text: "";
+    /// Multi-line: per-pass GPU ms (cull / shadow / atlas AO / opaque / translucent).
+    /// Empty when the `stats` cargo feature is off.
+    in-out property <string> perf-gpu-text: "";
+
+    // Slint → Rust
+    in-out property <float> mouse-x;
+    in-out property <float> mouse-y;
+    in-out property <float> press-x;
+    in-out property <float> press-y;
+    in-out property <float> click-x;
+    in-out property <float> click-y;
+    in-out property <int> click-serial;
+    in-out property <bool> left-pressed;
+    in-out property <bool> middle-pressed;
+    in-out property <bool> right-pressed;
+    in-out property <bool> suppress-click;
+    in-out property <float> scroll-delta;
+    in-out property <bool> shift-held;
+    in-out property <bool> control-held;
+    in-out property <bool> alt-held;
+    in-out property <bool> meta-held;
+}

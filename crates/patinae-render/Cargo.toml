@@ -1,0 +1,42 @@
+[package]
+name = "patinae-render"
+description = "Greenfield GPU-first rendering crate for Patinae (used by patinae)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[features]
+default = []
+# Build-time instrumentation: per-pass GPU timestamps + CPU phase markers
+# exposed via `RenderState::take_frame_stats()`. Off by default so production
+# builds don't pay for `TIMESTAMP_QUERY` feature requests or query writes in
+# every pass. Enable for profiling / HUD / `bench/render_loop`.
+stats = []
+
+[dependencies]
+patinae-mol = { workspace = true }
+patinae-settings = { workspace = true }
+patinae-algos = { workspace = true }
+wgpu = { workspace = true }
+lin_alg = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }
+image = { workspace = true }
+pollster = "0.4"
+thiserror = { workspace = true }
+rayon = { workspace = true }
+
+[dev-dependencies]
+pollster = "0.4"
+half = "2"
+patinae-io = { workspace = true }
+image = { workspace = true }
+naga = { version = "28", features = ["wgsl-in"] }
+winit = "0.30"
+
+[lints]
+workspace = true

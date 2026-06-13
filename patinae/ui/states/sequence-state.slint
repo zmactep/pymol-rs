@@ -1,0 +1,74 @@
+// ── One chain row ──────────────────────────────────────────────────
+//
+// The strip and highlight images are pre-rendered in Rust (CPU
+// rasterisation via ab_glyph) so the scene-graph cost is O(chains),
+// not O(chains × residues). See `patinae/src/bridges/sequence.rs`.
+
+export struct SeqChainRow {
+    chain-id: string,
+    chain-color: color,
+    object-name: string,
+    is-first-in-object: bool,
+    polymer-length: int,
+    // Strip image: ruler ticks + colored residue letters. Rendered at
+    // physical pixels (CSS × DPR) so it stays crisp on HiDPI.
+    strip-image: image,
+    // Translucent magenta band over residues that match `sele`.
+    highlight-image: image,
+    // Strip CSS-pixel width — drives Image element sizing so the
+    // physical-pixel buffer is downsampled to CSS layout coordinates.
+    strip-width-px: length,
+}
+
+// ── Sequence panel global state ────────────────────────────────────
+
+export global SequenceState {
+    in-out property <[SeqChainRow]> chains;
+    in-out property <bool> has-data;
+    in-out property <string> footer-text;
+    // Maximum row content width across all chains (px); drives Flickable
+    // viewport-width so all rows can be horizontally scrolled together.
+    in-out property <length> max-row-width;
+    // Mirrored from the Rust bridge; drives the toggle button state.
+    in-out property <bool> viewer-colors;
+
+    // Drag state (shared between Slint and Rust)
+    in-out property <int> drag-chain: -1;
+    in-out property <int> drag-start: -1;
+    in-out property <int> drag-end: -1;
+    in-out property <bool> drag-active: false;
+    // Drag-preview pixel band within the strip (cumulative cell widths
+    // resolved Rust-side from `drag-start`/`drag-end`).
+    in-out property <length> drag-px-start;
+    in-out property <length> drag-px-end;
+    // Held while pointer is down or hovered to reflect modifier state for
+    // drag preview / hover tinting.
+    in-out property <bool> ctrl-held: false;
+
+    // Hover state (only valid when not actively dragging)
+    in-out property <int> hover-chain: -1;
+    in-out property <int> hover-residue: -1;
+    in-out property <bool> hover-active: false;
+    in-out property <string> hover-tooltip;
+    // Hover coordinates in panel-local space (px), used to position the
+    // floating tooltip.
+    in-out property <length> hover-x;
+    in-out property <length> hover-y;
+
+    // Context menu state. `context-menu-chain == -1` means panel-level menu.
+    in-out property <bool> context-menu-open: false;
+    in-out property <int> context-menu-chain: -1;
+    in-out property <bool> context-menu-chain-copy-enabled: false;
+    in-out property <length> context-menu-x;
+    in-out property <length> context-menu-y;
+
+    // Callbacks
+    callback residue-clicked(int, int, int);
+    // row-dragging: chain-index, x-px (relative to residue strip)
+    callback row-drag-move(int, float);
+    callback residue-drag-ended(int, int, int, int);
+    callback row-hover(int, float);
+    callback viewer-colors-toggled();
+    callback copy-chain-fasta(int);
+    callback copy-all-fasta();
+}

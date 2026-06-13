@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use pymol_mol::{Atom, Element, SecondaryStructure};
+use patinae_mol::{Atom, Element, SecondaryStructure};
 
 /// Populate a Python dict with atom properties for use as `locals` in
 /// `py.run()` during iterate/alter.
@@ -45,7 +45,7 @@ pub fn set_atom_locals(
     )?;
 
     // Index / ID
-    locals.set_item("index", index + 1)?; // 1-based like PyMOL
+    locals.set_item("index", index + 1)?; // 1-based command API index.
     locals.set_item("ID", atom.id)?;
     locals.set_item("rank", atom.rank)?;
 
@@ -186,7 +186,7 @@ pub fn apply_locals_to_atom(locals: &Bound<'_, PyDict>, atom: &mut Atom) -> PyRe
 /// Build the globals dict for `iterate`/`alter` expression evaluation.
 ///
 /// Always uses `__main__.__dict__` as the base so that `stored`, `cmd`,
-/// and any user-defined variables are visible — matching real PyMOL.
+/// and any user-defined variables are visible to expressions.
 /// When a `space` dict is provided, its entries are merged on top.
 pub fn build_globals<'py>(
     py: Python<'py>,
@@ -199,7 +199,7 @@ pub fn build_globals<'py>(
     Ok(globals)
 }
 
-/// Convert a `SecondaryStructure` enum to the PyMOL-style single-letter code.
+/// Convert a `SecondaryStructure` enum to the command API single-letter code.
 pub fn ss_to_str(ss: SecondaryStructure) -> &'static str {
     match ss {
         SecondaryStructure::Helix
@@ -210,7 +210,7 @@ pub fn ss_to_str(ss: SecondaryStructure) -> &'static str {
     }
 }
 
-/// Convert a PyMOL-style SS string to a `SecondaryStructure` enum.
+/// Convert a command API SS string to a `SecondaryStructure` enum.
 pub fn str_to_ss(s: &str) -> SecondaryStructure {
     match s {
         "H" => SecondaryStructure::Helix,

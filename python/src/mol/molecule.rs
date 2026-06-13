@@ -1,7 +1,7 @@
 //! Python bindings for ObjectMolecule
 
 use pyo3::prelude::*;
-use pymol_mol::{AtomIndex, ObjectMolecule};
+use patinae_mol::{AtomIndex, ObjectMolecule};
 
 use super::atom::{PyAtom, PyAtomIter};
 use super::bond::{PyBond, PyBondIter};
@@ -82,7 +82,7 @@ impl PyObjectMolecule {
         self.inner.atom_count()
     }
 
-    /// Alias for atom_count (PyMOL API compatibility)
+    /// Alias for `atom_count`.
     fn n_atoms(&self) -> usize {
         self.atom_count()
     }
@@ -93,7 +93,7 @@ impl PyObjectMolecule {
         self.inner.bond_count()
     }
 
-    /// Alias for bond_count (PyMOL API compatibility)
+    /// Alias for `bond_count`.
     fn n_bonds(&self) -> usize {
         self.bond_count()
     }
@@ -104,7 +104,7 @@ impl PyObjectMolecule {
         self.inner.state_count()
     }
 
-    /// Alias for state_count (PyMOL API compatibility)
+    /// Alias for `state_count`.
     fn n_states(&self) -> usize {
         self.state_count()
     }
@@ -178,7 +178,7 @@ impl PyObjectMolecule {
 
     /// Get a bond by index
     fn get_bond(&self, index: usize) -> PyResult<PyBond> {
-        use pymol_mol::BondIndex;
+        use patinae_mol::BondIndex;
         let bond = self.inner.get_bond(BondIndex(index as u32)).ok_or_else(|| {
             pyo3::exceptions::PyIndexError::new_err(format!(
                 "Bond index {} out of range (max: {})",

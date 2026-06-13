@@ -1,11 +1,14 @@
 __pycache__
 _tests
 _plans
+_reference
 *.so
 target
 .venv
 CLAUDE.md
+AGENTS.md
 .claude
+.cargo
 .env
 .DS_Store
 node_modules
@@ -14,4 +17,6 @@ pkg
 package-lock.json
 !web/package-lock.json
 gh-pages
-python/pymol_rs/widget/static
+python/patinae/widget/static
+web/assets/1fsd.cif
+web/assets/3J3Q.cif

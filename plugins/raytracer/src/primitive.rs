@@ -201,7 +201,13 @@ impl GpuTriangle {
     }
 
     /// Create a triangle with flat shading (computed normal)
-    pub fn flat(v0: [f32; 3], v1: [f32; 3], v2: [f32; 3], color: [f32; 4], transparency: f32) -> Self {
+    pub fn flat(
+        v0: [f32; 3],
+        v1: [f32; 3],
+        v2: [f32; 3],
+        color: [f32; 4],
+        transparency: f32,
+    ) -> Self {
         // Compute face normal
         let e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
         let e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
@@ -416,12 +422,7 @@ mod tests {
         let mut collector = PrimitiveCollector::new();
         collector.add_sphere(GpuSphere::new([0.0; 3], 1.0, [1.0; 4], 0.0));
         collector.add_cylinder(GpuCylinder::new(
-            [0.0; 3],
-            [1.0; 3],
-            0.1,
-            [1.0; 4],
-            [1.0; 4],
-            0.0,
+            [0.0; 3], [1.0; 3], 0.1, [1.0; 4], [1.0; 4], 0.0,
         ));
         let prims = collector.build();
         assert_eq!(prims.total_count(), 2);

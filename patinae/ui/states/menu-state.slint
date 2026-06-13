@@ -1,0 +1,34 @@
+export struct RecentFileItem {
+    title: string,
+    subtitle: string,
+    path: string,
+    thumbnail: image,
+    has-thumbnail: bool,
+    extension: string,
+}
+
+export global MenuState {
+    callback action(string);
+    callback open-recent(string);
+
+    in-out property <[RecentFileItem]> recent-files;
+    in-out property <bool> has-recent-files: false;
+
+    in-out property <bool> fetch-visible: false;
+    in-out property <string> fetch-pdb-id;
+    in-out property <string> fetch-object-name;
+    in-out property <string> fetch-format: "cif";
+    in-out property <bool> fetch-loading: false;
+    in-out property <string> fetch-status;
+    in-out property <string> fetch-title;
+    in-out property <string> fetch-details;
+    in-out property <string> fetch-method;
+    in-out property <string> fetch-deposit-date;
+    in-out property <string> fetch-release-date;
+    in-out property <string> fetch-doi;
+
+    callback fetch-pdb-edited(string);
+    callback fetch-preview(string);
+    callback fetch-submit(string, string, string);
+    callback fetch-open-doi(string);
+}

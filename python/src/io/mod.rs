@@ -36,38 +36,38 @@ pub enum PyFileFormat {
     Unknown,
 }
 
-impl From<pymol_io::FileFormat> for PyFileFormat {
-    fn from(fmt: pymol_io::FileFormat) -> Self {
+impl From<patinae_io::FileFormat> for PyFileFormat {
+    fn from(fmt: patinae_io::FileFormat) -> Self {
         match fmt {
-            pymol_io::FileFormat::Pdb => PyFileFormat::Pdb,
-            pymol_io::FileFormat::Sdf => PyFileFormat::Sdf,
-            pymol_io::FileFormat::Mol2 => PyFileFormat::Mol2,
-            pymol_io::FileFormat::Cif => PyFileFormat::Cif,
-            pymol_io::FileFormat::Bcif => PyFileFormat::Bcif,
-            pymol_io::FileFormat::Xyz => PyFileFormat::Xyz,
-            pymol_io::FileFormat::Gro => PyFileFormat::Gro,
-            pymol_io::FileFormat::Xtc => PyFileFormat::Xtc,
-            pymol_io::FileFormat::Trr => PyFileFormat::Trr,
-            pymol_io::FileFormat::Ccp4 => PyFileFormat::Ccp4,
-            pymol_io::FileFormat::Unknown => PyFileFormat::Unknown,
+            patinae_io::FileFormat::Pdb => PyFileFormat::Pdb,
+            patinae_io::FileFormat::Sdf => PyFileFormat::Sdf,
+            patinae_io::FileFormat::Mol2 => PyFileFormat::Mol2,
+            patinae_io::FileFormat::Cif => PyFileFormat::Cif,
+            patinae_io::FileFormat::Bcif => PyFileFormat::Bcif,
+            patinae_io::FileFormat::Xyz => PyFileFormat::Xyz,
+            patinae_io::FileFormat::Gro => PyFileFormat::Gro,
+            patinae_io::FileFormat::Xtc => PyFileFormat::Xtc,
+            patinae_io::FileFormat::Trr => PyFileFormat::Trr,
+            patinae_io::FileFormat::Ccp4 => PyFileFormat::Ccp4,
+            patinae_io::FileFormat::Unknown => PyFileFormat::Unknown,
         }
     }
 }
 
-impl From<PyFileFormat> for pymol_io::FileFormat {
+impl From<PyFileFormat> for patinae_io::FileFormat {
     fn from(fmt: PyFileFormat) -> Self {
         match fmt {
-            PyFileFormat::Pdb => pymol_io::FileFormat::Pdb,
-            PyFileFormat::Sdf => pymol_io::FileFormat::Sdf,
-            PyFileFormat::Mol2 => pymol_io::FileFormat::Mol2,
-            PyFileFormat::Cif => pymol_io::FileFormat::Cif,
-            PyFileFormat::Bcif => pymol_io::FileFormat::Bcif,
-            PyFileFormat::Xyz => pymol_io::FileFormat::Xyz,
-            PyFileFormat::Gro => pymol_io::FileFormat::Gro,
-            PyFileFormat::Xtc => pymol_io::FileFormat::Xtc,
-            PyFileFormat::Trr => pymol_io::FileFormat::Trr,
-            PyFileFormat::Ccp4 => pymol_io::FileFormat::Ccp4,
-            PyFileFormat::Unknown => pymol_io::FileFormat::Unknown,
+            PyFileFormat::Pdb => patinae_io::FileFormat::Pdb,
+            PyFileFormat::Sdf => patinae_io::FileFormat::Sdf,
+            PyFileFormat::Mol2 => patinae_io::FileFormat::Mol2,
+            PyFileFormat::Cif => patinae_io::FileFormat::Cif,
+            PyFileFormat::Bcif => patinae_io::FileFormat::Bcif,
+            PyFileFormat::Xyz => patinae_io::FileFormat::Xyz,
+            PyFileFormat::Gro => patinae_io::FileFormat::Gro,
+            PyFileFormat::Xtc => patinae_io::FileFormat::Xtc,
+            PyFileFormat::Trr => patinae_io::FileFormat::Trr,
+            PyFileFormat::Ccp4 => patinae_io::FileFormat::Ccp4,
+            PyFileFormat::Unknown => patinae_io::FileFormat::Unknown,
         }
     }
 }
@@ -107,9 +107,9 @@ pub fn read_file(path: &str, format: Option<PyFileFormat>) -> PyResult<PyObjectM
     let path = Path::new(path);
     
     let mol = if let Some(fmt) = format {
-        pymol_io::read_file_format(path, fmt.into()).map_py_err()?
+        patinae_io::read_file_format(path, fmt.into()).map_py_err()?
     } else {
-        pymol_io::read_file(path).map_py_err()?
+        patinae_io::read_file(path).map_py_err()?
     };
     
     Ok(PyObjectMolecule::from(mol))
@@ -132,9 +132,9 @@ pub fn read_all(path: &str, format: Option<PyFileFormat>) -> PyResult<Vec<PyObje
     let path = Path::new(path);
     
     let mols = if let Some(fmt) = format {
-        pymol_io::read_all_format(path, fmt.into()).map_py_err()?
+        patinae_io::read_all_format(path, fmt.into()).map_py_err()?
     } else {
-        pymol_io::read_all(path).map_py_err()?
+        patinae_io::read_all(path).map_py_err()?
     };
     
     Ok(mols.into_iter().map(PyObjectMolecule::from).collect())
@@ -152,9 +152,9 @@ pub fn write_file(path: &str, mol: &PyObjectMolecule, format: Option<PyFileForma
     let path = Path::new(path);
     
     if let Some(fmt) = format {
-        pymol_io::write_file_format(path, mol.inner(), fmt.into()).map_py_err()?;
+        patinae_io::write_file_format(path, mol.inner(), fmt.into()).map_py_err()?;
     } else {
-        pymol_io::write_file(path, mol.inner()).map_py_err()?;
+        patinae_io::write_file(path, mol.inner()).map_py_err()?;
     }
     
     Ok(())
@@ -170,7 +170,7 @@ pub fn write_file(path: &str, mol: &PyObjectMolecule, format: Option<PyFileForma
 ///     ObjectMolecule containing the molecular data
 #[pyfunction]
 pub fn parse_string(content: &str, format: PyFileFormat) -> PyResult<PyObjectMolecule> {
-    let mol = pymol_io::parse_str(content, format.into()).map_py_err()?;
+    let mol = patinae_io::parse_str(content, format.into()).map_py_err()?;
     Ok(PyObjectMolecule::from(mol))
 }
 
@@ -184,7 +184,7 @@ pub fn parse_string(content: &str, format: PyFileFormat) -> PyResult<PyObjectMol
 #[pyfunction]
 pub fn detect_format(path: &str) -> PyFileFormat {
     let path = Path::new(path);
-    pymol_io::detect::detect_from_path(path).into()
+    patinae_io::detect::detect_from_path(path).into()
 }
 
 /// Fetch a structure from RCSB PDB
@@ -199,9 +199,9 @@ pub fn detect_format(path: &str) -> PyFileFormat {
 #[pyo3(signature = (pdb_id, format="bcif"))]
 pub fn fetch(pdb_id: &str, format: &str) -> PyResult<PyObjectMolecule> {
     let fetch_format = match format.to_lowercase().as_str() {
-        "pdb" => pymol_io::FetchFormat::Pdb,
-        "cif" | "mmcif" => pymol_io::FetchFormat::Cif,
-        "bcif" | "binarycif" => pymol_io::FetchFormat::Bcif,
+        "pdb" => patinae_io::FetchFormat::Pdb,
+        "cif" | "mmcif" => patinae_io::FetchFormat::Cif,
+        "bcif" | "binarycif" => patinae_io::FetchFormat::Bcif,
         _ => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
                 "Unknown fetch format: '{}'. Use 'pdb', 'cif', or 'bcif'.",
@@ -210,7 +210,7 @@ pub fn fetch(pdb_id: &str, format: &str) -> PyResult<PyObjectMolecule> {
         }
     };
     
-    let mol = pymol_io::fetch(pdb_id, fetch_format).map_py_err()?;
+    let mol = patinae_io::fetch(pdb_id, fetch_format).map_py_err()?;
     Ok(PyObjectMolecule::from(mol))
 }
 

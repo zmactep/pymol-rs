@@ -15,7 +15,73 @@ env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 jobs:
+  resolve_pypi_version:
+    name: Resolve PyPI version
+    runs-on: ubuntu-latest
+    outputs:
+      base_version: ${{ steps.version.outputs.base_version }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Choose package version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          project_name=$(awk -F '"' '
+            /^\[project\]$/ { in_project = 1; next }
+            /^\[/ { in_project = 0 }
+            in_project && /^name = / { print $2; exit }
+          ' python/pyproject.toml)
+          base_version=$(awk -F '"' '
+            /^\[project\]$/ { in_project = 1; next }
+            /^\[/ { in_project = 0 }
+            in_project && /^version = / { print $2; exit }
+          ' python/pyproject.toml)
+
+          if [[ -z "$project_name" || -z "$base_version" ]]; then
+            echo "Could not read project name/version from python/pyproject.toml" >&2
+            exit 1
+          fi
+
+          response=$(mktemp)
+          status=$(curl -sS -w '%{http_code}' -o "$response" "https://pypi.org/pypi/${project_name}/json" || true)
+          if [[ "$status" != "200" && "$status" != "404" ]]; then
+            echo "PyPI lookup for ${project_name} failed with HTTP ${status}" >&2
+            cat "$response" >&2
+            exit 1
+          fi
+
+          version="$base_version"
+          if [[ "$status" == "200" ]] && jq -e --arg version "$base_version" '.releases | has($version)' "$response" >/dev/null; then
+            post_base="$base_version"
+            post_number=1
+            if [[ "$base_version" =~ ^(.+)\.post([0-9]+)$ ]]; then
+              post_base="${BASH_REMATCH[1]}"
+              post_number=$((BASH_REMATCH[2] + 1))
+            fi
+
+            while jq -e --arg version "${post_base}.post${post_number}" '.releases | has($version)' "$response" >/dev/null; do
+              post_number=$((post_number + 1))
+            done
+            version="${post_base}.post${post_number}"
+            echo "::notice::${project_name} ${base_version} already exists on PyPI; publishing ${version} instead."
+          else
+            echo "::notice::Publishing ${project_name} ${version} to PyPI."
+          fi
+
+          {
+            echo "base_version=${base_version}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
+
   build-executables:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -69,25 +135,25 @@ jobs:
           version: 1.0
 
       - name: Build with cargo
-        run: cargo build --release -p pymol-gui --target ${{ matrix.target }}
+        run: cargo build --release -p patinae --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czvf ../../../pymol-rs-${{ matrix.name }}.tar.gz pymol-rs${{ matrix.ext }}
+          tar -czvf ../../../patinae-${{ matrix.name }}.tar.gz patinae${{ matrix.ext }}
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../pymol-rs-${{ matrix.name }}.zip pymol-rs${{ matrix.ext }}
+          7z a ../../../patinae-${{ matrix.name }}.zip patinae${{ matrix.ext }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pymol-rs-${{ matrix.name }}
-          path: pymol-rs-${{ matrix.name }}.*
+          name: patinae-${{ matrix.name }}
+          path: patinae-${{ matrix.name }}.*
           if-no-files-found: error
 
   build-plugins:
@@ -162,7 +228,7 @@ jobs:
           mkdir -p staging
           cp target/${{ matrix.target }}/release/${{ matrix.lib_glob }} staging/
           cd staging
-          tar -czvf ../pymol-rs-plugins-${{ matrix.name }}.tar.gz *
+          tar -czvf ../patinae-plugins-${{ matrix.name }}.tar.gz *
 
       - name: Package plugins (Windows)
         if: runner.os == 'Windows'
@@ -171,18 +237,18 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.lib_glob }}" staging/
           Copy-Item "plugins/*/*.deps" staging/ -ErrorAction SilentlyContinue
           cd staging
-          7z a ../pymol-rs-plugins-${{ matrix.name }}.zip *
+          7z a ../patinae-plugins-${{ matrix.name }}.zip *
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pymol-rs-plugins-${{ matrix.name }}
-          path: pymol-rs-plugins-${{ matrix.name }}.*
+          name: patinae-plugins-${{ matrix.name }}
+          path: patinae-plugins-${{ matrix.name }}.*
           if-no-files-found: error
 
   build-wheels:
     name: Build wheel ${{ matrix.os }} ${{ matrix.target }}
-    needs: [build-web]
+    needs: [build-web, resolve_pypi_version]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -205,6 +271,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Patch Python package version
+        shell: bash
+        env:
+          PYPI_VERSION: ${{ needs.resolve_pypi_version.outputs.version }}
+        run: |
+          sed -i.bak "s/^version = \".*\"/version = \"${PYPI_VERSION}\"/" python/pyproject.toml
+          rm -f python/pyproject.toml.bak
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -215,18 +289,19 @@ jobs:
           workspaces: python
 
       - name: Download web build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
-          name: pymol-rs-web
+          name: patinae-web
           path: web-artifact
 
       - name: Prepare widget assets
+        shell: bash
         run: |
-          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
-          mkdir -p python/pymol_rs/widget/static
-          cp web-artifact/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
-          cp web-artifact/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
-          cp web-artifact/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
+          tar -xzf web-artifact/patinae-web.tar.gz -C web-artifact
+          mkdir -p python/patinae/widget/static
+          cp web-artifact/dist/patinae-viewer.js python/patinae/widget/static/
+          cp web-artifact/dist/patinae_web_bg.wasm python/patinae/widget/static/
+          cp web-artifact/dist/patinae_web-*.js python/patinae/widget/static/patinae_web_glue.js
 
       - name: Setup Python 3.13
         uses: actions/setup-python@v6
@@ -256,10 +331,19 @@ jobs:
 
   build-sdist:
     name: Build sdist
+    needs: [resolve_pypi_version]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Patch Python package version
+        shell: bash
+        env:
+          PYPI_VERSION: ${{ needs.resolve_pypi_version.outputs.version }}
+        run: |
+          sed -i.bak "s/^version = \".*\"/version = \"${PYPI_VERSION}\"/" python/pyproject.toml
+          rm -f python/pyproject.toml.bak
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
@@ -301,7 +385,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: web
-        run: npm install
+        run: npm ci
 
       - name: Build WASM + TypeScript bundle
         working-directory: web
@@ -314,19 +398,25 @@ jobs:
           cp -r web/pkg staging/
           cp web/package.json staging/
           cd staging
-          tar -czvf ../pymol-rs-web.tar.gz .
+          tar -czvf ../patinae-web.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pymol-rs-web
-          path: pymol-rs-web.tar.gz
+          name: patinae-web
+          path: patinae-web.tar.gz
           if-no-files-found: error
 
   build-dmg:
     name: Build macOS DMG
     needs: [build-web]
     runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      PATINAE_APPLE_TEAMID: ${{ secrets.PATINAE_APPLE_TEAMID }}
+      PATINAE_APPLE_EMAIL: ${{ secrets.PATINAE_APPLE_EMAIL }}
+      PATINAE_APPLE_APP_PASS: ${{ secrets.PATINAE_APPLE_APP_PASS }}
 
     steps:
       - name: Checkout
@@ -353,22 +443,19 @@ jobs:
         run: uv tool install maturin
 
       - name: Download web build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
-          name: pymol-rs-web
+          name: patinae-web
           path: web-artifact
 
       - name: Prepare widget assets
         run: |
-          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
+          tar -xzf web-artifact/patinae-web.tar.gz -C web-artifact
           mkdir -p web/dist
           cp -r web-artifact/dist/* web/dist/
 
       - name: Import signing certificate
         if: env.APPLE_CERTIFICATE_BASE64 != ''
-        env:
-          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
           security create-keychain -p "ci-keychain" $KEYCHAIN_PATH
@@ -382,14 +469,10 @@ jobs:
           rm -f $RUNNER_TEMP/cert.p12
 
       - name: Create .env for signing
-        if: env.PYMOL_RS_APPLE_TEAMID != ''
-        env:
-          PYMOL_RS_APPLE_TEAMID: ${{ secrets.PYMOL_RS_APPLE_TEAMID }}
-          PYMOL_RS_APPLE_EMAIL: ${{ secrets.PYMOL_RS_APPLE_EMAIL }}
-          PYMOL_RS_APPLE_APP_PASS: ${{ secrets.PYMOL_RS_APPLE_APP_PASS }}
+        if: env.PATINAE_APPLE_TEAMID != ''
         run: |
-          printf "PYMOL_RS_APPLE_TEAMID='%s'\nPYMOL_RS_APPLE_EMAIL='%s'\nPYMOL_RS_APPLE_APP_PASS='%s'\n" \
-            "$PYMOL_RS_APPLE_TEAMID" "$PYMOL_RS_APPLE_EMAIL" "$PYMOL_RS_APPLE_APP_PASS" > .env
+          printf "PATINAE_APPLE_TEAMID='%s'\nPATINAE_APPLE_EMAIL='%s'\nPATINAE_APPLE_APP_PASS='%s'\n" \
+            "$PATINAE_APPLE_TEAMID" "$PATINAE_APPLE_EMAIL" "$PATINAE_APPLE_APP_PASS" > .env
 
       - name: Build DMG
         run: make dmg-full
@@ -397,8 +480,8 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
-          name: pymol-rs-dmg-macos-arm64
-          path: target/PyMOL-RS.dmg
+          name: patinae-dmg-macos-arm64
+          path: target/Patinae.dmg
           if-no-files-found: error
 
       - name: Cleanup keychain
@@ -453,14 +536,14 @@ jobs:
         run: uv tool install maturin
 
       - name: Download web build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
-          name: pymol-rs-web
+          name: patinae-web
           path: web-artifact
 
       - name: Prepare widget assets
         run: |
-          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
+          tar -xzf web-artifact/patinae-web.tar.gz -C web-artifact
           New-Item -ItemType Directory -Force -Path web/dist
           Copy-Item web-artifact/dist/* web/dist/ -Recurse
 
@@ -470,25 +553,25 @@ jobs:
       - name: Package bundle
         run: |
           cd target/bundle
-          7z a ../../pymol-rs-bundle-${{ matrix.name }}.zip PyMOL-RS
+          7z a ../../patinae-bundle-${{ matrix.name }}.zip Patinae
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pymol-rs-bundle-${{ matrix.name }}
-          path: pymol-rs-bundle-${{ matrix.name }}.zip
+          name: patinae-bundle-${{ matrix.name }}
+          path: patinae-bundle-${{ matrix.name }}.zip
           if-no-files-found: error
 
   publish-pypi:
     name: Publish to PyPI
-    needs: [build-wheels, build-sdist]
+    needs: [build-wheels, build-sdist, resolve_pypi_version]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
     steps:
       - name: Download all wheels and sdist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
           pattern: wheels-*
           path: dist
@@ -520,7 +603,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
@@ -528,8 +611,8 @@ jobs:
         run: |
           mkdir -p release
           # Move all archives (executables + plugins)
-          find artifacts -type f -name 'pymol-rs-*.tar.gz' -exec mv {} release/ \;
-          find artifacts -type f -name 'pymol-rs-*.zip' -exec mv {} release/ \;
+          find artifacts -type f -name 'patinae-*.tar.gz' -exec mv {} release/ \;
+          find artifacts -type f -name 'patinae-*.zip' -exec mv {} release/ \;
           # Move DMG
           find artifacts -type f -name '*.dmg' -exec mv {} release/ \;
           # Move wheels

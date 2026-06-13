@@ -1,0 +1,19 @@
+[package]
+name = "patinae-color"
+description = "Color system for Patinae"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+ahash = { workspace = true }
+serde = { workspace = true }
+patinae-mol = { workspace = true }
+
+[lints]
+workspace = true

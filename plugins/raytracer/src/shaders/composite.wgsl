@@ -18,12 +18,9 @@ struct CompositeParams {
 @group(0) @binding(3) var output: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(4) var<uniform> params: CompositeParams;
 
-// Quantize color for posterized look (mode 3)
-// PyMOL algorithm: 4 levels at 0, 0.333, 0.667, 1.0
-// From Ray.cpp: bit manipulation creates levels 0x00, 0x55, 0xAA, 0xFF
-// From anaglyph_header.fs: floor(color * 3.999) / 3.0
+// Quantize color for posterized look (mode 3). Four levels land at
+// 0, 1/3, 2/3, and 1.
 fn quantize_color(color: vec3<f32>, levels: f32) -> vec3<f32> {
-    // PyMOL: floor(color * 3.999) / 3.0 for 4 levels
     // Generic: floor(color * (levels - 0.001)) / (levels - 1.0)
     let n = levels - 0.001;  // Prevents 1.0 from going to next level
     let d = levels - 1.0;    // Number of intervals
@@ -65,8 +62,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let blended = mix(color.rgb, params.edge_color, edge);
             final_color = vec4<f32>(blended, color.a);
         } else if params.mode == 2u {
-            // Mode 2: Outline only
-            // PyMOL behavior: edges get edge_color, non-edges get white (or transparent)
+            // Mode 2: outline only. Edges get edge_color; non-edges get
+            // white or transparent depending on alpha.
             if edge > 0.5 {
                 // Edge pixel: draw with edge color
                 final_color = vec4<f32>(params.edge_color, 1.0);

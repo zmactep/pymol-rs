@@ -3,8 +3,8 @@
 //! Provides selection language parsing and evaluation.
 
 use pyo3::prelude::*;
-use pymol_mol::AtomIndex;
-use pymol_select::SelectionResult;
+use patinae_mol::AtomIndex;
+use patinae_select::SelectionResult;
 
 use crate::error::ResultExt;
 use crate::mol::PyObjectMolecule;
@@ -205,7 +205,7 @@ impl PySelectionIter {
 ///     String representation of the parsed AST (for debugging)
 #[pyfunction]
 pub fn parse(selection: &str) -> PyResult<String> {
-    let expr = pymol_select::parse(selection)
+    let expr = patinae_select::parse(selection)
         .map_err(|e| crate::error::SelectionError::new_err(format!("Parse error: {}", e)))?;
     Ok(format!("{:?}", expr))
 }
@@ -220,7 +220,7 @@ pub fn parse(selection: &str) -> PyResult<String> {
 ///     SelectionResult containing the selected atoms
 #[pyfunction]
 pub fn select(mol: &PyObjectMolecule, selection: &str) -> PyResult<PySelectionResult> {
-    let result = pymol_select::select(mol.inner(), selection).map_py_err()?;
+    let result = patinae_select::select(mol.inner(), selection).map_py_err()?;
     Ok(PySelectionResult::from_result(result, mol.inner().atom_count()))
 }
 
@@ -234,7 +234,7 @@ pub fn select(mol: &PyObjectMolecule, selection: &str) -> PyResult<PySelectionRe
 ///     List of atom indices
 #[pyfunction]
 pub fn select_atoms(mol: &PyObjectMolecule, selection: &str) -> PyResult<Vec<u32>> {
-    let indices = pymol_select::select_atoms(mol.inner(), selection).map_py_err()?;
+    let indices = patinae_select::select_atoms(mol.inner(), selection).map_py_err()?;
     Ok(indices.into_iter().map(|idx| idx.0).collect())
 }
 
@@ -248,7 +248,7 @@ pub fn select_atoms(mol: &PyObjectMolecule, selection: &str) -> PyResult<Vec<u32
 ///     Number of matching atoms
 #[pyfunction]
 pub fn count_atoms(mol: &PyObjectMolecule, selection: &str) -> PyResult<usize> {
-    let result = pymol_select::select(mol.inner(), selection).map_py_err()?;
+    let result = patinae_select::select(mol.inner(), selection).map_py_err()?;
     Ok(result.count())
 }
 

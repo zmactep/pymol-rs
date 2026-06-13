@@ -73,7 +73,13 @@ struct PrimitiveRef {
 }
 
 impl PrimitiveRef {
-    fn new(prim_type: u32, index: u32, centroid: [f32; 3], aabb_min: [f32; 3], aabb_max: [f32; 3]) -> Self {
+    fn new(
+        prim_type: u32,
+        index: u32,
+        centroid: [f32; 3],
+        aabb_min: [f32; 3],
+        aabb_max: [f32; 3],
+    ) -> Self {
         Self {
             encoded_index: (prim_type << 30) | (index & 0x3FFFFFFF),
             centroid,
@@ -104,19 +110,37 @@ impl Bvh {
         // Add spheres (type 0)
         for (i, sphere) in primitives.spheres.iter().enumerate() {
             let (aabb_min, aabb_max) = sphere.aabb();
-            refs.push(PrimitiveRef::new(0, i as u32, sphere.centroid(), aabb_min, aabb_max));
+            refs.push(PrimitiveRef::new(
+                0,
+                i as u32,
+                sphere.centroid(),
+                aabb_min,
+                aabb_max,
+            ));
         }
 
         // Add cylinders (type 1)
         for (i, cyl) in primitives.cylinders.iter().enumerate() {
             let (aabb_min, aabb_max) = cyl.aabb();
-            refs.push(PrimitiveRef::new(1, i as u32, cyl.centroid(), aabb_min, aabb_max));
+            refs.push(PrimitiveRef::new(
+                1,
+                i as u32,
+                cyl.centroid(),
+                aabb_min,
+                aabb_max,
+            ));
         }
 
         // Add triangles (type 2)
         for (i, tri) in primitives.triangles.iter().enumerate() {
             let (aabb_min, aabb_max) = tri.aabb();
-            refs.push(PrimitiveRef::new(2, i as u32, tri.centroid(), aabb_min, aabb_max));
+            refs.push(PrimitiveRef::new(
+                2,
+                i as u32,
+                tri.centroid(),
+                aabb_min,
+                aabb_max,
+            ));
         }
 
         // Allocate nodes (at most 2N-1 nodes for N primitives)
@@ -278,7 +302,9 @@ impl BvhBuilder {
             for i in start..end {
                 let c = self.refs[i].centroid[axis];
                 let bin_idx = ((c - min_c) * scale).min(NUM_BINS as f32 - 1.0) as usize;
-                bins[bin_idx].0.grow_aabb(self.refs[i].aabb_min, self.refs[i].aabb_max);
+                bins[bin_idx]
+                    .0
+                    .grow_aabb(self.refs[i].aabb_min, self.refs[i].aabb_max);
                 bins[bin_idx].1 += 1;
             }
 
@@ -340,7 +366,9 @@ mod tests {
     #[test]
     fn test_bvh_build_single() {
         let mut prims = Primitives::new();
-        prims.spheres.push(GpuSphere::new([0.0; 3], 1.0, [1.0; 4], 0.0));
+        prims
+            .spheres
+            .push(GpuSphere::new([0.0; 3], 1.0, [1.0; 4], 0.0));
         let bvh = Bvh::build(&prims).unwrap();
         assert!(!bvh.nodes.is_empty());
         assert!(bvh.nodes[0].is_leaf());
@@ -350,12 +378,9 @@ mod tests {
     fn test_bvh_build_multiple() {
         let mut prims = Primitives::new();
         for i in 0..100 {
-            prims.spheres.push(GpuSphere::new(
-                [i as f32, 0.0, 0.0],
-                0.5,
-                [1.0; 4],
-                0.0,
-            ));
+            prims
+                .spheres
+                .push(GpuSphere::new([i as f32, 0.0, 0.0], 0.5, [1.0; 4], 0.0));
         }
         let bvh = Bvh::build(&prims).unwrap();
         assert!(bvh.nodes.len() > 1);

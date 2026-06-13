@@ -1,0 +1,48 @@
+[package]
+name = "patinae"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Slint-based GUI for Patinae"
+
+[[bin]]
+name = "patinae"
+path = "src/main.rs"
+
+[dependencies]
+slint = { workspace = true }
+wgpu = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+serde = { workspace = true }
+webbrowser = { workspace = true }
+patinae-cmd = { workspace = true, features = ["fetch", "fetch-async", "native-io", "traj"] }
+patinae-color = { workspace = true }
+patinae-framework = { workspace = true }
+patinae-io = { workspace = true, features = ["fetch-async"] }
+patinae-mol = { workspace = true }
+patinae-plugin-host = { workspace = true }
+patinae-render = { workspace = true, features = ["stats"] }
+patinae-scene = { workspace = true, features = ["render-bridge"] }
+patinae-select = { workspace = true }
+patinae-settings = { workspace = true }
+lin_alg = { workspace = true }
+pollster = "0.4"
+image = { workspace = true }
+ab_glyph = { workspace = true }
+tokio = { workspace = true }
+copypasta = "0.10"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2", features = ["NSWindow", "NSColor", "NSResponder", "NSView", "NSApplication", "NSAppearance", "NSRunningApplication", "NSPanel", "NSSavePanel", "NSOpenPanel"] }
+objc2-foundation = "0.2"
+raw-window-handle = "0.6"
+
+[build-dependencies]
+slint-build = "1.16"
+
+[lints]
+workspace = true

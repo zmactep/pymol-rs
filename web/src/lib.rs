@@ -1,4 +1,4 @@
-//! PyMOL-RS Web Viewer
+//! Web viewer.
 //!
 //! WASM module providing molecular visualization via WebGPU.
 //! Exposes a `WebViewer` struct to JavaScript through wasm-bindgen.

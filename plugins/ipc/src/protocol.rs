@@ -1,6 +1,6 @@
 //! IPC Protocol definitions
 //!
-//! Defines the messages exchanged between the GUI and external clients (like pymol-python).
+//! Defines the messages exchanged between the GUI and external clients (like patinae-python).
 //! The protocol is bidirectional:
 //! - Client → GUI: Send commands, register external commands, respond to callbacks
 //! - GUI → Client: Send responses, request callback execution for external commands
@@ -17,6 +17,8 @@ pub enum OutputKind {
     Warning,
     /// Error message
     Error,
+    /// Wall-clock timing badge
+    Timing,
 }
 
 /// Output message from client (for GUI output view)
@@ -49,8 +51,12 @@ pub enum IpcRequest {
     RegisterCommand {
         /// Command name
         name: String,
-        /// Optional help text
-        help: Option<String>,
+        /// Optional description text
+        description: Option<String>,
+        /// Optional usage string
+        usage: Option<String>,
+        /// Optional arguments description
+        arguments: Option<String>,
     },
 
     /// Unregister an external command
@@ -94,7 +100,7 @@ pub enum IpcRequest {
 
     /// Client handshake: identifies the connecting client
     Hello {
-        /// Client identifier string (e.g. "pymol-python", "script:analysis.py")
+        /// Client identifier string (e.g. "patinae-python", "script:analysis.py")
         client_id: String,
     },
 

@@ -1,5 +1,5 @@
 [package]
-name = "pymol-bench"
+name = "patinae-bench"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,17 +8,27 @@ publish = false
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-pymol-algos = { workspace = true }
-pymol-io = { workspace = true }
-pymol-mol = { workspace = true }
-pymol-select = { workspace = true }
-pymol-render = { workspace = true, default-features = false, features = ["parallel"] }
-pymol-color = { workspace = true }
-pymol-scene = { workspace = true, default-features = false, features = ["parallel"] }
-pymol-settings = { workspace = true }
+patinae-algos = { workspace = true }
+patinae-io = { workspace = true }
+patinae-mol = { workspace = true }
+patinae-select = { workspace = true }
+patinae-color = { workspace = true }
+patinae-scene = { workspace = true, default-features = false }
+patinae-settings = { workspace = true }
+patinae-render = { workspace = true, features = ["stats"] }
+wgpu = { workspace = true }
+pollster = "0.4"
 flate2 = { workspace = true }
+lin_alg = { workspace = true }
 once_cell = "1"
 
 [[bench]]
 name = "assembly"
 harness = false
+
+[[bench]]
+name = "render_loop"
+harness = false
+
+[lints]
+workspace = true

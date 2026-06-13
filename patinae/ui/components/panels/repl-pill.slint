@@ -1,0 +1,656 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { LayoutState } from "../../states/layout-state.slint";
+import { ReplState } from "../../states/repl-state.slint";
+import { ViewportState } from "../../states/viewport-state.slint";
+import { CompletionPopup } from "completion-popup.slint";
+
+// ── Prompt icon — right-pointing chevron "›" ────────────────────────
+
+component PromptIcon inherits Rectangle {
+    in property <color> tint: Theme.cyan;
+
+    width: 12px;
+    height: 14px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 12;
+        viewbox-height: 14;
+        stroke: tint;
+        stroke-width: 2px;
+        fill: transparent;
+        commands: "M 2 1 L 10 7 L 2 13";
+    }
+}
+
+// ── Drawer chevron — up or down arrow ───────────────────────────────
+
+component DrawerChevronUp inherits Rectangle {
+    in property <color> tint;
+
+    width: 12px;
+    height: 8px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 12;
+        viewbox-height: 8;
+        stroke: tint;
+        stroke-width: 1.8px;
+        fill: transparent;
+        commands: "M 1 7 L 6 2 L 11 7";
+    }
+}
+
+component DrawerChevronDown inherits Rectangle {
+    in property <color> tint;
+
+    width: 12px;
+    height: 8px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 12;
+        viewbox-height: 8;
+        stroke: tint;
+        stroke-width: 1.8px;
+        fill: transparent;
+        commands: "M 1 1 L 6 6 L 11 1";
+    }
+}
+
+// Small clock icon for timing badge lines
+component ClockIcon inherits Rectangle {
+    in property <color> tint;
+    width: 10px;
+    height: 10px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        stroke: tint;
+        stroke-width: 1.4px;
+        fill: transparent;
+        commands: "M 5 1 A 4 4 0 1 1 1 5 A 4 4 0 0 1 5 1 Z M 5 3 L 5 5 L 7 5";
+    }
+}
+
+// ── Output line icons ───────────────────────────────────────────────
+
+// Small right-pointing chevron for command echo lines
+component CmdChevronIcon inherits Rectangle {
+    in property <color> tint;
+    width: 10px;
+    height: 12px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 10;
+        viewbox-height: 12;
+        stroke: tint;
+        stroke-width: 1.6px;
+        fill: transparent;
+        commands: "M 2 1 L 8 6 L 2 11";
+    }
+}
+
+// Checkmark for info/normal success lines
+component CheckIcon inherits Rectangle {
+    in property <color> tint;
+    width: 10px;
+    height: 10px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        stroke: tint;
+        stroke-width: 1.8px;
+        fill: transparent;
+        commands: "M 1 5.5 L 3.5 8 L 9 2";
+    }
+}
+
+// Warning triangle with exclamation mark
+component WarningIcon inherits Rectangle {
+    in property <color> tint;
+    width: 12px;
+    height: 11px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 12;
+        viewbox-height: 11;
+        stroke: tint;
+        stroke-width: 1.4px;
+        fill: transparent;
+        commands: "M 6 1 L 11 10 L 1 10 Z M 6 4.5 L 6 7 M 6 8.2 L 6 8.8";
+    }
+}
+
+// Red X for error lines
+component ErrorIcon inherits Rectangle {
+    in property <color> tint;
+    width: 10px;
+    height: 10px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        stroke: tint;
+        stroke-width: 1.8px;
+        fill: transparent;
+        commands: "M 2 2 L 8 8 M 8 2 L 2 8";
+    }
+}
+
+// ── Single output line ──────────────────────────────────────────────
+
+component OutputLine inherits Rectangle {
+    in property <string> text;
+    in property <string> kind;
+    in property <bool> show-icon: true;
+
+    background: kind == "command" ? Theme.bg-raised : transparent;
+    border-radius: kind == "command" ? Tokens.radius-sm : 0px;
+    height: row.preferred-height;
+
+    row := HorizontalLayout {
+        padding-top: 5px;
+        padding-bottom: 5px;
+        padding-right: Tokens.repl-output-pad;
+
+        // Icon cell — vertically centered by layout
+        VerticalLayout {
+            width: 24px;
+            horizontal-stretch: 0;
+            alignment: center;
+
+            if root.show-icon && kind == "command": CmdChevronIcon { tint: Theme.text-muted; }
+            if root.show-icon && kind == "timing": ClockIcon { tint: Theme.text-ghost; }
+            if root.show-icon && (kind == "info" || kind == "normal"): CheckIcon { tint: Theme.cyan; }
+            if root.show-icon && kind == "warning": WarningIcon { tint: Theme.warning; }
+            if root.show-icon && kind == "error": ErrorIcon { tint: Theme.error; }
+        }
+
+        // Text — vertically centered by layout
+        line-text := Text {
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            font-size: Tokens.repl-output-font;
+            font-weight: kind == "command" ? 500 : 400;
+            wrap: word-wrap;
+            color: kind == "command" ? Theme.text-dim
+                 : kind == "timing"  ? Theme.text-ghost
+                 : kind == "error"   ? Theme.error
+                 : kind == "warning" ? Theme.warning
+                 :                     Theme.text-muted;
+            text: root.text;
+        }
+    }
+}
+
+// ── REPL pill + output drawer ───────────────────────────────────────
+
+export component ReplPill inherits Rectangle {
+    in property <length> viewport-w;
+    in property <length> viewport-h;
+    forward-focus: input-field;
+
+    background: transparent;
+
+    // Drawer state memory — saved on dismiss, restored on focus
+    property <bool> drawer-was-open: false;
+
+    // Keyboard focus scope — resting target when TextInput is unfocused.
+    // Ensures Tab always works, even after layout reflows from panel toggling.
+    scope := FocusScope {
+        focus-on-click: false;
+
+        key-pressed(event) => {
+            if event.text == Key.Tab {
+                root.focus-input();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    function dismiss() {
+        drawer-was-open = ReplState.drawer-open;
+        ReplState.drawer-open = false;
+        ReplState.completion-visible = false;
+        ReplState.focused = false;
+        input-field.clear-focus();
+        scope.focus();
+    }
+
+    // Pill geometry
+    property <length> pill-w: Tokens.repl-pill-w;
+    property <length> pill-h: Tokens.repl-pill-h;
+    property <length> pill-x: (root.viewport-w - pill-w) / 2;
+    property <length> pill-y: root.viewport-h - Tokens.repl-pill-bottom - pill-h;
+
+    // Drawer geometry — full height is always computed, clip height animates
+    property <length> drawer-max-h: root.viewport-h * 0.5;
+    property <length> drawer-content-h: drawer-layout.preferred-height + 2 * Tokens.repl-output-pad;
+    property <length> drawer-full-h: min(drawer-content-h, drawer-max-h);
+    property <length> drawer-h: ReplState.drawer-open ? drawer-full-h : 0px;
+
+    // ── Click-outside backdrop ──────────────────────────────────
+    //
+    // Dismisses REPL focus on a press outside the pill. Viewport presses are
+    // forwarded to the viewport: short left-clicks can select, drags rotate.
+    if input-field.has-focus || ReplState.drawer-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+
+        TouchArea {
+            property <bool> over-pill:
+                self.mouse-x >= root.pill-x
+                && self.mouse-x < root.pill-x + root.pill-w
+                && self.mouse-y >= root.pill-y
+                && self.mouse-y < root.pill-y + root.pill-h;
+            property <bool> over-drawer:
+                ReplState.drawer-open
+                && self.mouse-x >= root.pill-x
+                && self.mouse-x < root.pill-x + root.pill-w
+                && self.mouse-y >= root.pill-y - root.drawer-h - Tokens.repl-drawer-gap
+                && self.mouse-y < root.pill-y - Tokens.repl-drawer-gap;
+            property <length> completion-h:
+                min(ReplState.completion-items.length, 8) * 26px + 2 * Tokens.space-xs;
+            property <bool> over-completion:
+                ReplState.completion-visible
+                && ReplState.completion-items.length > 0
+                && self.mouse-x >= root.pill-x
+                && self.mouse-x < root.pill-x + root.pill-w
+                && self.mouse-y >= root.pill-y - self.completion-h - 4px
+                && self.mouse-y < root.pill-y - 4px;
+            property <bool> over-repl-ui:
+                self.over-pill || self.over-drawer || self.over-completion;
+            property <bool> forwarding-viewport-input: false;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    self.forwarding-viewport-input = !self.over-repl-ui;
+                    if self.forwarding-viewport-input {
+                        root.dismiss();
+                        ViewportState.mouse-x = self.mouse-x / 1px;
+                        ViewportState.mouse-y = self.mouse-y / 1px;
+                        ViewportState.press-x = ViewportState.mouse-x;
+                        ViewportState.press-y = ViewportState.mouse-y;
+                        ViewportState.suppress-click = false;
+                        if event.button == PointerEventButton.left   { ViewportState.left-pressed = true; }
+                        if event.button == PointerEventButton.middle { ViewportState.middle-pressed = true; }
+                        if event.button == PointerEventButton.right  { ViewportState.right-pressed = true; }
+                    }
+                }
+                if event.kind == PointerEventKind.up && self.forwarding-viewport-input {
+                    ViewportState.mouse-x = self.mouse-x / 1px;
+                    ViewportState.mouse-y = self.mouse-y / 1px;
+                    if event.button == PointerEventButton.left {
+                        ViewportState.click-x = ViewportState.mouse-x;
+                        ViewportState.click-y = ViewportState.mouse-y;
+                        ViewportState.click-serial += 1;
+                    }
+                }
+                if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel)
+                   && self.forwarding-viewport-input {
+                    if event.button == PointerEventButton.left   { ViewportState.left-pressed = false; }
+                    if event.button == PointerEventButton.middle { ViewportState.middle-pressed = false; }
+                    if event.button == PointerEventButton.right  { ViewportState.right-pressed = false; }
+                    self.forwarding-viewport-input = false;
+                }
+            }
+            moved => {
+                if self.forwarding-viewport-input {
+                    ViewportState.mouse-x = self.mouse-x / 1px;
+                    ViewportState.mouse-y = self.mouse-y / 1px;
+                }
+            }
+            scroll-event(event) => {
+                if !self.over-repl-ui {
+                    ViewportState.scroll-delta = ViewportState.scroll-delta - event.delta-y / 1px;
+                }
+                return accept;
+            }
+        }
+    }
+
+    // ── Output drawer (above pill) ────────────────────────────────
+    //
+    // Bottom edge is anchored to the pill. Both `y` and `height` are animated
+    // so the drawer grows upward from the pill — content is revealed from
+    // the bottom (near the input) rather than from the top.
+    drawer := Rectangle {
+        x: root.pill-x;
+        y: root.pill-y - root.drawer-h - Tokens.repl-drawer-gap;
+        width: root.pill-w;
+        height: root.drawer-h;
+        clip: true;
+        border-radius: Tokens.radius-lg;
+        background: Theme.bg-card;
+        border-width: Tokens.hairline;
+        border-color: Theme.line;
+        visible: ReplState.drawer-open;
+
+        animate height { duration: Tokens.motion-base; easing: ease-in-out; }
+        animate y      { duration: Tokens.motion-base; easing: ease-in-out; }
+
+        // Block events from passing through
+        TouchArea {}
+
+        // Inner wrapper pinned to bottom — gives bottom-up reveal.
+        // As the clip height grows, content appears from the pill side first.
+        Rectangle {
+            x: 0;
+            width: parent.width;
+            height: root.drawer-full-h;
+            y: parent.height - self.height;
+
+            flick := Flickable {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                viewport-height: drawer-layout.preferred-height + 2 * Tokens.repl-output-pad;
+                // Scroll to bottom whenever new output arrives (generation bumps).
+                // The `* 0` makes the dependency invisible to the value.
+                viewport-y: min(0px, self.height - self.viewport-height)
+                            + ReplState.output-generation * 0px;
+
+                drawer-layout := VerticalLayout {
+                    padding: Tokens.repl-output-pad;
+                    spacing: 2px;
+                    width: parent.width;
+
+                    for item in ReplState.output-items: OutputLine {
+                        width: parent.width - 2 * Tokens.repl-output-pad;
+                        text: item.text;
+                        kind: item.kind;
+                        show-icon: item.show-icon;
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Completion popup (between drawer and pill) ─────────────────
+    completion := CompletionPopup {
+        x: root.pill-x;
+        width: root.pill-w;
+        y: root.pill-y - self.height - 4px;
+    }
+
+    // ── Pill ──────────────────────────────────────────────────────
+    pill := Rectangle {
+        x: root.pill-x;
+        y: root.pill-y;
+        width: root.pill-w;
+        height: root.pill-h;
+        border-radius: Tokens.repl-pill-radius;
+        background: Theme.bg-inset;
+        border-width: Tokens.hairline;
+        border-color: input-field.has-focus
+            ? Theme.cyan.with-alpha(0.6)
+            : Theme.line;
+        opacity: input-field.has-focus ? 1.0 : 0.55;
+        clip: true;
+
+        animate opacity { duration: Tokens.motion-base; }
+        animate border-color { duration: Tokens.motion-base; }
+
+        // Block events from passing through to viewport
+        TouchArea {
+            clicked => {
+                root.focus-input();
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 4px;
+            spacing: 6px;
+            alignment: stretch;
+
+            // Prompt icon (right-pointing chevron)
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+                PromptIcon {
+                    tint: Theme.cyan;
+                }
+            }
+
+            // Input viewport clips long single-line commands to the pill body.
+            input-viewport := Rectangle {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                height: parent.height;
+                clip: true;
+                background: transparent;
+
+                property <length> scroll-margin: 8px;
+
+                input-field := TextInput {
+                    x: 0px;
+                    width: max(parent.width, self.preferred-width);
+                    height: parent.height;
+                    vertical-alignment: center;
+                    font-size: Tokens.repl-prompt-size;
+                    color: Theme.text;
+                    single-line: true;
+                    text <=> ReplState.input-text;
+                    selection-background-color: Theme.cyan.with-alpha(0.3);
+                    selection-foreground-color: Theme.text;
+
+                    changed has-focus => {
+                        ReplState.focused = self.has-focus;
+                        if self.has-focus {
+                            ReplState.request-keyboard-modifier-reset();
+                        }
+                    }
+
+                    changed text => {
+                        if self.text == "" {
+                            self.x = 0px;
+                        }
+                    }
+
+                    accepted => {
+                        ReplState.completion-visible = false;
+                        ReplState.submit(self.text);
+                    }
+
+                    edited => {
+                        if ReplState.input-text != "" {
+                            ReplState.completion-text-changed(ReplState.input-text);
+                        } else {
+                            ReplState.completion-visible = false;
+                            self.x = 0px;
+                        }
+                    }
+
+                    cursor-position-changed(position) => {
+                        if ReplState.input-text == "" {
+                            self.x = 0px;
+                        } else if position.x + self.x < parent.scroll-margin {
+                            self.x = min(0px, -position.x + parent.scroll-margin);
+                        } else if position.x + self.x > parent.width - parent.scroll-margin - self.text-cursor-width {
+                            self.x = min(
+                                0px,
+                                parent.width - position.x - parent.scroll-margin - self.text-cursor-width
+                            );
+                        }
+                    }
+
+                    key-pressed(event) => {
+                        // ── When completion popup is visible ──
+                        if ReplState.completion-visible {
+                            if event.text == Key.UpArrow {
+                                if ReplState.completion-selected > 0 {
+                                    ReplState.completion-selected -= 1;
+                                } else {
+                                    ReplState.completion-selected = ReplState.completion-items.length - 1;
+                                }
+                                completion.scroll-to-selected();
+                                return accept;
+                            }
+                            if event.text == Key.DownArrow {
+                                if ReplState.completion-selected < ReplState.completion-items.length - 1 {
+                                    ReplState.completion-selected += 1;
+                                } else {
+                                    ReplState.completion-selected = 0;
+                                }
+                                completion.scroll-to-selected();
+                                return accept;
+                            }
+                            if event.text == Key.Tab {
+                                ReplState.completion-accept(ReplState.completion-selected);
+                                return accept;
+                            }
+                            if event.text == Key.Return {
+                                ReplState.completion-accept(ReplState.completion-selected);
+                                return accept;
+                            }
+                            if event.text == Key.Escape {
+                                ReplState.completion-visible = false;
+                                return accept;
+                            }
+                        } else {
+                            // ── No completion visible — normal behavior ──
+                            if event.text == Key.UpArrow {
+                                ReplState.history-previous();
+                                return accept;
+                            }
+                            if event.text == Key.DownArrow {
+                                ReplState.history-next();
+                                return accept;
+                            }
+                            if event.text == Key.Escape {
+                                root.dismiss();
+                                return accept;
+                            }
+                            if event.text == Key.Tab {
+                                // Trigger completion on Tab when popup is hidden
+                                ReplState.completion-text-changed(ReplState.input-text);
+                                return accept;
+                            }
+                        }
+                        // Ctrl+U — clear input
+                        if event.modifiers.control && event.text == "u" {
+                            ReplState.input-text = "";
+                            self.x = 0px;
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
+
+            // Drawer toggle button — right edge
+            Rectangle {
+                width: 28px;
+                horizontal-stretch: 0;
+                background: chevron-ta.has-hover
+                    ? Theme.text-ghost.with-alpha(0.22)
+                    : transparent;
+                border-radius: Tokens.radius-sm;
+
+                if ReplState.drawer-open: DrawerChevronUp {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    tint: chevron-ta.has-hover ? Theme.text : Theme.text-muted;
+                }
+                if !ReplState.drawer-open: DrawerChevronDown {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    tint: chevron-ta.has-hover ? Theme.text : Theme.text-muted;
+                }
+
+                chevron-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        ReplState.toggle-drawer();
+                    }
+                }
+            }
+        }
+
+        // Busy shimmer overlay
+        if ReplState.busy: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: Tokens.repl-pill-radius;
+            border-width: 1px;
+            border-color: Theme.cyan-dim.with-alpha(0.4);
+            background: transparent;
+        }
+    }
+
+    // Focus interceptor — when unfocused, route clicks through focus-input()
+    // so drawer-was-open is restored. Disappears once focused, allowing
+    // direct TextInput interaction (cursor positioning, selection, etc.).
+    if !input-field.has-focus: Rectangle {
+        x: root.pill-x;
+        y: root.pill-y;
+        width: root.pill-w;
+        height: root.pill-h;
+        background: transparent;
+        TouchArea {
+            clicked => { root.focus-input(); }
+        }
+    }
+
+    // Placeholder text (shown when input is empty and not focused)
+    if !input-field.has-focus && ReplState.input-text == "": Text {
+        x: root.pill-x + 34px;
+        y: root.pill-y;
+        height: root.pill-h;
+        text: LayoutState.mod-key == "⌘" ? "Cmd-L to focus" : LayoutState.mod-key + "-L to focus";
+        color: Theme.text-ghost;
+        font-size: Tokens.repl-prompt-size;
+        font-italic: true;
+        vertical-alignment: center;
+        opacity: 0.55;
+
+        // Click-through to pill
+        TouchArea {
+            clicked => {
+                root.focus-input();
+            }
+        }
+    }
+
+    public function dismiss-input() {
+        dismiss();
+    }
+
+    public function focus-input() {
+        if drawer-was-open {
+            ReplState.drawer-open = true;
+            drawer-was-open = false;
+        }
+        ReplState.focused = true;
+        ReplState.request-keyboard-modifier-reset();
+        input-field.focus();
+    }
+
+    public function cursor-to-end() {
+        input-field.set-selection-offsets(2147483647, 2147483647);
+    }
+}

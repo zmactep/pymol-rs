@@ -1,81 +1,92 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/pymol-settings",
-    "crates/pymol-color",
-    "crates/pymol-mol",
-    "crates/pymol-select",
-    "crates/pymol-io",
-    "crates/pymol-render",
-    "crates/pymol-scene",
-    "crates/pymol-cmd",
-    "crates/pymol-framework",
-    "crates/pymol-plugin",
-    "crates/pymol-gui",
-    "crates/pymol-algos",
-    "crates/pymol-session",
+    "crates/patinae-settings",
+    "crates/patinae-color",
+    "crates/patinae-mol",
+    "crates/patinae-select",
+    "crates/patinae-io",
+    "crates/patinae-render",
+    "crates/patinae-scene",
+    "crates/patinae-cmd",
+    "crates/patinae-framework",
+    "crates/patinae-plugin",
+    "crates/patinae-plugin-host",
+    "crates/patinae-algos",
+    "crates/patinae-session",
     "plugins/hello",
     "plugins/ipc",
     "plugins/python",
-    "plugins/toolbar",
     "plugins/raytracer",
     "bench",
+    "patinae",
 ]
 default-members = [
-    "crates/pymol-settings",
-    "crates/pymol-color",
-    "crates/pymol-mol",
-    "crates/pymol-select",
-    "crates/pymol-io",
-    "crates/pymol-render",
-    "crates/pymol-scene",
-    "crates/pymol-cmd",
-    "crates/pymol-framework",
-    "crates/pymol-plugin",
-    "crates/pymol-gui",
-    "crates/pymol-algos",
-    "crates/pymol-session",
+    "crates/patinae-settings",
+    "crates/patinae-color",
+    "crates/patinae-mol",
+    "crates/patinae-select",
+    "crates/patinae-io",
+    "crates/patinae-render",
+    "crates/patinae-scene",
+    "crates/patinae-cmd",
+    "crates/patinae-framework",
+    "crates/patinae-plugin",
+    "crates/patinae-plugin-host",
+    "crates/patinae-algos",
+    "crates/patinae-session",
+    "patinae",
 ]
 # python API requires maturin to build (use: cd python && maturin build)
 # web viewer is built separately with wasm-pack (use: cd web && npm run build)
 exclude = ["python", "web"]
 
 [workspace.package]
-version = "0.3.3"
+version = "0.4.0"
 edition = "2021"
 authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
-repository = "https://github.com/zmactep/pymol-rs"
-homepage = "https://github.com/zmactep/pymol-rs"
-documentation = "https://github.com/zmactep/pymol-rs"
+repository = "https://github.com/zmactep/patinae"
+homepage = "https://github.com/zmactep/patinae"
+documentation = "https://github.com/zmactep/patinae"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+correctness = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
 
 [workspace.dependencies]
 # Internal crates
-pymol-settings = { version = "0.3.3", path = "crates/pymol-settings" }
-pymol-color = { version = "0.3.3", path = "crates/pymol-color" }
-pymol-mol = { version = "0.3.3", path = "crates/pymol-mol" }
-pymol-select = { version = "0.3.3", path = "crates/pymol-select" }
-pymol-io = { version = "0.3.3", path = "crates/pymol-io" }
-pymol-render = { version = "0.3.3", path = "crates/pymol-render", default-features = false }
-pymol-scene = { version = "0.3.3", path = "crates/pymol-scene", default-features = false }
-pymol-cmd = { version = "0.3.3", path = "crates/pymol-cmd", default-features = false }
-pymol-gui = { version = "0.3.3", path = "crates/pymol-gui" }
-pymol-algos = { version = "0.3.3", path = "crates/pymol-algos" }
-pymol-session = { version = "0.3.3", path = "crates/pymol-session" }
-pymol-framework = { version = "0.3.3", path = "crates/pymol-framework" }
-pymol-plugin = { version = "0.3.3", path = "crates/pymol-plugin" }
+patinae-settings = { version = "0.4.0", path = "crates/patinae-settings" }
+patinae-color = { version = "0.4.0", path = "crates/patinae-color" }
+patinae-mol = { version = "0.4.0", path = "crates/patinae-mol" }
+patinae-select = { version = "0.4.0", path = "crates/patinae-select" }
+patinae-io = { version = "0.4.0", path = "crates/patinae-io" }
+patinae-render = { version = "0.4.0", path = "crates/patinae-render", default-features = false }
+patinae-scene = { version = "0.4.0", path = "crates/patinae-scene", default-features = false }
+patinae-cmd = { version = "0.4.0", path = "crates/patinae-cmd", default-features = false }
+patinae-algos = { version = "0.4.0", path = "crates/patinae-algos" }
+patinae-session = { version = "0.4.0", path = "crates/patinae-session" }
+patinae-framework = { version = "0.4.0", path = "crates/patinae-framework" }
+patinae-plugin = { version = "0.4.0", path = "crates/patinae-plugin" }
+patinae-plugin-host = { version = "0.4.0", path = "crates/patinae-plugin-host" }
 
 # External dependencies
 bitflags = { version = "2", features = ["serde"] }
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
-wgpu = "27"
-winit = "0.30.12"
+wgpu = "28"
 nom = "7"
 thiserror = "2"
 log = "0.4"
+libloading = "0.8"
 env_logger = "0.11"
 bytemuck = { version = "1", features = ["derive"] }
-parking_lot = "0.12"
 ahash = { version = "0.8", features = ["serde"] }
 smallvec = { version = "1", features = ["serde"] }
 memmap2 = "0.9"
@@ -83,19 +94,33 @@ flate2 = "1"
 rayon = "1"
 bitvec = "1"
 phf = { version = "0.11", features = ["macros"] }
-rustyline = "17"
 image = { version = "0.25", default-features = false, features = ["png"] }
-pollster = "0.4"
+ab_glyph = "0.2"
 shellexpand = "3"
 dirs = "5"
-libloading = "0.8"
 serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
 rmp-serde = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+webbrowser = "1.2"
 
-# egui integration
-egui = "0.33"
-egui-wgpu = "0.33"
-egui-winit = "0.33"
-muda = "0.17"
-rfd = "0.17"
+# Slint integration (Patinae GUI)
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-28", "unstable-winit-030"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+opt-level = "s"
+
+[profile.bench]
+debug = 1
+
+[profile.dev-fast]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+incremental = true
+strip = false

@@ -1,0 +1,511 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ObjectsState, ObjectItem, SubchainItem, TopLevelRow } from "../../states/objects-state.slint";
+import {
+    ChevronRight,
+    ChevronDown,
+    BioGlyph,
+    SolventGlyph,
+    OrganicGlyph,
+    InorganicGlyph,
+    MapSourceGlyph,
+    MapIsomeshGlyph,
+    MapIsosurfaceGlyph,
+} from "../icons.slint";
+import { RowBtn } from "./row-btn.slint";
+
+// ── Section header ───────────────────────────────────────────────────
+
+component SectionHeader inherits Rectangle {
+    height: Tokens.tab-bar-h;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: Tokens.space-md;
+        padding-right: Tokens.space-md;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: Tokens.space-sm;
+            alignment: start;
+
+            Text {
+                text: "OBJECTS";
+                color: Theme.cyan;
+                font-size: Tokens.font-md;
+                font-weight: 500;
+                letter-spacing: 1.1px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: ObjectsState.object-count;
+                color: Theme.text-ghost;
+                font-size: Tokens.font-md;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// ── Subchain row (leaf level) ───────────────────────────────────────
+
+component SubchainRow inherits Rectangle {
+    in property <SubchainItem> subchain;
+    in property <string> obj-name;
+    in property <length> base-indent;
+    in property <bool> obj-enabled: true;
+
+    property <bool> click-shift: false;
+    property <bool> click-meta:  false;
+
+    height: Tokens.chain-row-h;
+    border-radius: Tokens.radius-md;
+    background: root.subchain.selected
+        ? Theme.cyan.with-alpha(0.06)
+        : touch.has-hover
+            ? Theme.bg-inset.with-alpha(0.5)
+            : transparent;
+    border-width: root.subchain.selected ? Tokens.hairline : 0px;
+    border-color: root.subchain.selected
+        ? Theme.cyan.with-alpha(0.5)
+        : transparent;
+
+    // Kind indicator slot
+    Rectangle {
+        x: root.base-indent;
+        y: 0;
+        width: Tokens.chain-indicator-w;
+        height: parent.height;
+        background: transparent;
+
+        if root.subchain.kind == "biopolymer": BioGlyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            tint: root.obj-enabled ? root.subchain.color : Theme.text-ghost;
+            multicolor: root.obj-enabled && root.subchain.multicolor;
+        }
+
+        if root.subchain.kind == "solvent": SolventGlyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            tint: root.obj-enabled ? Theme.violet : Theme.text-ghost;
+        }
+
+        if root.subchain.kind == "organic": OrganicGlyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            tint: root.obj-enabled ? Theme.text-muted : Theme.text-ghost;
+        }
+
+        if root.subchain.kind == "inorganic": InorganicGlyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            tint: root.obj-enabled ? Theme.magenta : Theme.text-ghost;
+        }
+    }
+
+    // Chain letter (+ label suffix when present, e.g. "A (HEM)")
+    Text {
+        x: root.base-indent + Tokens.chain-indicator-w + Tokens.space-sm;
+        y: 0;
+        height: parent.height;
+        text: root.subchain.label == ""
+            ? root.subchain.chain-id
+            : root.subchain.chain-id + " (" + root.subchain.label + ")";
+        color: !root.obj-enabled
+            ? Theme.text-ghost
+            : root.subchain.selected ? Theme.text : Theme.text-dim;
+        font-size: Tokens.font-md;
+        font-weight: 500;
+        vertical-alignment: center;
+    }
+
+    // Atom count (fades out when R/C buttons visible)
+    Text {
+        x: parent.width - self.width - Tokens.space-md - 2 * Tokens.row-h;
+        y: 0;
+        height: parent.height;
+        text: root.subchain.atom-count;
+        color: root.obj-enabled ? Theme.text-ghost : Theme.text-ghost.with-alpha(0.4);
+        font-size: Tokens.font-sm;
+        vertical-alignment: center;
+        opacity: touch.has-hover ? 0.0 : 1.0;
+    }
+
+    // Click area (before RowBtns so it doesn't steal clicks)
+    touch := TouchArea {
+        x: 0;
+        y: 0;
+        width: parent.width - 2 * Tokens.row-h;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.click-shift = event.modifiers.shift;
+                root.click-meta  = event.modifiers.meta || event.modifiers.control;
+            }
+        }
+        clicked => {
+            ObjectsState.subchain-clicked(root.obj-name, root.subchain.chain-id,
+                                          root.subchain.label, root.subchain.kind,
+                                          root.subchain.entry-index, root.subchain.selector-clause,
+                                          root.click-shift, root.click-meta);
+        }
+    }
+
+    // R button (representations)
+    r-btn := RowBtn {
+        x: parent.width - 2 * Tokens.row-h + 4px;
+        y: (parent.height - self.height) / 2;
+        letter: "R";
+        obj-name: root.obj-name;
+        chain-id: root.subchain.chain-id;
+        subchain-label: root.subchain.label;
+        subchain-kind: root.subchain.kind;
+        entry-index: root.subchain.entry-index;
+        selector-clause: root.subchain.selector-clause;
+        row-hovered: touch.has-hover;
+        sibling-hovered: c-btn.hovered;
+    }
+
+    // C button (color)
+    c-btn := RowBtn {
+        x: parent.width - Tokens.row-h + 2px;
+        y: (parent.height - self.height) / 2;
+        letter: "C";
+        obj-name: root.obj-name;
+        chain-id: root.subchain.chain-id;
+        subchain-label: root.subchain.label;
+        subchain-kind: root.subchain.kind;
+        entry-index: root.subchain.entry-index;
+        selector-clause: root.subchain.selector-clause;
+        row-hovered: touch.has-hover;
+        sibling-hovered: r-btn.hovered;
+    }
+}
+
+// ── Object section (object header + expandable chains) ──────────────
+
+component ObjectSection inherits VerticalLayout {
+    in property <ObjectItem> obj;
+    in property <bool> in-group: false;
+
+    property <length> indent: root.in-group ? 20px : 0px;
+    property <bool> can-expand: root.obj.has-representations && root.obj.subchains.length > 0;
+    property <bool> has-object-icon: root.obj.object-icon-kind != "";
+    property <bool> has-leading-slot: root.can-expand || root.has-object-icon;
+    property <length> action-buttons-w: root.obj.has-representations ? 2 * Tokens.row-h : 0px;
+
+    // Object header row
+    obj-header := Rectangle {
+        property <bool> click-shift: false;
+        property <bool> click-meta:  false;
+
+        height: Tokens.row-h;
+        border-radius: Tokens.radius-md;
+        background: root.obj.selected
+            ? Theme.cyan.with-alpha(0.06)
+            : obj-touch.has-hover || chevron-touch.has-hover
+                ? Theme.bg-inset.with-alpha(0.5)
+                : transparent;
+        border-width: root.obj.selected ? Tokens.hairline : 0px;
+        border-color: root.obj.selected
+            ? Theme.cyan.with-alpha(0.5)
+            : transparent;
+
+        // Chevron
+        Rectangle {
+            x: root.indent + Tokens.space-md;
+            y: 0;
+            width: Tokens.chevron-w;
+            height: parent.height;
+            visible: root.can-expand;
+
+            if root.obj.expanded: ChevronDown {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.obj.enabled ? Theme.text-dim : Theme.text-ghost;
+            }
+            if !root.obj.expanded: ChevronRight {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.obj.enabled ? Theme.text-faint : Theme.text-ghost;
+            }
+        }
+
+        // Map kind icon
+        Rectangle {
+            x: root.indent + Tokens.space-md;
+            y: 0;
+            width: Tokens.chevron-w;
+            height: parent.height;
+            visible: root.has-object-icon;
+            background: transparent;
+
+            if root.obj.object-icon-kind == "map-source": MapSourceGlyph {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.obj.enabled ? Theme.cyan : Theme.text-ghost;
+            }
+
+            if root.obj.object-icon-kind == "map-isomesh": MapIsomeshGlyph {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.obj.enabled ? Theme.cyan : Theme.text-ghost;
+            }
+
+            if root.obj.object-icon-kind == "map-isosurface": MapIsosurfaceGlyph {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.obj.enabled ? Theme.cyan : Theme.text-ghost;
+            }
+        }
+
+        // Name
+        Text {
+            x: root.indent + Tokens.space-md
+                + (root.has-leading-slot ? Tokens.chevron-w + Tokens.space-sm : 0px);
+            y: 0;
+            width: parent.width - self.x - Tokens.space-md;
+            height: parent.height;
+            text: root.obj.name;
+            color: !root.obj.enabled
+                ? Theme.text-ghost
+                : root.obj.selected ? Theme.text : Theme.text-dim;
+            font-size: Tokens.font-lg;
+            font-weight: root.obj.selected ? 500 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // Chevron click area
+        chevron-touch := TouchArea {
+            x: root.indent;
+            y: 0;
+            width: root.can-expand ? Tokens.chevron-touch-w : 0px;
+            height: parent.height;
+            clicked => {
+                if (root.can-expand) {
+                    ObjectsState.toggle-object-expand(root.obj.name);
+                }
+            }
+        }
+
+        // Row click area
+        obj-touch := TouchArea {
+            x: root.indent + (root.can-expand ? Tokens.chevron-touch-w : 0px);
+            y: 0;
+            width: parent.width - root.indent
+                - (root.can-expand ? Tokens.chevron-touch-w : 0px)
+                - root.action-buttons-w;
+            height: parent.height;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    obj-header.click-shift = event.modifiers.shift;
+                    obj-header.click-meta  = event.modifiers.meta || event.modifiers.control;
+                    if (event.button == PointerEventButton.right) {
+                        ObjectsState.object-right-clicked(root.obj.name);
+                    }
+                }
+            }
+            clicked => {
+                ObjectsState.object-clicked(root.obj.name,
+                                            obj-header.click-shift, obj-header.click-meta);
+            }
+        }
+
+        // R button (representations)
+        obj-r-btn := RowBtn {
+            x: parent.width - 2 * Tokens.row-h + 4px;
+            y: (parent.height - self.height) / 2;
+            visible: root.obj.has-representations;
+            letter: "R";
+            obj-name: root.obj.name;
+            row-hovered: obj-touch.has-hover || chevron-touch.has-hover;
+            sibling-hovered: obj-c-btn.hovered;
+        }
+
+        // C button (color)
+        obj-c-btn := RowBtn {
+            x: parent.width - Tokens.row-h + 2px;
+            y: (parent.height - self.height) / 2;
+            visible: root.obj.has-representations;
+            letter: "C";
+            obj-name: root.obj.name;
+            row-hovered: obj-touch.has-hover || chevron-touch.has-hover;
+            sibling-hovered: root.obj.has-representations && obj-r-btn.hovered;
+        }
+    }
+
+    // Expanded subchains
+    if root.can-expand && root.obj.expanded: VerticalLayout {
+        spacing: Tokens.row-gap;
+
+        for subchain in root.obj.subchains: SubchainRow {
+            subchain: subchain;
+            obj-name: root.obj.name;
+            obj-enabled: root.obj.enabled;
+            base-indent: root.indent + Tokens.chain-row-indent;
+        }
+
+        if root.obj.overflow-count > 0: Rectangle {
+            height: Tokens.row-h;
+            Text {
+                x: root.indent + Tokens.chain-row-indent;
+                text: root.obj.overflow-count + " more subchains not shown";
+                color: Theme.text-ghost;
+                font-size: Tokens.font-md;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// ── Group section (group header + expandable children) ──────────────
+
+component GroupSection inherits VerticalLayout {
+    in property <TopLevelRow> data;
+
+    property <bool> click-shift: false;
+    property <bool> click-meta:  false;
+
+    // Group header
+    group-header := Rectangle {
+        height: Tokens.row-h;
+        border-radius: Tokens.radius-md;
+        background: root.data.group-selected
+            ? Theme.cyan.with-alpha(0.06)
+            : group-touch.has-hover || group-chevron-touch.has-hover
+                ? Theme.bg-inset.with-alpha(0.5)
+                : transparent;
+        border-width: root.data.group-selected ? Tokens.hairline : 0px;
+        border-color: root.data.group-selected
+            ? Theme.cyan.with-alpha(0.5)
+            : transparent;
+
+        // Chevron
+        Rectangle {
+            x: Tokens.space-md;
+            y: 0;
+            width: Tokens.chevron-w;
+            height: parent.height;
+
+            if root.data.group-open: ChevronDown {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.data.group-enabled ? Theme.text-dim : Theme.text-ghost;
+            }
+            if !root.data.group-open: ChevronRight {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: root.data.group-enabled ? Theme.text-faint : Theme.text-ghost;
+            }
+        }
+
+        // Group name
+        Text {
+            x: Tokens.space-md + Tokens.chevron-w + Tokens.space-sm;
+            y: 0;
+            width: parent.width - self.x - Tokens.space-md;
+            height: parent.height;
+            text: root.data.group-name;
+            color: !root.data.group-enabled
+                ? Theme.text-ghost
+                : root.data.group-selected ? Theme.text : Theme.text-dim;
+            font-size: Tokens.font-lg;
+            font-weight: root.data.group-selected ? 500 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // Child count badge (on hover)
+        if group-touch.has-hover || group-chevron-touch.has-hover: Text {
+            x: parent.width - self.width - Tokens.space-md;
+            y: 0;
+            height: parent.height;
+            text: root.data.group-child-count;
+            color: Theme.text-ghost;
+            font-size: Tokens.font-sm;
+            vertical-alignment: center;
+        }
+
+        // Chevron click area
+        group-chevron-touch := TouchArea {
+            x: 0;
+            y: 0;
+            width: Tokens.chevron-touch-w;
+            height: parent.height;
+            clicked => {
+                ObjectsState.toggle-group-open(root.data.group-name);
+            }
+        }
+
+        // Row click area
+        group-touch := TouchArea {
+            x: Tokens.chevron-touch-w;
+            y: 0;
+            width: parent.width - Tokens.chevron-touch-w;
+            height: parent.height;
+            pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) {
+                    root.click-shift = event.modifiers.shift;
+                    root.click-meta  = event.modifiers.meta || event.modifiers.control;
+                }
+            }
+            clicked => {
+                ObjectsState.group-clicked(root.data.group-name,
+                                           root.click-shift, root.click-meta);
+            }
+        }
+    }
+
+    // Expanded group children
+    if root.data.group-open: VerticalLayout {
+        spacing: Tokens.row-gap;
+
+        for obj in root.data.group-objects: ObjectSection {
+            obj: obj;
+            in-group: true;
+        }
+    }
+}
+
+// ── Object list panel ────────────────────────────────────────────────
+
+export component ObjectList inherits VerticalLayout {
+    SectionHeader {}
+
+    // Empty state
+    if ObjectsState.top-level.length == 0: Text {
+        text: "no objects yet";
+        color: Theme.text-ghost;
+        font-size: Tokens.font-sm;
+        letter-spacing: 0.6px;
+        horizontal-alignment: left;
+        vertical-alignment: top;
+        x: Tokens.space-md;
+    }
+
+    // Object tree
+    Flickable {
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            padding: Tokens.space-xs;
+            spacing: Tokens.row-gap;
+
+            for row in ObjectsState.top-level: VerticalLayout {
+                spacing: Tokens.row-gap;
+
+                if row.is-group: GroupSection {
+                    data: row;
+                }
+
+                if !row.is-group: ObjectSection {
+                    obj: row.object;
+                    in-group: false;
+                }
+            }
+        }
+    }
+}

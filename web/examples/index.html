@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PyMOL-RS Web Viewer</title>
+        <title>Patinae Web Viewer</title>
         <style>
             * {
                 margin: 0;
@@ -251,7 +251,7 @@
             /* ================================================================
        Panel content styles (shared across all panels)
        ================================================================ */
-            .pymol-panel {
+            .patinae-panel {
                 display: flex;
                 flex-direction: column;
                 flex: 1;
@@ -273,7 +273,7 @@
             }
 
             /* ---- REPL ---- */
-            .pymol-panel-repl {
+            .patinae-panel-repl {
                 flex: 1;
                 min-height: 0;
             }
@@ -331,7 +331,7 @@
             }
 
             /* ---- Object List ---- */
-            .pymol-panel-objects {
+            .patinae-panel-objects {
                 flex: 1;
                 overflow-y: auto;
             }
@@ -408,7 +408,7 @@
             }
 
             /* ---- Sequence ---- */
-            .pymol-panel-sequence {
+            .patinae-panel-sequence {
                 flex: 1;
                 overflow-y: auto;
             }
@@ -454,7 +454,7 @@
             }
 
             /* ---- Movie ---- */
-            .pymol-panel-movie {
+            .patinae-panel-movie {
                 flex: 1;
             }
 
@@ -550,7 +550,7 @@
     <body>
         <!-- Toolbar -->
         <div class="toolbar">
-            <span class="toolbar-brand">PyMOL-RS</span>
+            <span class="toolbar-brand">Patinae</span>
             <div class="toolbar-sep"></div>
             <input
                 class="pdb-input"
@@ -630,7 +630,7 @@
         </div>
 
         <script type="module">
-            import { PyMolRSViewer } from "../dist/pymol-rs-viewer.js";
+            import { PatinaeViewer } from "../dist/patinae-viewer.js";
 
             const status = document.getElementById("status");
             function setStatus(msg) {
@@ -708,7 +708,7 @@
             async function main() {
                 setStatus("Initializing WebGPU...");
 
-                const viewer = new PyMolRSViewer(
+                const viewer = new PatinaeViewer(
                     document.getElementById("viewer-container"),
                     {
                         layout: [

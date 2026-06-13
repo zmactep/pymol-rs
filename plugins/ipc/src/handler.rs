@@ -3,7 +3,8 @@
 //! Implements the plugin `MessageHandler` trait, bridging the IPC server
 //! with the host application through the `PollContext` polling API.
 
-use pymol_plugin::prelude::*;
+use patinae_plugin::prelude::*;
+use patinae_plugin::wire::{WireHostQuery, WireHostQueryValue};
 
 use crate::protocol::{IpcRequest, IpcResponse, OutputKind};
 use crate::server::IpcServer;
@@ -32,17 +33,30 @@ impl IpcMessageHandler {
         ctx: &mut PollContext<'_>,
     ) -> Option<IpcResponse> {
         match request {
-            IpcRequest::Execute { id, command, silent } => {
+            IpcRequest::Execute {
+                id,
+                command,
+                silent,
+            } => {
                 log::debug!("IPC Execute: {}", command);
                 ctx.execute_command(*id, command, *silent);
                 // Response sent later when result arrives
                 None
             }
 
-            IpcRequest::RegisterCommand { name, help } => {
+            IpcRequest::RegisterCommand {
+                name,
+                description,
+                usage,
+                arguments,
+            } => {
                 log::info!("IPC RegisterCommand: {}", name);
-                let help_text = help.clone().unwrap_or_default();
-                ctx.register_dynamic_command(name.clone(), help_text);
+                ctx.register_dynamic_command(
+                    name.clone(),
+                    description.clone().unwrap_or_default(),
+                    usage.clone().unwrap_or_default(),
+                    arguments.clone().unwrap_or_default(),
+                );
                 None
             }
 
@@ -65,6 +79,7 @@ impl IpcMessageHandler {
                         OutputKind::Info => ctx.bus.print_info(msg.text.clone()),
                         OutputKind::Warning => ctx.bus.print_warning(msg.text.clone()),
                         OutputKind::Error => ctx.bus.print_error(msg.text.clone()),
+                        OutputKind::Timing => ctx.bus.print_info(msg.text.clone()),
                     }
                 }
                 if !success {
@@ -84,32 +99,17 @@ impl IpcMessageHandler {
                 })
             }
 
-            IpcRequest::GetNames { id } => {
-                let names: Vec<String> = ctx
-                    .shared
-                    .registry
-                    .names()
-                    .map(|s| s.to_string())
-                    .collect();
-                Some(IpcResponse::Value {
-                    id: *id,
-                    value: serde_json::json!(names),
-                })
-            }
+            IpcRequest::GetNames { id } => Some(IpcResponse::Value {
+                id: *id,
+                value: serde_json::json!(&ctx.poll_shared.object_names),
+            }),
 
             IpcRequest::CountAtoms { id, selection } => {
-                let mut count = 0;
-                for name in ctx.shared.registry.names() {
-                    if let Some(mol_obj) = ctx.shared.registry.get_molecule(name) {
-                        if let Ok(result) = select(mol_obj.molecule(), selection) {
-                            count += result.count();
-                        }
-                    }
-                }
-                Some(IpcResponse::Value {
+                ctx.query_host(WireHostQuery::CountAtoms {
                     id: *id,
-                    value: serde_json::json!(count),
-                })
+                    selection: selection.clone(),
+                });
+                None
             }
 
             IpcRequest::Hello { client_id } => {
@@ -139,7 +139,7 @@ impl IpcMessageHandler {
             }
 
             IpcRequest::GetView { id } => {
-                let view = ctx.shared.camera.current_view();
+                let view = ctx.poll_shared.camera.current_view();
                 let r = &view.rotation;
 
                 // Build the 18-value array:
@@ -187,6 +187,17 @@ impl MessageHandler for IpcMessageHandler {
     }
 
     fn poll(&mut self, ctx: &mut PollContext<'_>) {
+        for result in ctx.host_query_results {
+            if let Ok(WireHostQueryValue::CountAtoms(count)) = &result.result {
+                if let Err(e) = self.server.send(IpcResponse::Value {
+                    id: result.id,
+                    value: serde_json::json!(count),
+                }) {
+                    log::error!("Failed to send query result: {}", e);
+                }
+            }
+        }
+
         // Deliver results from previously queued command executions
         for result in ctx.command_results {
             let response = match &result.result {

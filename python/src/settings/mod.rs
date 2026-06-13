@@ -1,9 +1,9 @@
 //! Settings module for Python
 //!
-//! Provides access to PyMOL settings.
+//! Provides access to runtime settings.
 
 use pyo3::prelude::*;
-use pymol_settings::{GlobalSettings, SettingType, SettingValue};
+use patinae_settings::{GlobalSettings, SettingType, SettingValue};
 
 /// Get a setting value by name
 pub fn get_setting_py<'py>(
@@ -11,7 +11,7 @@ pub fn get_setting_py<'py>(
     settings: &GlobalSettings,
     name: &str,
 ) -> PyResult<Py<PyAny>> {
-    let id = pymol_settings::get_setting_id(name).ok_or_else(|| {
+    let id = patinae_settings::get_setting_id(name).ok_or_else(|| {
         pyo3::exceptions::PyKeyError::new_err(format!("Unknown setting: {}", name))
     })?;
 
@@ -27,11 +27,11 @@ pub fn set_setting_py(
     name: &str,
     value: &Bound<'_, PyAny>,
 ) -> PyResult<()> {
-    let id = pymol_settings::get_setting_id(name).ok_or_else(|| {
+    let id = patinae_settings::get_setting_id(name).ok_or_else(|| {
         pyo3::exceptions::PyKeyError::new_err(format!("Unknown setting: {}", name))
     })?;
 
-    let setting = pymol_settings::get_setting(id).ok_or_else(|| {
+    let setting = patinae_settings::get_setting(id).ok_or_else(|| {
         pyo3::exceptions::PyKeyError::new_err(format!("Setting ID not found: {}", id))
     })?;
 
@@ -90,34 +90,23 @@ fn py_to_setting_value(value: &Bound<'_, PyAny>, expected_type: SettingType) -> 
 /// List all setting names
 #[pyfunction]
 pub fn list_settings() -> Vec<&'static str> {
-    let mut names = Vec::new();
-    for id in 0..pymol_settings::SETTING_COUNT as u16 {
-        if let Some(setting) = pymol_settings::get_setting(id) {
-            names.push(setting.name);
-        }
-    }
-    names
+    patinae_settings::setting_names()
 }
 
 /// Get setting names matching a pattern
 #[pyfunction]
 pub fn search_settings(pattern: &str) -> Vec<&'static str> {
     let pattern_lower = pattern.to_lowercase();
-    let mut names = Vec::new();
-    for id in 0..pymol_settings::SETTING_COUNT as u16 {
-        if let Some(setting) = pymol_settings::get_setting(id) {
-            if setting.name.to_lowercase().contains(&pattern_lower) {
-                names.push(setting.name);
-            }
-        }
-    }
-    names
+    patinae_settings::setting_names()
+        .into_iter()
+        .filter(|name| name.to_lowercase().contains(&pattern_lower))
+        .collect()
 }
 
 /// Register the settings submodule
 pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_settings, m)?)?;
     m.add_function(wrap_pyfunction!(search_settings, m)?)?;
-    m.add("SETTING_COUNT", pymol_settings::SETTING_COUNT)?;
+    m.add("SETTING_COUNT", patinae_settings::SETTING_COUNT)?;
     Ok(())
 }

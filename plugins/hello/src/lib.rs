@@ -1,5 +1,5 @@
-use pymol_plugin::prelude::*;
-use pymol_plugin::{define_plugin_settings, pymol_plugin};
+use patinae_plugin::prelude::*;
+use patinae_plugin::{define_plugin_settings, patinae_plugin};
 
 // Define typed settings for this plugin.
 // `set hello_style, 1` / `get hello_style` work out of the box.
@@ -9,7 +9,7 @@ define_plugin_settings! {
     }
 }
 
-pymol_plugin! {
+patinae_plugin! {
     name: "hello",
     description: "Example plugin: registers a 'hello' command with a configurable style setting",
     commands: [HelloCommand],
@@ -33,8 +33,14 @@ impl Command for HelloCommand {
         Ok(())
     }
 
-    fn help(&self) -> &str {
-        "hello <name>\n\n    Greets the user from the plugin system.\n    Example: hello Alice"
+    command_help! {
+        CMD "hello"
+        DESCRIPTION ["greets the user from the plugin system."]
+        REQUIRED []
+        OPTIONAL [
+            { "name", "string", "name to greet", "World" },
+        ]
+        EXAMPLES ["hello", "hello Alice"]
     }
 
     fn arg_hints(&self) -> &[ArgHint] {

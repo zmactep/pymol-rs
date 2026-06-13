@@ -2,17 +2,17 @@
  * REPL panel — command input with history and scrollable output log.
  */
 
-import type { PyMolRSViewer } from "../core/api.js";
+import type { PatinaeViewer } from "../core/api.js";
 
 export class ReplPanel {
   private container: HTMLElement;
-  private viewer: PyMolRSViewer;
+  private viewer: PatinaeViewer;
   private output: HTMLElement;
   private input: HTMLInputElement;
   private history: string[] = [];
   private historyIdx = -1;
 
-  constructor(container: HTMLElement, viewer: PyMolRSViewer) {
+  constructor(container: HTMLElement, viewer: PatinaeViewer) {
     this.container = container;
     this.viewer = viewer;
 
@@ -20,7 +20,7 @@ export class ReplPanel {
       <div class="repl-header">Command Line</div>
       <div class="repl-output"></div>
       <div class="repl-input-row">
-        <span class="repl-prompt">PyMOL&gt;</span>
+        <span class="repl-prompt">Patinae&gt;</span>
         <input class="repl-input" type="text" placeholder="Type a command..." spellcheck="false" autocomplete="off" />
       </div>
     `;
@@ -39,10 +39,14 @@ export class ReplPanel {
       this.history.push(cmd);
       this.historyIdx = this.history.length;
       this.input.value = "";
-      this.appendLine(`PyMOL> ${cmd}`, "cmd");
+      this.appendLine(`Patinae> ${cmd}`, "cmd");
 
       const result = await this.viewer.executeAsync(cmd);
       for (const msg of result.messages) {
+        if (msg.level === "clear") {
+          this.clearOutput();
+          continue;
+        }
         this.appendLine(msg.text, msg.level);
       }
     } else if (e.key === "ArrowUp") {
@@ -69,6 +73,10 @@ export class ReplPanel {
     line.textContent = text;
     this.output.appendChild(line);
     this.output.scrollTop = this.output.scrollHeight;
+  }
+
+  private clearOutput(): void {
+    this.output.replaceChildren();
   }
 
   update(): void {

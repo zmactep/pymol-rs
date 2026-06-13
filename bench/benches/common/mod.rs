@@ -3,13 +3,10 @@ use std::path::{Path, PathBuf};
 
 use once_cell::sync::Lazy;
 
-use pymol_color::NamedColors;
-use pymol_color::ElementColors;
-use pymol_algos::PyMolDss;
-use pymol_mol::dss::assign_secondary_structure;
-use pymol_mol::ObjectMolecule;
-use pymol_render::ColorResolver;
-use pymol_settings::{ResolvedSettings, Settings};
+use patinae_color::ColorResolver;
+use patinae_color::NamedPalette;
+use patinae_color::ThemedPalette;
+use patinae_mol::ObjectMolecule;
 
 fn project_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -22,18 +19,18 @@ pub fn test_file_path() -> PathBuf {
     let val = std::env::var("BENCH_FILE").unwrap_or_else(|_| {
         panic!(
             "BENCH_FILE environment variable is required.\n\
-             Usage: BENCH_FILE=path/to/structure.cif.gz cargo bench -p pymol-bench"
+             Usage: BENCH_FILE=path/to/structure.cif.gz cargo bench -p patinae-bench"
         )
     });
     let path = {
         let p = PathBuf::from(&val);
-        if p.is_absolute() { p } else { project_root().join(p) }
+        if p.is_absolute() {
+            p
+        } else {
+            project_root().join(p)
+        }
     };
-    assert!(
-        path.exists(),
-        "Bench file not found: {}",
-        path.display()
-    );
+    assert!(path.exists(), "Bench file not found: {}", path.display());
     path
 }
 
@@ -52,34 +49,23 @@ pub static RAW_TEXT: Lazy<String> = Lazy::new(|| {
 /// Parsed molecule (with bonds and atom classification, no DSS).
 pub static MOLECULE: Lazy<ObjectMolecule> = Lazy::new(|| {
     let path = test_file_path();
-    pymol_io::cif::read_cif(&path).expect("failed to parse CIF")
-});
-
-/// Parsed molecule with secondary structure assigned.
-pub static MOLECULE_WITH_DSS: Lazy<ObjectMolecule> = Lazy::new(|| {
-    let mut mol = MOLECULE.clone();
-    assign_secondary_structure(&mut mol, 0, &PyMolDss::default());
-    mol
+    patinae_io::cif::read_cif(&path).expect("failed to parse CIF")
 });
 
 pub struct ColorResolverOwned {
-    pub named: NamedColors,
-    pub element: ElementColors,
+    pub named: NamedPalette,
+    pub palette: ThemedPalette,
 }
 
 impl ColorResolverOwned {
     pub fn new() -> Self {
         Self {
-            named: NamedColors::new(),
-            element: ElementColors::new(),
+            named: NamedPalette::new(),
+            palette: ThemedPalette::dark(),
         }
     }
 
     pub fn resolver(&self) -> ColorResolver<'_> {
-        ColorResolver::new(&self.named, &self.element)
+        ColorResolver::new(&self.named, &self.palette)
     }
-}
-
-pub fn default_settings() -> ResolvedSettings {
-    ResolvedSettings::resolve(&Settings::default(), None)
 }

@@ -1,0 +1,283 @@
+import { Theme } from "theme.slint";
+import { Tokens } from "tokens.slint";
+import { Viewport } from "components/viewport/viewport.slint";
+import { ViewportState } from "states/viewport-state.slint";
+import { Sidebar } from "components/sidebar.slint";
+import { RightDock } from "components/docks/right-dock.slint";
+import { BottomDock } from "components/docks/bottom-dock.slint";
+import { ReplPill } from "components/panels/repl-pill.slint";
+import { ColorPopover } from "components/panels/color-popover.slint";
+import { RepPopover } from "components/panels/rep-popover.slint";
+import { OverflowMenu } from "components/panels/overflow-menu.slint";
+import { NameInputPopup } from "components/panels/name-input-popup.slint";
+import { LayoutState } from "states/layout-state.slint";
+import { ObjectsState } from "states/objects-state.slint";
+import { NotificationState } from "states/notification-state.slint";
+
+export { LayoutState }
+
+// ── Main layout — four zones + sidebar ─────────────────────────────
+//
+//  ┌────┬──────────────────┬────────────┐
+//  │    │                  │            │
+//  │ SB │    Viewport      │ Right Dock │
+//  │    │                  │            │
+//  │    ├──────────────────┴────────────┤
+//  │    │         Bottom Dock           │
+//  └────┴───────────────────────────────┘
+
+export component MainLayout inherits Rectangle {
+    forward-focus: focus-shell;
+    background: Theme.bg;
+
+    // Shorthand aliases
+    property <length> sw: Tokens.sidebar-w;
+    property <length> rw: LayoutState.effective-right-dock-width;
+    property <length> bh: LayoutState.effective-bottom-dock-height;
+
+    animate rw { duration: Tokens.motion-base; easing: ease-in-out; }
+    animate bh { duration: Tokens.motion-base; easing: ease-in-out; }
+
+    focus-shell := FocusScope {
+        focus-on-click: false;
+    }
+
+    // ── Sidebar ────────────────────────────────────────────────────
+    Sidebar {
+        x: 0;
+        y: 0;
+        height: parent.height;
+    }
+
+    // ── Viewport (fills remaining space) ───────────────────────────
+    Viewport {
+        x: root.sw;
+        y: 0;
+        width: parent.width - root.sw - root.rw;
+        height: parent.height - root.bh;
+    }
+
+    // ── Right dock ─────────────────────────────────────────────────
+    RightDock {
+        x: parent.width - root.rw;
+        y: 0;
+        width: root.rw;
+        height: parent.height - root.bh;
+    }
+
+    // ── Bottom dock ────────────────────────────────────────────────
+    BottomDock {
+        x: root.sw;
+        y: parent.height - root.bh;
+        width: parent.width - root.sw;
+        height: root.bh;
+    }
+
+    // ── Hairlines ──────────────────────────────────────────────────
+
+    // Sidebar | viewport (vertical, full height)
+    Rectangle {
+        x: root.sw;
+        y: 0;
+        width: 0.5px;
+        height: parent.height;
+        background: Theme.line;
+    }
+
+    // Viewport | right dock (vertical, above bottom dock)
+    Rectangle {
+        x: parent.width - root.rw;
+        y: 0;
+        width: 0.5px;
+        height: parent.height - root.bh;
+        background: Theme.line;
+    }
+
+    // Top zones | bottom dock (horizontal)
+    Rectangle {
+        x: root.sw;
+        y: parent.height - root.bh;
+        width: parent.width - root.sw;
+        height: 0.5px;
+        background: Theme.line;
+    }
+
+    // ── Resize handles ─────────────────────────────────────────────
+
+    // Right dock left-edge drag (vertical)
+    Rectangle {
+        visible: LayoutState.right-dock-visible;
+        x: parent.width - root.rw - 3px;
+        y: 0;
+        width: 6px;
+        height: parent.height - root.bh;
+        background: transparent;
+
+        TouchArea {
+            mouse-cursor: col-resize;
+            moved => {
+                if self.pressed {
+                    LayoutState.right-dock-width = clamp(
+                        LayoutState.right-dock-width - (self.mouse-x - self.pressed-x),
+                        Tokens.right-dock-min-w,
+                        Tokens.right-dock-max-w
+                    );
+                }
+            }
+        }
+    }
+
+    // Bottom dock top-edge drag (horizontal)
+    Rectangle {
+        visible: LayoutState.bottom-dock-visible;
+        x: root.sw;
+        y: parent.height - root.bh - 3px;
+        width: parent.width - root.sw;
+        height: 6px;
+        background: transparent;
+
+        TouchArea {
+            mouse-cursor: row-resize;
+            moved => {
+                if self.pressed {
+                    LayoutState.bottom-dock-height = clamp(
+                        LayoutState.bottom-dock-height - (self.mouse-y - self.pressed-y),
+                        Tokens.bottom-dock-min-h,
+                        Tokens.bottom-dock-max-h
+                    );
+                }
+            }
+        }
+    }
+
+    // ── REPL pill overlay (floating above viewport) ──────────────
+    repl := ReplPill {
+        x: root.sw;
+        y: 0;
+        width: parent.width - root.sw - root.rw;
+        height: parent.height - root.bh;
+        viewport-w: parent.width - root.sw - root.rw;
+        viewport-h: parent.height - root.bh;
+        visible: LayoutState.repl-visible && !LayoutState.empty-mode;
+    }
+
+    // ── Background task notification overlay ─────────────────────
+    if NotificationState.visible: Rectangle {
+        width: min(
+            max(96px, notification-text.preferred-width + Tokens.space-md + Tokens.space-sm + 14px),
+            parent.width - root.sw - root.rw - 2 * Tokens.space-md
+        );
+        height: max(Tokens.repl-pill-h, notification-text.preferred-height + 2 * Tokens.space-xs);
+        x: root.sw + (parent.width - root.sw - root.rw - self.width) / 2;
+        y: Tokens.space-lg;
+        border-radius: Tokens.repl-pill-radius;
+        border-width: 1px;
+        border-color: Theme.cyan-dim.with-alpha(0.45);
+        background: Theme.bg-inset.with-alpha(0.92);
+        opacity: 0.92;
+
+        Rectangle {
+            x: Tokens.space-sm;
+            y: (parent.height - self.height) / 2;
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: Theme.cyan;
+        }
+
+        notification-text := Text {
+            x: Tokens.space-sm + 14px;
+            y: 0;
+            height: parent.height;
+            width: parent.width - self.x - Tokens.space-md;
+            text: NotificationState.text;
+            color: Theme.text;
+            font-size: Tokens.font-md;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    // ── Popover overlay (highest z-order) ────────────────────────
+    //
+    // Catches the dismiss press and closes the popover. Presses that start
+    // inside the viewport are forwarded as real viewport drags, but the
+    // matching release is marked as non-click so it cannot wipe `(sele)`.
+    if ObjectsState.popover-kind != "": Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        TouchArea {
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    ObjectsState.popover-close();
+                    if self.mouse-x >= root.sw && self.mouse-x < parent.width - root.rw
+                       && self.mouse-y >= 0px && self.mouse-y < parent.height - root.bh {
+                        ViewportState.mouse-x = (self.mouse-x - root.sw) / 1px;
+                        ViewportState.mouse-y = self.mouse-y / 1px;
+                        ViewportState.press-x = ViewportState.mouse-x;
+                        ViewportState.press-y = ViewportState.mouse-y;
+                        ViewportState.suppress-click = true;
+                        if event.button == PointerEventButton.left   { ViewportState.left-pressed = true; }
+                        if event.button == PointerEventButton.middle { ViewportState.middle-pressed = true; }
+                        if event.button == PointerEventButton.right  { ViewportState.right-pressed = true; }
+                    }
+                }
+                if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                    if event.button == PointerEventButton.left   { ViewportState.left-pressed = false; }
+                    if event.button == PointerEventButton.middle { ViewportState.middle-pressed = false; }
+                    if event.button == PointerEventButton.right  { ViewportState.right-pressed = false; }
+                }
+            }
+            moved => {
+                if self.mouse-x >= root.sw && self.mouse-x < parent.width - root.rw
+                   && self.mouse-y >= 0px && self.mouse-y < parent.height - root.bh {
+                    ViewportState.mouse-x = (self.mouse-x - root.sw) / 1px;
+                    ViewportState.mouse-y = self.mouse-y / 1px;
+                }
+            }
+            scroll-event(event) => {
+                ViewportState.scroll-delta = ViewportState.scroll-delta - event.delta-y / 1px;
+                return accept;
+            }
+        }
+    }
+
+    if ObjectsState.popover-kind == "C": ColorPopover {
+        x: parent.width - root.rw + Tokens.space-sm;
+        y: ObjectsState.popover-source == "pill"
+            ? max(0px, min(ObjectsState.popover-anchor-y - self.height - 4px, parent.height - self.height))
+            : min(ObjectsState.popover-anchor-y, parent.height - self.height);
+        width: root.rw - 2 * Tokens.space-sm;
+    }
+
+    if ObjectsState.popover-kind == "R": RepPopover {
+        x: parent.width - root.rw + Tokens.space-sm;
+        y: ObjectsState.popover-source == "pill"
+            ? max(0px, min(ObjectsState.popover-anchor-y - self.height - 4px, parent.height - self.height))
+            : min(ObjectsState.popover-anchor-y, parent.height - self.height);
+        width: root.rw - 2 * Tokens.space-sm;
+    }
+
+    if ObjectsState.popover-kind == "M": OverflowMenu {
+        x: parent.width - root.rw + (root.rw - self.width) / 2;
+        y: max(0px, min(ObjectsState.popover-anchor-y - self.height - 4px, parent.height - self.height));
+    }
+
+    if ObjectsState.popover-kind == "N": NameInputPopup {
+        x: parent.width - root.rw + (root.rw - self.width) / 2;
+        y: max(0px, min(ObjectsState.popover-anchor-y - self.height - 4px, parent.height - self.height));
+    }
+
+    public function focus-repl() {
+        repl.focus-input();
+    }
+
+    public function dismiss-repl() {
+        repl.dismiss-input();
+    }
+
+    public function repl-cursor-to-end() {
+        repl.cursor-to-end();
+    }
+}

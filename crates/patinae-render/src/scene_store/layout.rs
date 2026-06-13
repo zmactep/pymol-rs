@@ -1,0 +1,131 @@
+//! Group-2 bind-group layout for [`crate::scene_store::SceneStore`].
+//!
+//! Bindings (must mirror `shaders/common/scene.wgsl`):
+//! - 0: `obj_table` — uniform with `dynamic_offset`. Each slot is one
+//!   [`ObjectEntry`] padded to `ObjectEntry::STRIDE` (256 B).
+//! - 1: `atoms`         — `storage<read>`  `array<AtomGpu>`
+//! - 2: `coords`        — `storage<read>`  `array<vec4<f32>>`
+//! - 3: `bonds`         — `storage<read>`  `array<BondGpu>`
+//! - 4: `color_lut`     — `storage<read>`  `array<ColorGpu>`
+//! - 5: `mask_lut`      — `storage<read>`  `array<u32>`
+//! - 6: `marker_lut`    — `storage<read>`  `array<u32>`
+//! - 7: `csr_offsets`   — `storage<read>`  `array<u32>`
+//! - 8: `csr_indices`   — `storage<read>`  `array<u32>`
+
+use std::num::NonZeroU64;
+
+use super::ObjectEntry;
+
+const STORAGE_BINDINGS: &[u32] = &[1, 2, 3, 4, 5, 6, 7, 8];
+#[cfg(test)]
+pub(crate) const FULL_STORAGE_BINDING_COUNT: usize = STORAGE_BINDINGS.len();
+#[cfg(test)]
+pub(crate) const OBJECT_COORDS_STORAGE_BINDING_COUNT: usize = 1;
+#[cfg(test)]
+const WEBGPU_MIN_STORAGE_BUFFERS_PER_STAGE: usize = 8;
+
+/// Shared, immutable layout. Created once on `RenderContext`; every
+/// pipeline that touches group 2 pulls its BGL from here.
+pub struct SceneStoreLayout {
+    pub bind_group_layout: wgpu::BindGroupLayout,
+    pub object_coords_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl SceneStoreLayout {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("patinae.scene_store.layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX
+                            | wgpu::ShaderStages::FRAGMENT
+                            | wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: NonZeroU64::new(
+                                std::mem::size_of::<ObjectEntry>() as u64
+                            ),
+                        },
+                        count: None,
+                    },
+                    storage_entry(STORAGE_BINDINGS[0]),
+                    storage_entry(STORAGE_BINDINGS[1]),
+                    storage_entry(STORAGE_BINDINGS[2]),
+                    storage_entry(STORAGE_BINDINGS[3]),
+                    storage_entry(STORAGE_BINDINGS[4]),
+                    storage_entry(STORAGE_BINDINGS[5]),
+                    storage_entry(STORAGE_BINDINGS[6]),
+                    storage_entry(STORAGE_BINDINGS[7]),
+                ],
+            });
+        let object_coords_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("patinae.scene_store.object_coords_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: NonZeroU64::new(
+                                std::mem::size_of::<ObjectEntry>() as u64
+                            ),
+                        },
+                        count: None,
+                    },
+                    storage_compute_entry(2),
+                ],
+            });
+        Self {
+            bind_group_layout,
+            object_coords_bind_group_layout,
+        }
+    }
+}
+
+fn storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::VERTEX
+            | wgpu::ShaderStages::FRAGMENT
+            | wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn storage_compute_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_store_layout_fits_webgpu_storage_buffer_limit() {
+        const {
+            assert!(
+                FULL_STORAGE_BINDING_COUNT <= WEBGPU_MIN_STORAGE_BUFFERS_PER_STAGE,
+                "group 2 must stay within WebGPU's portable 8 storage-buffer limit"
+            );
+        }
+    }
+}

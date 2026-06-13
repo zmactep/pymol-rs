@@ -1,72 +1,152 @@
-//! Python Syntax Highlighting
-//!
-//! Uses syntect to tokenize Python code and produce an egui `LayoutJob`
-//! with colored text spans for use with `TextEdit::layouter`.
+//! Python syntax highlighting for the scripting panel.
 
-use egui::text::LayoutJob;
-use egui::{Color32, FontId, TextFormat};
-use syntect::easy::HighlightLines;
-use syntect::highlighting::{self, ThemeSet};
-use syntect::parsing::SyntaxSet;
+use patinae_plugin::prelude::{PanelTextHighlight, PanelTextStyle};
+use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
-/// Cached syntax highlighting state for Python.
-pub struct PythonHighlighter {
-    syntax_set: SyntaxSet,
-    theme: highlighting::Theme,
+const HIGHLIGHT_NAMES: &[&str] = &[
+    "attribute",
+    "comment",
+    "constant",
+    "constant.builtin",
+    "constructor",
+    "function",
+    "function.builtin",
+    "keyword",
+    "number",
+    "operator",
+    "property",
+    "punctuation",
+    "punctuation.bracket",
+    "punctuation.delimiter",
+    "string",
+    "string.special",
+    "type",
+    "type.builtin",
+    "variable.builtin",
+];
+
+#[derive(Debug, Default)]
+pub(crate) struct PythonHighlightCache {
+    source: String,
+    spans: Vec<PanelTextHighlight>,
 }
 
-impl PythonHighlighter {
-    pub fn new() -> Self {
-        let syntax_set = SyntaxSet::load_defaults_newlines();
-        let theme_set = ThemeSet::load_defaults();
-        let theme = theme_set.themes["base16-mocha.dark"].clone();
-        Self { syntax_set, theme }
+impl PythonHighlightCache {
+    pub(crate) fn highlights_for(&mut self, source: &str) -> Vec<PanelTextHighlight> {
+        if self.source != source {
+            self.source = source.to_string();
+            self.spans = highlight_python(source);
+        }
+        self.spans.clone()
+    }
+}
+
+pub(crate) fn highlight_python(source: &str) -> Vec<PanelTextHighlight> {
+    if source.is_empty() {
+        return Vec::new();
     }
 
-    /// Produce a colored `LayoutJob` from Python source code.
-    pub fn highlight(&self, text: &str, font_id: FontId, wrap_width: f32) -> LayoutJob {
-        let mut job = LayoutJob::default();
-        job.wrap.max_width = wrap_width;
+    let Ok(mut config) = HighlightConfiguration::new(
+        tree_sitter_python::LANGUAGE.into(),
+        "python",
+        tree_sitter_python::HIGHLIGHTS_QUERY,
+        "",
+        "",
+    ) else {
+        return Vec::new();
+    };
+    config.configure(HIGHLIGHT_NAMES);
 
-        let syntax = self
-            .syntax_set
-            .find_syntax_by_extension("py")
-            .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
+    let mut highlighter = Highlighter::new();
+    let Ok(events) = highlighter.highlight(&config, source.as_bytes(), None, |_| None) else {
+        return Vec::new();
+    };
 
-        let mut highlighter = HighlightLines::new(syntax, &self.theme);
-
-        for line in text.split_inclusive('\n') {
-            let ranges = highlighter
-                .highlight_line(line, &self.syntax_set)
-                .unwrap_or_default();
-
-            for (style, piece) in ranges {
-                let fg = style.foreground;
-                let color = Color32::from_rgb(fg.r, fg.g, fg.b);
-                job.append(
-                    piece,
-                    0.0,
-                    TextFormat {
-                        font_id: font_id.clone(),
-                        color,
-                        ..Default::default()
-                    },
-                );
+    let mut active = Vec::new();
+    let mut spans = Vec::new();
+    for event in events {
+        match event {
+            Ok(HighlightEvent::HighlightStart(highlight)) => {
+                active.push(style_for_highlight(highlight.0));
             }
+            Ok(HighlightEvent::HighlightEnd) => {
+                active.pop();
+            }
+            Ok(HighlightEvent::Source { start, end }) => {
+                let Some(style) = active.iter().rev().find_map(|style| *style) else {
+                    continue;
+                };
+                if start < end && end <= source.len() {
+                    spans.push(PanelTextHighlight::new(start, end, style));
+                }
+            }
+            Err(_) => return Vec::new(),
         }
+    }
 
-        // Handle empty text — append an empty span so the layout has valid metrics
-        if text.is_empty() {
-            job.append(
-                "",
-                0.0,
-                TextFormat {
-                    font_id,
-                    ..Default::default()
-                },
-            );
+    spans
+}
+
+fn style_for_highlight(index: usize) -> Option<PanelTextStyle> {
+    match HIGHLIGHT_NAMES.get(index).copied()? {
+        "comment" => Some(PanelTextStyle::Comment),
+        "constant" | "constant.builtin" => Some(PanelTextStyle::Constant),
+        "constructor" | "type" | "type.builtin" => Some(PanelTextStyle::Type),
+        "function" => Some(PanelTextStyle::Function),
+        "function.builtin" | "variable.builtin" => Some(PanelTextStyle::Builtin),
+        "keyword" => Some(PanelTextStyle::Keyword),
+        "number" => Some(PanelTextStyle::Number),
+        "operator" => Some(PanelTextStyle::Operator),
+        "punctuation" | "punctuation.bracket" | "punctuation.delimiter" => {
+            Some(PanelTextStyle::Punctuation)
         }
+        "string" | "string.special" => Some(PanelTextStyle::String),
+        _ => None,
+    }
+}
 
-        job
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_style(source: &str, spans: &[PanelTextHighlight], style: PanelTextStyle) -> bool {
+        spans.iter().any(|span| {
+            span.style == style
+                && span.start < span.end
+                && span.end <= source.len()
+                && source.is_char_boundary(span.start)
+                && source.is_char_boundary(span.end)
+        })
+    }
+
+    #[test]
+    fn highlights_python_constructs() {
+        let source = "def f(x):\n    return \"hi\" # note\n";
+        let spans = highlight_python(source);
+
+        assert!(has_style(source, &spans, PanelTextStyle::Keyword));
+        assert!(has_style(source, &spans, PanelTextStyle::Function));
+        assert!(has_style(source, &spans, PanelTextStyle::String));
+        assert!(has_style(source, &spans, PanelTextStyle::Comment));
+    }
+
+    #[test]
+    fn spans_stay_inside_utf8_boundaries() {
+        let source = "name = 'привет'\n# note\n";
+        for span in highlight_python(source) {
+            assert!(span.start < span.end);
+            assert!(span.end <= source.len());
+            assert!(source.is_char_boundary(span.start));
+            assert!(source.is_char_boundary(span.end));
+        }
+    }
+
+    #[test]
+    fn incomplete_python_returns_safe_result() {
+        let source = "def broken(:\n    print('x'";
+        for span in highlight_python(source) {
+            assert!(span.start < span.end);
+            assert!(span.end <= source.len());
+        }
     }
 }

@@ -1,0 +1,49 @@
+// REPL state — command input, output model, drawer state, completion.
+
+export struct OutputItem {
+    /// The message text.
+    text: string,
+    /// Kind discriminator: "normal" | "info" | "warning" | "error" | "command" | "timing".
+    kind: string,
+    /// Whether to show the leading icon (false for continuation lines of the same kind).
+    show-icon: bool,
+}
+
+export struct CompletionItem {
+    /// The completion text to insert.
+    text: string,
+    /// Human-readable description (command summary, setting type, etc.).
+    description: string,
+    /// Source badge: "" (none) | "plugin".
+    source: string,
+}
+
+export global ReplState {
+    // ── Properties (Rust <-> Slint) ──
+    in-out property <string> input-text: "";
+    in-out property <bool> focused: false;
+    in-out property <bool> busy: false;
+    in-out property <bool> drawer-open: false;
+
+    // ── Output model (Rust -> Slint) ──
+    in-out property <[OutputItem]> output-items;
+    /// Incremented by Rust when new output arrives — triggers scroll-to-bottom.
+    in-out property <int> output-generation: 0;
+
+    // ── Completion model (Rust -> Slint) ──
+    in-out property <[CompletionItem]> completion-items;
+    in-out property <int> completion-selected: -1;
+    in-out property <bool> completion-visible: false;
+    in-out property <int> completion-start-pos: 0;
+
+    // ── Callbacks (Slint -> Rust) ──
+    callback submit(/* text */ string);
+    callback history-previous();
+    callback history-next();
+    callback toggle-drawer();
+    callback request-focus();
+    callback request-dismiss();
+    callback request-keyboard-modifier-reset();
+    callback completion-accept(/* index */ int);
+    callback completion-text-changed(/* text */ string);
+}

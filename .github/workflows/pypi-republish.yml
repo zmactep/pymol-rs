@@ -12,6 +12,9 @@ env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 jobs:
   build-web:
     name: Build web assets
@@ -39,7 +42,7 @@ jobs:
 
       - name: Install web dependencies
         working-directory: web
-        run: npm install
+        run: npm ci
 
       - name: Build WASM + TypeScript bundle
         working-directory: web
@@ -52,13 +55,13 @@ jobs:
           cp -r web/pkg staging/
           cp web/package.json staging/
           cd staging
-          tar -czvf ../pymol-rs-web.tar.gz .
+          tar -czvf ../patinae-web.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: pymol-rs-web
-          path: pymol-rs-web.tar.gz
+          name: patinae-web
+          path: patinae-web.tar.gz
           if-no-files-found: error
 
   build-wheels:
@@ -102,18 +105,19 @@ jobs:
           workspaces: python
 
       - name: Download web build
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
-          name: pymol-rs-web
+          name: patinae-web
           path: web-artifact
 
       - name: Prepare widget assets
+        shell: bash
         run: |
-          tar -xzf web-artifact/pymol-rs-web.tar.gz -C web-artifact
-          mkdir -p python/pymol_rs/widget/static
-          cp web-artifact/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
-          cp web-artifact/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
-          cp web-artifact/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
+          tar -xzf web-artifact/patinae-web.tar.gz -C web-artifact
+          mkdir -p python/patinae/widget/static
+          cp web-artifact/dist/patinae-viewer.js python/patinae/widget/static/
+          cp web-artifact/dist/patinae_web_bg.wasm python/patinae/widget/static/
+          cp web-artifact/dist/patinae_web-*.js python/patinae/widget/static/patinae_web_glue.js
 
       - name: Setup Python 3.13
         uses: actions/setup-python@v6
@@ -175,7 +179,7 @@ jobs:
       id-token: write
     steps:
       - name: Download all wheels and sdist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v5
         with:
           pattern: wheels-*
           path: dist

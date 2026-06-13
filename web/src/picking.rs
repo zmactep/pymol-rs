@@ -6,8 +6,8 @@
 
 use serde::Serialize;
 
-use pymol_mol::ObjectMolecule;
-use pymol_scene::{pick_expression_for_hit, PickHit};
+use patinae_mol::ObjectMolecule;
+use patinae_scene::{pick_expression_for_hit, PickHit};
 
 /// Pick result returned to JavaScript as JSON.
 #[derive(Serialize)]
@@ -20,7 +20,7 @@ pub struct PickHitInfo {
     pub chain: Option<String>,
     /// Residue sequence number of the hit atom, or `null`.
     pub residue: Option<i32>,
-    /// PyMOL selection expression (depends on `mouse_selection_mode`), or `null`.
+    /// Selection expression (depends on `mouse_selection_mode`), or `null`.
     pub expression: Option<String>,
 }
 

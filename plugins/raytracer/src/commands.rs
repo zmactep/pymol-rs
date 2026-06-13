@@ -2,8 +2,8 @@
 //!
 //! Provides the `ray` command (perform raytracing).
 
-use pymol_plugin::prelude::*;
-use pymol_scene::ViewportImage;
+use patinae_plugin::prelude::*;
+use patinae_scene::ViewportImage;
 
 use crate::scene::raytrace_scene;
 use crate::settings::read_ray_settings;
@@ -19,41 +19,40 @@ impl Command for RayCommand {
         "ray"
     }
 
-    fn help(&self) -> &str {
-        r#"
-DESCRIPTION
+    fn runtime_requirements(&self) -> CommandRuntimeRequirements {
+        CommandRuntimeRequirements::FULL_SESSION
+            .union(CommandRuntimeRequirements::DISPLAYED_GEOMETRY)
+    }
 
-    "ray" performs ray-tracing and saves the resulting image to a file.
-    Ray tracing produces high-quality images with proper shadows, lighting,
-    and transparency effects.
-
-USAGE
-
-    ray [ width [, height [, antialias [, filename [, quiet ]]]]]
-
-ARGUMENTS
-
-    width = integer: width in pixels (default: current window width)
-    height = integer: height in pixels (default: current window height)
-    antialias = integer: antialiasing level 1-4 (default: antialias setting)
-        1 = no antialiasing
-        2 = 2x2 supersampling
-        3 = 3x3 supersampling
-        4 = 4x4 supersampling
-    filename = string: output file path (default: no file saved, returns to display)
-    quiet = 0/1: suppress feedback (default: 0)
-
-EXAMPLES
-
-    ray                          # Raytrace at current resolution
-    ray 1920, 1080               # Raytrace at 1080p
-    ray 1920, 1080, 2            # Raytrace at 1080p with 2x2 AA
-    ray width=1920, height=1080, filename=output.png
-
-SEE ALSO
-
-    png
-"#
+    command_help! {
+        CMD "ray"
+        DESCRIPTION [
+            "performs ray-tracing and saves the resulting image to a file.",
+            "Ray tracing produces high-quality images with proper shadows, lighting,",
+            "and transparency effects.",
+        ]
+        REQUIRED []
+        OPTIONAL [
+            { "width", "integer", "width in pixels", "current window width" },
+            { "height", "integer", "height in pixels", "current window height" },
+            { "antialias", "integer", "antialiasing level 1-4", "antialias setting" } => [
+                "1 = no antialiasing",
+                "2 = 2x2 supersampling",
+                "3 = 3x3 supersampling",
+                "4 = 4x4 supersampling",
+            ],
+            { "filename", "string", "output file path", "none (returns to display)" },
+            { "quiet", "0/1", "suppress feedback", "0" },
+        ]
+        EXAMPLES [
+            "ray                          # Raytrace at current resolution",
+            "ray 1920, 1080               # Raytrace at 1080p",
+            "ray 1920, 1080, 2            # Raytrace at 1080p with 2x2 AA",
+            "ray width=1920, height=1080, filename=output.png",
+        ]
+        SEE ALSO [
+            "png",
+        ]
     }
 
     fn execute<'v, 'r>(
@@ -73,14 +72,12 @@ SEE ALSO
             .or_else(|| args.get_named_int("height"))
             .map(|v| v as u32);
 
-        let antialias = args
-            .get_int(2)
-            .or_else(|| args.get_named_int("antialias"))
-            .unwrap_or_else(|| ctx.viewer.settings().ui.antialias as i64) as u32;
+        let antialias =
+            args.get_int(2)
+                .or_else(|| args.get_named_int("antialias"))
+                .unwrap_or_else(|| ctx.viewer.settings().ui.antialias as i64) as u32;
 
-        let filename = args
-            .get_str(3)
-            .or_else(|| args.get_named_str("filename"));
+        let filename = args.get_str(3).or_else(|| args.get_named_str("filename"));
 
         let quiet = args
             .get_bool(4)
@@ -181,4 +178,17 @@ fn expand_path(path: &str) -> std::path::PathBuf {
 
 fn dirs_hint() -> Option<String> {
     std::env::var("HOME").ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ray_command_requests_displayed_geometry() {
+        let requirements = RayCommand.runtime_requirements();
+
+        assert!(requirements.contains(CommandRuntimeRequirements::DISPLAYED_GEOMETRY));
+        assert!(requirements.contains(CommandRuntimeRequirements::FULL_SESSION));
+    }
 }

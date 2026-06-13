@@ -2,14 +2,14 @@
 //!
 //! This module provides utilities for converting between:
 //! - `lin_alg::f32::Vec3` <-> Python tuple `(f32, f32, f32)`
-//! - `pymol_color::Color` <-> Python tuple `(f32, f32, f32)`
+//! - `patinae_color::Color` <-> Python tuple `(f32, f32, f32)`
 //! - Various array/list conversions
 //!
 //! Some functions are currently unused but kept as part of the complete
 //! conversion API for future use.
 
 use lin_alg::f32::Vec3;
-use pymol_color::Color;
+use patinae_color::Color;
 
 /// Convert a Vec3 to a Python tuple
 pub fn vec3_to_tuple(v: Vec3) -> (f32, f32, f32) {
@@ -100,7 +100,7 @@ pub fn py_list_to_coords(coords: Vec<(f32, f32, f32)>) -> Vec<Vec3> {
 }
 
 /// Extract coordinates from CoordSet as Python list
-pub fn coordset_to_py_list(coordset: &pymol_mol::CoordSet) -> Vec<(f32, f32, f32)> {
+pub fn coordset_to_py_list(coordset: &patinae_mol::CoordSet) -> Vec<(f32, f32, f32)> {
     coordset.iter()
         .map(|v| (v.x, v.y, v.z))
         .collect()

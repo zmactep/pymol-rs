@@ -1,0 +1,205 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { PluginHighlightLine } from "../../states/plugin-state.slint";
+
+export component HighlightedTextArea inherits Rectangle {
+    in property <string> value-text;
+    in property <string> placeholder;
+    in property <bool> read-only;
+    in property <[PluginHighlightLine]> highlight-lines;
+    in property <string> font-family: "JetBrains Mono";
+    in property <length> font-size: Tokens.font-md;
+    in property <string> identity: "";
+
+    callback edited(string);
+    callback committed(string);
+
+    property <length> pad-x: 6px;
+    property <length> pad-y: 5px;
+    property <string> editor-text: root.value-text;
+    property <bool> editor-focused: false;
+    property <length> char-width: max(1px, char-probe.preferred-width / 10);
+    property <length> line-height: max(root.font-size * 1.35, line-probe.preferred-height);
+
+    border-radius: Tokens.radius-sm;
+    background: root.read-only ? Theme.bg-card.with-alpha(0.88) : Theme.bg-inset.with-alpha(0.70);
+    border-width: Tokens.hairline;
+    border-color: root.read-only ? Theme.line-strong : Theme.line;
+    clip: true;
+
+    changed value-text => {
+        if !root.editor-focused {
+            root.editor-text = root.value-text;
+        }
+    }
+
+    changed identity => {
+        root.editor-text = root.value-text;
+    }
+
+    char-probe := TextInput {
+        x: -10000px;
+        y: -10000px;
+        text: "0000000000";
+        font-family: root.font-family;
+        font-size: root.font-size;
+        font-weight: 400;
+        letter-spacing: 0px;
+        single-line: true;
+        read-only: true;
+        enabled: false;
+        wrap: no-wrap;
+        opacity: 0;
+    }
+
+    line-probe := TextInput {
+        x: -10000px;
+        y: -10000px;
+        text: "M";
+        font-family: root.font-family;
+        font-size: root.font-size;
+        font-weight: 400;
+        letter-spacing: 0px;
+        single-line: true;
+        read-only: true;
+        enabled: false;
+        wrap: no-wrap;
+        opacity: 0;
+    }
+
+    if !root.read-only: Flickable {
+        width: 100%;
+        height: 100%;
+        viewport-width: max(self.width, editor.preferred-width + 2 * root.pad-x);
+        viewport-height: max(self.height, editor.preferred-height + 2 * root.pad-y);
+        interactive: true;
+
+        overlay := Rectangle {
+            x: root.pad-x;
+            y: root.pad-y;
+            width: editor.width;
+            height: editor.height;
+            clip: true;
+
+            for line[index] in root.highlight-lines: Rectangle {
+                x: 0px;
+                y: index * root.line-height;
+                width: parent.width;
+                height: root.line-height;
+
+                for run in line.runs: TextInput {
+                    x: run.start-col * root.char-width;
+                    y: 0px;
+                    width: self.preferred-width;
+                    height: root.line-height;
+                    text: run.text;
+                    color: root.highlight-color(run.style);
+                    font-family: root.font-family;
+                    font-size: root.font-size;
+                    font-weight: 400;
+                    letter-spacing: 0px;
+                    single-line: true;
+                    read-only: true;
+                    enabled: false;
+                    wrap: no-wrap;
+                    vertical-alignment: top;
+                }
+            }
+        }
+
+        editor := TextInput {
+            x: root.pad-x;
+            y: root.pad-y;
+            width: max(parent.width - 2 * root.pad-x, self.preferred-width);
+            height: max(parent.height - 2 * root.pad-y, self.preferred-height);
+            text <=> root.editor-text;
+            single-line: false;
+            wrap: no-wrap;
+            color: root.highlight-lines.length > 0 ? Theme.text-dim.with-alpha(0.04) : Theme.text-dim;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            font-weight: 400;
+            letter-spacing: 0px;
+            vertical-alignment: top;
+            selection-background-color: Theme.cyan.with-alpha(0.3);
+            selection-foreground-color: Theme.text;
+
+            edited => {
+                root.edited(self.text);
+            }
+
+            changed has-focus => {
+                root.editor-focused = self.has-focus;
+                if !self.has-focus {
+                    root.committed(self.text);
+                }
+            }
+
+            cursor-position-changed(position) => {
+                if position.x + parent.viewport-x < 8px {
+                    parent.viewport-x = min(0px, max(parent.width - self.width, -position.x + 8px));
+                } else if position.x + parent.viewport-x > parent.width - 12px {
+                    parent.viewport-x = min(0px, max(parent.width - self.width, parent.width - position.x - 12px));
+                }
+
+                if position.y + parent.viewport-y < 8px {
+                    parent.viewport-y = min(0px, max(parent.height - self.height, -position.y + 8px));
+                } else if position.y + parent.viewport-y > parent.height - root.line-height - 8px {
+                    parent.viewport-y = min(0px, max(parent.height - self.height, parent.height - position.y - root.line-height - 8px));
+                }
+            }
+        }
+    }
+
+    if root.read-only: Flickable {
+        width: 100%;
+        height: 100%;
+        viewport-width: self.width;
+        viewport-height: output-text.preferred-height + 2 * root.pad-y;
+        interactive: true;
+
+        output-text := Text {
+            x: root.pad-x;
+            y: root.pad-y;
+            width: parent.width - 2 * root.pad-x;
+            text: root.value-text == "" ? root.placeholder : root.value-text;
+            color: root.value-text == "" ? Theme.text-ghost : Theme.text-muted;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            font-weight: 400;
+            letter-spacing: 0px;
+            wrap: word-wrap;
+        }
+    }
+
+    if !root.read-only && root.editor-text == "": TextInput {
+        x: root.pad-x;
+        y: root.pad-y;
+        width: parent.width - 2 * root.pad-x;
+        height: root.line-height;
+        text: root.placeholder;
+        color: Theme.text-ghost;
+        font-family: root.font-family;
+        font-size: root.font-size;
+        font-weight: 400;
+        letter-spacing: 0px;
+        single-line: true;
+        read-only: true;
+        enabled: false;
+        wrap: no-wrap;
+    }
+
+    function highlight-color(style: string) -> color {
+        return style == "keyword" ? Theme.violet
+            : style == "string" ? Theme.amber
+            : style == "comment" ? Theme.text-faint
+            : style == "number" ? Theme.magenta
+            : style == "function" ? Theme.cyan
+            : style == "type" ? Theme.good
+            : style == "constant" ? Theme.magenta
+            : style == "operator" ? Theme.violet
+            : style == "punctuation" ? Theme.text-muted
+            : style == "builtin" ? Theme.cyan
+            : Theme.text-dim;
+    }
+}

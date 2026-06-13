@@ -107,7 +107,11 @@ impl RaytraceUniforms {
             ray_shadow: if settings.ray_shadow { 1 } else { 0 },
             ray_max_passes: settings.ray_max_passes,
             ray_trace_fog: if settings.ray_trace_fog { 1 } else { 0 },
-            ray_transparency_shadows: if settings.ray_transparency_shadows { 1 } else { 0 },
+            ray_transparency_shadows: if settings.ray_transparency_shadows {
+                1
+            } else {
+                0
+            },
             ray_trace_mode: settings.ray_trace_mode as u32,
             ray_opaque_background: if settings.ray_opaque_background { 1 } else { 0 },
             transparency_mode: settings.transparency_mode as u32,

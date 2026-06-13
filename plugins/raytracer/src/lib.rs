@@ -1,10 +1,9 @@
-//! GPU raytracing plugin for PyMOL-RS
+//! GPU raytracing plugin.
 //!
 //! Provides the `ray` command and ray tracing settings. All raytracing logic
 //! (BVH, compute shaders, primitive collection) lives in this plugin.
 
-use pymol_plugin::prelude::*;
-use pymol_plugin::{define_plugin_settings, pymol_plugin};
+use patinae_plugin::{define_plugin_settings, patinae_plugin};
 
 // Raytracer engine modules
 pub mod bvh;
@@ -13,12 +12,11 @@ pub mod commands;
 pub mod edge_pipeline;
 pub mod error;
 pub mod gpu;
+mod panel;
 pub mod pipeline;
 pub mod primitive;
 pub mod scene;
 pub mod settings;
-pub mod toolbar;
-
 // ---------------------------------------------------------------------------
 // Plugin settings
 // ---------------------------------------------------------------------------
@@ -59,17 +57,10 @@ define_plugin_settings! {
 // Plugin declaration
 // ---------------------------------------------------------------------------
 
-pymol_plugin! {
+patinae_plugin! {
     name: "raytracer",
     description: "GPU compute shader raytracing — provides the 'ray' command",
     commands: [commands::RayCommand],
-    components: [
-        (toolbar::RtToolbarComponent::new(), {
-            let mut c = PanelConfig::right(300.0);
-            c.visible = false;
-            c.expanded = false;
-            c
-        })
-    ],
+    panels: [panel::RtPanel::new()],
     settings: [RaySettings],
 }

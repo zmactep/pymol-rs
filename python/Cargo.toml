@@ -1,28 +1,29 @@
 [package]
-name = "pymol-python"
-version = "0.3.3"
+name = "patinae-python"
+version = "0.4.0"
 edition = "2021"
 authors = ["Pavel Yakovlev"]
 license = "BSD-3-Clause"
-repository = "https://github.com/zmactep/pymol-rs"
-description = "Python bindings for pymol-rs using PyO3"
+repository = "https://github.com/zmactep/patinae"
+description = "Python bindings for patinae using PyO3"
 
 [lib]
-name = "pymol_rs"
+name = "patinae"
 crate-type = ["cdylib"]
 
 [dependencies]
-# PyO3 for Python bindings
-pyo3 = { version = "0.27.2", features = ["extension-module"] }
+# PyO3 for Python bindings. The extension-module feature is enabled only
+# for wheel builds so Rust test binaries can link against libpython.
+pyo3 = { version = "0.27.2" }
 
 # Internal crates (relative paths from this crate)
-pymol-mol = { path = "../crates/pymol-mol" }
-pymol-io = { path = "../crates/pymol-io", features = ["fetch"] }
-pymol-select = { path = "../crates/pymol-select" }
-pymol-color = { path = "../crates/pymol-color" }
-pymol-settings = { path = "../crates/pymol-settings" }
-pymol-scene = { path = "../crates/pymol-scene" }
-pymol-cmd = { path = "../crates/pymol-cmd" }
+patinae-mol = { path = "../crates/patinae-mol" }
+patinae-io = { path = "../crates/patinae-io", features = ["fetch"] }
+patinae-select = { path = "../crates/patinae-select" }
+patinae-color = { path = "../crates/patinae-color" }
+patinae-settings = { path = "../crates/patinae-settings" }
+patinae-scene = { path = "../crates/patinae-scene" }
+patinae-cmd = { path = "../crates/patinae-cmd" }
 
 # External dependencies
 lin_alg = { version = "1.1", features = ["computer_graphics"] }
@@ -32,6 +33,7 @@ env_logger = "0.11"
 
 [features]
 default = ["numpy"]
+extension-module = ["pyo3/extension-module"]
 # Enable numpy array support for coordinate data
 numpy = ["dep:numpy"]
 

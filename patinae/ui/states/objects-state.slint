@@ -1,0 +1,204 @@
+import { Theme } from "../theme.slint";
+
+// ── Subchain (leaf level) ────────────────────────────────────────────
+
+/// A single chain subchain within a molecular object: a contiguous polymer
+/// stretch, a single ligand residue (e.g. HEM), a run of solvent waters,
+/// or an ion group.
+export struct SubchainItem {
+    /// Chain identifier (e.g. "A", "B").
+    chain-id: string,
+    /// Display-only label. Non-empty for non-biopolymer subchains (e.g.
+    /// "HEM", "HOH", composite glycan "NAG+8"). Never sent back to Rust as
+    /// a selection qualifier — use `selector-clause` for that.
+    label: string,
+    /// Semantic category: "biopolymer" | "organic" | "solvent" | "inorganic" | "other".
+    kind: string,
+    /// Number of atoms in this subchain.
+    atom-count: int,
+    /// Sidebar dot color (resolved from Rust).
+    color: color,
+    /// True when the subchain has multiple colors (gradient dot).
+    multicolor: bool,
+    /// Whether this subchain is selected in the panel.
+    selected: bool,
+    /// Index into the owning molecule's SubchainPartition::entries(). Sent
+    /// back to Rust for atom-set membership checks.
+    entry-index: int,
+    /// PyMOL selection clause appended after `"{obj-name} and "`. Empty
+    /// when the row covers the whole object. Built by Rust from typed
+    /// SubchainKind/SubchainLabel.
+    selector-clause: string,
+}
+
+// ── Object (contains subchains) ──────────────────────────────────────
+
+/// A molecular object containing zero or more subchains.
+export struct ObjectItem {
+    /// Object name (e.g. "1abc").
+    name: string,
+    /// Semantic object type: "molecule" or "map".
+    object-type: string,
+    /// Object-list icon key: "" | "map-source" | "map-isomesh" | "map-isosurface".
+    object-icon-kind: string,
+    /// Visible in the viewport.
+    enabled: bool,
+    /// Whether subchains are expanded below this object.
+    expanded: bool,
+    /// Whether this object is selected in the panel.
+    selected: bool,
+    /// Total atom count across all subchains.
+    atom-count: int,
+    /// Sidebar color (first subchain or consensus).
+    color: color,
+    /// Whether representation controls apply to this object.
+    has-representations: bool,
+    /// Subchains belonging to this object.
+    subchains: [SubchainItem],
+    /// Number of subchains truncated from the list (0 = all shown).
+    overflow-count: int,
+}
+
+// ── Top-level row (group or standalone object) ───────────────────────
+
+/// A top-level entry: either a group or a standalone object.
+/// Slint has no enum types in models, so we use an `is-group` flag.
+export struct TopLevelRow {
+    /// `true` = group, `false` = standalone object.
+    is-group: bool,
+
+    // ── Group fields (meaningful when is-group == true) ──
+    group-name: string,
+    group-open: bool,
+    group-enabled: bool,
+    group-selected: bool,
+    group-child-count: int,
+    group-objects: [ObjectItem],
+
+    // ── Object fields (meaningful when is-group == false) ──
+    object: ObjectItem,
+}
+
+// ── Named selection row ──────────────────────────────────────────────
+
+/// A named selection in the selections panel.
+export struct SelectionRow {
+    name: string,
+    expression: string,
+    atom-count: int,
+    residue-count: int,
+    enabled: bool,
+    /// Whether this selection is selected in the panel.
+    selected: bool,
+}
+
+// ── Overflow menu item ─────────────────────────────────────────────
+
+/// A single row in the action pill overflow menu.
+export struct OverflowMenuItem {
+    /// Action identifier: "align" | "rename" | "copy" | "extract" | "remove" | "separator" | "color" | "representation".
+    action: string,
+    /// Display label (empty for separators).
+    label: string,
+    /// Whether the item is disabled / greyed out.
+    disabled: bool,
+}
+
+// ── Global state ─────────────────────────────────────────────────────
+
+export global ObjectsState {
+    // ── Models (Rust → Slint) ──
+    in-out property <[TopLevelRow]> top-level;
+    in-out property <[SelectionRow]> selections;
+
+    // ── Counts ──
+    in-out property <int> object-count: 0;
+    in-out property <int> selected-count: 0;
+    in-out property <int> selected-selection-count: 0;
+
+    /// Current selection level: "none" | "groups" | "objects" | "subchains".
+    in-out property <string> selection-level: "none";
+
+    // ── Group callbacks ──
+    callback group-clicked(/* name */ string, /* shift */ bool, /* meta */ bool);
+    callback toggle-group-open(/* name */ string);
+
+    // ── Object callbacks ──
+    callback object-clicked(/* name */ string, /* shift */ bool, /* meta */ bool);
+    callback toggle-object-expand(/* name */ string);
+    callback object-right-clicked(/* name */ string);
+
+    // ── Subchain callbacks ──
+    callback subchain-clicked(/* obj-name */ string, /* chain-id */ string,
+                              /* label */ string, /* kind */ string,
+                              /* entry-index */ int, /* selector-clause */ string,
+                              /* shift */ bool, /* meta */ bool);
+
+    // ── Selection callbacks ──
+    callback selection-clicked(/* name */ string, /* shift */ bool, /* meta */ bool);
+    callback selection-right-clicked(/* name */ string);
+
+    // ── Row button callback ──
+    callback row-btn-clicked(/* kind */ string, /* source */ string, /* obj-name */ string, /* chain-id */ string,
+                             /* subchain-label */ string, /* subchain-kind */ string,
+                             /* entry-index */ int, /* selector-clause */ string);
+
+    // ── Popover state ──
+    in-out property <string> popover-source: "";      // "object" | "selection"
+    in-out property <string> popover-kind: "";        // "" | "C"
+    in-out property <string> popover-obj-name: "";
+    in-out property <string> popover-chain-id: "";       // "" = object scope
+    in-out property <string> popover-subchain-label: ""; // non-biopolymer label (e.g. "HEM")
+    in-out property <string> popover-target: "";        // selection expression (computed by Rust)
+    in-out property <string> popover-display-label: ""; // header label (computed by Rust)
+    in-out property <string> popover-cmd-preview: "";   // live command preview on hover
+    in-out property <string> popover-subchain-kind: "";  // "biopolymer" | "organic" | "solvent" | "inorganic" | "other" | "" (object-level)
+    in-out property <int> popover-entry-index: -1;       // partition entry index (-1 = object scope)
+    in-out property <string> popover-selector-clause: "";// selection clause for current popover target
+    in-out property <string> popover-scope: "all";     // "all" | "cartoon" | "sticks" | ...
+    in-out property <length> popover-anchor-y: 0px;    // window-relative Y for popover top edge
+    // Per-rep active flags (computed by Rust for "R" popover)
+    in-out property <bool> popover-rep-lines: false;
+    in-out property <bool> popover-rep-sticks: false;
+    in-out property <bool> popover-rep-spheres: false;
+    in-out property <bool> popover-rep-cartoon: false;
+    in-out property <bool> popover-rep-ribbon: false;
+    in-out property <bool> popover-rep-surface: false;
+    in-out property <bool> popover-rep-mesh: false;
+    in-out property <bool> popover-rep-dots: false;
+    // Per-preset active flags (computed by Rust for "R" popover)
+    in-out property <bool> popover-preset-sidechain: false;
+    in-out property <bool> popover-preset-backbone: false;
+    in-out property <bool> popover-preset-organic: false;
+    in-out property <bool> popover-preset-solvent: false;
+    in-out property <bool> popover-preset-inorganic: false;
+    in-out property <bool> popover-preset-polymer: false;
+
+    // Transparency slider current global values (set by Rust on popover open)
+    in-out property <float> popover-transparency-sticks: 0.0;
+    in-out property <float> popover-transparency-spheres: 0.0;
+    in-out property <float> popover-transparency-cartoon: 0.0;
+    in-out property <float> popover-transparency-surface: 0.0;
+
+    // ── Popover callbacks ──
+    callback popover-close();
+    callback popover-execute();  // execute popover-cmd-preview as command
+
+    // ── Overflow menu (action pill three-dots) ──
+    in-out property <[OverflowMenuItem]> overflow-menu-items;
+    callback action-overflow();
+    callback overflow-action(/* action */ string);
+
+    // ── Name-input popup (rename/copy/extract from action pill) ──
+    in-out property <string> name-input-action: "";   // "rename" | "copy" | "extract"
+    in-out property <string> name-input-target: "";   // source object/selection name
+    in-out property <string> name-input-text: "";     // editable name (pre-filled with default)
+    in-out property <string> name-input-title: "";    // popup header, e.g. "Rename 1abc"
+    callback name-input-confirm();
+
+    // ── Action pill callbacks (level-agnostic, Rust dispatches) ──
+    callback action-zoom();
+    callback action-orient();
+    callback action-center();
+    callback action-toggle();
+}

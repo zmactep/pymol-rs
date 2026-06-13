@@ -137,12 +137,19 @@ pub fn raytrace(
     if let Some((min, max)) = primitives.aabb() {
         log::debug!(
             "Raytrace scene bounds: ({:.2}, {:.2}, {:.2}) - ({:.2}, {:.2}, {:.2})",
-            min[0], min[1], min[2], max[0], max[1], max[2]
+            min[0],
+            min[1],
+            min[2],
+            max[0],
+            max[1],
+            max[2]
         );
     }
     log::debug!(
         "Raytrace camera position: ({:.2}, {:.2}, {:.2})",
-        params.camera_pos[0], params.camera_pos[1], params.camera_pos[2]
+        params.camera_pos[0],
+        params.camera_pos[1],
+        params.camera_pos[2]
     );
 
     // Validate buffer sizes against GPU limits
@@ -258,8 +265,13 @@ pub fn raytrace(
         .unwrap_or(&render_textures.color_texture);
 
     // Record texture-to-buffer copy, then submit and read back
-    let (readback_buffer, padded_bytes_per_row) =
-        buffers::record_texture_copy(device, &mut encoder, output_texture, render_width, render_height);
+    let (readback_buffer, padded_bytes_per_row) = buffers::record_texture_copy(
+        device,
+        &mut encoder,
+        output_texture,
+        render_width,
+        render_height,
+    );
 
     queue.submit(std::iter::once(encoder.finish()));
 

@@ -1,0 +1,771 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { LayoutState } from "../../states/layout-state.slint";
+import { MenuState } from "../../states/menu-state.slint";
+import { StartState } from "../../states/start-state.slint";
+
+component PatinaeMark inherits Rectangle {
+    width: 58px;
+    height: 58px;
+    background: transparent;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("../../../../images/patinae.png");
+        image-fit: contain;
+    }
+}
+
+component DropFileIcon inherits Rectangle {
+    in property <color> tint: Theme.text-ghost;
+
+    width: 44px;
+    height: 44px;
+
+    Rectangle {
+        x: 11px;
+        y: 6px;
+        width: 24px;
+        height: 31px;
+        border-radius: 5px;
+        border-width: 1.2px;
+        border-color: tint;
+        background: Theme.bg-inset.with-alpha(0.35);
+    }
+
+    Path {
+        x: 23px;
+        y: 6px;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        stroke: tint;
+        stroke-width: 1.2px;
+        fill: Theme.viewport-bg;
+        commands: "M 0 0 L 12 12 L 0 12 Z";
+    }
+
+    Path {
+        x: 16px;
+        y: 17px;
+        width: 15px;
+        height: 14px;
+        viewbox-width: 15;
+        viewbox-height: 14;
+        stroke: Theme.cyan-dim;
+        stroke-width: 1.5px;
+        fill: transparent;
+        commands: "M 7.5 1 L 7.5 10 M 3 6 L 7.5 10.5 L 12 6 M 1 13 L 14 13";
+    }
+}
+
+component DatabaseIcon inherits Rectangle {
+    in property <color> tint: Theme.cyan;
+
+    width: 16px;
+    height: 16px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: tint;
+        stroke-width: 1.3px;
+        fill: transparent;
+        commands: "M 3 4 C 3 2.6 13 2.6 13 4 C 13 5.4 3 5.4 3 4 Z M 3 4 L 3 12 C 3 13.4 13 13.4 13 12 L 13 4 M 3 8 C 3 9.4 13 9.4 13 8";
+    }
+}
+
+component PreviewGlyph inherits Rectangle {
+    in property <int> slot: 0;
+    in property <color> tint: Theme.cyan;
+
+    background: Theme.bg;
+
+    Path {
+        x: 32px;
+        y: 17px;
+        width: 76px;
+        height: 50px;
+        viewbox-width: 76;
+        viewbox-height: 50;
+        stroke: Theme.line-strong;
+        stroke-width: 3px;
+        fill: transparent;
+        commands: slot == 1
+            ? "M 14 35 L 33 19 L 55 25 L 64 10 M 33 19 L 38 40 M 55 25 L 62 38"
+            : "M 12 30 L 30 15 L 52 20 L 65 34 M 30 15 L 36 39 M 52 20 L 46 38";
+    }
+
+    Rectangle {
+        x: slot == 1 ? 42px : 41px;
+        y: slot == 1 ? 45px : 42px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: tint.with-alpha(0.9);
+    }
+
+    Rectangle {
+        x: slot == 1 ? 59px : 62px;
+        y: slot == 1 ? 28px : 20px;
+        width: 21px;
+        height: 21px;
+        border-radius: 10.5px;
+        background: Theme.violet.with-alpha(0.88);
+    }
+
+    Rectangle {
+        x: slot == 1 ? 85px : 90px;
+        y: slot == 1 ? 32px : 35px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: Theme.warning.with-alpha(0.88);
+    }
+
+    Rectangle {
+        x: slot == 1 ? 94px : 88px;
+        y: slot == 1 ? 14px : 50px;
+        width: 11px;
+        height: 11px;
+        border-radius: 5.5px;
+        background: Theme.magenta.with-alpha(0.82);
+    }
+
+    Rectangle {
+        x: slot == 1 ? 67px : 66px;
+        y: slot == 1 ? 58px : 58px;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: Theme.text-muted.with-alpha(0.72);
+    }
+
+    Rectangle {
+        x: 52px;
+        y: 64px;
+        width: parent.width - 104px;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.line-strong.with-alpha(0.45);
+    }
+}
+
+component ExampleGlyph inherits Rectangle {
+    in property <string> kind;
+
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: Theme.bg.with-alpha(0.82);
+
+    if kind == "antibody": Rectangle {
+        background: transparent;
+
+        Path {
+            x: 6px;
+            y: 7px;
+            width: 16px;
+            height: 15px;
+            viewbox-width: 16;
+            viewbox-height: 15;
+            stroke: Theme.cyan;
+            stroke-width: 1.8px;
+            fill: transparent;
+            commands: "M 8 15 L 8 8 M 8 8 L 2 1 M 8 8 L 14 1";
+        }
+
+        Rectangle { x: 11px; y: 18px; width: 6px; height: 6px; border-radius: 3px; background: Theme.cyan; }
+        Rectangle { x: 3px; y: 2px; width: 6px; height: 6px; border-radius: 3px; background: Theme.violet; }
+        Rectangle { x: 19px; y: 2px; width: 6px; height: 6px; border-radius: 3px; background: Theme.magenta; }
+    }
+
+    if kind == "pocket": Rectangle {
+        background: transparent;
+
+        Rectangle {
+            x: 5px;
+            y: 6px;
+            width: 18px;
+            height: 16px;
+            border-radius: 8px;
+            background: Theme.violet.with-alpha(0.48);
+        }
+
+        Rectangle { x: 11px; y: 12px; width: 6px; height: 6px; border-radius: 3px; background: Theme.magenta; }
+        Rectangle { x: 17px; y: 8px; width: 4px; height: 4px; border-radius: 2px; background: Theme.cyan.with-alpha(0.84); }
+    }
+
+    if kind == "dna": Rectangle {
+        background: transparent;
+
+        Path {
+            x: 6px;
+            y: 4px;
+            width: 16px;
+            height: 20px;
+            viewbox-width: 16;
+            viewbox-height: 20;
+            stroke: Theme.warning;
+            stroke-width: 1.6px;
+            fill: transparent;
+            commands: "M 4 1 C 13 5 13 15 4 19 M 12 1 C 3 5 3 15 12 19 M 5 6 L 11 6 M 5 10 L 11 10 M 5 14 L 11 14";
+        }
+
+        Rectangle { x: 8px; y: 8px; width: 3px; height: 3px; border-radius: 1.5px; background: Theme.cyan; }
+        Rectangle { x: 17px; y: 17px; width: 3px; height: 3px; border-radius: 1.5px; background: Theme.magenta; }
+    }
+
+    if kind == "gpcr": Rectangle {
+        background: transparent;
+
+        Path {
+            x: 4px;
+            y: 4px;
+            width: 20px;
+            height: 20px;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            stroke: Theme.magenta;
+            stroke-width: 1.5px;
+            fill: transparent;
+            commands: "M 3 1 C 6 5 2 9 5 13 C 7 16 3 19 3 19 M 9 1 C 12 5 8 9 11 13 C 13 16 9 19 9 19 M 15 1 C 18 5 14 9 17 13 C 19 16 15 19 15 19";
+        }
+
+        Rectangle { x: 4px; y: 6px; width: 20px; height: 2px; border-radius: 1px; background: Theme.cyan.with-alpha(0.28); }
+        Rectangle { x: 4px; y: 20px; width: 20px; height: 2px; border-radius: 1px; background: Theme.cyan.with-alpha(0.28); }
+    }
+}
+
+component FetchForm inherits Rectangle {
+    width: 360px;
+    height: 42px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.cyan.with-alpha(0.8) : Theme.line-strong;
+    background: Theme.bg-inset;
+    clip: true;
+
+    Rectangle {
+        x: 10px;
+        y: 9px;
+        width: 54px;
+        height: 24px;
+        border-radius: 7px;
+        background: Theme.cyan.with-alpha(0.1);
+
+        DatabaseIcon {
+            x: 8px;
+            y: 4px;
+        }
+
+        Text {
+            x: 28px;
+            y: 0px;
+            width: 22px;
+            height: parent.height;
+            text: "PDB";
+            color: Theme.cyan;
+            font-size: Tokens.font-xs;
+            font-family: "JetBrains Mono";
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+
+    input := TextInput {
+        x: 76px;
+        y: 0px;
+        width: parent.width - 178px;
+        height: parent.height;
+        text <=> StartState.fetch-pdb-id;
+        color: Theme.text;
+        font-family: "JetBrains Mono";
+        font-size: 15px;
+        single-line: true;
+        vertical-alignment: center;
+        selection-background-color: Theme.cyan.with-alpha(0.3);
+
+        accepted => {
+            if StartState.fetch-pdb-valid {
+                StartState.fetch-submit(StartState.fetch-pdb-id);
+            }
+        }
+
+        edited => {
+            StartState.fetch-pdb-edited(StartState.fetch-pdb-id);
+        }
+    }
+
+    if StartState.fetch-pdb-id == "": Text {
+        x: 76px;
+        y: 0px;
+        width: parent.width - 178px;
+        height: parent.height;
+        text: "PDB ID";
+        color: Theme.text-ghost;
+        font-size: Tokens.font-lg;
+        font-family: "JetBrains Mono";
+        vertical-alignment: center;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { input.focus(); }
+        }
+    }
+
+    submit := Rectangle {
+        x: parent.width - 88px;
+        y: 7px;
+        width: 78px;
+        height: 28px;
+        border-radius: 8px;
+        background: StartState.fetch-pdb-valid
+            ? Theme.cyan.with-alpha(submit-touch.has-hover ? 0.24 : 0.16)
+            : Theme.text-ghost.with-alpha(0.14);
+        border-width: Tokens.hairline;
+        border-color: StartState.fetch-pdb-valid ? Theme.cyan.with-alpha(0.42) : transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "FETCH";
+            color: StartState.fetch-pdb-valid ? Theme.cyan : Theme.text-faint;
+            font-size: Tokens.font-xs;
+            font-family: "JetBrains Mono";
+            font-weight: 500;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        submit-touch := TouchArea {
+            enabled: StartState.fetch-pdb-valid;
+            mouse-cursor: pointer;
+            clicked => { StartState.fetch-submit(StartState.fetch-pdb-id); }
+        }
+    }
+}
+
+component RecentCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> path;
+    in property <image> thumbnail;
+    in property <bool> has-thumbnail: false;
+    in property <string> extension;
+    in property <int> slot: 0;
+
+    width: 140px;
+    height: 126px;
+    border-radius: 10px;
+    border-width: Tokens.hairline;
+    border-color: card-touch.has-hover ? Theme.line-strong : Theme.line;
+    background: card-touch.has-hover ? Theme.bg-card : Theme.bg-inset;
+    clip: true;
+
+    if root.has-thumbnail: Image {
+        x: (parent.width - self.width) / 2;
+        width: 88px;
+        height: 88px;
+        source: root.thumbnail;
+        image-fit: cover;
+    }
+
+    if !root.has-thumbnail: PreviewGlyph {
+        width: parent.width;
+        height: 88px;
+        slot: root.slot;
+        tint: root.slot == 1 ? Theme.violet : Theme.cyan-dim;
+    }
+
+    if root.extension != "": Rectangle {
+        x: parent.width - 50px;
+        y: 8px;
+        width: 42px;
+        height: 18px;
+        border-radius: 5px;
+        border-width: Tokens.hairline;
+        border-color: Theme.cyan.with-alpha(0.3);
+        background: Theme.bg-inset.with-alpha(0.82);
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.extension;
+            color: Theme.cyan;
+            font-size: Tokens.font-xs;
+            font-family: "JetBrains Mono";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    Text {
+        x: 10px;
+        y: 94px;
+        width: parent.width - 20px;
+        height: 14px;
+        text: root.title;
+        color: Theme.text;
+        font-size: Tokens.font-sm;
+        font-family: "JetBrains Mono";
+        overflow: elide;
+    }
+
+    Text {
+        x: 10px;
+        y: 110px;
+        width: parent.width - 20px;
+        height: 12px;
+        text: root.subtitle;
+        color: Theme.text-ghost;
+        font-size: Tokens.font-xs;
+        font-family: "JetBrains Mono";
+        overflow: elide;
+    }
+
+    card-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { MenuState.open-recent(root.path); }
+    }
+}
+
+component ExampleCard inherits Rectangle {
+    in property <string> kind;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> pdb;
+    in property <image> thumbnail;
+    in property <length> card-width: 134px;
+
+    width: card-width;
+    height: 50px;
+    border-radius: 9px;
+    border-width: Tokens.hairline;
+    border-color: example-touch.has-hover ? Theme.line-strong : Theme.line;
+    background: example-touch.has-hover ? Theme.bg-card : Theme.bg-inset;
+    clip: true;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 42px;
+        height: parent.height;
+        background: Theme.bg.with-alpha(0.82);
+    }
+
+    if root.thumbnail.width > 0: Image {
+        x: 0px;
+        y: 0px;
+        width: 42px;
+        height: parent.height;
+        source: root.thumbnail;
+        image-fit: fill;
+    }
+
+    if root.thumbnail.width <= 0: ExampleGlyph {
+        x: 10px;
+        y: 11px;
+        kind: root.kind;
+    }
+
+    Text {
+        x: 46px;
+        y: 10px;
+        width: parent.width - 56px;
+        height: 15px;
+        text: root.title;
+        color: Theme.text;
+        font-size: Tokens.font-sm;
+        font-family: "JetBrains Mono";
+        font-weight: 500;
+        overflow: elide;
+    }
+
+    Text {
+        x: 46px;
+        y: 27px;
+        width: parent.width - 56px;
+        height: 12px;
+        text: root.subtitle;
+        color: Theme.text-ghost;
+        font-size: Tokens.font-xs;
+        font-family: "JetBrains Mono";
+        overflow: elide;
+    }
+
+    example-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { StartState.open-example(root.pdb); }
+    }
+}
+
+export component EmptyState inherits Rectangle {
+    background: Theme.viewport-bg;
+    clip: true;
+
+    property <length> content-w: min(590px, root.width - 2 * Tokens.space-lg);
+    property <length> content-x: (root.width - content-w) / 2;
+    property <length> hero-y: max(42px, (root.height - 660px) / 2);
+    property <length> drop-y: hero-y + 150px;
+    property <length> recent-y: drop-y + 214px;
+    property <length> examples-y: recent-y + (MenuState.has-recent-files ? 172px : 0px);
+
+    PatinaeMark {
+        x: root.content-x + (root.content-w - self.width) / 2;
+        y: root.hero-y;
+    }
+
+    Text {
+        x: root.content-x;
+        y: root.hero-y + 76px;
+        width: root.content-w;
+        height: 34px;
+        text: "Patinae";
+        color: Theme.text;
+        font-family: "Georgia";
+        font-size: 30px;
+        font-weight: 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    Text {
+        x: root.content-x;
+        y: root.hero-y + 114px;
+        width: root.content-w;
+        height: 18px;
+        text: "load a structure to start";
+        color: Theme.text-faint;
+        font-size: Tokens.font-lg;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    drop := Rectangle {
+        x: root.content-x;
+        y: root.drop-y;
+        width: root.content-w;
+        height: 184px;
+        property <bool> open-hover: drop-top-touch.has-hover
+            || drop-left-touch.has-hover
+            || drop-right-touch.has-hover
+            || drop-bottom-touch.has-hover;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: drop.open-hover ? Theme.cyan-dim : Theme.line-strong;
+        background: drop.open-hover ? Theme.bg-card.with-alpha(0.9) : Theme.bg.with-alpha(0.86);
+
+        DropFileIcon {
+            x: (parent.width - self.width) / 2;
+            y: 22px;
+            tint: drop.open-hover ? Theme.text-muted : Theme.text-ghost;
+        }
+
+        Text {
+            x: 0px;
+            y: 78px;
+            width: parent.width;
+            height: 16px;
+            text: "drop a .pdb / .cif / .mol2 file here";
+            color: Theme.text-muted;
+            font-size: Tokens.font-md;
+            font-family: "JetBrains Mono";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 0px;
+            y: 102px;
+            width: parent.width;
+            height: 14px;
+            text: "or fetch from PDB";
+            color: Theme.text-ghost;
+            font-size: Tokens.font-sm;
+            font-family: "JetBrains Mono";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        FetchForm {
+            x: (parent.width - self.width) / 2;
+            y: 128px;
+        }
+
+        drop-top-touch := TouchArea {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 128px;
+            mouse-cursor: pointer;
+            clicked => { MenuState.action("open"); }
+        }
+
+        drop-left-touch := TouchArea {
+            x: 0px;
+            y: 128px;
+            width: (parent.width - 360px) / 2;
+            height: parent.height - self.y;
+            mouse-cursor: pointer;
+            clicked => { MenuState.action("open"); }
+        }
+
+        drop-right-touch := TouchArea {
+            x: (parent.width + 360px) / 2;
+            y: 128px;
+            width: (parent.width - 360px) / 2;
+            height: parent.height - self.y;
+            mouse-cursor: pointer;
+            clicked => { MenuState.action("open"); }
+        }
+
+        drop-bottom-touch := TouchArea {
+            x: (parent.width - 360px) / 2;
+            y: 170px;
+            width: 360px;
+            height: parent.height - self.y;
+            mouse-cursor: pointer;
+            clicked => { MenuState.action("open"); }
+        }
+    }
+
+    if StartState.fetch-status != "": Text {
+        x: root.content-x;
+        y: drop.y + drop.height + 8px;
+        width: root.content-w;
+        height: 16px;
+        text: StartState.fetch-status;
+        color: Theme.warning;
+        font-size: Tokens.font-sm;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if MenuState.has-recent-files: Rectangle {
+        x: root.content-x;
+        y: root.recent-y;
+        width: root.content-w;
+        height: 150px;
+        background: transparent;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 14px;
+            text: "RECENT";
+            color: Theme.text-faint;
+            font-size: Tokens.font-sm;
+            font-family: "JetBrains Mono";
+            font-weight: 500;
+            letter-spacing: 1.2px;
+        }
+
+        HorizontalLayout {
+            x: 0px;
+            y: 24px;
+            width: parent.width;
+            height: 126px;
+            spacing: 10px;
+
+            for item[idx] in MenuState.recent-files: Rectangle {
+                width: idx < 4 ? 140px : 0px;
+                height: 126px;
+                visible: idx < 4;
+                background: transparent;
+
+                RecentCard {
+                    title: item.title;
+                    subtitle: item.subtitle;
+                    path: item.path;
+                    thumbnail: item.thumbnail;
+                    has-thumbnail: item.has-thumbnail;
+                    extension: item.extension;
+                    slot: idx;
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        x: root.content-x;
+        y: root.examples-y;
+        width: root.content-w;
+        height: 78px;
+        background: transparent;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 14px;
+            text: "EXAMPLES";
+            color: Theme.text-faint;
+            font-size: Tokens.font-sm;
+            font-family: "JetBrains Mono";
+            font-weight: 500;
+            letter-spacing: 1.2px;
+        }
+
+        HorizontalLayout {
+            x: 0px;
+            y: 24px;
+            width: parent.width;
+            height: 50px;
+            spacing: 10px;
+
+            ExampleCard {
+                kind: "antibody";
+                title: "antibody";
+                subtitle: "1igt / IgG";
+                pdb: "1igt";
+                thumbnail: @image-url("../../../../images/examples/1igt.png");
+            }
+
+            ExampleCard {
+                kind: "pocket";
+                title: "pocket";
+                subtitle: "6lu7 / ligand";
+                pdb: "6lu7";
+                thumbnail: @image-url("../../../../images/examples/6lu7.png");
+            }
+
+            ExampleCard {
+                kind: "dna";
+                title: "duplex DNA";
+                subtitle: "1bna / classic";
+                pdb: "1bna";
+                thumbnail: @image-url("../../../../images/examples/1bna.png");
+            }
+
+            ExampleCard {
+                kind: "gpcr";
+                title: "GPCR";
+                subtitle: "7cmv / membrane";
+                pdb: "7cmv";
+                thumbnail: @image-url("../../../../images/examples/7cmv.png");
+                card-width: 158px;
+            }
+        }
+    }
+
+    Text {
+        x: 0px;
+        y: parent.height - 18px;
+        width: parent.width;
+        height: 14px;
+        text: LayoutState.mod-key + "O open file   " + LayoutState.mod-key + "F fetch PDB";
+        color: Theme.text-ghost;
+        font-size: Tokens.font-sm;
+        font-family: "JetBrains Mono";
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

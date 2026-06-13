@@ -2,16 +2,16 @@
  * Movie panel — animation timeline and playback controls.
  */
 
-import type { PyMolRSViewer } from "../core/api.js";
+import type { PatinaeViewer } from "../core/api.js";
 
 export class MoviePanel {
   private container: HTMLElement;
-  private viewer: PyMolRSViewer;
+  private viewer: PatinaeViewer;
   private frameLabel: HTMLElement | null = null;
   private slider: HTMLInputElement | null = null;
   private playBtn: HTMLButtonElement | null = null;
 
-  constructor(container: HTMLElement, viewer: PyMolRSViewer) {
+  constructor(container: HTMLElement, viewer: PatinaeViewer) {
     this.container = container;
     this.viewer = viewer;
 

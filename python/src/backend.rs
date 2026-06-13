@@ -1,4 +1,4 @@
-//! Standalone backend for the pymol_rs Python package.
+//! Standalone backend for the patinae Python package.
 //!
 //! Provides direct access to a Session + CommandExecutor without IPC.
 //! Used when running Python scripts standalone (not embedded in the GUI).
@@ -9,10 +9,10 @@ use pyo3::exceptions::{PyKeyError, PyRuntimeError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use pymol_cmd::CommandExecutor;
-use pymol_mol::AtomIndex;
-use pymol_scene::{Session, SessionAdapter, ViewportImage};
-use pymol_select::select;
+use patinae_cmd::CommandExecutor;
+use patinae_mol::AtomIndex;
+use patinae_scene::{Session, SessionAdapter, ViewportImage};
+use patinae_select::select;
 
 use crate::iterate::{apply_locals_to_atom, build_globals, set_atom_locals};
 use crate::mol::PyObjectMolecule;
@@ -30,10 +30,8 @@ pub struct StandaloneBackend {
 
 impl StandaloneBackend {
     pub fn create() -> Self {
-        let mut session = Session::new();
-        session.apply_default_settings();
         Self {
-            session,
+            session: Session::new(),
             executor: CommandExecutor::new(),
             needs_redraw: false,
         }
@@ -44,16 +42,14 @@ impl StandaloneBackend {
 impl StandaloneBackend {
     #[new]
     fn new() -> Self {
-        let mut session = Session::new();
-        session.apply_default_settings();
         Self {
-            session,
+            session: Session::new(),
             executor: CommandExecutor::new(),
             needs_redraw: false,
         }
     }
 
-    /// Execute a PyMOL command string.
+    /// Execute a command string.
     #[pyo3(signature = (command, silent=false))]
     fn execute(&mut self, command: &str, silent: bool) -> PyResult<()> {
         let mut adapter = SessionAdapter {
@@ -67,6 +63,26 @@ impl StandaloneBackend {
             .do_with_options(&mut adapter, command, silent)
             .map(|_| ())
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Advance movie, rock, and camera animations by an explicit delta time.
+    fn update_animations(&mut self, dt: f32) -> bool {
+        let update = self.session.update_animations(dt);
+        if update.needs_redraw {
+            self.needs_redraw = true;
+        }
+        update.needs_redraw
+    }
+
+    /// Get the current movie state as a Python dict.
+    fn get_movie_state(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let state = self.session.movie_state_snapshot();
+        let dict = PyDict::new(py);
+        dict.set_item("frame_count", state.frame_count)?;
+        dict.set_item("current_frame", state.current_frame)?;
+        dict.set_item("is_playing", state.is_playing)?;
+        dict.set_item("rock_enabled", state.rock_enabled)?;
+        Ok(dict.into_any().unbind())
     }
 
     /// Get a molecular object by name.
@@ -287,5 +303,50 @@ impl StandaloneBackend {
     /// No-op in standalone mode (no GUI event loop).
     fn unset_key(&self, _key: &str) -> PyResult<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standalone_movie_state_and_explicit_animation_tick_are_deterministic() {
+        let mut backend = StandaloneBackend::create();
+        backend.session.settings.movie.movie_fps = 10.0;
+
+        backend.execute("mset 1 x3", true).unwrap();
+        backend.execute("mplay", true).unwrap();
+
+        assert!(backend.update_animations(0.11));
+        assert_eq!(backend.session.movie.current_frame(), 1);
+
+        Python::attach(|py| {
+            let state = backend.get_movie_state(py).unwrap();
+            let dict = state.bind(py).cast::<PyDict>().unwrap();
+            assert_eq!(
+                dict.get_item("frame_count")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<usize>()
+                    .unwrap(),
+                3
+            );
+            assert_eq!(
+                dict.get_item("current_frame")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<usize>()
+                    .unwrap(),
+                1
+            );
+            assert!(
+                dict.get_item("is_playing")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<bool>()
+                    .unwrap()
+            );
+        });
     }
 }

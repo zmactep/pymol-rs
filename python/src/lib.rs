@@ -1,8 +1,8 @@
-//! PyMOL-RS Python Bindings
+//! Python bindings.
 //!
-//! Unified Python package for pymol-rs. Works in two modes:
+//! Unified Python package for patinae. Works in two modes:
 //! - **Standalone**: Direct Session + CommandExecutor (no IPC)
-//! - **Embedded**: Plugin backend injected via `sys._pymolrs_backend`
+//! - **Embedded**: Plugin backend injected via `sys._patinae_backend`
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
@@ -18,16 +18,16 @@ pub mod mol;
 pub mod selecting;
 pub mod settings;
 
-pub use error::{PymolError, SelectionError};
+pub use error::{PatinaeError, SelectionError};
 pub use mol::{PyAtom, PyBond, PyCoordSet, PyElement, PyObjectMolecule};
 pub use color::PyColor;
 pub use selecting::PySelectionResult;
 
 /// Python module initialization
 #[pymodule]
-fn _pymol_rs(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _patinae(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register exception types
-    m.add("PymolError", py.get_type::<error::PymolError>())?;
+    m.add("PatinaeError", py.get_type::<error::PatinaeError>())?;
     m.add("SelectionError", py.get_type::<error::SelectionError>())?;
 
     // Register main types

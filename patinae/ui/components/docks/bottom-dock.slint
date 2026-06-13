@@ -1,0 +1,38 @@
+import { Theme } from "../../theme.slint";
+import { LayoutState } from "../../states/layout-state.slint";
+import { PluginState } from "../../states/plugin-state.slint";
+import { DockTabBar } from "../panels/dock-tab-bar.slint";
+import { SequenceBar } from "../panels/sequence-bar.slint";
+import { MoviePanel } from "../panels/movie-panel.slint";
+import { PluginPanelView } from "../panels/plugin-panel-view.slint";
+
+// Bottom dock — hosts tabbed panels (Sequence, Movie).
+// Hides automatically when toggled off via sidebar.
+//
+// IMPORTANT: tab-body components (SequenceBar, MoviePanel) are gated on
+// `bottom-dock-visible` AS WELL AS the active-tab discriminant. Without
+// that extra gate, `SequenceBar` (active-tab=0 by default) instantiates
+// its entire `for chain ... for residue ...` subtree even when the dock
+// is hidden — on a 7KP3-sized model that's tens of thousands of Slint
+// elements walked per frame, costing ~18 ms of scene-graph time.
+export component BottomDock inherits Rectangle {
+    background: Theme.bg-panel;
+
+    VerticalLayout {
+        DockTabBar {}
+
+        if LayoutState.bottom-dock-visible && !LayoutState.empty-mode && !PluginState.bottom-visible && LayoutState.bottom-active-tab == 0: SequenceBar {
+            vertical-stretch: 1;
+        }
+
+        if LayoutState.bottom-dock-visible && !LayoutState.empty-mode && !PluginState.bottom-visible && LayoutState.bottom-active-tab == 1: MoviePanel {
+            vertical-stretch: 1;
+        }
+
+        if LayoutState.bottom-dock-visible && PluginState.bottom-visible: PluginPanelView {
+            vertical-stretch: 1;
+            panel-id: PluginState.active-bottom-panel-id;
+            controls: PluginState.active-bottom-controls;
+        }
+    }
+}

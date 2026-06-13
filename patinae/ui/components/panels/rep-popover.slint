@@ -1,0 +1,594 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ObjectsState } from "../../states/objects-state.slint";
+
+// ── Section label ──────────────────────────────────────────────────
+
+component SectionLabel inherits Text {
+    color: Theme.text-ghost;
+    font-size: Tokens.font-xs;
+    font-weight: 500;
+    letter-spacing: 1.1px;
+    vertical-alignment: center;
+    height: 14px;
+}
+
+// ── Rep toggle button ──────────────────────────────────────────────
+
+component RepToggle inherits Rectangle {
+    in property <string> rep-id;
+    in property <bool> rep-active;
+    in property <string> label;
+    in property <bool> disabled: false;
+    in property <string> target;
+
+    property <bool> active: !root.disabled && root.rep-active;
+    out property <color> tint: root.disabled ? Theme.text-ghost : root.active ? Theme.cyan : rep-touch.has-hover ? Theme.text : Theme.text-dim;
+
+    horizontal-stretch: 1;
+    preferred-width: 0px;
+    min-width: 0px;
+    height: 36px;
+    border-radius: Tokens.radius-sm;
+    border-width: root.active ? 1px : Tokens.hairline;
+    border-color: root.disabled ? Theme.line : root.active ? Theme.cyan : rep-touch.has-hover ? Theme.line-strong : Theme.line;
+    background: root.disabled ? transparent : root.active ? Theme.cyan.with-alpha(0.12) : rep-touch.has-hover ? Theme.bg-inset : Theme.bg-raised;
+    opacity: root.disabled ? 0.4 : 1.0;
+
+    // Icon area (10×10, centered horizontally, top-aligned)
+    Rectangle {
+        x: (parent.width - 10px) / 2;
+        y: 5px;
+        width: 10px;
+        height: 10px;
+        @children
+    }
+
+    Text {
+        y: 18px;
+        width: 100%;
+        height: 16px;
+        text: root.label;
+        color: root.tint;
+        font-size: Tokens.font-sm;
+        font-weight: root.active ? 600 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    rep-touch := TouchArea {
+        enabled: !root.disabled;
+        changed has-hover => {
+            if self.has-hover {
+                ObjectsState.popover-cmd-preview = root.active ? "hide " + root.rep-id + ", " + root.target : "show " + root.rep-id + ", " + root.target;
+            }
+        }
+        clicked => {
+            ObjectsState.popover-cmd-preview = root.active ? "hide " + root.rep-id + ", " + root.target : "show " + root.rep-id + ", " + root.target;
+            ObjectsState.popover-execute();
+        }
+    }
+}
+
+// ── Preset card ────────────────────────────────────────────────────
+
+component PresetCard inherits Rectangle {
+    in property <string> show-cmd;
+    in property <string> hide-cmd;
+    in property <string> label;
+    in property <bool> preset-active;
+    in property <bool> disabled: false;
+
+    property <bool> active: !root.disabled && root.preset-active;
+    out property <color> tint: root.disabled ? Theme.text-ghost : root.active ? Theme.cyan : card-touch.has-hover ? Theme.text : Theme.text-dim;
+
+    height: 38px;
+    horizontal-stretch: 1;
+    preferred-width: 0px;
+    min-width: 0px;
+    border-radius: Tokens.radius-sm;
+    border-width: root.active ? 1px : Tokens.hairline;
+    border-color: root.disabled ? Theme.line : root.active ? Theme.cyan : card-touch.has-hover ? Theme.line-strong : Theme.line;
+    background: root.disabled ? transparent : root.active ? Theme.cyan.with-alpha(0.12) : card-touch.has-hover ? Theme.bg-inset : Theme.bg-raised;
+    opacity: root.disabled ? 0.4 : 1.0;
+
+    // Icon area (12×12, centered horizontally)
+    Rectangle {
+        x: (parent.width - 12px) / 2;
+        y: 4px;
+        width: 12px;
+        height: 12px;
+        @children
+    }
+
+    Text {
+        y: 19px;
+        width: 100%;
+        height: 16px;
+        text: root.label;
+        color: root.tint;
+        font-size: Tokens.font-sm;
+        font-weight: root.active ? 600 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    card-touch := TouchArea {
+        enabled: !root.disabled;
+        changed has-hover => {
+            if self.has-hover {
+                ObjectsState.popover-cmd-preview = root.active ? root.hide-cmd : root.show-cmd;
+            }
+        }
+        clicked => {
+            ObjectsState.popover-cmd-preview = root.active ? root.hide-cmd : root.show-cmd;
+            ObjectsState.popover-execute();
+        }
+    }
+}
+
+// ── Transparency slider ────────────────────────────────────────────
+
+component TransparencySlider inherits Rectangle {
+    in property <string> label;
+    in property <string> setting-name;
+    in property <string> target;
+    in property <float> initial-value: 0.0;
+
+    property <float> value: root.initial-value;
+    property <bool> enabled: root.initial-value > 0.0;
+    property <bool> dragging: false;
+
+    height: 22px;
+
+    HorizontalLayout {
+        spacing: Tokens.space-sm;
+
+        Text {
+            width: 44px;
+            text: root.label;
+            color: root.enabled ? Theme.text-dim : Theme.text-ghost;
+            font-size: Tokens.font-sm;
+            vertical-alignment: center;
+        }
+
+        // Checkbox
+        Rectangle {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: root.enabled ? Theme.cyan : Theme.text-ghost;
+            background: root.enabled ? Theme.cyan.with-alpha(0.2) : transparent;
+
+            // Checkmark
+            if root.enabled: Path {
+                width: 8px;
+                height: 8px;
+                x: 2px;
+                y: 2px;
+                commands: "M 1 4 L 3.5 6.5 L 7 2";
+                stroke: Theme.cyan;
+                stroke-width: 1.5px;
+            }
+
+            checkbox-touch := TouchArea {
+                clicked => {
+                    if root.enabled {
+                        // Unset: disable and reset to global
+                        root.enabled = false;
+                        ObjectsState.popover-cmd-preview = "unset " + root.setting-name + ", " + root.target;
+                        ObjectsState.popover-execute();
+                    } else {
+                        // Enable: set current slider value
+                        root.enabled = true;
+                        ObjectsState.popover-cmd-preview = "set " + root.setting-name + ", " + round(root.value * 100) / 100 + ", " + root.target;
+                        ObjectsState.popover-execute();
+                    }
+                }
+            }
+        }
+
+        // Track
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 12px;
+            border-radius: 6px;
+            background: Theme.bg-inset;
+            opacity: root.enabled ? 1.0 : 0.35;
+
+            // Fill
+            Rectangle {
+                x: 0px;
+                width: parent.width * root.value;
+                height: parent.height;
+                border-radius: parent.border-radius;
+                background: Theme.cyan.with-alpha(0.3 + 0.5 * root.value);
+            }
+
+            // Thumb
+            Rectangle {
+                x: (parent.width - 10px) * root.value;
+                width: 10px;
+                height: 10px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 5px;
+                background: slider-touch.has-hover || root.dragging ? Theme.cyan : Theme.text-muted;
+            }
+
+            slider-touch := TouchArea {
+                enabled: root.enabled;
+                moved => {
+                    if self.pressed {
+                        root.dragging = true;
+                        root.value = clamp(self.mouse-x / parent.width, 0.0, 1.0);
+                        ObjectsState.popover-cmd-preview = "set " + root.setting-name + ", " + round(root.value * 100) / 100 + ", " + root.target;
+                    }
+                }
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        root.dragging = true;
+                        root.value = clamp(self.mouse-x / parent.width, 0.0, 1.0);
+                        ObjectsState.popover-cmd-preview = "set " + root.setting-name + ", " + round(root.value * 100) / 100 + ", " + root.target;
+                    }
+                    if event.kind == PointerEventKind.up {
+                        root.dragging = false;
+                        ObjectsState.popover-cmd-preview = "set " + root.setting-name + ", " + round(root.value * 100) / 100 + ", " + root.target;
+                        ObjectsState.popover-execute();
+                    }
+                }
+            }
+        }
+
+        // Value display
+        Text {
+            width: 28px;
+            text: root.enabled ? round(root.value * 100) + "%" : "—";
+            color: root.enabled ? Theme.cyan : Theme.text-ghost;
+            font-size: Tokens.font-xs;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+    }
+}
+
+// ── Rep popover ────────────────────────────────────────────────────
+
+export component RepPopover inherits Rectangle {
+    height: inner.preferred-height;
+    border-radius: Tokens.radius-md;
+    background: Theme.bg-card;
+    border-width: Tokens.hairline;
+    border-color: Theme.line;
+
+    // Block empty-surface clicks from falling through to the dismiss backdrop.
+    TouchArea {}
+
+    property <string> target: ObjectsState.popover-target;
+    // True when the popover targets a biopolymer subchain (or object-level).
+    property <bool> is-bio: ObjectsState.popover-subchain-kind == "" || ObjectsState.popover-subchain-kind == "biopolymer";
+    // True when the popover targets an entire object (not a specific subchain).
+    property <bool> is-obj: ObjectsState.popover-subchain-kind == "";
+
+    inner := VerticalLayout {
+        padding: Tokens.space-sm;
+        spacing: Tokens.space-sm;
+
+        // Header
+        HorizontalLayout {
+            alignment: space-between;
+            height: 18px;
+            padding-left: Tokens.space-xs;
+            padding-right: Tokens.space-xs;
+
+            Text {
+                text: "SHOW / HIDE";
+                color: Theme.text-muted;
+                font-size: Tokens.font-xs;
+                font-weight: 500;
+                letter-spacing: 1.1px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: ObjectsState.popover-display-label;
+                color: Theme.text-ghost;
+                font-size: Tokens.font-xs;
+                vertical-alignment: center;
+            }
+        }
+
+        // ── REPRESENTATIONS ──
+        SectionLabel {
+            text: "REPRESENTATIONS";
+        }
+
+        VerticalLayout {
+            spacing: 2px;
+
+            HorizontalLayout {
+                spacing: 2px;
+
+                // Lines — zigzag wireframe
+                RepToggle {
+                    rep-id: "lines"; rep-active: ObjectsState.popover-rep-lines;
+                    label: "lines"; target: root.target;
+                    Path {
+                        width: 10px; height: 10px;
+                        commands: "M 1 8 L 5 2 L 9 8";
+                        stroke: parent.tint; stroke-width: 1px;
+                    }
+                }
+
+                // Sticks — thick zigzag
+                RepToggle {
+                    rep-id: "sticks"; rep-active: ObjectsState.popover-rep-sticks;
+                    label: "sticks"; target: root.target;
+                    Path {
+                        width: 10px; height: 10px;
+                        commands: "M 1 8 L 5 2 L 9 8";
+                        stroke: parent.tint; stroke-width: 2.5px;
+                    }
+                }
+
+                // Spheres — filled circle
+                RepToggle {
+                    rep-id: "spheres"; rep-active: ObjectsState.popover-rep-spheres;
+                    label: "spheres"; target: root.target;
+                    Rectangle { x: 1px; y: 1px; width: 8px; height: 8px; border-radius: 4px; background: parent.tint; }
+                }
+
+                // Cartoon — thick S-curve (helix ribbon)
+                RepToggle {
+                    rep-id: "cartoon"; rep-active: ObjectsState.popover-rep-cartoon;
+                    label: "cartoon"; target: root.target; disabled: !root.is-bio;
+                    Path {
+                        width: 10px; height: 10px;
+                        commands: "M 0 7 Q 2.5 0, 5 5 Q 7.5 10, 10 3";
+                        stroke: parent.tint; stroke-width: 2px;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 2px;
+
+                // Ribbon — thin S-curve trace
+                RepToggle {
+                    rep-id: "ribbon"; rep-active: ObjectsState.popover-rep-ribbon;
+                    label: "ribbon"; target: root.target; disabled: !root.is-bio;
+                    Path {
+                        width: 10px; height: 10px;
+                        commands: "M 0 7 Q 2.5 1, 5 5 Q 7.5 9, 10 3";
+                        stroke: parent.tint; stroke-width: 1px;
+                    }
+                }
+
+                // Surface — filled pentagon
+                RepToggle {
+                    rep-id: "surface"; rep-active: ObjectsState.popover-rep-surface;
+                    label: "surface"; target: root.target;
+                    Path {
+                        width: 10px; height: 10px;
+                        commands: "M 5 0.5 L 9.3 3.6 L 7.6 8.6 L 2.4 8.6 L 0.7 3.6 Z";
+                        fill: parent.tint;
+                    }
+                }
+
+                // Mesh — pentagon with diagonals
+                RepToggle {
+                    rep-id: "mesh"; rep-active: ObjectsState.popover-rep-mesh;
+                    label: "mesh"; target: root.target;
+                    Path {
+                        width: 10px; height: 10px;
+                        commands: "M 5 0.5 L 9.3 3.6 L 7.6 8.6 L 2.4 8.6 L 0.7 3.6 Z M 5 0.5 L 2.4 8.6 M 5 0.5 L 7.6 8.6";
+                        stroke: parent.tint; stroke-width: 0.8px;
+                    }
+                }
+
+                // Dots — pentagon vertices
+                RepToggle {
+                    rep-id: "dots"; rep-active: ObjectsState.popover-rep-dots;
+                    label: "dots"; target: root.target;
+                    Rectangle { x: 4px;   y: -0.5px; width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
+                    Rectangle { x: 8.3px; y: 2.6px;  width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
+                    Rectangle { x: 6.6px; y: 7.6px;  width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
+                    Rectangle { x: 1.4px; y: 7.6px;  width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
+                    Rectangle { x: -0.3px; y: 2.6px; width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
+                }
+            }
+        }
+
+        // Presets section — only for biopolymer chains or object-level
+        if root.is-bio: Rectangle {
+            height: Tokens.hairline;
+            background: Theme.line;
+        }
+
+        if root.is-bio: SectionLabel {
+            text: "PRESETS";
+        }
+
+        if root.is-bio: VerticalLayout {
+            spacing: 2px;
+
+            HorizontalLayout {
+                spacing: 2px;
+
+                // Sidechain — CA atom circle + Y-shaped sticks above
+                PresetCard {
+                    label: "sidechain";
+                    preset-active: ObjectsState.popover-preset-sidechain;
+                    show-cmd: "show sticks, " + root.target + " and (sidechain or name CA)";
+                    hide-cmd: "hide sticks, " + root.target + " and (sidechain or name CA)";
+                    // Y-shaped sticks
+                    Path {
+                        width: 12px; height: 12px;
+                        commands: "M 3.5 1 L 6 3.5 L 8.5 1 M 6 3.5 L 6 9";
+                        stroke: parent.tint; stroke-width: 1.2px;
+                    }
+                    // CA atom dot
+                    Rectangle { x: 4px; y: 9.5px; width: 4px; height: 4px; border-radius: 2px; background: parent.tint; }
+                }
+
+                // Backbone — zigzag chain trace
+                PresetCard {
+                    label: "backbone";
+                    preset-active: ObjectsState.popover-preset-backbone;
+                    show-cmd: "show sticks, " + root.target + " and backbone";
+                    hide-cmd: "hide sticks, " + root.target + " and backbone";
+                    Path {
+                        width: 12px; height: 12px;
+                        commands: "M 0 7 L 3 3 L 6 7 L 9 3 L 12 7";
+                        stroke: parent.tint; stroke-width: 1.5px;
+                    }
+                }
+            }
+
+            // Subset presets — only at object level (not for individual chains)
+            if root.is-obj: HorizontalLayout {
+                spacing: 2px;
+
+                // Organic — hexagon (benzene ring)
+                PresetCard {
+                    label: "organic";
+                    preset-active: ObjectsState.popover-preset-organic;
+                    show-cmd: "show sticks, " + root.target + " and organic";
+                    hide-cmd: "hide sticks, " + root.target + " and organic";
+                    Path {
+                        width: 12px; height: 12px;
+                        commands: "M 3 1 L 9 1 L 12 6 L 9 11 L 3 11 L 0 6 Z";
+                        stroke: parent.tint; stroke-width: 1px;
+                    }
+                }
+
+                // Solvent — three water dots
+                PresetCard {
+                    label: "solvent";
+                    preset-active: ObjectsState.popover-preset-solvent;
+                    show-cmd: "show dots, " + root.target + " and solvent";
+                    hide-cmd: "hide dots, " + root.target + " and solvent";
+                    Rectangle { x: 3.5px; y: 1px; width: 3px; height: 3px; border-radius: 1.5px; background: parent.tint; }
+                    Rectangle { x: 0px;   y: 7px; width: 3px; height: 3px; border-radius: 1.5px; background: parent.tint; }
+                    Rectangle { x: 7px;   y: 7px; width: 3px; height: 3px; border-radius: 1.5px; background: parent.tint; }
+                }
+            }
+
+            if root.is-obj: HorizontalLayout {
+                spacing: 2px;
+
+                // Inorganic — diamond shape
+                PresetCard {
+                    label: "inorganic";
+                    preset-active: ObjectsState.popover-preset-inorganic;
+                    show-cmd: "show spheres, " + root.target + " and inorganic";
+                    hide-cmd: "hide spheres, " + root.target + " and inorganic";
+                    Path {
+                        width: 12px; height: 12px;
+                        commands: "M 6 0 L 12 6 L 6 12 L 0 6 Z";
+                        stroke: parent.tint; stroke-width: 1px;
+                    }
+                }
+
+                // Polymer — chain of 3 connected circles
+                PresetCard {
+                    label: "polymer";
+                    preset-active: ObjectsState.popover-preset-polymer;
+                    show-cmd: "show sticks, " + root.target + " and polymer";
+                    hide-cmd: "hide sticks, " + root.target + " and polymer";
+                    // Connecting lines
+                    Rectangle { x: 3px; y: 5.5px; width: 3px; height: 1px; background: parent.tint; }
+                    Rectangle { x: 8px; y: 5.5px; width: 3px; height: 1px; background: parent.tint; }
+                    // Three monomer circles
+                    Rectangle { x: 0px; y: 3px; width: 4px; height: 4px; border-radius: 2px; border-width: 1px; border-color: parent.tint; }
+                    Rectangle { x: 5px; y: 3px; width: 4px; height: 4px; border-radius: 2px; border-width: 1px; border-color: parent.tint; }
+                    Rectangle { x: 10px; y: 3px; width: 4px; height: 4px; border-radius: 2px; border-width: 1px; border-color: parent.tint; }
+                }
+            }
+        }
+
+        // ── TRANSPARENCY ──
+        Rectangle {
+            height: Tokens.hairline;
+            background: Theme.line;
+        }
+
+        SectionLabel {
+            text: "TRANSPARENCY";
+        }
+
+        VerticalLayout {
+            spacing: 4px;
+
+            TransparencySlider {
+                label: "sticks";
+                setting-name: "stick_transparency";
+                target: root.target;
+                initial-value: ObjectsState.popover-transparency-sticks;
+            }
+            TransparencySlider {
+                label: "spheres";
+                setting-name: "sphere_transparency";
+                target: root.target;
+                initial-value: ObjectsState.popover-transparency-spheres;
+            }
+            TransparencySlider {
+                label: "cartoon";
+                setting-name: "cartoon_transparency";
+                target: root.target;
+                initial-value: ObjectsState.popover-transparency-cartoon;
+            }
+            TransparencySlider {
+                label: "surface";
+                setting-name: "transparency";
+                target: root.target;
+                initial-value: ObjectsState.popover-transparency-surface;
+            }
+        }
+
+        // Command preview footer
+        HorizontalLayout {
+            height: 22px;
+            spacing: 0px;
+
+            // CMD badge
+            Rectangle {
+                width: cmd-label.preferred-width + 2 * Tokens.space-sm;
+                height: parent.height;
+                border-radius: Tokens.radius-sm;
+                background: Theme.bg-raised;
+
+                cmd-label := Text {
+                    width: 100%;
+                    height: 100%;
+                    text: "CMD";
+                    color: Theme.text-ghost;
+                    font-size: Tokens.font-sm;
+                    font-weight: 600;
+                    letter-spacing: 0.8px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Command text
+            Rectangle {
+                horizontal-stretch: 1;
+                height: parent.height;
+                border-radius: Tokens.radius-sm;
+                background: Theme.bg-inset;
+
+                Text {
+                    x: Tokens.space-sm;
+                    width: parent.width - 2 * Tokens.space-sm;
+                    height: 100%;
+                    text: ObjectsState.popover-cmd-preview;
+                    color: Theme.text-muted;
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}

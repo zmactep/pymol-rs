@@ -1,132 +1,211 @@
 <p align="center">
-  <img src="images/pymol-rs.png" alt="PyMOL-RS" width="200">
+  <img src="images/patinae.png" alt="Patinae" width="200">
 </p>
 
-<h1 align="center">PyMOL-RS</h1>
+<h1 align="center">Patinae</h1>
 
 <p align="center">
-  <strong>PyMOL, reimagined in Rust.</strong><br>
-  Same power. Modern core. Zero legacy baggage.
+  <strong>Familiar power. Modern core. No legacy baggage.</strong><br>
+  A fast, programmable molecular viewer for research, scripting, and the web.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/rust-1.70%2B-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/status-release-green.svg" alt="Status">
+  <img src="https://img.shields.io/badge/version-0.4.0-green.svg" alt="Version 0.4.0">
+  <img src="https://img.shields.io/badge/GPU-WebGPU-purple.svg" alt="WebGPU">
 </p>
 
 ---
 
-## Why?
+## What is Patinae?
 
-PyMOL is the gold standard for molecular visualization — but it's 25 years of C/C++/Python accumulated into a monolith. PyMOL-RS started as a Rust port of the original PyMOL, carrying over many of its core algorithms and concepts, but has since evolved with its own architectural decisions. It aims to keep the familiar command language and workflow while replacing the engine:
+Patinae is a modern molecular visualization toolkit for interactive research,
+scripting, structural analysis, publication images, notebooks, and embedding.
 
-| | PyMOL (classic) | PyMOL-RS |
-|---|---|---|
-| **Language** | C / C++ / Python | Rust + wgpu |
-| **Rendering** | OpenGL 2.x fixed pipeline | WebGPU (wgpu), GPU impostors |
-| **Architecture** | Monolithic | Independent crates |
-| **Python** | Embedded CPython | PyO3 bindings (optional) |
-| **Memory safety** | Manual | Guaranteed at compile time |
-| **Cross-platform** | Build scripts per OS | Single `cargo build` |
+It is built around a responsive GPU-first viewer, a command-driven workflow, and
+extension points for native, Python, and web applications. The aim is to keep the
+power of a full molecular workstation while making the everyday experience fast,
+light, and comfortable.
+
+## Formerly PyMOL-RS
+
+Patinae was called PyMOL-RS through the 0.3.x releases. The project started as
+a GPU-first remake experiment: keep the familiar molecular command workflow,
+but rebuild the viewer as a modern, independent application.
+
+By 0.4.0, the project had outgrown the remake label. The renderer, command
+runtime, plugin host, desktop UI, Python surface, packaging, and web viewer were
+redesigned into an independent application and toolkit. The rename to Patinae
+marks that shift.
+
+Patinae is not an official PyMOL project or a wrapper around PyMOL source code.
+It remains compatible with familiar command and session workflows where that is
+useful for users, but the implementation is its own codebase and rendering
+stack.
+
+## Highlights
+
+| Area | Design |
+| --- | --- |
+| **Rendering** | WebGPU via `wgpu`, GPU impostors, compute-heavy pipelines, native and web targets |
+| **Workflow** | Interactive command line, object panel, sequence viewer, picking, measurements, sessions |
+| **Extensibility** | Rust plugin SDK, Python plugin, Python package, reusable crates |
+| **Architecture** | Independent `patinae-*` crates with explicit renderer, scene, command, IO, session, and plugin boundaries |
+| **Portability** | Native desktop app, Python/Jupyter package, and WebAssembly/WebGPU viewer |
 
 ## Quick Start
 
 ### Pre-built binaries
 
-Grab the latest release for your platform from [Releases](https://github.com/zmactep/pymol-rs/releases/latest).
+Download the latest release for your platform from
+[Releases](https://github.com/zmactep/pymol-rs/releases/latest).
 
-**Standalone executable** — no Python needed:
+Standalone executable:
+
 ```bash
-pymol-rs protein.pdb
+patinae protein.pdb
 ```
 
-**Python wheel** — includes both `pymol_rs` module and Jupyter plugin:
+Python package:
+
 ```bash
-pip install pymol_rs
+pip install patinae
 ```
 
 ### Build from source
 
-Prerequisites: [Rust](https://rustup.rs/) (cargo), [uv](https://docs.astral.sh/uv/) (Python wheel), [Node.js](https://nodejs.org/) (web version & Jupyter widget). Only cargo is required for the core build — uv and Node.js are needed only for the components listed below.
+Prerequisites:
+
+- [Rust](https://rustup.rs/) for the core workspace and desktop app.
+- [uv](https://docs.astral.sh/uv/) for Python package builds.
+- [Node.js](https://nodejs.org/) for the web viewer and notebook widget assets.
 
 ```bash
 git clone https://github.com/zmactep/pymol-rs
 cd pymol-rs
-make release && make run
+make patinae
+./target/release/patinae
 ```
 
 | Target | Command | Requires |
-|--------|---------|----------|
-| Release build | `make release` | cargo |
-| Debug build | `make debug` | cargo |
-| Plugins | `make plugins` | cargo |
-| Python wheel | `make python` | cargo, uv |
-| Web widget | `make web-build` | cargo, npm |
+| --- | --- | --- |
+| Patinae release build | `make patinae` | cargo |
+| Patinae dev run | `make patinae-dev` | cargo |
+| Reference plugins | `make plugins` | cargo |
+| Python wheel | `make python-release` | cargo, uv |
+| Web viewer | `make web-build` | cargo, npm |
+| Rust check | `make check` | cargo |
 | Tests | `make test` | cargo |
 
-## Features
+### Development verification
 
-**Formats:** PDB · mmCIF · bCIF · MOL2 · SDF/MOL · XYZ · GRO · CCP4/MRC (+ gzip)
+Run the baseline checks locally before opening a pull request:
 
-**Representations:** Spheres (GPU impostors) · Sticks · Lines · Cartoon · Ribbon · Surface (SAS/SES/VdW) · Mesh · Dots · Labels · Isomesh · Isosurface · Isodot
-
-**Selection language** — full PyMOL-compatible syntax:
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace
+cargo test --workspace
+cargo check --manifest-path python/Cargo.toml
+rustup target add wasm32-unknown-unknown
+cargo check --manifest-path web/Cargo.toml --target wasm32-unknown-unknown
 ```
+
+Additional compliance tools are useful when installed locally:
+`cargo audit` or `cargo deny` for dependency policy, `cargo hack` for feature
+matrices, `cargo udeps` for unused dependencies, and Miri for targeted
+unsafe-code tests.
+
+## Molecular Capabilities
+
+**Formats:** PDB, mmCIF, bCIF, MOL2, SDF/MOL, XYZ, GRO, CCP4/MRC, trajectory
+formats such as XTC/TRR, and gzip-compressed inputs.
+
+**Representations:** Spheres, sticks, lines, cartoon, ribbon, surface
+(SAS/SES/VdW), mesh, dots, labels, isomesh, isosurface, and isodot.
+
+**Selections:** atom, residue, chain, object, proximity, polymer, solvent, and
+stored-selection expressions with a familiar molecular selection syntax.
+
+```text
 chain A and name CA
 byres around 5 ligand
 polymer and not solvent
 ```
 
-**Commands** — familiar PyMOL verbs with tab completion: `load`, `show`, `hide`, `color`, `select`, `zoom`, `center`, `orient`, `png`, `ray`, …
+**Commands:** interactive verbs with completion and scriptability, including
+`load`, `fetch`, `show`, `hide`, `color`, `select`, `zoom`, `center`, `orient`,
+`png`, `ray`, `align`, `cealign`, `symexp`, `isomesh`, `isosurface`, and
+`isodot`.
 
 **Structural analysis:**
-- Alignment — Kabsch superposition & CE structural alignment
-- Measurements — distance, angle, dihedral with visual feedback
-- Crystallographic symmetry — `symexp` with all 230 space groups
-- Secondary structure — `dss` assignment from geometry
-- Electron density maps — CCP4/MRC loading with `isomesh`, `isosurface`, `isodot` contouring
 
-**Sessions** — save and load your sessions with high-efficiency `.prs` file format or use your old PyMOL sessions with `.pse` parser.
+- Kabsch superposition and CE structural alignment.
+- Distance, angle, and dihedral measurements with visual feedback.
+- Crystallographic symmetry expansion with all 230 space groups.
+- Secondary-structure assignment from geometry.
+- Electron density map loading and contouring.
 
-**Ray tracing** — offline GPU ray tracing with BVH acceleration, shadows, and transparency (via the `raytracer` plugin).
+**Sessions:** save and load Patinae `.prs` sessions and import legacy `.pse`
+sessions for interoperability.
 
-**Jupyter widget** — interactive 3D viewer for Jupyter notebooks via [anywidget](https://anywidget.dev/), with full command execution and Python API integration.
+**Ray tracing:** the `raytracer` plugin provides offline GPU ray tracing with
+BVH acceleration, shadows, transparency, and edge detection.
 
-**GUI** — egui-based interface with command line, object panel, sequence viewer, mouse picking, and viewport:
+## Native Desktop App
+
+The native Patinae app is a desktop interface around the same
+renderer, scene model, command runtime, and plugin host used by the rest of the
+workspace. It includes a command line, object panel, sequence viewer, plugin
+panels, mouse picking, native file workflows, and a GPU viewport.
 
 <p align="center">
-  <img src="images/interface.png" alt="Interface" width="800">
+  <img src="images/interface.png" alt="Patinae interface" width="800">
 </p>
 
-## Python API
+## Python And Notebooks
+
+The `patinae` Python package exposes a familiar command object for scripting,
+automation, and notebook workflows.
 
 ```python
-from pymol_rs import cmd
+from patinae import cmd
 
 cmd.load("protein.pdb")
 cmd.show("cartoon")
 cmd.color("green", "chain A")
 cmd.select("site", "byres around 5 ligand")
-cmd.png("output.png", width=1920, height=1080)
-
-# Extend with custom commands
-def highlight(selection):
-    cmd.color("yellow", selection)
-
-cmd.extend("highlight", highlight)
+site_atoms = cmd.count_atoms("site")
+cmd.do("set ambient, 0.8")
 ```
 
-## Web Version
+The package also includes an anywidget-based Jupyter viewer:
 
-PyMOL-RS runs in the browser via WebAssembly + WebGPU. The viewer is published as an npm package `@pymol-rs/viewer` and can be embedded in any web page.
+```python
+from patinae.widget import Viewer
 
-**JavaScript API:**
+view = Viewer()
+view.show()
+
+cmd = view.get_cmd()
+cmd.fetch("1CRN")
+cmd.show("cartoon")
+cmd.color("green", "chain A")
+```
+
+## Web Viewer
+
+Patinae runs in the browser through WebAssembly and WebGPU. The web viewer is
+published as `@patinae/viewer` and can be embedded into applications or static
+pages.
+
 ```html
-<script type="module">
-  import { PyMolRSViewer } from "@pymol-rs/viewer";
+<div id="viewer" style="width: 800px; height: 600px"></div>
 
-  const viewer = new PyMolRSViewer(document.getElementById("viewer"));
+<script type="module">
+  import { PatinaeViewer } from "@patinae/viewer";
+
+  const viewer = new PatinaeViewer(document.getElementById("viewer"));
   await viewer.init();
 
   await viewer.loadUrl("https://models.rcsb.org/1IGT.bcif.gz", {
@@ -139,107 +218,87 @@ PyMOL-RS runs in the browser via WebAssembly + WebGPU. The viewer is published a
 </script>
 ```
 
-**Web Component** — register `<pymol-rs-viewer>` as a custom element:
+The package can also register a custom element:
+
 ```html
 <script type="module">
-  import { registerElement } from "@pymol-rs/viewer";
+  import { registerElement } from "@patinae/viewer";
   registerElement();
 </script>
 
-<pymol-rs-viewer
+<patinae-viewer
   src="https://models.rcsb.org/1IGT.bcif.gz"
-  panels="repl,objects,sequence"
   command="show cartoon; color green, chain A">
-</pymol-rs-viewer>
+</patinae-viewer>
 ```
 
 ## Architecture
 
-```
-pymol-rs/
-├── pymol-mol         Core data: Atom, Bond, Molecule
-├── pymol-io          Format parsers & writers
-├── pymol-select      Selection language (parser + evaluator)
-├── pymol-color       Colors, schemes, ramps
-├── pymol-settings    Configuration system
-├── pymol-algos       Molecular algorithms
-├── pymol-render      wgpu rendering engine
-├── pymol-scene       Viewer, camera, scene graph
-├── pymol-session     Sessions save and load (`.prs` and `.pse`)
-├── pymol-cmd         Command parser & executor
-├── pymol-framework   Messaging system and core reusable components
-├── pymol-gui         GUI (egui)
-└── pymol-plugin      Plugin system
+```text
+patinae/
+├── patinae                    Native desktop application
+├── crates/patinae-mol         Molecular data model: atoms, bonds, molecules, coordinate sets
+├── crates/patinae-io          Structure, map, session, fetch, and trajectory IO
+├── crates/patinae-select      Selection parser and evaluator
+├── crates/patinae-color       Named colors, palettes, schemes, and ramps
+├── crates/patinae-settings    Configuration and settings system
+├── crates/patinae-algos       Alignment, symmetry, sequence, and analysis algorithms
+├── crates/patinae-render      WebGPU renderer
+├── crates/patinae-scene       Viewer state, scene graph, camera, input, and render bridge
+├── crates/patinae-session     `.prs` and `.pse` session support
+├── crates/patinae-cmd         Command parser, executor, and command registry
+├── crates/patinae-framework   Shared app messaging and component infrastructure
+├── crates/patinae-plugin      Plugin SDK
+├── crates/patinae-plugin-host Runtime plugin host for front ends
+├── plugins                    Reference Rust plugins
+├── python                     Python package and Jupyter widget
+└── web                        WebAssembly/WebGPU viewer package
 ```
 
-Each crate is independently usable. Want just the selection parser? `pymol-select`. Need to read PDB files in your pipeline? `pymol-io` + `pymol-mol`. No GUI tax.
+Each crate is independently usable. Need only the selection parser? Use
+`patinae-select`. Need molecular file parsing in a Rust pipeline? Use
+`patinae-io` and `patinae-mol`. Need a viewer? Compose the scene, renderer,
+command runtime, and front end that fit your application.
 
 ## Plugin System
 
-PyMOL-RS supports a dynamic plugin architecture that lets you extend the application with native Rust shared libraries. Plugins are loaded at startup from `~/.pymol-rs/plugins/` and can register new commands, hook into the command pipeline, and interact with the viewer through the `PluginRegistrar` API.
+Patinae supports native Rust plugins loaded at startup from
+`~/.patinae/plugins/` or bundled beside the application. Plugins can register
+commands, provide panels, hook into the command pipeline, and interact with the
+viewer through the Patinae plugin APIs.
 
-Plugins are compiled as dynamic libraries (`.dylib` on macOS, `.so` on Linux, `.dll` on Windows). At startup, PyMOL-RS scans the plugin directory, loads each library, and calls its registration entry point. The plugin receives a `PluginRegistrar` that provides capabilities for:
-
-- Registering new commands accessible from the PyMOL-RS command line
-- Routing command execution through the `pymol-cmd` dispatcher
-- Interacting with the viewer state through the plugin backend
-
-### Reference Plugins
-
-Three reference plugins are included in the `plugins/` directory:
+Plugins are compiled as dynamic libraries (`.dylib` on macOS, `.so` on Linux,
+`.dll` on Windows). The workspace includes reference plugins:
 
 | Plugin | Crate | Description |
-|--------|-------|-------------|
-| **raytracer** | `raytracer-plugin` | GPU ray tracing — BVH-accelerated compute shader pipeline with shadows, transparency, and edge detection |
-| **hello** | `hello-plugin` | Minimal example — registers a single command to demonstrate the plugin lifecycle |
+| --- | --- | --- |
+| **hello** | `hello-plugin` | Minimal plugin lifecycle and command-registration example |
+| **raytracer** | `raytracer-plugin` | GPU ray tracing with BVH acceleration, shadows, transparency, and edge detection |
 | **ipc** | `ipc-plugin` | Inter-process communication plugin for external tool integration |
-| **python** | `python-plugin` | Embedded CPython interpreter via PyO3 — enables Python scripting inside the native binary |
+| **python** | `python-plugin` | Embedded CPython interpreter for scripting inside the native app |
 
-### Python Plugin
-
-<p align="center">
-  <img src="images/python-plugin.png" alt="Python plugin" width="800">
-</p>
-
-
-The `python-plugin` embeds a CPython interpreter directly into PyMOL-RS using [PyO3](https://pyo3.rs). This is separate from the standalone Python wheel (`pymol_rs`) — the plugin runs Python _inside_ the native application, allowing scripts to register commands and manipulate the scene without a separate process.
-
-The plugin consists of four modules:
-
-- **engine** — manages the embedded CPython interpreter lifecycle
-- **commands** — bridges Python-defined commands into the PyMOL-RS command system
-- **backend** — provides Python code with access to the viewer and scene state
-- **handler** — dispatches command execution between Rust and Python origins
-
-Python commands registered via `cmd.extend()` from within the embedded interpreter are routed through the same command dispatcher as native commands, with full tab completion and help support.
-
-### Building Plugins
+Build and stage the reference plugins:
 
 ```bash
 make plugins
 ```
 
-This builds all reference plugins and installs them to `~/.pymol-rs/plugins/`. The Python plugin requires a Python installation discoverable by PyO3:
+Install them into the user plugin directory:
 
 ```bash
-PYO3_PYTHON=$(python3 -c "import sys; print(sys.executable)") \
-    cargo build --release -p raytracer-plugin -p hello-plugin -p ipc-plugin -p python-plugin
+make plugins-install
 ```
 
-## Relationship with PyMOL
+### Embedded Python Plugin
 
-PyMOL-RS started as a direct Rust port of PyMOL, actively using algorithms from [pymol-open-source](https://github.com/schrodinger/pymol-open-source). Since then, the project has diverged substantially:
+<p align="center">
+  <img src="images/python-plugin.png" alt="Patinae Python plugin" width="800">
+</p>
 
-- **All molecular algorithms** (CE structural alignment, Kabsch superposition, sequence alignment, space group expansion, surface generation) have been **rewritten from original scientific papers** rather than transliterated from the PyMOL C code.
-- **Rendering** has been redesigned around GPU impostors and WebGPU compute pipelines — a fundamentally different approach from PyMOL's OpenGL-based rendering.
-- **What remains from PyMOL:** the DSS (secondary structure assignment) algorithm and the settings table used exclusively for `.pse` session import. PyMOL-RS uses its own settings system internally; the PyMOL settings table exists only to parse legacy session files.
-
-The project has deep respect for PyMOL's legacy and shares its Open Source spirit, but it follows an entirely different development path. Keeping the codebase free of direct PyMOL code borrowings is an explicit goal — new functionality is derived from primary sources (academic papers, specifications) rather than ported from the original C/C++ implementation.
+The `python-plugin` embeds CPython directly into the native application. It is
+separate from the standalone Python package: scripts run inside the desktop app
+and issue commands through the same dispatcher as native commands.
 
 ## License
 
 [BSD 3-Clause](LICENSE)
-
-## Acknowledgments
-
-Inspired by [PyMOL](https://pymol.org/), created by Warren Lyford DeLano. This is an independent reimplementation, not affiliated with Schrödinger, Inc.

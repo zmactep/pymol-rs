@@ -477,7 +477,7 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
     return false;
 }
 
-// Shade a hit point - PyMOL multi-light model
+// Shade a hit point with the classic multi-light model.
 // - Headlight (camera direction): Always active with 'direct' intensity, CASTS SHADOWS
 // - Positional lights (light, light2-light9): Use 'reflect' intensity, first casts shadows
 // - light_count controls number of positional lights (1 = none, 2+ = positional lights)
@@ -494,7 +494,7 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
     }
     
     // === FLAT LIGHTING for mode 3 with light_count = 1 ===
-    // PyMOL: light_count = 1 means "ambient only" - no directional lights
+    // light_count = 1 means ambient-only output with no directional lights.
     // For mode 3 (quantized), this produces clean single-color surfaces
     if uniforms.ray_trace_mode == 3u && uniforms.light_count == 1 {
         // Use boosted ambient (direct is already added to ambient on CPU when light_count < 2)
@@ -543,9 +543,9 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
     let effective_spec_count = select(uniforms.spec_count, num_pos_lights + 1, uniforms.spec_count < 0);
     
     for (var i = 0; i < num_pos_lights; i++) {
-        // PyMOL light directions are in VIEW SPACE (relative to camera)
-        // Transform from view space to world space (raytracing works in world space)
-        // light setting is direction FROM light TO scene, negate to get FROM surface TO light
+        // Light directions are in view space. Transform them into world
+        // space because raytracing works in world space. The setting stores
+        // direction from light to scene, so negate it for surface-to-light.
         let light_view = -uniforms.light_dirs[i].xyz;
         let light_dir = normalize((uniforms.view_inv_matrix * vec4<f32>(light_view, 0.0)).xyz);
         

@@ -1,9 +1,9 @@
 //! DOM event to InputState mapping.
 //!
 //! Converts JS mouse/keyboard event parameters into the framework-agnostic
-//! input types used by `pymol_scene::InputState`.
+//! input types used by `patinae_scene::InputState`.
 
-use pymol_scene::{ButtonState, InputState, Modifiers, MouseButton, ScrollDelta};
+use patinae_scene::{ButtonState, InputState, Modifiers, MouseButton, ScrollDelta};
 
 /// Modifier flag bits matching the JS `MouseEvent.buttons` / modifier booleans.
 pub const MOD_SHIFT: u32 = 1;

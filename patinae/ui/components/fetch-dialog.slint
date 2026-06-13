@@ -1,0 +1,510 @@
+import { Theme } from "../theme.slint";
+import { Tokens } from "../tokens.slint";
+import { MenuState } from "../states/menu-state.slint";
+
+component DialogButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    horizontal-stretch: 0;
+    width: max(104px, label-text.preferred-width + 32px);
+    height: 36px;
+    border-radius: Tokens.radius-sm;
+    border-width: Tokens.hairline;
+    border-color: !enabled
+        ? Theme.line
+        : (primary ? Theme.cyan-dim : Theme.line-strong);
+    background: !enabled
+        ? Theme.bg-inset.with-alpha(0.32)
+        : (touch.has-hover
+            ? (primary ? Theme.cyan.with-alpha(0.14) : Theme.bg-inset)
+            : Theme.bg-raised.with-alpha(primary ? 0.18 : 0.62));
+
+    label-text := Text {
+        text: root.label;
+        color: !root.enabled ? Theme.text-faint : (root.primary ? Theme.cyan : Theme.text);
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component CloseButton inherits Rectangle {
+    callback clicked();
+
+    horizontal-stretch: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: Tokens.radius-sm;
+    background: touch.has-hover ? Theme.bg-inset : Theme.bg-raised.with-alpha(0.38);
+    border-width: Tokens.hairline;
+    border-color: touch.has-hover ? Theme.line-strong : Theme.line;
+
+    icon := Rectangle {
+        x: (parent.width - 18px) / 2;
+        y: (parent.height - 18px) / 2;
+        width: 18px;
+        height: 18px;
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-width: 18;
+            viewbox-height: 18;
+            stroke: touch.has-hover ? Theme.text : Theme.text-muted;
+            stroke-width: 2px;
+            fill: transparent;
+            commands: "M 5 5 L 13 13 M 13 5 L 5 13";
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component FieldBox inherits Rectangle {
+    in property <string> label;
+    in property <string> helper;
+    in property <bool> emphasis: false;
+    in-out property <string> value;
+    callback accepted();
+    callback edited(string);
+
+    horizontal-stretch: 0;
+    height: 66px;
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 5px;
+
+        HorizontalLayout {
+            height: 18px;
+            spacing: Tokens.space-sm;
+
+            Text {
+                text: root.label;
+                color: Theme.text-muted;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Text {
+                text: root.helper;
+                color: Theme.text-faint;
+                font-size: 10px;
+                vertical-alignment: center;
+            }
+        }
+
+        field := Rectangle {
+            height: 38px;
+            border-radius: Tokens.radius-sm;
+            border-width: input.has-focus ? 1px : Tokens.hairline;
+            border-color: input.has-focus ? Theme.cyan-dim : Theme.line-strong;
+            background: input.has-focus ? Theme.bg-inset : Theme.bg-raised.with-alpha(0.54);
+            clip: true;
+
+            input := TextInput {
+                x: Tokens.space-sm;
+                y: 0px;
+                width: parent.width - 2 * Tokens.space-sm;
+                height: parent.height;
+                text <=> root.value;
+                color: Theme.text;
+                font-family: root.emphasis ? "JetBrains Mono" : "Inter";
+                font-size: root.emphasis ? 18px : 13px;
+                vertical-alignment: center;
+                selection-background-color: Theme.cyan.with-alpha(0.3);
+                accepted => { root.accepted(); }
+                edited => { root.edited(root.value); }
+            }
+        }
+    }
+}
+
+component FormatSegment inherits Rectangle {
+    in property <string> value;
+    in property <string> label;
+    in property <length> segment-width: 118px;
+    property <bool> active: MenuState.fetch-format == value;
+
+    width: segment-width;
+    height: 34px;
+    border-radius: Tokens.radius-sm;
+    border-width: Tokens.hairline;
+    border-color: active ? Theme.cyan-dim : (touch.has-hover ? Theme.line-strong : Theme.line);
+    background: active
+        ? Theme.cyan.with-alpha(0.15)
+        : (touch.has-hover ? Theme.bg-inset : Theme.bg-raised.with-alpha(0.52));
+
+    Text {
+        text: root.label;
+        color: root.active ? Theme.cyan : Theme.text-muted;
+        font-size: 13px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => { MenuState.fetch-format = root.value; }
+    }
+}
+
+component FormatBox inherits Rectangle {
+    horizontal-stretch: 0;
+    height: 58px;
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 5px;
+
+        Text {
+            height: 18px;
+            text: "Format";
+            color: Theme.text-muted;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+
+        HorizontalLayout {
+            height: 34px;
+            spacing: Tokens.space-sm;
+
+            FormatSegment {
+                segment-width: (root.width - 2 * Tokens.space-sm) / 3;
+                value: "cif";
+                label: "mmCIF";
+            }
+
+            FormatSegment {
+                segment-width: (root.width - 2 * Tokens.space-sm) / 3;
+                value: "pdb";
+                label: "PDB";
+            }
+
+            FormatSegment {
+                segment-width: (root.width - 2 * Tokens.space-sm) / 3;
+                value: "bcif";
+                label: "BinaryCIF";
+            }
+        }
+    }
+}
+
+component MetadataRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> link: false;
+    callback clicked();
+
+    height: 20px;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: Tokens.space-sm;
+
+        Text {
+            width: 82px;
+            horizontal-stretch: 0;
+            text: root.label;
+            color: Theme.text-faint;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+
+        if !root.link: Text {
+            horizontal-stretch: 1;
+            text: root.value;
+            color: Theme.text-muted;
+            font-size: 12px;
+            wrap: word-wrap;
+            vertical-alignment: center;
+        }
+
+        if root.link: Rectangle {
+            horizontal-stretch: 0;
+            width: link-text.preferred-width;
+            height: parent.height;
+            background: transparent;
+
+            link-text := Text {
+                text: root.value;
+                color: link-touch.has-hover ? Theme.cyan : Theme.cyan-dim;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+
+            link-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { root.clicked(); }
+            }
+        }
+    }
+}
+
+component MetadataPreview inherits Rectangle {
+    in property <bool> loading;
+    in property <string> status;
+    in property <string> title;
+    in property <string> method;
+    in property <string> deposit-date;
+    in property <string> release-date;
+    in property <string> doi;
+
+    horizontal-stretch: 0;
+    height: 160px;
+    border-radius: Tokens.radius-sm;
+    border-width: Tokens.hairline;
+    border-color: Theme.line;
+    background: Theme.bg-inset;
+    clip: true;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 3px;
+        height: parent.height;
+        background: root.status != "" ? Theme.warning : Theme.cyan-dim;
+    }
+
+    VerticalLayout {
+        x: Tokens.space-md;
+        y: Tokens.space-md;
+        width: parent.width - 2 * Tokens.space-md;
+        height: parent.height - 2 * Tokens.space-md;
+        spacing: Tokens.space-xs;
+
+        Text {
+            text: root.loading
+                ? "Looking up metadata..."
+                : (root.status != ""
+                    ? root.status
+                    : (root.title != "" ? root.title : "Metadata preview"));
+            color: root.status != ""
+                ? Theme.warning
+                : (root.title == "" && !root.loading ? Theme.text-muted : Theme.text);
+            font-size: 14px;
+            font-weight: root.title != "" ? 600 : 400;
+            wrap: word-wrap;
+            height: 42px;
+        }
+
+        if root.loading: Text {
+            text: "RCSB metadata request in progress";
+            color: Theme.text-faint;
+            font-size: 12px;
+        }
+
+        if !root.loading && root.status != "": Text {
+            text: "Fetch remains available.";
+            color: Theme.text-faint;
+            font-size: 12px;
+        }
+
+        if !root.loading && root.status == "" && root.title == "": Text {
+            text: "Enter a PDB ID and preview metadata.";
+            color: Theme.text-faint;
+            font-size: 12px;
+        }
+
+        if !root.loading && root.status == "" && root.method != "": MetadataRow {
+            label: "Method";
+            value: root.method;
+        }
+
+        if !root.loading && root.status == "" && root.deposit-date != "": MetadataRow {
+            label: "Deposited";
+            value: root.deposit-date;
+        }
+
+        if !root.loading && root.status == "" && root.release-date != "": MetadataRow {
+            label: "Released";
+            value: root.release-date;
+        }
+
+        if !root.loading && root.status == "" && root.doi != "": MetadataRow {
+            label: "DOI";
+            value: root.doi;
+            link: true;
+            clicked => { MenuState.fetch-open-doi(root.doi); }
+        }
+    }
+}
+
+component FooterStatus inherits Rectangle {
+    in property <bool> loading;
+    in property <string> status;
+    in property <string> title;
+
+    horizontal-stretch: 1;
+    height: 40px;
+    background: transparent;
+
+    Rectangle {
+        x: 0px;
+        y: 16px;
+        width: 7px;
+        height: 7px;
+        border-radius: 4px;
+        background: root.status != "" ? Theme.warning : Theme.cyan;
+    }
+
+    Text {
+        x: 18px;
+        y: 8px;
+        width: parent.width - 18px;
+        height: 24px;
+        text: root.status != ""
+            ? "Metadata lookup failed"
+            : (root.loading
+                ? "Looking up metadata"
+                : (root.title != "" ? "RCSB metadata loaded" : "Ready to fetch by PDB ID"));
+        color: root.status != "" ? Theme.warning : Theme.text-muted;
+        font-size: 11px;
+        vertical-alignment: center;
+    }
+}
+
+export component FetchDialog inherits Rectangle {
+    visible: MenuState.fetch-visible;
+    background: Theme.bg.with-alpha(0.62);
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => {}
+    }
+
+    panel := Rectangle {
+        width: min(528px, parent.width - 2 * Tokens.space-lg);
+        height: min(450px, parent.height - 2 * Tokens.space-lg);
+        x: (parent.width - self.width) / 2;
+        y: max(Tokens.space-lg, (parent.height - self.height) / 2);
+        border-radius: Tokens.radius-md;
+        border-width: 1px;
+        border-color: Theme.line-strong;
+        background: Theme.bg-panel;
+
+        VerticalLayout {
+            padding: Tokens.space-lg;
+            spacing: Tokens.space-sm;
+
+            HorizontalLayout {
+                height: 34px;
+
+                Text {
+                    text: "Fetch PDB";
+                    color: Theme.text;
+                    font-size: 22px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                CloseButton {
+                    clicked => { MenuState.fetch-visible = false; }
+                }
+            }
+
+            form-row := Rectangle {
+                horizontal-stretch: 0;
+                width: panel.width - 2 * Tokens.space-lg;
+                height: 66px;
+                background: transparent;
+
+                HorizontalLayout {
+                    spacing: Tokens.space-md;
+
+                    FieldBox {
+                        width: (form-row.width - Tokens.space-md) / 2;
+                        label: "PDB ID";
+                        helper: "4 characters";
+                        emphasis: true;
+                        value <=> MenuState.fetch-pdb-id;
+                        accepted => { MenuState.fetch-preview(MenuState.fetch-pdb-id); }
+                        edited(value) => { MenuState.fetch-pdb-edited(value); }
+                    }
+
+                    FieldBox {
+                        width: (form-row.width - Tokens.space-md) / 2;
+                        label: "Object name";
+                        helper: "optional";
+                        value <=> MenuState.fetch-object-name;
+                    }
+                }
+            }
+
+            FormatBox {
+                width: panel.width - 2 * Tokens.space-lg;
+            }
+
+            MetadataPreview {
+                width: panel.width - 2 * Tokens.space-lg;
+                loading: MenuState.fetch-loading;
+                status: MenuState.fetch-status;
+                title: MenuState.fetch-title;
+                method: MenuState.fetch-method;
+                deposit-date: MenuState.fetch-deposit-date;
+                release-date: MenuState.fetch-release-date;
+                doi: MenuState.fetch-doi;
+            }
+
+            footer-row := Rectangle {
+                horizontal-stretch: 0;
+                width: panel.width - 2 * Tokens.space-lg;
+                height: 40px;
+                background: transparent;
+
+                HorizontalLayout {
+                    spacing: Tokens.space-sm;
+
+                    FooterStatus {
+                        loading: MenuState.fetch-loading;
+                        status: MenuState.fetch-status;
+                        title: MenuState.fetch-title;
+                    }
+
+                    DialogButton {
+                        label: "Preview";
+                        enabled: !MenuState.fetch-loading;
+                        clicked => { MenuState.fetch-preview(MenuState.fetch-pdb-id); }
+                    }
+
+                    DialogButton {
+                        label: "Cancel";
+                        clicked => { MenuState.fetch-visible = false; }
+                    }
+
+                    DialogButton {
+                        label: "Fetch";
+                        primary: true;
+                        clicked => {
+                            MenuState.fetch-submit(
+                                MenuState.fetch-pdb-id,
+                                MenuState.fetch-object-name,
+                                MenuState.fetch-format
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

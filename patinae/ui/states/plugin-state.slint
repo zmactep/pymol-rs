@@ -1,0 +1,136 @@
+export struct PluginOption {
+    label: string,
+    value: string,
+}
+
+export struct PluginButtonItem {
+    id: string,
+    label: string,
+    icon: string,
+    primary: bool,
+    enabled: bool,
+}
+
+export struct PluginHighlightRun {
+    text: string,
+    style: string,
+    start-col: int,
+}
+
+export struct PluginHighlightLine {
+    runs: [PluginHighlightRun],
+}
+
+export struct PluginToolbarItem {
+    id: string,
+    title: string,
+    icon: string,
+    placement: string,
+    visible: bool,
+    active: bool,
+}
+
+export struct PluginControlLeaf {
+    id: string,
+    kind: string,
+    label: string,
+    text: string,
+    value-text: string,
+    bool-value: bool,
+    num-value: float,
+    min: float,
+    max: float,
+    step: float,
+    primary: bool,
+    open: bool,
+    read-only: bool,
+    rows: float,
+    grow: float,
+    gap: float,
+    height: float,
+    highlight-lines: [PluginHighlightLine],
+    options: [PluginOption],
+    buttons: [PluginButtonItem],
+    image-value: image,
+    image-width: float,
+    image-height: float,
+}
+
+export struct PluginControlNode {
+    id: string,
+    kind: string,
+    label: string,
+    text: string,
+    value-text: string,
+    bool-value: bool,
+    num-value: float,
+    min: float,
+    max: float,
+    step: float,
+    primary: bool,
+    open: bool,
+    read-only: bool,
+    rows: float,
+    grow: float,
+    gap: float,
+    height: float,
+    highlight-lines: [PluginHighlightLine],
+    options: [PluginOption],
+    buttons: [PluginButtonItem],
+    leaf-children: [PluginControlLeaf],
+    image-value: image,
+    image-width: float,
+    image-height: float,
+}
+
+export struct PluginPanelTab {
+    id: string,
+    title: string,
+    active: bool,
+}
+
+export struct PluginControl {
+    id: string,
+    kind: string,
+    label: string,
+    text: string,
+    value-text: string,
+    bool-value: bool,
+    num-value: float,
+    min: float,
+    max: float,
+    step: float,
+    primary: bool,
+    open: bool,
+    read-only: bool,
+    rows: float,
+    grow: float,
+    gap: float,
+    height: float,
+    highlight-lines: [PluginHighlightLine],
+    options: [PluginOption],
+    buttons: [PluginButtonItem],
+    children: [PluginControlNode],
+    image-value: image,
+    image-width: float,
+    image-height: float,
+}
+
+export global PluginState {
+    in-out property <[PluginToolbarItem]> toolbar-items;
+    in-out property <[PluginPanelTab]> right-tabs;
+    in-out property <[PluginPanelTab]> bottom-tabs;
+    in-out property <[PluginControl]> active-right-controls;
+    in-out property <[PluginControl]> active-bottom-controls;
+    in-out property <string> active-right-panel-id;
+    in-out property <string> active-bottom-panel-id;
+    in-out property <string> active-right-title;
+    in-out property <string> active-bottom-title;
+    in-out property <bool> right-visible: false;
+    in-out property <bool> bottom-visible: false;
+
+    callback toggle-panel(string);
+    callback activate-panel(string);
+    callback deactivate-placement(string);
+    callback control-event(string, string, string, string, float, bool);
+}

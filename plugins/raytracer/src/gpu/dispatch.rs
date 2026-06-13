@@ -2,7 +2,7 @@
 
 use wgpu::util::DeviceExt;
 
-use crate::edge_pipeline::{CompositePipeline, CompositeParams, EdgeDetectPipeline, EdgeParams};
+use crate::edge_pipeline::{CompositeParams, CompositePipeline, EdgeDetectPipeline, EdgeParams};
 use crate::error::RaytraceResult;
 
 use super::textures::RenderTextures;

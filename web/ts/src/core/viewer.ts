@@ -2,13 +2,18 @@
  * ViewerCore — canvas lifecycle, WASM initialization, rAF loop, and event wiring.
  */
 
-import type { WebViewer } from "../../../pkg/pymol_web.js";
-import type { LabelInfo } from "./types.js";
+import type { WebViewer } from "../../../pkg/patinae_web.js";
+import type {
+  LabelInfo,
+  ViewerPerformanceSnapshot,
+  ViewerWasmPerformanceSnapshot,
+} from "./types.js";
 import { MOD_SHIFT, MOD_CTRL, MOD_ALT, MOD_META } from "./types.js";
 import { LabelOverlay } from "./labels.js";
 
 /** Click-detection threshold: drag distance squared in CSS pixels. */
 const CLICK_THRESHOLD_SQ = 25; // 5 CSS-px radius
+const PERF_RING_CAPACITY = 240;
 
 export class ViewerCore {
   private wasm: WebViewer | null = null;
@@ -20,6 +25,13 @@ export class ViewerCore {
   private _revealDuration = 150;
   private dpr = 1;
   private clickStart: { x: number; y: number } | null = null;
+  private fatalError: unknown | null = null;
+  private fatalLabel: string | null = null;
+  private queuedHover: { x: number; y: number } | null = null;
+  private frameTimes: number[] = [];
+  private lastFrameMs = 0;
+  private frameCount = 0;
+  private skipNextFrameTiming = false;
 
   /** Called with the raw WASM pick result (PickHitInfo | null) on each click. */
   onPick: ((hit: unknown | null) => void) | null = null;
@@ -32,7 +44,7 @@ export class ViewerCore {
     }
 
     this.canvas = document.createElement("canvas");
-    this.canvas.id = "pymol-rs-canvas-" + Math.random().toString(36).slice(2, 8);
+    this.canvas.id = "patinae-canvas-" + Math.random().toString(36).slice(2, 8);
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
     this.canvas.style.display = "block";
@@ -42,16 +54,41 @@ export class ViewerCore {
     this.labelOverlay = new LabelOverlay(container);
   }
 
-  async init(): Promise<WebViewer> {
+  /**
+   * Initialise the viewer.
+   *
+   * @param options.picking — whether to allocate hit-test picking readback
+   *   resources (Rg32Uint half-res target + readbacks/reprojection).
+   *   Read-only viewers should leave it `false` to save VRAM. Defaults to
+   *   `false`. The choice is baked in at WASM construction; changing
+   *   later requires re-creating the viewer.
+   * @param options.selectionOverlay — whether to draw visible selection /
+   *   hover overlays. Defaults to `options.picking`.
+   */
+  async init(
+    options: { picking?: boolean; selectionOverlay?: boolean } = {},
+  ): Promise<WebViewer> {
     // Dynamically import the WASM module
-    const wasmModule = await import("../../../pkg/pymol_web.js");
+    const wasmModule = await import("../../../pkg/patinae_web.js");
     await wasmModule.default(); // init wasm
 
     // Match canvas pixel size to layout size
     this.syncCanvasSize();
 
-    const viewer = await wasmModule.WebViewer.create(this.canvas.id);
+    const pickingEnabled = options.picking ?? false;
+    const selectionOverlay = options.selectionOverlay ?? pickingEnabled;
+    const viewer = await wasmModule.WebViewer.create(
+      this.canvas.id,
+      pickingEnabled,
+      selectionOverlay,
+    );
     this.wasm = viewer;
+    this.fatalError = null;
+    this.fatalLabel = null;
+    this.syncCanvasSize();
+    this.requireWasm("resize", (wasm) =>
+      wasm.resize(this.canvas.width, this.canvas.height),
+    );
 
     this.bindEvents();
     this.startLoop();
@@ -59,8 +96,49 @@ export class ViewerCore {
     return viewer;
   }
 
-  get wasmViewer(): WebViewer | null {
-    return this.wasm;
+  get isFailed(): boolean {
+    return this.fatalError !== null;
+  }
+
+  get lastError(): unknown | null {
+    return this.fatalError;
+  }
+
+  callWasm<T>(label: string, fn: (wasm: WebViewer) => T): T | undefined {
+    if (this.fatalError !== null) return undefined;
+    const wasm = this.wasm;
+    if (!wasm) return undefined;
+
+    try {
+      return fn(wasm);
+    } catch (error) {
+      this.recordFatal(label, error);
+      return undefined;
+    }
+  }
+
+  requireWasm<T>(label: string, fn: (wasm: WebViewer) => T): T {
+    if (this.fatalError !== null) {
+      throw this.stoppedError(label);
+    }
+    const wasm = this.wasm;
+    if (!wasm) {
+      throw new Error(
+        `Patinae viewer is not initialized; cannot call ${label}`,
+      );
+    }
+
+    try {
+      return fn(wasm);
+    } catch (error) {
+      this.recordFatal(label, error);
+      throw error;
+    }
+  }
+
+  queryWasm<T>(label: string, fallback: T, fn: (wasm: WebViewer) => T): T {
+    if (!this.wasm && this.fatalError === null) return fallback;
+    return this.requireWasm(label, fn);
   }
 
   get isDeferred(): boolean {
@@ -110,6 +188,62 @@ export class ViewerCore {
     this.wasm = null;
   }
 
+  getPerformanceSnapshot(): ViewerPerformanceSnapshot {
+    const avg =
+      this.frameTimes.length > 0
+        ? this.frameTimes.reduce((sum, ms) => sum + ms, 0) /
+          this.frameTimes.length
+        : 0;
+    const wasm = (this.callWasm("get_performance_snapshot", (viewer) =>
+      viewer.get_performance_snapshot(),
+    ) ?? null) as ViewerWasmPerformanceSnapshot | null;
+    return {
+      frame_count: this.frameCount,
+      avg_frame_ms: avg,
+      median_frame_ms: percentile(this.frameTimes, 0.5),
+      p95_frame_ms: percentile(this.frameTimes, 0.95),
+      last_frame_ms: this.lastFrameMs,
+      wasm,
+    };
+  }
+
+  resetPerformanceStats(): void {
+    this.frameTimes = [];
+    this.lastFrameMs = 0;
+    this.frameCount = 0;
+    this.skipNextFrameTiming = true;
+    this.callWasm("reset_performance_stats", (viewer) =>
+      viewer.reset_performance_stats(),
+    );
+  }
+
+  private recordFatal(label: string, error: unknown): void {
+    if (this.fatalError !== null) return;
+
+    this.fatalError = error;
+    this.fatalLabel = label;
+    this.clickStart = null;
+
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = 0;
+    }
+
+    console.error(
+      `[Patinae] WASM call failed in ${label}; viewer stopped.`,
+      error,
+    );
+  }
+
+  private stoppedError(label: string): Error {
+    const firstLabel = this.fatalLabel ?? "unknown";
+    const error = new Error(
+      `Patinae viewer stopped after WASM call ${firstLabel} failed; cannot call ${label}`,
+      { cause: this.fatalError },
+    );
+    return error;
+  }
+
   // ---------------------------------------------------------------------------
   // Render loop
   // ---------------------------------------------------------------------------
@@ -118,21 +252,59 @@ export class ViewerCore {
     let lastTime = performance.now();
     const loop = (now: number) => {
       this.animFrameId = requestAnimationFrame(loop);
-      if (!this.wasm) return;
+      if (!this.wasm || this.isFailed) return;
 
       const dt = Math.min((now - lastTime) / 1000.0, 0.1);
+      this.lastFrameMs = now - lastTime;
+      if (this.skipNextFrameTiming) {
+        this.skipNextFrameTiming = false;
+      } else if (this.lastFrameMs > 0) {
+        this.frameTimes.push(this.lastFrameMs);
+        if (this.frameTimes.length > PERF_RING_CAPACITY) {
+          this.frameTimes.shift();
+        }
+        this.frameCount++;
+      }
       lastTime = now;
 
-      this.wasm.process_input();
-      this.wasm.update_animations(dt);
+      this.callWasm("process_input", (wasm) => wasm.process_input());
+      if (this.isFailed) return;
+      this.callWasm("update_animations", (wasm) => wasm.update_animations(dt));
+      if (this.isFailed) return;
 
-      if (this.wasm.needs_redraw()) {
-        this.wasm.render_frame();
-        const labels = this.wasm.get_labels() as LabelInfo[] | null;
-        this.labelOverlay.update(
-          labels ?? [],
-          window.devicePixelRatio || 1,
+      const hover = this.queuedHover;
+      if (hover) {
+        this.queuedHover = null;
+        this.callWasm("process_hover", (wasm) =>
+          wasm.process_hover(hover.x, hover.y),
         );
+        if (this.isFailed) return;
+      }
+
+      // GPU-mode hover/click readbacks complete independently of visible
+      // redraws. Poll every rAF so picks resolve even when the camera is idle.
+      this.callWasm("poll_pending_picks", (wasm) => wasm.poll_pending_picks());
+      if (this.isFailed) return;
+
+      if (this.callWasm("needs_redraw", (wasm) => wasm.needs_redraw())) {
+        this.callWasm("render_frame", (wasm) => wasm.render_frame());
+        if (this.isFailed) return;
+        const labels = this.callWasm(
+          "get_labels",
+          (wasm) => wasm.get_labels() as LabelInfo[] | null,
+        );
+        if (this.isFailed) return;
+        this.labelOverlay.update(labels ?? [], window.devicePixelRatio || 1);
+      }
+
+      // GPU-mode click picks complete asynchronously. Drain the latest
+      // result here and forward it to onPick exactly like the CPU path.
+      const pickedAsync = this.callWasm("take_completed_pick", (wasm) =>
+        wasm.take_completed_pick(),
+      );
+      if (this.isFailed) return;
+      if (pickedAsync !== undefined) {
+        this.onPick?.(pickedAsync ?? null);
       }
     };
     this.animFrameId = requestAnimationFrame(loop);
@@ -149,7 +321,10 @@ export class ViewerCore {
     c.addEventListener("mousedown", (e) => {
       e.preventDefault();
       c.focus();
-      this.wasm?.on_mouse_down(e.offsetX, e.offsetY, e.button, modBits(e));
+      this.callWasm("on_mouse_down", (wasm) =>
+        wasm.on_mouse_down(e.offsetX, e.offsetY, e.button, modBits(e)),
+      );
+      if (this.isFailed) return;
       // Track potential click start for left button only.
       if (e.button === 0) {
         this.clickStart = { x: e.offsetX, y: e.offsetY };
@@ -157,23 +332,30 @@ export class ViewerCore {
     });
 
     c.addEventListener("mousemove", (e) => {
-      this.wasm?.on_mouse_move(e.offsetX, e.offsetY, modBits(e));
-      this.wasm?.process_hover(e.offsetX * this.dpr, e.offsetY * this.dpr);
+      this.callWasm("on_mouse_move", (wasm) =>
+        wasm.on_mouse_move(e.offsetX, e.offsetY, modBits(e)),
+      );
+      if (this.isFailed) return;
+      this.queuedHover = {
+        x: e.offsetX * this.dpr,
+        y: e.offsetY * this.dpr,
+      };
     });
 
     c.addEventListener("mouseup", (e) => {
-      this.wasm?.on_mouse_up(e.offsetX, e.offsetY, e.button);
+      this.callWasm("on_mouse_up", (wasm) =>
+        wasm.on_mouse_up(e.offsetX, e.offsetY, e.button),
+      );
+      if (this.isFailed) return;
       // Detect click (left button, short drag).
       if (e.button === 0 && this.clickStart !== null) {
         const dx = e.offsetX - this.clickStart.x;
         const dy = e.offsetY - this.clickStart.y;
         if (dx * dx + dy * dy < CLICK_THRESHOLD_SQ) {
-          const hit =
-            this.wasm?.pick_at_screen(
-              e.offsetX * this.dpr,
-              e.offsetY * this.dpr,
-            ) ?? null;
-          this.onPick?.(hit);
+          this.callWasm("pick_at_screen", (wasm) =>
+            wasm.pick_at_screen(e.offsetX * this.dpr, e.offsetY * this.dpr),
+          );
+          if (this.isFailed) return;
         }
         this.clickStart = null;
       }
@@ -181,13 +363,19 @@ export class ViewerCore {
 
     c.addEventListener("mouseleave", () => {
       this.clickStart = null;
-      this.wasm?.process_hover(-1, -1); // guaranteed miss → clears all hover indicators
+      this.queuedHover = { x: -1, y: -1 }; // guaranteed miss clears hover indicators
     });
 
-    c.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      this.wasm?.on_wheel(e.deltaY, modBits(e));
-    }, { passive: false });
+    c.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        this.callWasm("on_wheel", (wasm) =>
+          wasm.on_wheel(e.deltaY, modBits(e)),
+        );
+      },
+      { passive: false },
+    );
 
     c.addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -195,9 +383,9 @@ export class ViewerCore {
     this.resizeObserver = new ResizeObserver(() => {
       this.dpr = window.devicePixelRatio || 1;
       this.syncCanvasSize();
-      if (this.wasm) {
-        this.wasm.resize(this.canvas.width, this.canvas.height);
-      }
+      this.callWasm("resize", (wasm) =>
+        wasm.resize(this.canvas.width, this.canvas.height),
+      );
     });
     this.resizeObserver.observe(this.container);
   }
@@ -218,4 +406,11 @@ function modBits(e: MouseEvent | WheelEvent): number {
   if (e.altKey) bits |= MOD_ALT;
   if (e.metaKey) bits |= MOD_META;
   return bits;
+}
+
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.round((sorted.length - 1) * Math.min(Math.max(p, 0), 1));
+  return sorted[idx] ?? 0;
 }

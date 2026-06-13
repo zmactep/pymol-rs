@@ -25,9 +25,9 @@ pub(crate) struct ResolvedRaySettings {
 }
 
 pub(crate) fn read_ray_settings(
-    get_setting: impl Fn(&str) -> Option<pymol_settings::SettingValue>,
+    get_setting: impl Fn(&str) -> Option<patinae_settings::SettingValue>,
 ) -> ResolvedRaySettings {
-    use pymol_settings::SettingValue;
+    use patinae_settings::SettingValue;
 
     let get_bool = |name: &str, default: bool| -> bool {
         match get_setting(name) {
@@ -137,7 +137,7 @@ pub struct RaytraceSettings {
     pub silhouette_depth_jump: f32,
 }
 
-/// Default light directions matching PyMOL settings.
+/// Default view-space light directions for classic shading.
 const DEFAULT_LIGHT_DIRS: [[f32; 4]; MAX_LIGHTS] = [
     [-0.4, -0.4, -1.0, 0.0],
     [-0.55, -0.7, 0.15, 0.0],

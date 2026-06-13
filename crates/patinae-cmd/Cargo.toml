@@ -1,0 +1,40 @@
+[package]
+name = "patinae-cmd"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Patinae command parsing and execution system"
+
+[features]
+default = ["fetch-async", "fetch", "native-io", "traj"]
+fetch = ["patinae-io/fetch"]
+fetch-async = ["patinae-io/fetch-async"]
+native-io = ["dep:shellexpand", "dep:image"]
+traj = ["patinae-io/traj"]
+
+[dependencies]
+# Internal crates
+patinae-scene = { workspace = true, default-features = false }
+patinae-select = { workspace = true }
+patinae-io = { workspace = true }
+patinae-settings = { workspace = true }
+patinae-mol = { workspace = true }
+patinae-color = { workspace = true }
+patinae-algos = { workspace = true }
+patinae-session = { workspace = true }
+
+# External dependencies
+nom = { workspace = true }
+ahash = { workspace = true }
+log = { workspace = true }
+lin_alg = { workspace = true }
+shellexpand = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

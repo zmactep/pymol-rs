@@ -1,0 +1,552 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { MovieState, MovieLane } from "../../states/movie-state.slint";
+
+global MovieLayout {
+    out property <length> label-w: 42px;
+    out property <length> lane-h: 25px;
+    out property <length> toolbar-h: 40px;
+    out property <length> footer-h: 32px;
+}
+
+component TransportIcon {
+    in property <string> kind;
+    in property <color> tint;
+
+    width: 16px;
+    height: 16px;
+
+    if root.kind == "first": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 5 3 L 5 13 M 12 4 L 7 8 L 12 12";
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        fill: transparent;
+    }
+
+    if root.kind == "prev": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 11 4 L 6 8 L 11 12";
+        stroke: root.tint;
+        stroke-width: 1.6px;
+        fill: transparent;
+    }
+
+    if root.kind == "play": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 6 4 L 12 8 L 6 12 Z";
+        stroke: transparent;
+        fill: root.tint;
+    }
+
+    if root.kind == "pause": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 5 4 L 7 4 L 7 12 L 5 12 Z M 9 4 L 11 4 L 11 12 L 9 12 Z";
+        stroke: transparent;
+        fill: root.tint;
+    }
+
+    if root.kind == "next": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 5 4 L 10 8 L 5 12";
+        stroke: root.tint;
+        stroke-width: 1.6px;
+        fill: transparent;
+    }
+
+    if root.kind == "last": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 4 4 L 9 8 L 4 12 M 11 3 L 11 13";
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        fill: transparent;
+    }
+
+    if root.kind == "stop": Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: "M 5 5 L 11 5 L 11 11 L 5 11 Z";
+        stroke: transparent;
+        fill: root.tint;
+    }
+}
+
+component MiniButton inherits Rectangle {
+    in property <string> icon;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    callback clicked;
+
+    width: root.primary ? 34px : 28px;
+    height: 24px;
+    border-radius: Tokens.radius-sm;
+    background: !root.enabled
+        ? transparent
+        : root.primary
+            ? Theme.cyan.with-alpha(0.16)
+            : touch.has-hover ? Theme.bg-inset : transparent;
+    border-width: Tokens.hairline;
+    border-color: root.primary && root.enabled
+        ? Theme.cyan.with-alpha(0.55)
+        : touch.has-hover && root.enabled ? Theme.line-strong : Theme.line;
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    TransportIcon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        kind: root.icon;
+        tint: root.primary ? Theme.cyan : Theme.text-dim;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component ToggleChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked;
+
+    width: chip-label.preferred-width + 16px;
+    height: 24px;
+    border-radius: Tokens.radius-sm;
+    background: root.active
+        ? Theme.cyan.with-alpha(0.14)
+        : touch.has-hover ? Theme.bg-inset : transparent;
+    border-width: Tokens.hairline;
+    border-color: root.active ? Theme.cyan.with-alpha(0.55) : Theme.line;
+
+    chip-label := Text {
+        text: root.label;
+        color: root.active ? Theme.cyan : Theme.text-muted;
+        font-size: Tokens.font-sm;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component FieldBox inherits Rectangle {
+    in-out property <string> value;
+    in property <length> field-w: 44px;
+    callback accepted(string);
+    callback edited;
+
+    width: root.field-w;
+    height: 24px;
+    border-radius: Tokens.radius-sm;
+    background: Theme.bg-inset.with-alpha(0.72);
+    border-width: Tokens.hairline;
+    border-color: input.has-focus ? Theme.cyan.with-alpha(0.65) : Theme.line.with-alpha(0.72);
+
+    input := TextInput {
+        x: 4px;
+        y: 0px;
+        width: parent.width - 8px;
+        height: parent.height;
+        text <=> root.value;
+        single-line: true;
+        color: Theme.text-dim;
+        font-family: "JetBrains Mono";
+        font-size: Tokens.font-md;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        selection-background-color: Theme.cyan.with-alpha(0.3);
+        selection-foreground-color: Theme.text;
+
+        edited => { root.edited(); }
+        accepted => { root.accepted(self.text); }
+    }
+}
+
+component StatusLabel inherits Rectangle {
+    in property <string> label;
+
+    width: label-text.preferred-width;
+    height: 24px;
+
+    label-text := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: Theme.text-muted;
+        font-size: Tokens.font-md;
+        vertical-alignment: center;
+    }
+}
+
+component StatusValue inherits Rectangle {
+    in property <string> label;
+
+    width: value-text.preferred-width;
+    height: 24px;
+
+    value-text := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: Theme.text-muted;
+        font-family: "JetBrains Mono";
+        font-size: Tokens.font-sm;
+        vertical-alignment: center;
+    }
+}
+
+component TimelineLaneRow inherits Rectangle {
+    in property <MovieLane> lane;
+
+    height: MovieLayout.lane-h;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: MovieLayout.label-w;
+        height: parent.height;
+        text: root.lane.label;
+        color: root.lane.id == "mset" ? Theme.text-muted : Theme.text-faint;
+        font-family: "JetBrains Mono";
+        font-size: Tokens.font-sm;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+
+    track := Rectangle {
+        x: MovieLayout.label-w + Tokens.space-sm;
+        y: 4px;
+        width: parent.width - self.x - Tokens.space-md;
+        height: parent.height - 8px;
+        border-radius: Tokens.radius-sm;
+        background: Theme.bg-inset.with-alpha(0.42);
+
+        for block in root.lane.blocks: Rectangle {
+            x: parent.width * block.start-pos;
+            y: 3px;
+            width: max(2px, parent.width * (block.end-pos - block.start-pos));
+            height: parent.height - 6px;
+            border-radius: Tokens.radius-sm;
+            background: block.kind == "state"
+                ? Theme.violet.with-alpha(0.16)
+                : Theme.magenta.with-alpha(0.16);
+            border-width: Tokens.hairline;
+            border-color: block.kind == "state"
+                ? Theme.violet.with-alpha(0.32)
+                : Theme.magenta.with-alpha(0.32);
+
+            Text {
+                x: 6px;
+                width: max(0px, parent.width - 12px);
+                height: parent.height;
+                text: block.label;
+                color: block.kind == "state" ? Theme.text-muted : Theme.magenta;
+                font-size: Tokens.font-xs;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+
+        for marker in root.lane.markers: Rectangle {
+            x: parent.width * marker.pos - 4px;
+            y: (parent.height - 8px) / 2;
+            width: 8px;
+            height: 8px;
+            border-radius: 1px;
+            background: marker.kind == "camera"
+                ? Theme.cyan
+                : marker.kind == "scene" ? Theme.amber : Theme.magenta;
+            transform-rotation: 45deg;
+            transform-origin: { x: 4px, y: 4px };
+        }
+
+        for marker in root.lane.markers: Text {
+            x: min(parent.width - self.width, parent.width * marker.pos + 7px);
+            y: 0px;
+            height: parent.height;
+            text: root.lane.id == "camera" ? "" : marker.label;
+            color: marker.kind == "scene" ? Theme.amber : Theme.magenta;
+            font-size: Tokens.font-xs;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component RulerRow inherits Rectangle {
+    height: 22px;
+
+    Rectangle {
+        x: MovieLayout.label-w + Tokens.space-sm;
+        y: parent.height - 4px;
+        width: parent.width - self.x - Tokens.space-md;
+        height: Tokens.hairline;
+        background: Theme.line;
+
+        for tick in MovieState.ticks: Rectangle {
+            x: parent.width * tick.pos;
+            y: -4px;
+            width: Tokens.hairline;
+            height: 8px;
+            background: Theme.line-strong;
+        }
+
+        for tick in MovieState.ticks: Text {
+            x: max(0px, min(parent.width - self.width, parent.width * tick.pos - self.width / 2));
+            y: -18px;
+            text: tick.label;
+            color: Theme.text-ghost;
+            font-family: "JetBrains Mono";
+            font-size: Tokens.font-xs;
+        }
+    }
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: label-text.preferred-width + 18px;
+    height: 24px;
+    border-radius: Tokens.radius-sm;
+    background: root.enabled && touch.has-hover ? Theme.bg-inset : transparent;
+    border-width: Tokens.hairline;
+    border-color: root.enabled && touch.has-hover ? Theme.line-strong : Theme.line;
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    label-text := Text {
+        text: root.label;
+        color: Theme.text-muted;
+        font-size: Tokens.font-sm;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Movie panel — compact timeline for animation playback and keyframes.
+export component MoviePanel inherits Rectangle {
+    clip: true;
+    background: Theme.bg-panel;
+
+    property <float> playhead-pos: (MovieState.current-frame - 0.5) / max(1, MovieState.frame-count);
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // ── Transport / status ───────────────────────────────────
+        Rectangle {
+            height: MovieLayout.toolbar-h;
+            background: transparent;
+
+            Rectangle {
+                x: Tokens.space-md;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 2 * Tokens.space-md;
+                height: 24px;
+
+                HorizontalLayout {
+                    spacing: Tokens.space-sm;
+                    alignment: start;
+
+                    MiniButton { icon: "first"; clicked => { MovieState.goto-frame(1); } }
+                    MiniButton { icon: "prev"; clicked => { MovieState.step-frame(-1); } }
+                    MiniButton {
+                        icon: MovieState.is-playing ? "pause" : "play";
+                        primary: true;
+                        clicked => { MovieState.toggle-play(); }
+                    }
+                    MiniButton { icon: "next"; clicked => { MovieState.step-frame(1); } }
+                    MiniButton { icon: "last"; clicked => { MovieState.goto-frame(MovieState.frame-count); } }
+                    MiniButton { icon: "stop"; clicked => { MovieState.stop(); } }
+
+                    Rectangle { width: Tokens.space-sm; }
+
+                    StatusLabel { label: "Frame"; }
+
+                    FieldBox {
+                        value <=> MovieState.frame-input;
+                        field-w: 42px;
+                        edited => { MovieState.frame-editing = true; }
+                        accepted(text) => {
+                            MovieState.frame-editing = false;
+                            MovieState.set-frame(text);
+                        }
+                    }
+
+                    StatusValue { label: "/ " + MovieState.frame-count; }
+
+                    StatusLabel { label: "FPS"; }
+
+                    FieldBox {
+                        value <=> MovieState.fps;
+                        field-w: 38px;
+                        edited => { MovieState.fps-editing = true; }
+                        accepted(text) => {
+                            MovieState.fps-editing = false;
+                            MovieState.set-fps(text);
+                        }
+                    }
+
+                    ToggleChip {
+                        label: "Loop";
+                        active: MovieState.loop-enabled;
+                        clicked => { MovieState.toggle-loop(); }
+                    }
+                    ToggleChip {
+                        label: "Rock";
+                        active: MovieState.rock-enabled;
+                        clicked => { MovieState.toggle-rock(); }
+                    }
+                    ToggleChip {
+                        label: "Interp";
+                        active: MovieState.auto-interpolate;
+                        clicked => { MovieState.toggle-auto-interpolate(); }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    ActionButton {
+                        label: "Export";
+                        clicked => { MovieState.request-export(); }
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: Tokens.hairline; background: Theme.line; }
+
+        // ── Timeline ─────────────────────────────────────────────
+        timeline := Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            background: Theme.bg-panel;
+
+            VerticalLayout {
+                spacing: 0px;
+                RulerRow {}
+                for lane in MovieState.lanes: TimelineLaneRow {
+                    lane: lane;
+                }
+            }
+
+            playhead := Rectangle {
+                x: MovieLayout.label-w + Tokens.space-sm
+                    + (parent.width - MovieLayout.label-w - Tokens.space-sm - Tokens.space-md) * root.playhead-pos;
+                y: 2px;
+                width: 1px;
+                height: parent.height - 4px;
+                background: Theme.cyan;
+            }
+
+            Rectangle {
+                x: playhead.x - 4px;
+                y: 0px;
+                width: 9px;
+                height: 9px;
+                border-radius: 1px;
+                background: Theme.cyan;
+                transform-rotation: 45deg;
+                transform-origin: { x: 4.5px, y: 4.5px };
+            }
+
+            scrub := TouchArea {
+                x: MovieLayout.label-w + Tokens.space-sm;
+                y: 0px;
+                width: parent.width - self.x - Tokens.space-md;
+                height: parent.height;
+                mouse-cursor: pointer;
+
+                clicked => {
+                    MovieState.scrub(self.mouse-x / self.width);
+                }
+                moved => {
+                    if self.pressed {
+                        MovieState.scrub(self.mouse-x / self.width);
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: Tokens.hairline; background: Theme.line; }
+
+        // ── Quick actions ────────────────────────────────────────
+        Rectangle {
+            height: MovieLayout.footer-h;
+            background: transparent;
+
+            HorizontalLayout {
+                padding-left: Tokens.space-md;
+                padding-right: Tokens.space-md;
+                spacing: Tokens.space-sm;
+                alignment: start;
+
+                ActionButton {
+                    label: "+ Camera keyframe";
+                    clicked => { MovieState.store-camera-keyframe(); }
+                }
+                ActionButton {
+                    label: "+ Scene keyframe";
+                    enabled: MovieState.can-store-scene;
+                    clicked => { MovieState.store-scene-keyframe(); }
+                }
+                ActionButton {
+                    label: MovieState.target-object == ""
+                        ? "+ Object keyframe"
+                        : "+ " + MovieState.target-object + " keyframe";
+                    enabled: MovieState.can-store-object;
+                    clicked => { MovieState.store-object-keyframe(); }
+                }
+                ActionButton {
+                    label: "Interpolate";
+                    clicked => { MovieState.interpolate(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    text: MovieState.frame-count <= 1
+                        ? "single frame"
+                        : "" + MovieState.frame-count + " frames";
+                    color: Theme.text-ghost;
+                    font-family: "JetBrains Mono";
+                    font-size: Tokens.font-sm;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

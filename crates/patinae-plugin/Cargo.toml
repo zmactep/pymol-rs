@@ -1,0 +1,25 @@
+[package]
+name = "patinae-plugin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Plugin SDK for Patinae — register commands, components, and message handlers"
+
+[dependencies]
+patinae-framework = { workspace = true }
+patinae-cmd = { workspace = true }
+patinae-scene = { workspace = true, features = ["render-bridge"] }
+patinae-mol = { workspace = true }
+patinae-render = { workspace = true }
+patinae-select = { workspace = true }
+patinae-settings = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+rmp-serde = { workspace = true }
+
+[lints]
+workspace = true

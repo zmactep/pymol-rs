@@ -1,23 +1,23 @@
-# PyMOL-RS Python Bindings
+# Patinae Python Bindings
 
-Python bindings for [PyMOL-RS](https://github.com/zmactep/pymol-rs), a modern molecular visualization tool built in Rust with WebGPU rendering.
+Python bindings for the Rust/WebGPU molecular visualization workspace.
 
 ## Installation
 
 ```bash
-pip install pymol-rs
+pip install patinae
 ```
 
 ## Jupyter Widget
 
-PyMOL-RS includes an [anywidget](https://anywidget.dev/)-based widget for interactive visualization in notebooks. Works in JupyterLab, Jupyter Notebook, VS Code, and Google Colab.
+The package includes an [anywidget](https://anywidget.dev/)-based widget for interactive visualization in notebooks. Works in JupyterLab, Jupyter Notebook, VS Code, and Google Colab.
 
 ```bash
-pip install pymol-rs[widget]
+pip install patinae[widget]
 ```
 
 ```python
-from pymol_rs.widget import Viewer
+from patinae.widget import Viewer
 
 view = Viewer()
 view.show()

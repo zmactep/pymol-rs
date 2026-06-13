@@ -7,13 +7,16 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-description = "PyMOL-RS IPC server plugin: Unix domain socket control"
+description = "Patinae IPC server plugin: Unix domain socket control"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-pymol-plugin = { path = "../../crates/pymol-plugin" }
+patinae-plugin = { path = "../../crates/patinae-plugin" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
+
+[lints]
+workspace = true

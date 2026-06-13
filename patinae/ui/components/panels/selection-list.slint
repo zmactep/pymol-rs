@@ -1,0 +1,186 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ObjectsState, SelectionRow } from "../../states/objects-state.slint";
+import { RowBtn } from "./row-btn.slint";
+
+// ── Selection section header ─────────────────────────────────────────
+
+component SelectionHeader inherits Rectangle {
+    height: Tokens.tab-bar-h;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: Tokens.space-md;
+        padding-right: Tokens.space-md;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: Tokens.space-sm;
+            alignment: start;
+
+            Text {
+                text: "SELECTIONS";
+                color: Theme.magenta;
+                font-size: Tokens.font-md;
+                font-weight: 500;
+                letter-spacing: 1.1px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: ObjectsState.selections.length;
+                color: Theme.text-ghost;
+                font-size: Tokens.font-md;
+                vertical-alignment: center;
+            }
+        }
+
+        // Placeholder for creating a saved selection from the panel.
+        VerticalLayout {
+            alignment: center;
+
+            Rectangle {
+                width: Tokens.row-btn-w;
+                height: Tokens.row-btn-h;
+                border-radius: Tokens.radius-sm;
+
+                Text {
+                    text: "+";
+                    color: Theme.text-faint;
+                    font-size: Tokens.font-xl;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                ta := TouchArea {}
+
+                states [
+                    hover when ta.has-hover: {
+                        background: Theme.bg-inset;
+                    }
+                ]
+            }
+        }
+    }
+}
+
+// ── Selection row ────────────────────────────────────────────────────
+
+component SelectionRowItem inherits Rectangle {
+    in property <SelectionRow> data;
+
+    property <bool> click-shift: false;
+    property <bool> click-meta:  false;
+
+    height: Tokens.row-h;
+    border-radius: Tokens.radius-md;
+    background: root.data.selected
+        ? Theme.cyan.with-alpha(0.06)
+        : touch.has-hover
+            ? Theme.bg-inset.with-alpha(0.5)
+            : transparent;
+    border-width: root.data.selected ? Tokens.hairline : 0px;
+    border-color: root.data.selected
+        ? Theme.cyan.with-alpha(0.5)
+        : transparent;
+
+    // Name in parentheses, magenta
+    Text {
+        x: Tokens.space-md + Tokens.chevron-w + Tokens.space-sm;
+        y: 0;
+        width: parent.width - self.x - 2 * Tokens.row-h - Tokens.space-sm;
+        height: parent.height;
+        text: "(" + root.data.name + ")";
+        color: root.data.enabled ? Theme.magenta : Theme.text-ghost;
+        font-size: Tokens.font-lg;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    // Atom count (fades out when R/C buttons visible)
+    Text {
+        x: parent.width - self.width - Tokens.space-md - 2 * Tokens.row-h;
+        y: 0;
+        height: parent.height;
+        text: root.data.atom-count;
+        color: Theme.text-ghost;
+        font-size: Tokens.font-sm;
+        vertical-alignment: center;
+        opacity: touch.has-hover ? 0.0 : 1.0;
+        visible: root.data.atom-count > 0;
+    }
+
+    // Click area (before RowBtns so it doesn't steal clicks)
+    touch := TouchArea {
+        x: 0;
+        y: 0;
+        width: parent.width - 2 * Tokens.row-h;
+        height: parent.height;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.click-shift = event.modifiers.shift;
+                root.click-meta  = event.modifiers.meta || event.modifiers.control;
+                if (event.button == PointerEventButton.right) {
+                    ObjectsState.selection-right-clicked(root.data.name);
+                }
+            }
+        }
+        clicked => {
+            ObjectsState.selection-clicked(root.data.name,
+                                           root.click-shift, root.click-meta);
+        }
+    }
+
+    // R button (representations)
+    r-btn := RowBtn {
+        x: parent.width - 2 * Tokens.row-h + 4px;
+        y: (parent.height - self.height) / 2;
+        letter: "R";
+        source: "selection";
+        obj-name: root.data.name;
+        row-hovered: touch.has-hover;
+        sibling-hovered: c-btn.hovered;
+    }
+
+    // C button (color)
+    c-btn := RowBtn {
+        x: parent.width - Tokens.row-h + 2px;
+        y: (parent.height - self.height) / 2;
+        letter: "C";
+        source: "selection";
+        obj-name: root.data.name;
+        row-hovered: touch.has-hover;
+        sibling-hovered: r-btn.hovered;
+    }
+}
+
+// ── Selection list panel ─────────────────────────────────────────────
+
+export component SelectionList inherits VerticalLayout {
+    SelectionHeader {}
+
+    // Empty state
+    if ObjectsState.selections.length == 0: Text {
+        text: "no selections yet";
+        color: Theme.text-ghost;
+        font-size: Tokens.font-sm;
+        letter-spacing: 0.6px;
+        horizontal-alignment: left;
+        vertical-alignment: top;
+        x: Tokens.space-md;
+    }
+
+    // Selection rows
+    if ObjectsState.selections.length > 0: Flickable {
+        vertical-stretch: 1;
+
+        VerticalLayout {
+            padding: Tokens.space-xs;
+            spacing: Tokens.row-gap;
+
+            for item in ObjectsState.selections: SelectionRowItem {
+                data: item;
+            }
+        }
+    }
+}

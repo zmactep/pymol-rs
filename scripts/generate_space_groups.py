@@ -6,10 +6,10 @@ distributed as syminfo.lib in the CCP4 suite (derived from sgtbx).
 
 Usage:
     python3 scripts/generate_space_groups.py scripts/syminfo.lib \
-        > crates/pymol-algos/src/symmetry/space_groups_data.rs
+        > crates/patinae-algos/src/symmetry/space_groups_data.rs
 
     python3 scripts/generate_space_groups.py scripts/syminfo.lib --verify \
-        crates/pymol-algos/src/symmetry/space_groups_data.rs
+        crates/patinae-algos/src/symmetry/space_groups_data.rs
 """
 
 from __future__ import annotations

@@ -1,0 +1,28 @@
+[package]
+name = "patinae-plugin-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Runtime plugin host for Patinae frontends"
+
+[dependencies]
+ahash = { workspace = true }
+libloading = { workspace = true }
+log = { workspace = true }
+patinae-cmd = { workspace = true }
+patinae-framework = { workspace = true }
+patinae-mol = { workspace = true }
+patinae-plugin = { workspace = true }
+patinae-render = { workspace = true }
+patinae-scene = { workspace = true, features = ["render-bridge"] }
+patinae-select = { workspace = true }
+patinae-settings = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

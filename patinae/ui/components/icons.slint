@@ -1,0 +1,322 @@
+// Custom-drawn UI icons — Rectangle and Path primitives only. No Unicode.
+//
+// Used by the action pill (ZoomIcon / OrientIcon / CenterIcon / ToggleIcon /
+// OverflowIcon) and by the object-list chain rows (BioGlyph / SolventGlyph /
+// OrganicGlyph / InorganicGlyph).
+
+import { Theme } from "../theme.slint";
+import { Tokens } from "../tokens.slint";
+
+// ── Chevron icons (object-list expand/collapse) ─────────────────────
+
+// Right-pointing chevron (collapsed state). 8×8 box, stroke only.
+export component ChevronRight {
+    in property <color> tint;
+
+    width: 8px;
+    height: 8px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 8;
+        viewbox-height: 8;
+        stroke: tint;
+        stroke-width: 1.2px;
+        fill: transparent;
+        commands: "M 2 1 L 6 4 L 2 7";
+    }
+}
+
+// Down-pointing chevron (expanded state). 8×8 box, stroke only.
+export component ChevronDown {
+    in property <color> tint;
+
+    width: 8px;
+    height: 8px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 8;
+        viewbox-height: 8;
+        stroke: tint;
+        stroke-width: 1.2px;
+        fill: transparent;
+        commands: "M 1 2 L 4 6 L 7 2";
+    }
+}
+
+// ── Action pill icons ────────────────────────────────────────────────
+
+// Viewfinder — 4 L-shaped corner brackets inside a centered 12×12 box.
+export component ZoomIcon {
+    in property <color> tint;
+    property <length> s: Tokens.pill-icon-size;
+    property <length> t: Tokens.pill-icon-stroke;
+    // Inner frame: centered 12×12 so icon visually matches other 12×12 icons.
+    property <length> inset: (s - 12px) / 2;
+    property <length> b: 4px;  // bracket arm length
+
+    width: s;
+    height: s;
+
+    Rectangle { x: inset;           y: inset;           width: b; height: t; background: tint; }
+    Rectangle { x: inset;           y: inset;           width: t; height: b; background: tint; }
+    Rectangle { x: s - inset - b;   y: inset;           width: b; height: t; background: tint; }
+    Rectangle { x: s - inset - t;   y: inset;           width: t; height: b; background: tint; }
+    Rectangle { x: inset;           y: s - inset - t;   width: b; height: t; background: tint; }
+    Rectangle { x: inset;           y: s - inset - b;   width: t; height: b; background: tint; }
+    Rectangle { x: s - inset - b;   y: s - inset - t;   width: b; height: t; background: tint; }
+    Rectangle { x: s - inset - t;   y: s - inset - b;   width: t; height: b; background: tint; }
+}
+
+// 270° arc + arrowhead — rotation/orient affordance.
+// Uses a smaller 5px radius arc centered at (8,8) to keep proportions square.
+export component OrientIcon {
+    in property <color> tint;
+
+    width: Tokens.pill-icon-size;
+    height: Tokens.pill-icon-size;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: tint;
+        stroke-width: Tokens.pill-icon-stroke;
+        fill: transparent;
+        // 270° arc (r=5) from 3 o'clock CW around to 12 o'clock, with arrowhead.
+        commands: "M 13 8 A 5 5 0 1 1 8 3 M 8 3 L 6 1 M 8 3 L 6 5";
+    }
+}
+
+// Crosshair in a ring — center / recenter action. 12×12 target centered in 16×16.
+export component CenterIcon {
+    in property <color> tint;
+    property <length> s: Tokens.pill-icon-size;
+    property <length> t: Tokens.pill-icon-stroke;
+    property <length> d: 8px;        // ring diameter
+    property <length> r: d / 2;
+    property <length> arm: 2px;      // crosshair protrusion beyond ring
+    property <length> span: d + 2 * arm;  // 12px — matches other icons' 12×12 frame
+
+    width: s;
+    height: s;
+
+    // Ring
+    Rectangle {
+        x: (s - d) / 2;
+        y: (s - d) / 2;
+        width: d;
+        height: d;
+        border-radius: r;
+        border-width: t;
+        border-color: tint;
+        background: transparent;
+    }
+    // Crosshair arms — 4 short stubs at ring edges
+    Rectangle { x: (s - t) / 2;     y: (s - span) / 2;           width: t;   height: arm; background: tint; }
+    Rectangle { x: (s - t) / 2;     y: (s + span) / 2 - arm;     width: t;   height: arm; background: tint; }
+    Rectangle { x: (s - span) / 2;  y: (s - t) / 2;              width: arm; height: t;   background: tint; }
+    Rectangle { x: (s + span) / 2 - arm; y: (s - t) / 2;         width: arm; height: t;   background: tint; }
+    // Center dot
+    Rectangle {
+        x: (s - t * 2) / 2;
+        y: (s - t * 2) / 2;
+        width: t * 2;
+        height: t * 2;
+        border-radius: t;
+        background: tint;
+    }
+}
+
+// Power — circle with a gap at top and a vertical stroke through the gap.
+export component ToggleIcon {
+    in property <color> tint;
+
+    width: Tokens.pill-icon-size;
+    height: Tokens.pill-icon-size;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: tint;
+        stroke-width: Tokens.pill-icon-stroke;
+        fill: transparent;
+        // Arc with gap at top (from ~30° to ~330°), plus vertical bar.
+        commands: "M 10 4 A 5 5 0 1 1 6 4 M 8 3 L 8 8";
+    }
+}
+
+// Three horizontal dots — overflow / more-actions affordance.
+export component OverflowIcon {
+    in property <color> tint;
+    property <length> dot: 3px;
+
+    width: Tokens.pill-icon-size;
+    height: Tokens.pill-icon-size;
+
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+        padding-top: (parent.height - dot) / 2;
+        padding-bottom: (parent.height - dot) / 2;
+
+        Rectangle { width: dot; height: dot; border-radius: dot / 2; background: tint; }
+        Rectangle { width: dot; height: dot; border-radius: dot / 2; background: tint; }
+        Rectangle { width: dot; height: dot; border-radius: dot / 2; background: tint; }
+    }
+}
+
+// ── Chain kind indicators (object-list chain sub-rows) ──────────────
+
+// Biopolymer — chain color dot.
+export component BioGlyph {
+    in property <color> tint;
+    in property <bool> multicolor: false;
+
+    width: Tokens.dot-size;
+    height: Tokens.dot-size;
+
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: Tokens.dot-radius;
+        background: root.multicolor
+            ? @linear-gradient(135deg, #22D3EE 0%, #A78BFA 50%, #FB923C 100%)
+            : root.tint;
+    }
+}
+
+// Solvent — "SOL" text tag in violet.
+export component SolventGlyph {
+    in property <color> tint: Theme.violet;
+
+    width: Tokens.chain-indicator-w;
+    height: 12px;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: "SOL";
+        color: tint;
+        font-size: Tokens.font-xs;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Organic — three gray dots in a water-like triangle, connected by lines.
+export component OrganicGlyph {
+    in property <color> tint: Theme.text-muted;
+
+    width: 12px;
+    height: 11px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 12;
+        viewbox-height: 11;
+        stroke: tint;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 9 L 6 2 L 10 9";
+    }
+
+    // Filled dots at the three vertices
+    Rectangle { x: 4.5px; y: 0.5px; width: 3px; height: 3px; border-radius: 1.5px; background: tint; }
+    Rectangle { x: 0.5px; y: 7.5px; width: 3px; height: 3px; border-radius: 1.5px; background: tint; }
+    Rectangle { x: 8.5px; y: 7.5px; width: 3px; height: 3px; border-radius: 1.5px; background: tint; }
+}
+
+// Inorganic — rotated magenta square (diamond), suggesting crystalline/ion.
+export component InorganicGlyph {
+    in property <color> tint: Theme.magenta;
+
+    width: 10px;
+    height: 10px;
+
+    Rectangle {
+        x: (parent.width - 7px) / 2;
+        y: (parent.height - 7px) / 2;
+        width: 7px;
+        height: 7px;
+        background: tint;
+        transform-rotation: 45deg;
+        transform-origin: { x: 3.5px, y: 3.5px };
+    }
+}
+
+// Source map — small volume/grid square.
+export component MapSourceGlyph {
+    in property <color> tint: Theme.cyan;
+
+    width: 14px;
+    height: 14px;
+
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        border-width: 1px;
+        border-color: tint;
+        background: transparent;
+    }
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        stroke: tint.with-alpha(0.7);
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 5 2 L 5 12 M 9 2 L 9 12 M 2 5 L 12 5 M 2 9 L 12 9";
+    }
+}
+
+// Isomesh — contour wire.
+export component MapIsomeshGlyph {
+    in property <color> tint: Theme.cyan;
+
+    width: 14px;
+    height: 14px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        stroke: tint;
+        stroke-width: 1.2px;
+        fill: transparent;
+        commands: "M 2 8 C 3 3 7 3 8 6 C 9 9 12 7 12 3 M 3 11 C 5 8 8 10 10 12";
+    }
+}
+
+// Isosurface — filled contour surface.
+export component MapIsosurfaceGlyph {
+    in property <color> tint: Theme.cyan;
+
+    width: 14px;
+    height: 14px;
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 14;
+        viewbox-height: 14;
+        stroke: tint;
+        stroke-width: 1px;
+        fill: tint.with-alpha(0.22);
+        commands: "M 2 8 C 2 4 5 2 8 3 C 12 4 13 8 11 11 C 9 13 5 12 3 10 C 2 9 2 8 2 8 Z";
+    }
+}

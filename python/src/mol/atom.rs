@@ -1,7 +1,7 @@
 //! Python bindings for Atom
 
 use pyo3::prelude::*;
-use pymol_mol::{Atom, Element, SecondaryStructure};
+use patinae_mol::{Atom, Element, SecondaryStructure};
 
 use super::element::PyElement;
 

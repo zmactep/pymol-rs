@@ -3,16 +3,16 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pymol-rs"
-version = "0.3.3"
-description = "PyMOL-RS: Modern molecular visualization in Rust with WebGPU rendering"
+name = "patinae"
+version = "0.4.0"
+description = "Patinae: Modern molecular visualization in Rust with WebGPU rendering"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-3-Clause" }
 authors = [
     { name = "Pavel Yakovlev" }
 ]
-keywords = ["pymol", "molecular", "visualization", "chemistry", "biology"]
+keywords = ["patinae", "molecular", "visualization", "chemistry", "biology"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -37,18 +37,18 @@ widget = ["anywidget>=0.9", "traitlets>=5.0"]
 dev = ["pytest>=7.0", "numpy>=1.20"]
 
 [project.urls]
-Homepage = "https://github.com/zmactep/pymol-rs"
-Repository = "https://github.com/zmactep/pymol-rs"
+Homepage = "https://github.com/zmactep/patinae"
+Repository = "https://github.com/zmactep/patinae"
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["extension-module"]
 python-source = "."
-module-name = "pymol_rs._pymol_rs"
+module-name = "patinae._patinae"
 include = [
     { path = "LICENSE", format = "sdist" },
-    { path = "pymol_rs/widget/_frontend.js", format = "sdist" },
-    { path = "pymol_rs/widget/static/**", format = ["sdist", "wheel"] },
+    { path = "patinae/widget/_frontend.js", format = "sdist" },
+    { path = "patinae/widget/static/**", format = ["sdist", "wheel"] },
 ]
 
 [project.scripts]
-pymol-rs = "pymol_rs._cli:main"
+patinae = "patinae._cli:main"

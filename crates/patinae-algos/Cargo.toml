@@ -1,0 +1,25 @@
+[package]
+name = "patinae-algos"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Computational algorithms for Patinae (alignment, SVD, sequence alignment)"
+
+[features]
+default = []
+parallel = ["dep:rayon"]
+
+[dependencies]
+lin_alg = { workspace = true }
+thiserror = { workspace = true }
+phf = { workspace = true }
+bitflags = { workspace = true }
+serde = { workspace = true }
+rayon = { workspace = true, optional = true }
+
+[lints]
+workspace = true

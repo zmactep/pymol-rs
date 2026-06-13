@@ -1,7 +1,7 @@
 //! Python bindings for Element
 
 use pyo3::prelude::*;
-use pymol_mol::Element;
+use patinae_mol::Element;
 
 /// Python wrapper for chemical elements
 #[pyclass(name = "Element")]

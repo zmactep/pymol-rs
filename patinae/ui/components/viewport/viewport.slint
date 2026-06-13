@@ -1,0 +1,78 @@
+import { Hud } from "hud.slint";
+import { EmptyState } from "empty-state.slint";
+import { Theme } from "../../theme.slint";
+import { LayoutState } from "../../states/layout-state.slint";
+import { ViewportState } from "../../states/viewport-state.slint";
+
+export component Viewport inherits Rectangle {
+    background: Theme.viewport-bg;
+
+    if !LayoutState.empty-mode: Image {
+        source: ViewportState.viewport-texture;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+    }
+
+    if !LayoutState.empty-mode: Hud {
+        x: parent.width - self.width - 16px;
+        y: 16px;
+    }
+
+    if LayoutState.empty-mode: EmptyState {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    if !LayoutState.empty-mode: TouchArea {
+        width: 100%;
+        height: 100%;
+        property <bool> left-press-started: false;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                ViewportState.mouse-x = self.mouse-x / 1px;
+                ViewportState.mouse-y = self.mouse-y / 1px;
+                ViewportState.press-x = ViewportState.mouse-x;
+                ViewportState.press-y = ViewportState.mouse-y;
+                if event.button == PointerEventButton.left {
+                    self.left-press-started = true;
+                    ViewportState.left-pressed = true;
+                }
+                if event.button == PointerEventButton.middle { ViewportState.middle-pressed = true; }
+                if event.button == PointerEventButton.right  { ViewportState.right-pressed = true; }
+            }
+            if event.kind == PointerEventKind.up {
+                ViewportState.mouse-x = self.mouse-x / 1px;
+                ViewportState.mouse-y = self.mouse-y / 1px;
+                if event.button == PointerEventButton.left && self.left-press-started {
+                    ViewportState.click-x = ViewportState.mouse-x;
+                    ViewportState.click-y = ViewportState.mouse-y;
+                    ViewportState.click-serial += 1;
+                }
+            }
+            if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                if event.button == PointerEventButton.left {
+                    self.left-press-started = false;
+                    ViewportState.left-pressed = false;
+                }
+                if event.button == PointerEventButton.middle { ViewportState.middle-pressed = false; }
+                if event.button == PointerEventButton.right  { ViewportState.right-pressed = false; }
+            }
+            ViewportState.shift-held   = event.modifiers.shift;
+            ViewportState.control-held = event.modifiers.control;
+            ViewportState.alt-held     = event.modifiers.alt;
+            ViewportState.meta-held    = event.modifiers.meta;
+        }
+
+        moved => {
+            ViewportState.mouse-x = self.mouse-x / 1px;
+            ViewportState.mouse-y = self.mouse-y / 1px;
+        }
+
+        scroll-event(event) => {
+            ViewportState.scroll-delta = ViewportState.scroll-delta - event.delta-y / 1px;
+            return accept;
+        }
+    }
+}

@@ -1,0 +1,147 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ReplState } from "../../states/repl-state.slint";
+
+// ── Single completion row ──────────────────────────────────────────
+
+component CompletionRow inherits Rectangle {
+    in property <string> text;
+    in property <string> description;
+    in property <string> source;
+    in property <bool> selected;
+    in property <int> index;
+
+    height: 26px;
+    background: selected ? Theme.bg-raised : transparent;
+    border-radius: Tokens.radius-sm;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        // Command/item name
+        Text {
+            text: root.text;
+            color: root.selected ? Theme.text : Theme.text-dim;
+            font-size: Tokens.repl-output-font;
+            font-weight: 500;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        // Description (dimmed, right side)
+        if root.description != "": Text {
+            text: root.description;
+            color: Theme.text-muted;
+            font-size: Tokens.font-xs;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
+            max-width: 160px;
+            overflow: elide;
+        }
+
+        // Plugin badge
+        if root.source == "plugin": VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+
+            Rectangle {
+                width: 42px;
+                height: 16px;
+                border-radius: Tokens.radius-sm;
+                background: Theme.violet.with-alpha(0.15);
+
+                Text {
+                    text: "plugin";
+                    color: Theme.violet;
+                    font-size: Tokens.font-xs;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            ReplState.completion-accept(root.index);
+        }
+    }
+}
+
+// ── Completion popup ───────────────────────────────────────────────
+
+export component CompletionPopup inherits Rectangle {
+    property <int> max-visible: 8;
+    property <int> count: ReplState.completion-items.length;
+    property <length> row-h: 26px;
+    property <length> pad: Tokens.space-xs;
+
+    visible: ReplState.completion-visible && count > 0;
+    height: min(count, max-visible) * row-h + 2 * pad;
+    clip: true;
+    border-radius: Tokens.radius-lg;
+    background: Theme.bg-card;
+    border-width: Tokens.hairline;
+    border-color: Theme.line;
+
+    // Block events from passing through
+    TouchArea {}
+
+    flick := Flickable {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        viewport-height: count * row-h + 2 * pad;
+
+        VerticalLayout {
+            padding: root.pad;
+
+            for item[idx] in ReplState.completion-items: CompletionRow {
+                text: item.text;
+                description: item.description;
+                source: item.source;
+                selected: idx == ReplState.completion-selected;
+                index: idx;
+            }
+        }
+    }
+
+    /// Scroll so the currently selected row is visible.
+    /// Called imperatively from repl-pill after arrow-key navigation.
+    public function scroll-to-selected() {
+        // Top edge of the selected row in viewport coordinates
+        if ReplState.completion-selected < 0 { return; }
+        // selected-top/bot relative to viewport content origin
+        // (row-h * index + pad is the top of the row inside the VerticalLayout)
+        scroll-to-index(ReplState.completion-selected);
+    }
+
+    function scroll-to-index(idx: int) {
+        // Position of the row inside the content
+        // VerticalLayout has padding = pad at top, then rows of row-h each.
+        // So row top = pad + idx * row-h, row bottom = pad + (idx+1) * row-h.
+        // viewport-y is negative (scrolled down = more negative).
+        // visible-top = -viewport-y, visible-bottom = -viewport-y + height.
+        // We want: row-top >= visible-top AND row-bottom <= visible-bottom.
+
+        // Use helper lengths to avoid unit issues
+        // row-top and row-bottom in content space:
+        // visible window in content space: [-viewport-y, -viewport-y + height)
+
+        // If the selected row is above the visible area, scroll up:
+        if pad + idx * row-h < -flick.viewport-y {
+            flick.viewport-y = -(pad + idx * row-h);
+        }
+        // If the selected row is below the visible area, scroll down:
+        if pad + (idx + 1) * row-h > -flick.viewport-y + flick.height {
+            flick.viewport-y = -(pad + (idx + 1) * row-h - flick.height);
+        }
+    }
+}

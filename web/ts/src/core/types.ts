@@ -5,7 +5,7 @@ export interface CommandOutput {
 }
 
 export interface OutputMessage {
-  level: "info" | "warning" | "error";
+  level: "info" | "warning" | "error" | "clear";
   text: string;
 }
 
@@ -38,6 +38,7 @@ export interface MovieState {
   frame_count: number;
   current_frame: number;
   is_playing: boolean;
+  rock_enabled: boolean;
 }
 
 export interface LabelInfo {
@@ -65,8 +66,82 @@ export interface PickHitInfo {
   chain: string | null;
   /** Residue sequence number of the hit atom, or `null`. */
   residue: number | null;
-  /** PyMOL selection expression (depends on `mouse_selection_mode`), or `null`. */
+  /** Selection expression (depends on `mouse_selection_mode`), or `null`. */
   expression: string | null;
+}
+
+export interface ViewerWasmPerformanceSnapshot {
+  render_count: number;
+  avg_render_ms: number;
+  median_render_ms: number;
+  p95_render_ms: number;
+  last_render_ms: number;
+  last_poll_picks_ms: number;
+  last_uniforms_ms: number;
+  last_prepare_ms: number;
+  last_sync_ms: number;
+  last_sync_scene_store_object_ms: number;
+  last_sync_scene_store_flush_ms: number;
+  last_sync_marking_resources_ms: number;
+  last_sync_rep_ms: number;
+  last_sync_map_ms: number;
+  last_sync_order_bounds_ms: number;
+  last_sync_compute_dispatch_ms: number;
+  last_sync_marker_lut_upload_bytes: number;
+  last_sync_marker_lut_upload_ranges: number;
+  last_sync_marker_lut_reallocated: boolean;
+  last_sync_scene_store_live_atoms: number;
+  last_sync_scene_store_allocated_atoms: number;
+  last_sync_scene_store_orphaned_atoms: number;
+  last_sync_scene_store_live_bonds: number;
+  last_sync_scene_store_allocated_bonds: number;
+  last_sync_scene_store_orphaned_bonds: number;
+  last_sync_scene_store_live_table_slots: number;
+  last_sync_scene_store_allocated_table_slots: number;
+  last_sync_scene_store_orphaned_table_slots: number;
+  sphere_lod_active: boolean;
+  sphere_lod_sample_shift: number;
+  sphere_lod_sample_stride: number;
+  sphere_lod_base_sample_shift: number;
+  sphere_lod_source_atom_count: number;
+  sphere_lod_instance_upper_bound: number;
+  sphere_lod_cull_upper_bound: number;
+  sphere_lod_viewport_visible_count: number;
+  sphere_lod_viewport_full_detail: boolean;
+  stick_lod_active: boolean;
+  stick_lod_sample_shift: number;
+  stick_lod_sample_stride: number;
+  stick_lod_base_sample_shift: number;
+  stick_lod_source_bond_count: number;
+  stick_lod_sampled_bond_upper_bound: number;
+  stick_lod_cull_upper_bound: number;
+  stick_lod_viewport_visible_count: number;
+  stick_lod_viewport_full_detail: boolean;
+  overlay_id_marked_only: boolean;
+  last_settings_ms: number;
+  last_acquire_ms: number;
+  last_encode_ms: number;
+  last_submit_present_ms: number;
+  hover_submitted: number;
+  hover_completed: number;
+  hover_stale: number;
+  hover_queued: number;
+  hover_deferred: number;
+  hover_throttle_active: boolean;
+  hover_cancelled: number;
+  click_submitted: number;
+  click_completed: number;
+  hover_pending: boolean;
+  click_pending: boolean;
+}
+
+export interface ViewerPerformanceSnapshot {
+  frame_count: number;
+  avg_frame_ms: number;
+  median_frame_ms: number;
+  p95_frame_ms: number;
+  last_frame_ms: number;
+  wasm: ViewerWasmPerformanceSnapshot | null;
 }
 
 export interface ViewerOptions {
@@ -85,6 +160,11 @@ export interface ViewerOptions {
    * Fires `atom-picked` events with hit details. Default: false.
    */
   picking?: boolean;
+  /**
+   * Draw the visible selection / hover overlay. Defaults to `picking`, so
+   * read-only embedded viewers stay visually inert unless explicitly enabled.
+   */
+  selectionOverlay?: boolean;
 }
 
 export type PanelName = "repl" | "objects" | "sequence" | "movie";

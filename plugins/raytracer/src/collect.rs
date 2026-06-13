@@ -5,53 +5,51 @@
 
 use std::collections::HashMap;
 
-use pymol_color::{ChainColors, ElementColors, NamedColors};
-use pymol_mol::{AtomIndex, CoordSet, ObjectMolecule, RepMask};
+use patinae_color::{NamedPalette, ThemedPalette};
+use patinae_mol::{AtomIndex, CoordSet, ObjectMolecule, RepMask};
 
 use crate::primitive::{GpuCylinder, GpuSphere, PrimitiveCollector, Primitives};
 
 /// Color resolver for raytracing (simplified version)
 pub struct RayColorResolver<'a> {
-    named_colors: &'a NamedColors,
-    element_colors: &'a ElementColors,
+    named_palette: &'a NamedPalette,
+    palette: &'a ThemedPalette,
 }
 
 impl<'a> RayColorResolver<'a> {
     /// Create a new color resolver
-    pub fn new(
-        named_colors: &'a NamedColors,
-        element_colors: &'a ElementColors,
-        _chain_colors: &ChainColors, // Kept for API compatibility
-    ) -> Self {
+    pub fn new(named_palette: &'a NamedPalette, palette: &'a ThemedPalette) -> Self {
         Self {
-            named_colors,
-            element_colors,
+            named_palette,
+            palette,
         }
     }
 
     /// Resolve color for an atom
-    pub fn resolve_atom(
-        &self,
-        atom: &pymol_mol::Atom,
-        _molecule: &ObjectMolecule,
-    ) -> [f32; 4] {
+    pub fn resolve_atom(&self, atom: &patinae_mol::Atom, _molecule: &ObjectMolecule) -> [f32; 4] {
         // Check for explicit atom color first (positive index means custom color)
         if atom.repr.colors.base >= 0 {
-            if let Some(color) = self.named_colors.get_by_index(atom.repr.colors.base as u32) {
+            if let Some(color) = self
+                .named_palette
+                .get_by_index(atom.repr.colors.base as u32)
+            {
                 return [color.r, color.g, color.b, 1.0];
             }
         }
 
         // Try element color
-        let color = self.element_colors.get(atom.element.atomic_number());
+        let color = self.palette.element.get(atom.element.atomic_number());
         if color.r != 1.0 || color.g != 0.0 || color.b != 1.0 {
             // Not the default magenta, so it's a valid element color
             return [color.r, color.g, color.b, 1.0];
         }
 
-        // Try chain color
-        if !atom.residue.chain.is_empty() {
-            let color = ChainColors::get(&atom.residue.chain);
+        // Try chain color for biomolecule carbons only
+        if !atom.residue.chain.is_empty()
+            && atom.state.flags.is_biomolecule()
+            && atom.element.is_carbon()
+        {
+            let color = self.palette.chains.get(&atom.residue.chain);
             return [color.r, color.g, color.b, 1.0];
         }
 
@@ -88,11 +86,14 @@ pub fn collect_spheres(
         let radius = atom.effective_vdw() * scale;
         let color = colors.resolve_atom(atom, molecule);
 
+        // Use per-atom transparency if set, otherwise fall back to global
+        let transparency = atom.repr.sphere_transparency.unwrap_or(sphere_transparency);
+
         spheres.push(GpuSphere::new(
             [coord.x, coord.y, coord.z],
             radius,
             color,
-            sphere_transparency,
+            transparency,
         ));
     }
 
@@ -110,7 +111,7 @@ pub fn collect_cylinders(
     stick_transparency: f32,
 ) -> (Vec<GpuCylinder>, Vec<GpuSphere>) {
     let mut cylinders = Vec::new();
-    let mut atom_max_radius: HashMap<AtomIndex, (f32, [f32; 4])> = HashMap::new();
+    let mut atom_max_radius: HashMap<AtomIndex, (f32, [f32; 4], f32)> = HashMap::new();
 
     for bond in molecule.bonds() {
         let atom1_idx = bond.atom1;
@@ -145,35 +146,40 @@ pub fn collect_cylinders(
         let color2 = colors.resolve_atom(atom2, molecule);
         let radius = stick_radius * bond.order.as_float().sqrt();
 
+        // Use per-atom transparency if set, otherwise fall back to global
+        let trans1 = atom1.repr.stick_transparency.unwrap_or(stick_transparency);
+        let trans2 = atom2.repr.stick_transparency.unwrap_or(stick_transparency);
+        let bond_transparency = trans1.max(trans2);
+
         cylinders.push(GpuCylinder::new(
             [pos1.x, pos1.y, pos1.z],
             [pos2.x, pos2.y, pos2.z],
             radius,
             color1,
             color2,
-            stick_transparency,
+            bond_transparency,
         ));
 
-        // Track atoms for sphere caps
+        // Track atoms for sphere caps (with per-atom transparency)
         atom_max_radius
             .entry(atom1_idx)
-            .and_modify(|(r, _)| *r = r.max(radius))
-            .or_insert((radius, color1));
+            .and_modify(|(r, _, _)| *r = r.max(radius))
+            .or_insert((radius, color1, trans1));
         atom_max_radius
             .entry(atom2_idx)
-            .and_modify(|(r, _)| *r = r.max(radius))
-            .or_insert((radius, color2));
+            .and_modify(|(r, _, _)| *r = r.max(radius))
+            .or_insert((radius, color2, trans2));
     }
 
     // Create sphere caps
     let mut sphere_caps = Vec::new();
-    for (atom_idx, (max_radius, color)) in atom_max_radius {
+    for (atom_idx, (max_radius, color, transparency)) in atom_max_radius {
         if let Some(coord) = coord_set.get_atom_coord(atom_idx) {
             sphere_caps.push(GpuSphere::new(
                 [coord.x, coord.y, coord.z],
                 max_radius,
                 color,
-                stick_transparency,
+                transparency,
             ));
         }
     }

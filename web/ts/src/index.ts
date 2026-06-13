@@ -1,14 +1,14 @@
 /**
- * @pymol-rs/viewer — embeddable WebGPU molecular visualization.
+ * @patinae/viewer — embeddable WebGPU molecular visualization.
  *
  * Usage:
- *   import { PyMolRSViewer } from "@pymol-rs/viewer";
- *   const viewer = new PyMolRSViewer(document.getElementById("container")!);
+ *   import { PatinaeViewer } from "@patinae/viewer";
+ *   const viewer = new PatinaeViewer(document.getElementById("container")!);
  *   await viewer.init();
  *   viewer.execute("load https://files.rcsb.org/download/1CRN.pdb");
  */
 
-export { PyMolRSViewer } from "./core/api.js";
+export { PatinaeViewer } from "./core/api.js";
 export type {
   CommandOutput,
   ObjectInfo,
@@ -16,6 +16,8 @@ export type {
   SequenceResidue,
   MovieState,
   ViewerOptions,
+  ViewerPerformanceSnapshot,
+  ViewerWasmPerformanceSnapshot,
   PanelName,
   PanelSlot,
   PanelPlacement,
@@ -23,23 +25,24 @@ export type {
 export type { ViewerEventType, ViewerEventMap } from "./core/events.js";
 
 // Custom element registration
-import { PyMolRSViewer } from "./core/api.js";
+import { PatinaeViewer } from "./core/api.js";
 
 /**
- * Register `<pymol-rs-viewer>` as a custom HTML element.
+ * Register `<patinae-viewer>` as a custom HTML element.
  *
  * Attributes:
- *   src      — URL(s) to load on mount (whitespace-separated for multiple)
- *   panels   — comma-separated panel names (repl, objects, sequence, movie)
- *   command  — PyMOL command to run after loading
+ *   src               — URL(s) to load on mount (whitespace-separated for multiple)
+ *   panels            — comma-separated panel names (repl, objects, sequence, movie)
+ *   command           — command to run after loading
+ *   selection-overlay — set to "false" to suppress selection/hover visuals
  */
-export function registerElement(tagName = "pymol-rs-viewer"): void {
+export function registerElement(tagName = "patinae-viewer"): void {
   if (customElements.get(tagName)) return;
 
   customElements.define(
     tagName,
     class extends HTMLElement {
-      private viewer: PyMolRSViewer | null = null;
+      private viewer: PatinaeViewer | null = null;
 
       async connectedCallback() {
         const shadow = this.attachShadow({ mode: "open" });
@@ -61,8 +64,16 @@ export function registerElement(tagName = "pymol-rs-viewer"): void {
         const shouldDefer = deferAttr !== null
           ? deferAttr !== "false"
           : !!(src || cmd);
+        const selectionOverlayAttr = this.getAttribute("selection-overlay");
+        const selectionOverlay = selectionOverlayAttr === null
+          ? undefined
+          : selectionOverlayAttr !== "false";
 
-        this.viewer = new PyMolRSViewer(wrapper, { panels, defer: shouldDefer });
+        this.viewer = new PatinaeViewer(wrapper, {
+          panels,
+          defer: shouldDefer,
+          selectionOverlay,
+        });
         await this.viewer.init();
 
         if (src) {

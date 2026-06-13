@@ -6,15 +6,18 @@
 //! All callers submit [`WorkItem`]s via the [`WorkerHandle`] and results
 //! are returned through an `mpsc` channel, drained in `PythonHandler::poll()`.
 
+use std::ffi::CString;
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use pyo3::prelude::*;
 
-use crate::backend::{PluginBackend, SharedStateHandle};
+use crate::backend::PluginBackend;
 use crate::engine::PythonEngine;
+use crate::shared::SharedStateHandle;
 
 // =============================================================================
 // StreamingWriter — real-time stdout/stderr forwarding
@@ -43,7 +46,7 @@ impl StreamingWriter {
             let line: String = self.buffer.drain(..=pos).collect();
             let _ = self.tx.send(WorkResult {
                 origin: self.origin,
-                result: Ok(line),
+                payload: WorkResultPayload::Output(line),
             });
         }
 
@@ -55,9 +58,31 @@ impl StreamingWriter {
             let text = std::mem::take(&mut self.buffer);
             let _ = self.tx.send(WorkResult {
                 origin: self.origin,
-                result: Ok(text),
+                payload: WorkResultPayload::Output(text),
             });
         }
+        Ok(())
+    }
+}
+
+#[pyclass]
+struct CancellationToken {
+    interrupt_requested: Arc<AtomicBool>,
+}
+
+#[pymethods]
+impl CancellationToken {
+    fn check(&self) -> PyResult<()> {
+        check_interrupt_requested(&self.interrupt_requested)
+    }
+}
+
+fn check_interrupt_requested(interrupt_requested: &AtomicBool) -> PyResult<()> {
+    if interrupt_requested.load(Ordering::Acquire) {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "Python script interrupted",
+        ))
+    } else {
         Ok(())
     }
 }
@@ -66,24 +91,15 @@ impl StreamingWriter {
 // Types
 // =============================================================================
 
-/// Output entry from Python execution.
-pub struct OutputEntry {
-    pub text: String,
-    pub is_error: bool,
-}
-
-/// Shared buffer for routing editor results from handler to editor component.
-pub type EditorOutputHandle = Arc<Mutex<Vec<OutputEntry>>>;
-
 /// Identifies the origin of a work request (for routing results).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkOrigin {
     /// From the `python` / `/` command line.
     Command,
-    /// From the editor Run button.
-    Editor,
     /// From `run script.py`.
     Script,
+    /// From the scripting panel.
+    Panel,
     /// Backend installation (one-time setup).
     Setup,
 }
@@ -94,7 +110,7 @@ pub enum WorkItem {
     Eval { code: String, origin: WorkOrigin },
     /// Execute a file by path.
     ExecFile { path: String, origin: WorkOrigin },
-    /// Install the PluginBackend into `sys._pymolrs_backend`.
+    /// Install the PluginBackend into `sys._patinae_backend`.
     InstallBackend { shared: SharedStateHandle },
     /// Invoke a Python callable bound to a key (no arguments).
     InvokeKeybindCallback {
@@ -109,7 +125,17 @@ pub enum WorkItem {
 /// Result sent back from the worker thread.
 pub struct WorkResult {
     pub origin: WorkOrigin,
-    pub result: Result<String, String>,
+    pub payload: WorkResultPayload,
+}
+
+/// Typed worker event payload.
+pub enum WorkResultPayload {
+    /// A stdout/stderr chunk emitted by running Python code.
+    Output(String),
+    /// A work item completed, with an optional error.
+    Finished(Result<(), String>),
+    /// One-time backend setup result.
+    Setup(Result<String, String>),
 }
 
 // =============================================================================
@@ -123,6 +149,7 @@ pub struct WorkResult {
 pub struct WorkerHandle {
     tx: Sender<WorkItem>,
     busy: Arc<AtomicBool>,
+    interrupt_requested: Arc<AtomicBool>,
 }
 
 impl WorkerHandle {
@@ -138,19 +165,9 @@ impl WorkerHandle {
         self.busy.load(Ordering::Relaxed)
     }
 
-    /// Request interruption of the currently running Python code.
-    ///
-    /// Calls `PyErr_SetInterrupt` which raises `KeyboardInterrupt` at the
-    /// next bytecode instruction check. Safe to call from any thread.
-    /// No-op if the worker is not busy.
+    /// Request cooperative cancellation of the running script.
     pub fn request_interrupt(&self) {
-        if self.is_busy() {
-            // Safety: PyErr_SetInterrupt is explicitly documented as safe
-            // to call from any thread (it is async-signal-safe).
-            unsafe {
-                pyo3::ffi::PyErr_SetInterrupt();
-            }
-        }
+        self.interrupt_requested.store(true, Ordering::Release);
     }
 }
 
@@ -162,20 +179,25 @@ impl WorkerHandle {
 ///
 /// Returns the handle (for submitting work) and the receiver (for collecting results).
 /// The worker owns the `PythonEngine` exclusively — no `Arc<Mutex<>>` needed.
-pub fn spawn_worker() -> (WorkerHandle, Receiver<WorkResult>) {
+pub fn spawn_worker(interrupt_requested: Arc<AtomicBool>) -> (WorkerHandle, Receiver<WorkResult>) {
     let (work_tx, work_rx) = mpsc::channel::<WorkItem>();
     let (result_tx, result_rx) = mpsc::channel::<WorkResult>();
     let busy = Arc::new(AtomicBool::new(false));
     let busy_flag = busy.clone();
+    let worker_interrupt_requested = interrupt_requested.clone();
 
     thread::Builder::new()
         .name("python-worker".into())
         .spawn(move || {
-            worker_loop(work_rx, result_tx, busy_flag);
+            worker_loop(work_rx, result_tx, busy_flag, worker_interrupt_requested);
         })
         .expect("Failed to spawn Python worker thread");
 
-    let handle = WorkerHandle { tx: work_tx, busy };
+    let handle = WorkerHandle {
+        tx: work_tx,
+        busy,
+        interrupt_requested,
+    };
     (handle, result_rx)
 }
 
@@ -184,8 +206,10 @@ fn worker_loop(
     work_rx: Receiver<WorkItem>,
     result_tx: Sender<WorkResult>,
     busy: Arc<AtomicBool>,
+    interrupt_requested: Arc<AtomicBool>,
 ) {
     let mut engine = PythonEngine::new();
+    let script_reader = ProcessScriptReader;
 
     for item in work_rx {
         match item {
@@ -196,7 +220,7 @@ fn worker_loop(
                 let result = install_backend(&mut engine, &shared);
                 let _ = result_tx.send(WorkResult {
                     origin: WorkOrigin::Setup,
-                    result,
+                    payload: WorkResultPayload::Setup(result),
                 });
                 busy.store(false, Ordering::Relaxed);
             }
@@ -204,32 +228,35 @@ fn worker_loop(
             WorkItem::InvokeKeybindCallback { callback, origin } => {
                 busy.store(true, Ordering::Relaxed);
                 let result = Python::attach(|py| -> Result<String, String> {
-                    callback.call0(py).map_err(|e| e.to_string())?;
+                    install_interrupt_trace(py, &interrupt_requested)?;
+                    let result = callback.call0(py).map_err(|e| e.to_string());
+                    clear_interrupt_trace(py);
+                    result?;
                     Ok(String::new())
                 });
-                if let Err(e) = result {
-                    let _ = result_tx.send(WorkResult {
-                        origin,
-                        result: Err(e),
-                    });
-                }
+                let _ = result_tx.send(WorkResult {
+                    origin,
+                    payload: WorkResultPayload::Finished(result.map(|_| ())),
+                });
                 busy.store(false, Ordering::Relaxed);
             }
 
             WorkItem::Eval { code, origin } => {
                 busy.store(true, Ordering::Relaxed);
-                eval_streaming(&mut engine, &code, origin, &result_tx);
+                eval_streaming(&mut engine, &code, origin, &result_tx, &interrupt_requested);
                 busy.store(false, Ordering::Relaxed);
             }
 
             WorkItem::ExecFile { path, origin } => {
                 busy.store(true, Ordering::Relaxed);
-                match std::fs::read_to_string(&path) {
-                    Ok(code) => eval_streaming(&mut engine, &code, origin, &result_tx),
+                match read_script_file(&script_reader, &path) {
+                    Ok(code) => {
+                        eval_streaming(&mut engine, &code, origin, &result_tx, &interrupt_requested)
+                    }
                     Err(e) => {
                         let _ = result_tx.send(WorkResult {
                             origin,
-                            result: Err(format!("failed to read {}: {}", path, e)),
+                            payload: WorkResultPayload::Finished(Err(e)),
                         });
                     }
                 }
@@ -241,6 +268,75 @@ fn worker_loop(
     log::info!("Python worker thread exiting");
 }
 
+trait ScriptReader {
+    fn read_to_string(&self, path: &str) -> io::Result<String>;
+}
+
+struct ProcessScriptReader;
+
+impl ScriptReader for ProcessScriptReader {
+    fn read_to_string(&self, path: &str) -> io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+}
+
+fn read_script_file(reader: &impl ScriptReader, path: &str) -> Result<String, String> {
+    reader
+        .read_to_string(path)
+        .map_err(|e| format!("failed to read {}: {}", path, e))
+}
+
+fn install_interrupt_trace(
+    py: Python<'_>,
+    interrupt_requested: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    let token = Py::new(
+        py,
+        CancellationToken {
+            interrupt_requested: interrupt_requested.clone(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
+
+    let globals = py.import("__main__").map_err(|e| e.to_string())?.dict();
+    globals
+        .set_item("__patinae_interrupt_token", token.bind(py))
+        .map_err(|e| e.to_string())?;
+
+    let trace_code = CString::new(
+        r#"def __patinae_interrupt_trace(frame, event, arg):
+    if frame.f_code.co_name == "<module>":
+        __patinae_interrupt_token.check()
+    return __patinae_interrupt_trace
+"#,
+    )
+    .map_err(|e| e.to_string())?;
+    py.run(trace_code.as_c_str(), Some(&globals), None)
+        .map_err(|e| e.to_string())?;
+
+    let trace_fn = globals
+        .get_item("__patinae_interrupt_trace")
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "failed to install Python interrupt trace".to_string())?;
+    py.import("sys")
+        .map_err(|e| e.to_string())?
+        .call_method1("settrace", (trace_fn,))
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+fn clear_interrupt_trace(py: Python<'_>) {
+    if let Ok(sys) = py.import("sys") {
+        let _ = sys.call_method1("settrace", (py.None(),));
+    }
+    if let Ok(main) = py.import("__main__") {
+        let globals = main.dict();
+        let _ = globals.del_item("__patinae_interrupt_token");
+        let _ = globals.del_item("__patinae_interrupt_trace");
+    }
+}
+
 /// Run Python code with real-time output streaming via [`StreamingWriter`].
 ///
 /// Output is sent through `result_tx` as it is produced. If the code raises
@@ -250,7 +346,10 @@ fn eval_streaming(
     code: &str,
     origin: WorkOrigin,
     result_tx: &Sender<WorkResult>,
+    interrupt_requested: &Arc<AtomicBool>,
 ) {
+    interrupt_requested.store(false, Ordering::Release);
+
     let result = Python::attach(|py| -> Result<(), String> {
         let stdout_w = Py::new(
             py,
@@ -272,25 +371,29 @@ fn eval_streaming(
         )
         .map_err(|e| e.to_string())?;
 
+        install_interrupt_trace(py, interrupt_requested)?;
         let result = engine.eval_with_writers(code, stdout_w.bind(py), stderr_w.bind(py));
 
         // Flush any remaining buffered text (e.g. output without trailing newline)
         let _ = stdout_w.borrow_mut(py).flush();
         let _ = stderr_w.borrow_mut(py).flush();
+        clear_interrupt_trace(py);
 
         result
     });
+    interrupt_requested.store(false, Ordering::Release);
 
-    if let Err(e) = result {
-        let _ = result_tx.send(WorkResult {
-            origin,
-            result: Err(e),
-        });
-    }
+    let _ = result_tx.send(WorkResult {
+        origin,
+        payload: WorkResultPayload::Finished(result),
+    });
 }
 
-/// Install the PluginBackend into `sys._pymolrs_backend` and auto-import `cmd`.
-fn install_backend(engine: &mut PythonEngine, shared: &SharedStateHandle) -> Result<String, String> {
+/// Install the PluginBackend into `sys._patinae_backend` and auto-import `cmd`.
+fn install_backend(
+    engine: &mut PythonEngine,
+    shared: &SharedStateHandle,
+) -> Result<String, String> {
     engine.ensure_init()?;
 
     let py_backend = Python::attach(|py| -> Result<Py<PyAny>, String> {
@@ -302,11 +405,125 @@ fn install_backend(engine: &mut PythonEngine, shared: &SharedStateHandle) -> Res
     engine.set_backend(py_backend)?;
 
     // Auto-import cmd and stored into __main__ so it's available in the REPL
-    match engine.eval("from pymol_rs import cmd; from pymol_rs import stored") {
+    match engine.eval("from patinae import cmd; from patinae import stored") {
         Ok(_) => Ok("backend installed, cmd auto-imported".to_string()),
         Err(e) => {
-            log::warn!("Python plugin: backend installed but auto-import cmd failed: {}", e);
+            log::warn!(
+                "Python plugin: backend installed but auto-import cmd failed: {}",
+                e
+            );
             Ok("backend installed (cmd auto-import failed)".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[derive(Clone, Copy)]
+    enum FakeRead {
+        Ok(&'static str),
+        Err(io::ErrorKind),
+    }
+
+    struct FakeScriptReader {
+        result: FakeRead,
+    }
+
+    impl ScriptReader for FakeScriptReader {
+        fn read_to_string(&self, _path: &str) -> io::Result<String> {
+            match self.result {
+                FakeRead::Ok(code) => Ok(code.to_string()),
+                FakeRead::Err(kind) => Err(io::Error::new(kind, "fake read failure")),
+            }
+        }
+    }
+
+    #[test]
+    fn script_reader_returns_code_without_process_fs() {
+        let reader = FakeScriptReader {
+            result: FakeRead::Ok("print('ok')"),
+        };
+
+        let code = read_script_file(&reader, "/fake/script.py").expect("script should read");
+
+        assert_eq!(code, "print('ok')");
+    }
+
+    #[test]
+    fn script_reader_formats_read_failures() {
+        let reader = FakeScriptReader {
+            result: FakeRead::Err(io::ErrorKind::NotFound),
+        };
+
+        let err = read_script_file(&reader, "/fake/missing.py").expect_err("read should fail");
+
+        assert!(
+            err.contains("failed to read /fake/missing.py"),
+            "unexpected error: {err}"
+        );
+        assert!(err.contains("fake read failure"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn request_interrupt_stops_running_python_code() {
+        let interrupt_requested = Arc::new(AtomicBool::new(false));
+        let (worker, rx) = spawn_worker(interrupt_requested);
+        worker.submit(WorkItem::Eval {
+            code: "print('started')\nwhile True:\n    pass\n".to_string(),
+            origin: WorkOrigin::Panel,
+        });
+
+        let startup_deadline = Instant::now() + Duration::from_secs(5);
+        let mut saw_started = false;
+        while !saw_started {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(result) => match result.payload {
+                    WorkResultPayload::Output(output) => {
+                        saw_started = output.contains("started");
+                    }
+                    WorkResultPayload::Finished(result) => {
+                        panic!("Python worker finished before interrupt: {result:?}");
+                    }
+                    WorkResultPayload::Setup(_) => {}
+                },
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    assert!(
+                        Instant::now() < startup_deadline,
+                        "Python worker did not start executing before timeout"
+                    );
+                }
+                Err(e) => panic!("Python worker result channel closed: {e}"),
+            }
+        }
+
+        worker.request_interrupt();
+
+        let finished_deadline = Instant::now() + Duration::from_secs(5);
+        let mut interrupt_error = None;
+        while Instant::now() < finished_deadline {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(result) => {
+                    if let WorkResultPayload::Finished(result) = result.payload {
+                        interrupt_error = Some(result.expect_err(
+                            "interrupted Python code should finish with an interrupt error",
+                        ));
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(e) => panic!("Python worker result channel closed: {e}"),
+            }
+        }
+
+        worker.submit(WorkItem::Shutdown);
+
+        let err = interrupt_error.expect("Python code did not stop after interrupt");
+        assert!(
+            err.contains("Python script interrupted"),
+            "expected interrupt error, got {err:?}"
+        );
     }
 }

@@ -1,0 +1,29 @@
+[package]
+name = "patinae-mol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Molecular data structures for Patinae"
+
+[dependencies]
+lin_alg = { workspace = true }
+patinae-algos = { workspace = true }
+patinae-settings = { workspace = true }
+thiserror = { workspace = true }
+bitflags = { workspace = true }
+ahash = { workspace = true }
+smallvec = { workspace = true }
+serde = { workspace = true }
+phf = { workspace = true }
+
+log = { workspace = true }
+rmp-serde = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

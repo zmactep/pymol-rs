@@ -20,8 +20,8 @@ impl Default for EdgeParams {
     fn default() -> Self {
         Self {
             viewport: [0.0, 0.0],
-            thickness: 4.0,    // Sampling distance in pixels
-            depth_jump: 0.03,  // Depth discontinuity threshold
+            thickness: 4.0,   // Sampling distance in pixels
+            depth_jump: 0.03, // Depth discontinuity threshold
         }
     }
 }
@@ -112,7 +112,7 @@ impl EdgeDetectPipeline {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Edge Detect Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         // Create compute pipeline
@@ -223,7 +223,7 @@ impl CompositePipeline {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Composite Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         // Create compute pipeline

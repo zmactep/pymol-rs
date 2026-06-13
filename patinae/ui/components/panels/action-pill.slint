@@ -1,0 +1,148 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ObjectsState } from "../../states/objects-state.slint";
+import {
+    ZoomIcon,
+    OrientIcon,
+    CenterIcon,
+    ToggleIcon,
+    OverflowIcon,
+} from "../icons.slint";
+
+// ── Icon-only pill button ────────────────────────────────────────────
+
+component PillButton inherits Rectangle {
+    callback clicked();
+    out property <bool> hovered <=> touch.has-hover;
+    out property <color> tint: touch.has-hover ? Theme.text : Theme.text-dim;
+
+    width: Tokens.action-btn-h;
+    height: Tokens.action-btn-h;
+    horizontal-stretch: 0;
+    border-radius: Tokens.action-btn-radius;
+    background: touch.has-hover ? Theme.bg-inset.with-alpha(0.6) : transparent;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// ── Hairline separator ───────────────────────────────────────────────
+
+component PillSep inherits Rectangle {
+    width: Tokens.hairline;
+    horizontal-stretch: 0;
+    background: Theme.line;
+}
+
+// ── Action pill ──────────────────────────────────────────────────────
+
+export component ActionPill inherits Rectangle {
+    width: layout.preferred-width;
+    height: Tokens.action-pill-h;
+    border-radius: Tokens.action-pill-radius;
+    background: Theme.bg-card;
+    border-width: Tokens.hairline;
+    border-color: Theme.cyan.with-alpha(0.5);
+
+    // Block events from passing through to content underneath
+    TouchArea {}
+
+    // Outer glow
+    Rectangle {
+        x: -Tokens.action-pill-glow;
+        y: -Tokens.action-pill-glow;
+        width: parent.width + 2 * Tokens.action-pill-glow;
+        height: parent.height + 2 * Tokens.action-pill-glow;
+        border-radius: Tokens.action-pill-radius + Tokens.border-stroke;
+        background: transparent;
+        border-width: Tokens.border-stroke;
+        border-color: Theme.cyan.with-alpha(0.08);
+    }
+
+    layout := HorizontalLayout {
+        padding-left:   Tokens.action-pill-pad-h;
+        padding-right:  Tokens.action-pill-pad-h;
+        padding-top:    Tokens.action-pill-pad-v;
+        padding-bottom: Tokens.action-pill-pad-v;
+        spacing: Tokens.action-pill-spacing;
+
+        // Count badge
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: Tokens.badge-size;
+                height: Tokens.badge-size;
+                border-radius: Tokens.badge-radius;
+                background: Theme.cyan.with-alpha(0.18);
+                border-width: Tokens.hairline;
+                border-color: Theme.cyan.with-alpha(0.4);
+
+                Text {
+                    width: 100%;
+                    height: 100%;
+                    text: ObjectsState.selected-count;
+                    color: Theme.cyan;
+                    font-size: Tokens.font-sm;
+                    font-weight: 500;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        PillSep {}
+
+        // Camera cluster: zoom · orient · center
+        zoom-btn := PillButton {
+            clicked => { ObjectsState.action-zoom(); }
+            ZoomIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: zoom-btn.tint;
+            }
+        }
+        orient-btn := PillButton {
+            clicked => { ObjectsState.action-orient(); }
+            OrientIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: orient-btn.tint;
+            }
+        }
+        center-btn := PillButton {
+            clicked => { ObjectsState.action-center(); }
+            CenterIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: center-btn.tint;
+            }
+        }
+
+        // Visibility toggle (not for subchains)
+        if ObjectsState.selection-level != "subchains": PillSep {}
+        if ObjectsState.selection-level != "subchains": toggle-btn := PillButton {
+            clicked => { ObjectsState.action-toggle(); }
+            ToggleIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: toggle-btn.tint;
+            }
+        }
+
+        PillSep {}
+
+        // Overflow
+        overflow-btn := PillButton {
+            clicked => {
+                ObjectsState.popover-anchor-y = overflow-btn.absolute-position.y - Tokens.action-pill-pad-v;
+                ObjectsState.action-overflow();
+            }
+            OverflowIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                tint: overflow-btn.tint;
+            }
+        }
+    }
+}

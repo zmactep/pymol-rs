@@ -1,9 +1,8 @@
 //! IPC Server implementation
 //!
 //! Provides a non-blocking IPC server using Unix domain sockets.
-//! Simplified from the original pymol-gui implementation: no tokio deps,
-//! no callback channels — all async handling goes through the plugin's
-//! `PollContext` instead.
+//! Uses no tokio dependencies or callback channels; async handling goes
+//! through the plugin's `PollContext`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -41,8 +40,7 @@ impl IpcServer {
     pub fn bind(socket_path: &Path) -> std::io::Result<Self> {
         use std::os::unix::net::UnixListener;
 
-        // Remove existing socket file if present
-        let _ = std::fs::remove_file(socket_path);
+        prepare_socket_path(socket_path, &ProcessSocketCleanup)?;
 
         let listener = UnixListener::bind(socket_path)?;
         listener.set_nonblocking(true)?;
@@ -114,18 +112,16 @@ impl IpcServer {
                     self.client = None;
                     return None;
                 }
-                Ok(_) => {
-                    match serde_json::from_str::<IpcRequest>(&line) {
-                        Ok(request) => {
-                            log::debug!("IPC request: {:?}", request);
-                            return Some(request);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to parse IPC request: {}", e);
-                            log::error!("Raw line: {}", line.trim());
-                        }
+                Ok(_) => match serde_json::from_str::<IpcRequest>(&line) {
+                    Ok(request) => {
+                        log::debug!("IPC request: {:?}", request);
+                        return Some(request);
                     }
-                }
+                    Err(e) => {
+                        log::error!("Failed to parse IPC request: {}", e);
+                        log::error!("Raw line: {}", line.trim());
+                    }
+                },
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
                     log::debug!("IPC read interrupted, will retry");
@@ -201,9 +197,95 @@ impl IpcServer {
     }
 }
 
+#[cfg(any(unix, test))]
+trait SocketCleanup {
+    fn remove_file(&self, path: &Path) -> std::io::Result<()>;
+}
+
+#[cfg(unix)]
+struct ProcessSocketCleanup;
+
+#[cfg(unix)]
+impl SocketCleanup for ProcessSocketCleanup {
+    fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+}
+
+#[cfg(any(unix, test))]
+fn prepare_socket_path(path: &Path, cleanup: &impl SocketCleanup) -> std::io::Result<()> {
+    match cleanup.remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 impl Drop for IpcServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket_path);
         log::info!("IPC server stopped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct FakeSocketCleanup {
+        result: Cell<Option<std::io::ErrorKind>>,
+    }
+
+    impl FakeSocketCleanup {
+        fn success() -> Self {
+            Self {
+                result: Cell::new(None),
+            }
+        }
+
+        fn error(kind: std::io::ErrorKind) -> Self {
+            Self {
+                result: Cell::new(Some(kind)),
+            }
+        }
+    }
+
+    impl SocketCleanup for FakeSocketCleanup {
+        fn remove_file(&self, _path: &Path) -> std::io::Result<()> {
+            match self.result.get() {
+                Some(kind) => Err(std::io::Error::new(kind, "fake cleanup failure")),
+                None => Ok(()),
+            }
+        }
+    }
+
+    #[test]
+    fn prepare_socket_path_accepts_removed_socket() {
+        prepare_socket_path(
+            Path::new("/tmp/patinae.sock"),
+            &FakeSocketCleanup::success(),
+        )
+        .expect("removed socket should be accepted");
+    }
+
+    #[test]
+    fn prepare_socket_path_accepts_missing_socket() {
+        prepare_socket_path(
+            Path::new("/tmp/patinae.sock"),
+            &FakeSocketCleanup::error(std::io::ErrorKind::NotFound),
+        )
+        .expect("missing stale socket should be accepted");
+    }
+
+    #[test]
+    fn prepare_socket_path_returns_cleanup_failure() {
+        let err = prepare_socket_path(
+            Path::new("/tmp/patinae.sock"),
+            &FakeSocketCleanup::error(std::io::ErrorKind::PermissionDenied),
+        )
+        .expect_err("cleanup failure should stop bind");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
     }
 }

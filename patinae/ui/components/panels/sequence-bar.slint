@@ -1,0 +1,453 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { SequenceState, SeqChainRow } from "../../states/sequence-state.slint";
+
+// CSS-pixel offset of the first residue cell inside the strip image.
+// Mirrors `RESIDUE_X_OFFSET` in `patinae/src/bridges/sequence.rs`.
+global SeqLayout {
+    out property <length> residues-x: 28px;
+}
+
+// ─── One chain row ──────────────────────────────────────────────────
+// One Image carries everything visible: chain-id label, ruler ticks,
+// residue letters. The overlay Image draws translucent sele bands.
+// Per-residue scene-graph cost is O(chains), not O(chains × residues).
+
+component SeqChainRowView {
+    in property <int> chain-index;
+    in property <SeqChainRow> chain-data;
+    in property <length> row-width;
+    in property <length> panel-x-origin;
+    in property <length> panel-y-origin;
+
+    height: 28px;
+    // Stretch to the global max row width so the row aligns with siblings
+    // (the strip itself is no wider than the chain content).
+    width: row-width;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+
+        // Residue strip — pre-rendered image. Sized exactly to the chain's
+        // CSS width so the physical-pixel buffer maps 1:1 to the CSS box.
+        strip := Rectangle {
+            x: 0px;
+            width: chain-data.strip-width-px;
+            height: 28px;
+
+            // Static strip (label + ruler ticks + letters).
+            Image {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                source: chain-data.strip-image;
+                image-fit: fill;
+                image-rendering: smooth;
+            }
+
+            // Translucent selection band (sele highlights).
+            Image {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                source: chain-data.highlight-image;
+                image-fit: fill;
+                image-rendering: smooth;
+            }
+
+            // Drag-preview band — only materialises for the chain being
+            // dragged. `drag-px-start`/`drag-px-end` are strip-relative so
+            // the rectangle lands exactly on the residue cells.
+            if SequenceState.drag-active && SequenceState.drag-chain == chain-index: Rectangle {
+                x: SequenceState.drag-px-start;
+                y: 10px;
+                width: SequenceState.drag-px-end - SequenceState.drag-px-start;
+                height: 18px;
+                background: SequenceState.ctrl-held
+                    ? Theme.warning.with-alpha(0.45)
+                    : Theme.magenta.with-alpha(0.45);
+            }
+
+            label-context-touch := TouchArea {
+                x: 0px;
+                y: 0px;
+                width: SeqLayout.residues-x;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        SequenceState.hover-active = false;
+                        SequenceState.hover-chain = -1;
+                        SequenceState.hover-residue = -1;
+                        SequenceState.context-menu-chain = chain-index;
+                        SequenceState.context-menu-chain-copy-enabled = chain-data.polymer-length > 0;
+                        SequenceState.context-menu-x = self.absolute-position.x + self.mouse-x - root.panel-x-origin;
+                        SequenceState.context-menu-y = self.absolute-position.y + self.mouse-y - root.panel-y-origin;
+                        SequenceState.context-menu-open = true;
+                        return;
+                    }
+                }
+            }
+
+            // TouchArea covers only the residue strip — the label zone is
+            // visual-only. `mouse-x` is therefore zero at the first residue.
+            touch := TouchArea {
+                x: SeqLayout.residues-x;
+                y: 0px;
+                width: parent.width - SeqLayout.residues-x;
+                height: parent.height;
+                mouse-cursor: text;
+
+                pointer-event(event) => {
+                    SequenceState.ctrl-held = event.modifiers.meta || event.modifiers.control;
+
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        SequenceState.hover-active = false;
+                        SequenceState.hover-chain = -1;
+                        SequenceState.hover-residue = -1;
+                        SequenceState.context-menu-chain = chain-index;
+                        SequenceState.context-menu-chain-copy-enabled = chain-data.polymer-length > 0;
+                        SequenceState.context-menu-x = self.absolute-position.x + self.mouse-x - root.panel-x-origin;
+                        SequenceState.context-menu-y = self.absolute-position.y + self.mouse-y - root.panel-y-origin;
+                        SequenceState.context-menu-open = true;
+                        return;
+                    }
+
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        SequenceState.drag-chain = chain-index;
+                        SequenceState.drag-active = true;
+                        SequenceState.drag-start = -1;
+                        SequenceState.drag-end = -1;
+                        SequenceState.row-drag-move(chain-index, self.mouse-x / 1px);
+                        return;
+                    }
+                    if event.kind == PointerEventKind.move {
+                        if SequenceState.drag-active && SequenceState.drag-chain == chain-index {
+                            SequenceState.row-drag-move(chain-index, self.mouse-x / 1px);
+                        } else if !SequenceState.drag-active && !SequenceState.context-menu-open {
+                            // Keep the tooltip anchored to the cursor in panel-local coordinates.
+                            SequenceState.hover-x = self.absolute-position.x + self.mouse-x - root.panel-x-origin;
+                            SequenceState.hover-y = self.absolute-position.y + self.mouse-y - root.panel-y-origin;
+                            SequenceState.row-hover(chain-index, self.mouse-x / 1px);
+                        }
+                        return;
+                    }
+                    if event.kind == PointerEventKind.up
+                        && event.button == PointerEventButton.left
+                        && SequenceState.drag-active
+                        && SequenceState.drag-chain == chain-index {
+                        SequenceState.residue-drag-ended(
+                            chain-index,
+                            SequenceState.drag-start,
+                            chain-index,
+                            SequenceState.drag-end
+                        );
+                        SequenceState.drag-active = false;
+                    }
+                }
+
+                changed has-hover => {
+                    if !self.has-hover && !SequenceState.drag-active {
+                        if SequenceState.hover-chain == chain-index {
+                            SequenceState.hover-active = false;
+                            SequenceState.hover-chain = -1;
+                            SequenceState.hover-residue = -1;
+                        }
+                    }
+                }
+            }
+        }
+
+        blank-context-touch := TouchArea {
+            x: strip.width;
+            y: 0px;
+            width: max(0px, parent.width - strip.width);
+            height: parent.height;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    SequenceState.hover-active = false;
+                    SequenceState.hover-chain = -1;
+                    SequenceState.hover-residue = -1;
+                    SequenceState.context-menu-chain = chain-index;
+                    SequenceState.context-menu-chain-copy-enabled = chain-data.polymer-length > 0;
+                    SequenceState.context-menu-x = self.absolute-position.x + self.mouse-x - root.panel-x-origin;
+                    SequenceState.context-menu-y = self.absolute-position.y + self.mouse-y - root.panel-y-origin;
+                    SequenceState.context-menu-open = true;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+component SeqMenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> disabled;
+    callback activated();
+
+    width: 100%;
+    height: 28px;
+    border-radius: Tokens.radius-sm;
+    background: root.disabled ? transparent
+        : touch.has-hover ? Theme.bg-inset : transparent;
+    opacity: root.disabled ? 0.4 : 1.0;
+
+    Text {
+        x: Tokens.space-sm;
+        width: parent.width - 2 * Tokens.space-sm;
+        height: parent.height;
+        text: root.label;
+        color: root.disabled ? Theme.text-ghost
+            : touch.has-hover ? Theme.text : Theme.text-dim;
+        font-size: Tokens.font-md;
+        font-weight: 500;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+
+        clicked => {
+            if !root.disabled {
+                root.activated();
+            }
+        }
+    }
+}
+
+component SeqContextMenu inherits Rectangle {
+    width: 184px;
+    height: inner.preferred-height;
+    border-radius: Tokens.radius-md;
+    background: Theme.bg-card;
+    border-width: Tokens.hairline;
+    border-color: Theme.line;
+    drop-shadow-color: #00000080;
+    drop-shadow-blur: 4px;
+    drop-shadow-offset-y: 2px;
+
+    TouchArea {}
+
+    inner := VerticalLayout {
+        padding: Tokens.space-xs;
+        spacing: 0px;
+
+        if SequenceState.context-menu-chain >= 0: SeqMenuRow {
+            label: "Copy Chain FASTA";
+            disabled: !SequenceState.context-menu-chain-copy-enabled;
+
+            activated => {
+                SequenceState.context-menu-open = false;
+                SequenceState.copy-chain-fasta(SequenceState.context-menu-chain);
+            }
+        }
+
+        SeqMenuRow {
+            label: "Copy All FASTA";
+            disabled: !SequenceState.has-data;
+
+            activated => {
+                SequenceState.context-menu-open = false;
+                SequenceState.copy-all-fasta();
+            }
+        }
+    }
+}
+
+// ─── Empty state ────────────────────────────────────────────────────
+
+component SeqEmptyState inherits Rectangle {
+    vertical-stretch: 1;
+
+    Text {
+        text: "No sequences to display.\nLoad a structure to see its residue sequence here.";
+        color: Theme.text-muted;
+        font-size: Tokens.font-md;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// ─── Object header (rendered above the first chain of each object) ─
+
+component SeqObjectHeader inherits Rectangle {
+    in property <string> object-name;
+
+    height: 22px;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: Tokens.space-xs;
+        padding-top: Tokens.space-xs;
+        alignment: start;
+
+        Text {
+            text: object-name;
+            color: Theme.text-dim;
+            font-family: "JetBrains Mono";
+            font-size: Tokens.font-sm;
+            letter-spacing: 0.6px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ─── Top-level Sequence Bar ─────────────────────────────────────────
+
+export component SequenceBar inherits Rectangle {
+    // Use a Rectangle root so the floating tooltip can be positioned
+    // absolutely on top of the layout.
+
+    property <length> content-width: max(SequenceState.max-row-width, max(0px, root.width - 2 * Tokens.space-xs));
+
+    panel-context-touch := TouchArea {
+        enabled: !SequenceState.has-data;
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                SequenceState.hover-active = false;
+                SequenceState.hover-chain = -1;
+                SequenceState.hover-residue = -1;
+                SequenceState.context-menu-chain = -1;
+                SequenceState.context-menu-chain-copy-enabled = false;
+                SequenceState.context-menu-x = self.mouse-x;
+                SequenceState.context-menu-y = self.mouse-y;
+                SequenceState.context-menu-open = true;
+                return;
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        if !SequenceState.has-data: SeqEmptyState {}
+
+        if SequenceState.has-data: Flickable {
+            vertical-stretch: 1;
+            // Keep the inner TouchArea in charge of pointer events; we still
+            // get mouse-wheel + keyboard scrolling.
+            interactive: false;
+            viewport-width: root.content-width;
+
+            VerticalLayout {
+                spacing: 1px;
+                padding-left: Tokens.space-xs;
+                padding-right: Tokens.space-xs;
+
+                for chain[ci] in SequenceState.chains: VerticalLayout {
+                    spacing: 0px;
+                    if chain.is-first-in-object: SeqObjectHeader {
+                        object-name: chain.object-name;
+                    }
+                    SeqChainRowView {
+                        chain-index: ci;
+                        chain-data: chain;
+                        row-width: root.content-width;
+                        panel-x-origin: root.absolute-position.x;
+                        panel-y-origin: root.absolute-position.y;
+                    }
+                }
+
+                Rectangle {
+                    height: Tokens.space-sm;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 24px;
+            background: transparent;
+
+            HorizontalLayout {
+                padding-left: Tokens.space-md;
+                padding-right: Tokens.space-sm;
+                spacing: Tokens.space-sm;
+                alignment: space-between;
+
+                Text {
+                    text: SequenceState.footer-text;
+                    color: Theme.text-ghost;
+                    font-size: Tokens.font-sm;
+                    letter-spacing: 0.6px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    width: 110px;
+                    height: 18px;
+                    border-radius: Tokens.radius-sm;
+                    background: SequenceState.viewer-colors
+                        ? Theme.cyan.with-alpha(0.18)
+                        : (vc-touch.has-hover ? Theme.bg-inset : transparent);
+                    border-width: Tokens.hairline;
+                    border-color: SequenceState.viewer-colors
+                        ? Theme.cyan.with-alpha(0.5)
+                        : Theme.line;
+
+                    Text {
+                        text: SequenceState.viewer-colors ? "✓ Viewer colors" : "Viewer colors";
+                        color: SequenceState.viewer-colors ? Theme.cyan : Theme.text-muted;
+                        font-size: Tokens.font-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    vc-touch := TouchArea {
+                        clicked => {
+                            SequenceState.viewer-colors-toggled();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if SequenceState.context-menu-open: TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                SequenceState.context-menu-open = false;
+            }
+        }
+    }
+
+    if SequenceState.context-menu-open: SeqContextMenu {
+        x: max(0px, min(root.width - self.width - 4px, SequenceState.context-menu-x));
+        y: max(0px, min(root.height - self.height - 4px, SequenceState.context-menu-y));
+    }
+
+    // Floating tooltip overlay (inlined so we can reference `root.width`).
+    Rectangle {
+        visible: SequenceState.hover-active && SequenceState.hover-tooltip != "";
+        x: max(0px, min(root.width - self.width - 4px, SequenceState.hover-x + 8px));
+        y: max(0px, min(root.height - self.height - 4px, SequenceState.hover-y + 8px));
+        width: tooltip-text.preferred-width + 12px;
+        height: 22px;
+        background: Theme.bg-card;
+        border-color: Theme.line-strong;
+        border-width: Tokens.hairline;
+        border-radius: Tokens.radius-sm;
+        drop-shadow-color: #00000080;
+        drop-shadow-blur: 4px;
+        drop-shadow-offset-y: 2px;
+
+        tooltip-text := Text {
+            text: SequenceState.hover-tooltip;
+            color: Theme.text;
+            font-family: "JetBrains Mono";
+            font-size: Tokens.font-md;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

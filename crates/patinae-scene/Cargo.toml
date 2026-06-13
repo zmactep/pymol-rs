@@ -1,0 +1,41 @@
+[package]
+name = "patinae-scene"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "Scene management, camera, and window handling for Patinae"
+
+[features]
+default = ["png-export", "render-bridge"]
+png-export = ["dep:image"]
+# Exposes the host bridges (`bridge::*`) that translate `Session` into
+# `patinae-render::RenderInput`. Patinae and web both depend on these;
+# headless consumers (CLI parsing, tests) can disable to skip the dep.
+render-bridge = ["dep:patinae-render"]
+
+[dependencies]
+# Internal crates
+patinae-mol.workspace = true
+patinae-algos.workspace = true
+patinae-select.workspace = true
+patinae-color.workspace = true
+patinae-settings.workspace = true
+patinae-render = { workspace = true, optional = true }
+
+# External dependencies
+lin_alg.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+log.workspace = true
+ahash.workspace = true
+bitflags.workspace = true
+image = { workspace = true, optional = true }
+serde = { workspace = true }
+web-time = "1"
+
+[lints]
+workspace = true

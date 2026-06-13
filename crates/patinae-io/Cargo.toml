@@ -1,0 +1,40 @@
+[package]
+name = "patinae-io"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description = "File format parsers and writers for molecular structures"
+
+[features]
+default = []
+traj = ["dep:molly", "dep:byteorder"]
+fetch = ["dep:ureq", "dep:rustls"]
+fetch-async = ["dep:reqwest", "dep:rustls", "dep:serde_json"]
+
+[dependencies]
+patinae-mol = { workspace = true }
+flate2 = { workspace = true }
+lin_alg = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
+rmp-serde = { workspace = true }
+
+# Optional traj dependencies
+byteorder = { version = "1", optional = true }
+molly = { version = "0.6", optional = true }
+
+# Optional fetch dependencies
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "gzip"], optional = true }
+rustls = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

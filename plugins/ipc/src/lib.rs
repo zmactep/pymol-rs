@@ -1,26 +1,26 @@
-//! PyMOL-RS IPC Plugin
+//! IPC plugin.
 //!
 //! Provides a Unix domain socket IPC server for external control of
-//! the application (e.g., from pymol-python).
+//! the application (e.g., from patinae-python).
 //!
-//! Activated by setting the `PYMOL_RS_IPC_SOCKET` environment variable
+//! Activated by setting the `PATINAE_IPC_SOCKET` environment variable
 //! to the desired socket path.
 
 mod handler;
 mod protocol;
 mod server;
 
-use pymol_plugin::pymol_plugin;
+use patinae_plugin::patinae_plugin;
 
 use handler::IpcMessageHandler;
 use server::IpcServer;
 
-pymol_plugin! {
+patinae_plugin! {
     name: "ipc",
     description: "IPC server for external control via Unix domain socket",
     commands: [],
     register: |reg| {
-        if let Ok(socket_path) = std::env::var("PYMOL_RS_IPC_SOCKET") {
+        if let Ok(socket_path) = std::env::var("PATINAE_IPC_SOCKET") {
             let path = std::path::PathBuf::from(&socket_path);
             match IpcServer::bind(&path) {
                 Ok(server) => {
@@ -32,7 +32,7 @@ pymol_plugin! {
                 }
             }
         } else {
-            log::info!("IPC plugin: PYMOL_RS_IPC_SOCKET not set, server disabled");
+            log::info!("IPC plugin: PATINAE_IPC_SOCKET not set, server disabled");
         }
     },
 }

@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PyMOL-RS — Minimal Viewer</title>
+        <title>Patinae — Minimal Viewer</title>
         <style>
             * {
                 margin: 0;
@@ -24,9 +24,9 @@
         <div id="viewer"></div>
 
         <script type="module">
-            import { PyMolRSViewer } from "../dist/pymol-rs-viewer.js";
+            import { PatinaeViewer } from "../dist/patinae-viewer.js";
 
-            const viewer = new PyMolRSViewer(document.getElementById("viewer"));
+            const viewer = new PatinaeViewer(document.getElementById("viewer"));
             await viewer.init();
 
             await viewer.loadUrl("https://models.rcsb.org/1IGT.bcif.gz", {

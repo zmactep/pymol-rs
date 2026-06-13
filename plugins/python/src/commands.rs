@@ -8,159 +8,49 @@
 //! All commands are non-blocking: code is submitted to the Python worker
 //! thread, and output appears asynchronously via the poll cycle.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use patinae_plugin::prelude::*;
+#[cfg(test)]
+use patinae_scene::ObjectRegistry;
 
-use pymol_mol::{Element, SecondaryStructure};
-use pymol_plugin::prelude::*;
-
-use crate::backend::SharedStateHandle;
+use crate::shared::SharedStateHandle;
 use crate::worker::{WorkItem, WorkOrigin, WorkerHandle};
-
-// =============================================================================
-// Alter types
-// =============================================================================
-
-/// A single atom property value that can be changed by `alter`.
-#[derive(Debug, Clone)]
-pub enum PropertyValue {
-    Str(String),
-    F32(f32),
-    I32(i32),
-    I8(i8),
-    Bool(bool),
-}
-
-/// A batch of property changes for a single atom.
-#[derive(Debug, Clone)]
-pub struct AtomChange {
-    pub obj: String,
-    pub idx: u32,
-    pub changes: HashMap<String, PropertyValue>,
-}
-
-/// Thread-safe buffer for atom changes produced by `alter()` on the Python
-/// worker thread and consumed via `queue_viewer_mutation` on the main thread.
-pub type AlterBuffer = Arc<Mutex<Vec<Vec<AtomChange>>>>;
-
-/// Apply property changes from a HashMap to a mutable Atom.
-pub fn apply_property_changes(atom: &mut Atom, changes: &HashMap<String, PropertyValue>) {
-    for (key, value) in changes {
-        match key.as_str() {
-            "name" => {
-                if let PropertyValue::Str(v) = value {
-                    atom.name = Arc::from(v.as_str());
-                }
-            }
-            "b" => {
-                if let PropertyValue::F32(v) = value {
-                    atom.b_factor = *v;
-                }
-            }
-            "q" => {
-                if let PropertyValue::F32(v) = value {
-                    atom.occupancy = *v;
-                }
-            }
-            "vdw" => {
-                if let PropertyValue::F32(v) = value {
-                    atom.vdw = *v;
-                }
-            }
-            "partial_charge" => {
-                if let PropertyValue::F32(v) = value {
-                    atom.partial_charge = *v;
-                }
-            }
-            "formal_charge" => {
-                if let PropertyValue::I8(v) = value {
-                    atom.formal_charge = *v;
-                }
-            }
-            "color" => {
-                if let PropertyValue::I32(v) = value {
-                    atom.repr.colors.base = *v;
-                }
-            }
-            "elem" => {
-                if let PropertyValue::Str(v) = value {
-                    if let Some(el) = Element::from_symbol(v) {
-                        atom.element = el;
-                    }
-                }
-            }
-            "ss" => {
-                if let PropertyValue::Str(v) = value {
-                    atom.ss_type = match v.as_str() {
-                        "H" => SecondaryStructure::Helix,
-                        "S" => SecondaryStructure::Sheet,
-                        _ => SecondaryStructure::Loop,
-                    };
-                }
-            }
-            "type" => {
-                if let PropertyValue::Str(v) = value {
-                    atom.state.hetatm = v == "HETATM";
-                }
-            }
-            "alt" => {
-                if let PropertyValue::Str(v) = value {
-                    atom.alt = v.chars().next().unwrap_or(' ');
-                }
-            }
-            // Residue fields require Arc clone-on-write
-            "chain" | "resn" | "resv" | "segi" => {
-                let mut res = (*atom.residue).clone();
-                match key.as_str() {
-                    "chain" => {
-                        if let PropertyValue::Str(v) = value {
-                            res.key.chain = v.clone();
-                        }
-                    }
-                    "resn" => {
-                        if let PropertyValue::Str(v) = value {
-                            res.key.resn = v.clone();
-                        }
-                    }
-                    "resv" => {
-                        if let PropertyValue::I32(v) = value {
-                            res.key.resv = *v;
-                        }
-                    }
-                    "segi" => {
-                        if let PropertyValue::Str(v) = value {
-                            res.segi = v.clone();
-                        }
-                    }
-                    _ => {}
-                }
-                atom.residue = Arc::new(res);
-            }
-            _ => {} // Unknown property — ignore
-        }
-    }
-}
 
 // =============================================================================
 // Shared state sync
 // =============================================================================
 
-/// Sync molecule snapshots from the viewer into shared state.
-///
-/// Called before submitting `iterate`/`alter` work to the Python worker so
-/// the worker sees up-to-date molecule data, even when no GUI poll cycle
-/// has run (e.g., during .pml script execution).
-fn sync_shared_molecules(shared: &SharedStateHandle, viewer: &dyn ViewerLike) {
+/// Sync molecule snapshots from the viewer into shared state for legacy tests.
+#[cfg(test)]
+pub(crate) fn sync_shared_molecules(
+    shared: &SharedStateHandle,
+    viewer: &dyn ViewerLike,
+    force: bool,
+) -> bool {
+    sync_shared_molecules_from_registry(shared, viewer.objects(), force)
+}
+
+#[cfg(test)]
+pub(crate) fn sync_shared_molecules_from_registry(
+    shared: &SharedStateHandle,
+    registry: &ObjectRegistry,
+    force: bool,
+) -> bool {
+    let generation = registry.generation();
     let mut state = shared.lock().unwrap();
-    state.names = viewer.objects().names().map(|s| s.to_string()).collect();
+    if !force && state.molecule_generation == Some(generation) {
+        return false;
+    }
+    state.names = registry.names().map(|s| s.to_string()).collect();
     state.molecules.clear();
-    for name in viewer.objects().names() {
-        if let Some(mol_obj) = viewer.objects().get_molecule(name) {
+    for name in registry.names() {
+        if let Some(mol_obj) = registry.get_molecule(name) {
             state
                 .molecules
                 .push((name.to_string(), mol_obj.molecule().clone()));
         }
     }
+    state.molecule_generation = Some(generation);
+    true
 }
 
 // =============================================================================
@@ -194,9 +84,74 @@ fn collect_all_args(args: &ParsedCommand) -> Vec<String> {
         .collect()
 }
 
+fn split_raw_atom_args(raw_args: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut string_char = '\0';
+    let mut escaped = false;
+
+    for (index, ch) in raw_args.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == string_char {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => {
+                in_string = true;
+                string_char = ch;
+            }
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let expression_start = index + ch.len_utf8();
+                return Some((
+                    raw_args[..index].trim(),
+                    raw_args[expression_start..].trim(),
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 /// Escape a string for inclusion in Python source code (single-quoted).
 fn python_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn atom_expression(args: &ParsedCommand, reconstructed_args: &[String]) -> Option<String> {
+    args.raw_args()
+        .and_then(split_raw_atom_args)
+        .map(|(_, expression)| expression)
+        .filter(|expression| !expression.is_empty())
+        .map(str::to_string)
+        .or_else(|| Some(reconstructed_args[1..].join(", ")))
+}
+
+fn build_atom_command_code(args: &ParsedCommand, method: &str) -> Option<String> {
+    let all_args = collect_all_args(args);
+    if all_args.len() < 2 {
+        return None;
+    }
+
+    let selection = &all_args[0];
+    let expression = atom_expression(args, &all_args)?;
+
+    Some(format!(
+        "cmd.{}('{}', '{}')",
+        method,
+        python_escape(selection),
+        python_escape(&expression),
+    ))
 }
 
 /// Shared logic for `iterate` and `alter` commands.
@@ -209,21 +164,10 @@ fn submit_atom_command(
     args: &ParsedCommand,
     method: &str,
 ) -> CmdResult {
-    let all_args = collect_all_args(args);
-    if all_args.len() < 2 {
+    let Some(code) = build_atom_command_code(args, method) else {
         ctx.print(&format!("Usage: {} <selection>, <expression>", method));
         return Ok(());
-    }
-
-    let selection = &all_args[0];
-    let expression = all_args[1..].join(", ");
-
-    let code = format!(
-        "cmd.{}('{}', '{}')",
-        method,
-        python_escape(selection),
-        python_escape(&expression),
-    );
+    };
 
     worker.submit(WorkItem::Eval {
         code,
@@ -261,6 +205,10 @@ impl Command for PythonCommand {
         &["/"]
     }
 
+    fn runtime_requirements(&self) -> CommandRuntimeRequirements {
+        CommandRuntimeRequirements::NONE
+    }
+
     fn execute<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
@@ -290,7 +238,7 @@ impl Command for PythonCommand {
          Examples:\n\
              python print(\"hello\")\n\
              /import math; print(math.pi)\n\
-             python from pymol_rs import cmd; cmd.color(\"red\", \"all\")"
+             python from patinae import cmd; cmd.color(\"red\", \"all\")"
     }
 
     fn arg_hints(&self) -> &[ArgHint] {
@@ -310,12 +258,11 @@ impl Command for PythonCommand {
 ///   iterate chain A, mylist.append(b)
 pub struct IterateCommand {
     worker: WorkerHandle,
-    shared: SharedStateHandle,
 }
 
 impl IterateCommand {
-    pub fn new(worker: WorkerHandle, shared: SharedStateHandle) -> Self {
-        Self { worker, shared }
+    pub fn new(worker: WorkerHandle, _shared: SharedStateHandle) -> Self {
+        Self { worker }
     }
 }
 
@@ -324,12 +271,15 @@ impl Command for IterateCommand {
         "iterate"
     }
 
+    fn runtime_requirements(&self) -> CommandRuntimeRequirements {
+        CommandRuntimeRequirements::NONE
+    }
+
     fn execute<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        sync_shared_molecules(&self.shared, ctx.viewer);
         submit_atom_command(&self.worker, ctx, args, "iterate")
     }
 
@@ -363,12 +313,11 @@ impl Command for IterateCommand {
 ///   alter chain A, chain='B'
 pub struct AlterCommand {
     worker: WorkerHandle,
-    shared: SharedStateHandle,
 }
 
 impl AlterCommand {
-    pub fn new(worker: WorkerHandle, shared: SharedStateHandle) -> Self {
-        Self { worker, shared }
+    pub fn new(worker: WorkerHandle, _shared: SharedStateHandle) -> Self {
+        Self { worker }
     }
 }
 
@@ -377,12 +326,15 @@ impl Command for AlterCommand {
         "alter"
     }
 
+    fn runtime_requirements(&self) -> CommandRuntimeRequirements {
+        CommandRuntimeRequirements::NONE
+    }
+
     fn execute<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        sync_shared_molecules(&self.shared, ctx.viewer);
         submit_atom_command(&self.worker, ctx, args, "alter")
     }
 
@@ -403,5 +355,151 @@ impl Command for AlterCommand {
 
     fn arg_hints(&self) -> &[ArgHint] {
         &[ArgHint::Selection, ArgHint::None]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+
+    use patinae_mol::ObjectMolecule;
+    use patinae_scene::{MoleculeObject, Session, SessionAdapter};
+
+    fn shared_state() -> SharedStateHandle {
+        Arc::new(Mutex::new(crate::shared::SharedState::new(
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::new(AtomicBool::new(false)),
+        )))
+    }
+
+    #[test]
+    fn python_commands_declare_scene_requirements_explicitly() {
+        let (worker, _rx) = crate::worker::spawn_worker(Arc::new(AtomicBool::new(false)));
+        let shared = shared_state();
+
+        assert!(PythonCommand::new(worker.clone())
+            .runtime_requirements()
+            .is_empty());
+        assert!(IterateCommand::new(worker.clone(), shared.clone())
+            .runtime_requirements()
+            .is_empty());
+        assert!(AlterCommand::new(worker, shared)
+            .runtime_requirements()
+            .is_empty());
+    }
+
+    #[test]
+    fn atom_command_code_preserves_raw_python_expression() {
+        let args = ParsedCommand::new("alter")
+            .with_arg("name CA")
+            .with_named_arg("b", "random.random()")
+            .with_raw_args("name CA, b=random.random()");
+
+        let code = build_atom_command_code(&args, "alter").unwrap();
+
+        assert_eq!(code, "cmd.alter('name CA', 'b=random.random()')");
+    }
+
+    #[test]
+    fn atom_command_code_preserves_raw_string_assignment() {
+        let args = ParsedCommand::new("alter")
+            .with_arg("chain A")
+            .with_named_arg("chain", "B")
+            .with_raw_args("chain A, chain='B'");
+
+        let code = build_atom_command_code(&args, "alter").unwrap();
+
+        assert_eq!(code, r#"cmd.alter('chain A', 'chain=\'B\'')"#);
+    }
+
+    #[test]
+    fn atom_command_code_preserves_raw_stored_expression() {
+        let args = ParsedCommand::new("alter")
+            .with_arg("name CA")
+            .with_named_arg("b", "stored.b.pop()")
+            .with_raw_args("name CA, b=stored.b.pop()");
+
+        let code = build_atom_command_code(&args, "alter").unwrap();
+
+        assert_eq!(code, "cmd.alter('name CA', 'b=stored.b.pop()')");
+    }
+
+    #[test]
+    fn atom_command_code_preserves_expression_commas() {
+        let args = ParsedCommand::new("iterate")
+            .with_arg("all")
+            .with_arg("print(name")
+            .with_arg("resn")
+            .with_arg("b)")
+            .with_raw_args("all, print(name, resn, b)");
+
+        let code = build_atom_command_code(&args, "iterate").unwrap();
+
+        assert_eq!(code, "cmd.iterate('all', 'print(name, resn, b)')");
+    }
+
+    #[test]
+    fn molecule_snapshot_sync_is_generation_gated() {
+        let shared = shared_state();
+        let mut session = Session::new();
+        session
+            .registry
+            .add(MoleculeObject::new(ObjectMolecule::new("obj")));
+        let mut needs_redraw = false;
+        let adapter = SessionAdapter {
+            session: &mut session,
+            render_context: None,
+            default_size: (800, 600),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+
+        assert!(sync_shared_molecules(&shared, &adapter, false));
+        {
+            let state = shared.lock().unwrap();
+            assert_eq!(state.names, vec!["obj".to_string()]);
+            assert_eq!(state.molecules.len(), 1);
+            assert!(state.molecule_generation.is_some());
+        }
+
+        assert!(!sync_shared_molecules(&shared, &adapter, false));
+        assert!(sync_shared_molecules(&shared, &adapter, true));
+    }
+
+    #[test]
+    fn molecule_snapshot_refreshes_when_registry_generation_changes() {
+        let shared = shared_state();
+        let mut session = Session::new();
+        session
+            .registry
+            .add(MoleculeObject::new(ObjectMolecule::new("first")));
+        let mut needs_redraw = false;
+        {
+            let adapter = SessionAdapter {
+                session: &mut session,
+                render_context: None,
+                default_size: (800, 600),
+                needs_redraw: &mut needs_redraw,
+                async_fetch_fn: None,
+            };
+            assert!(sync_shared_molecules(&shared, &adapter, false));
+        }
+
+        session
+            .registry
+            .add(MoleculeObject::new(ObjectMolecule::new("second")));
+        let adapter = SessionAdapter {
+            session: &mut session,
+            render_context: None,
+            default_size: (800, 600),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+
+        assert!(sync_shared_molecules(&shared, &adapter, false));
+        let state = shared.lock().unwrap();
+        assert_eq!(state.molecules.len(), 2);
     }
 }

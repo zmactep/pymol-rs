@@ -1,0 +1,40 @@
+import { Tokens } from "../tokens.slint";
+
+// Layout zone dimensions — accessible from Rust for viewport sizing.
+export global LayoutState {
+    // True while no scene objects are loaded. Built-in panels are suppressed
+    // in this mode without changing the user's persisted panel preferences.
+    in-out property <bool> empty-mode: true;
+
+    // ── Component visibility (toggled by sidebar) ─────────────────
+    in-out property <bool> objects-visible: true;
+    in-out property <bool> selections-visible: true;
+    in-out property <bool> sequence-visible: false;
+    in-out property <bool> movie-visible: false;
+    in-out property <int> bottom-active-tab: 0;  // 0 = Sequence, 1 = Movie
+    in-out property <bool> repl-visible: true;
+    in-out property <bool> plugin-right-visible: false;
+    in-out property <bool> plugin-bottom-visible: false;
+
+    // ── Derived dock visibility ───────────────────────────────────
+    // A dock is visible when at least one of its components is on.
+    out property <bool> right-dock-visible:
+        plugin-right-visible || (!empty-mode && (objects-visible || selections-visible));
+    out property <bool> bottom-dock-visible:
+        plugin-bottom-visible || (!empty-mode && (sequence-visible || movie-visible));
+
+    // ── Dock dimensions ───────────────────────────────────────────
+    in-out property <length> right-dock-width:  Tokens.right-dock-default-w;
+    in-out property <length> bottom-dock-height: Tokens.bottom-dock-default-h;
+    out property <length> effective-right-dock-width:
+        right-dock-visible ? right-dock-width : 0px;
+    out property <length> effective-bottom-dock-height:
+        bottom-dock-visible ? bottom-dock-height : 0px;
+
+    // Platform modifier key — set from Rust (⌘ on macOS, Ctrl elsewhere).
+    in-out property <string> mod-key: "⌘";
+
+    // ── Callbacks (Slint -> Rust, routed through message bus) ──────
+    callback show-panel(/* id */ string);
+    callback hide-panel(/* id */ string);
+}

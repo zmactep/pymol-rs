@@ -1,0 +1,66 @@
+// Movie state — compact timeline, playback controls, and keyframe actions.
+
+export struct MovieTick {
+    frame: int,
+    label: string,
+    pos: float,
+}
+
+export struct MovieMarker {
+    frame: int,
+    pos: float,
+    kind: string,
+    label: string,
+}
+
+export struct MovieBlock {
+    start-frame: int,
+    end-frame: int,
+    start-pos: float,
+    end-pos: float,
+    kind: string,
+    label: string,
+}
+
+export struct MovieLane {
+    id: string,
+    label: string,
+    markers: [MovieMarker],
+    blocks: [MovieBlock],
+}
+
+export global MovieState {
+    // Rust -> Slint
+    in-out property <int> frame-count: 1;
+    in-out property <int> current-frame: 1;
+    in-out property <string> frame-input: "1";
+    in-out property <bool> frame-editing: false;
+    in-out property <string> fps: "30";
+    in-out property <bool> fps-editing: false;
+    in-out property <bool> is-playing: false;
+    in-out property <bool> loop-enabled: true;
+    in-out property <bool> rock-enabled: false;
+    in-out property <bool> auto-interpolate: true;
+    in-out property <[MovieLane]> lanes;
+    in-out property <[MovieTick]> ticks;
+    in-out property <bool> can-store-scene: false;
+    in-out property <bool> can-store-object: false;
+    in-out property <string> target-object: "";
+
+    // Slint -> Rust
+    callback toggle-play();
+    callback stop();
+    callback goto-frame(int);
+    callback scrub(float);
+    callback set-frame(string);
+    callback step-frame(int);
+    callback set-fps(string);
+    callback toggle-loop();
+    callback toggle-rock();
+    callback toggle-auto-interpolate();
+    callback store-camera-keyframe();
+    callback store-scene-keyframe();
+    callback store-object-keyframe();
+    callback interpolate();
+    callback request-export();
+}

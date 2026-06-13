@@ -1,0 +1,74 @@
+import { Theme } from "../../theme.slint";
+import { Tokens } from "../../tokens.slint";
+import { ViewportState } from "../../states/viewport-state.slint";
+
+export component Hud inherits Rectangle {
+    background: transparent;
+    opacity: 0.55;
+    width: layout.preferred-width;
+    height: layout.preferred-height;
+
+    property <color> indicator-color:
+        ViewportState.fps-value >= 50 ? Theme.good
+        : ViewportState.fps-value >= 25 ? Theme.warning
+        : Theme.error;
+
+    layout := VerticalLayout {
+        spacing: 2px;
+
+        Text {
+            text: ViewportState.device-name;
+            color: Theme.text-muted;
+            font-size: Tokens.font-xs;
+            horizontal-alignment: right;
+        }
+        Text {
+            text: ViewportState.engine-name;
+            color: Theme.text-faint;
+            font-size: Tokens.font-xs;
+            horizontal-alignment: right;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 4px;
+            Rectangle {
+                width: 4px;
+                height: 4px;
+                border-radius: 2px;
+                background: root.indicator-color;
+                y: (parent.height - self.height) / 2;
+            }
+            Text {
+                text: ViewportState.fps-text;
+                color: Theme.text-muted;
+                font-size: Tokens.font-xs;
+            }
+        }
+        // `PATINAE_PERF=1` → tail-latency rows + per-pass GPU times.
+        if ViewportState.perf-visible: Text {
+            text: ViewportState.perf-avg-text;
+            color: Theme.text-muted;
+            font-size: Tokens.font-xs;
+            horizontal-alignment: right;
+        }
+        if ViewportState.perf-visible: Text {
+            text: ViewportState.perf-low-1pct-text;
+            color: Theme.text-muted;
+            font-size: Tokens.font-xs;
+            horizontal-alignment: right;
+        }
+        if ViewportState.perf-visible: Text {
+            text: ViewportState.perf-low-0_1pct-text;
+            color: Theme.text-muted;
+            font-size: Tokens.font-xs;
+            horizontal-alignment: right;
+        }
+        if ViewportState.perf-visible && ViewportState.perf-gpu-text != "": Text {
+            text: ViewportState.perf-gpu-text;
+            color: Theme.text-faint;
+            font-size: Tokens.font-xs;
+            horizontal-alignment: right;
+            wrap: word-wrap;
+        }
+    }
+}

@@ -11,8 +11,7 @@ pub(crate) fn validate_buffer_sizes(
     primitives: &Primitives,
 ) -> RaytraceResult<()> {
     let max_buffer_size = device.limits().max_storage_buffer_binding_size as usize;
-    let sphere_size =
-        primitives.spheres.len() * std::mem::size_of::<crate::primitive::GpuSphere>();
+    let sphere_size = primitives.spheres.len() * std::mem::size_of::<crate::primitive::GpuSphere>();
     let cylinder_size =
         primitives.cylinders.len() * std::mem::size_of::<crate::primitive::GpuCylinder>();
     let triangle_size =

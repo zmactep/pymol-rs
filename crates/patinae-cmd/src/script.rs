@@ -1,0 +1,161 @@
+//! Script engine for executing .pml files
+//!
+//! Provides higher-level script execution with better error handling
+//! and support for script-specific features like `@` file inclusion.
+
+use std::path::{Path, PathBuf};
+
+use crate::command::ViewerLike;
+use crate::error::{CmdError, CmdResult};
+use crate::executor::CommandExecutor;
+use crate::parser::join_continued_lines;
+
+/// Script engine for executing .pml files and command batches
+pub struct ScriptEngine {
+    /// The command executor
+    executor: CommandExecutor,
+    /// Stack of currently executing scripts (for include tracking)
+    script_stack: Vec<PathBuf>,
+    /// Maximum include depth (to prevent infinite recursion)
+    max_include_depth: usize,
+}
+
+impl Default for ScriptEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScriptEngine {
+    /// Create a new script engine
+    pub fn new() -> Self {
+        Self {
+            executor: CommandExecutor::new(),
+            script_stack: Vec::new(),
+            max_include_depth: 100,
+        }
+    }
+
+    /// Create a script engine with a custom executor
+    pub fn with_executor(executor: CommandExecutor) -> Self {
+        Self {
+            executor,
+            script_stack: Vec::new(),
+            max_include_depth: 100,
+        }
+    }
+
+    /// Get a reference to the executor
+    pub fn executor(&self) -> &CommandExecutor {
+        &self.executor
+    }
+
+    /// Get a mutable reference to the executor
+    pub fn executor_mut(&mut self) -> &mut CommandExecutor {
+        &mut self.executor
+    }
+
+    /// Set the maximum include depth
+    pub fn set_max_include_depth(&mut self, depth: usize) {
+        self.max_include_depth = depth;
+    }
+
+    /// Run a .pml script file
+    pub fn run_pml(&mut self, viewer: &mut dyn ViewerLike, path: &Path) -> CmdResult {
+        // Check include depth
+        if self.script_stack.len() >= self.max_include_depth {
+            return Err(CmdError::script(
+                0,
+                format!(
+                    "maximum include depth ({}) exceeded",
+                    self.max_include_depth
+                ),
+            ));
+        }
+
+        // Canonicalize path for comparison
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        // Check for circular includes
+        if self.script_stack.contains(&canonical) {
+            return Err(CmdError::script(
+                0,
+                format!("circular include detected: {}", path.display()),
+            ));
+        }
+
+        // Read the file
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| CmdError::script(0, format!("failed to read script: {}", e)))?;
+
+        // Push onto stack
+        self.script_stack.push(canonical);
+
+        // Execute the script
+        let result = self.run_string_with_base(viewer, &content, path.parent());
+
+        // Pop from stack
+        self.script_stack.pop();
+
+        result
+    }
+
+    /// Run a script string
+    pub fn run_string(&mut self, viewer: &mut dyn ViewerLike, script: &str) -> CmdResult {
+        self.run_string_with_base(viewer, script, None)
+    }
+
+    /// Run a script string with a base directory for relative paths
+    fn run_string_with_base(
+        &mut self,
+        viewer: &mut dyn ViewerLike,
+        script: &str,
+        base_dir: Option<&Path>,
+    ) -> CmdResult {
+        // Preprocess: join lines ending with backslash (line continuation)
+        let script = join_continued_lines(script);
+        let lines: Vec<&str> = script.lines().collect();
+
+        for (line_num, line) in lines.iter().enumerate() {
+            let line = line.trim();
+
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Handle @ include syntax
+            if let Some(stripped) = line.strip_prefix('@') {
+                let include_path = stripped.trim();
+                let full_path = if let Some(base) = base_dir {
+                    base.join(include_path)
+                } else {
+                    PathBuf::from(include_path)
+                };
+
+                self.run_pml(viewer, &full_path).map_err(|e| {
+                    CmdError::script(line_num + 1, format!("in @{}: {}", include_path, e))
+                })?;
+                continue;
+            }
+
+            // Execute the command
+            if let Err(e) = self.executor.do_(viewer, line) {
+                return Err(CmdError::script(line_num + 1, format!("{}: {}", line, e)));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_script_engine_creation() {
+        let engine = ScriptEngine::new();
+        assert!(engine.script_stack.is_empty());
+    }
+}

@@ -1,0 +1,315 @@
+import { Theme } from "../theme.slint";
+import { Tokens } from "../tokens.slint";
+import { LayoutState } from "../states/layout-state.slint";
+import { PluginState } from "../states/plugin-state.slint";
+
+// A single sidebar icon button (32×32, 7px radius).
+component SidebarButton inherits Rectangle {
+    in property <bool> active: false;
+    callback clicked;
+
+    width: Tokens.icon-size;
+    height: Tokens.icon-size;
+    border-radius: Tokens.radius-md;
+
+    @children
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    states [
+        active-hover when active && ta.has-hover: {
+            background: Theme.cyan.with-alpha(0.22);
+        }
+        active when active: {
+            background: Theme.cyan.with-alpha(0.14);
+        }
+        hover when ta.has-hover: {
+            background: Theme.text-ghost.with-alpha(0.18);
+        }
+    ]
+
+    animate background { duration: Tokens.motion-micro; }
+}
+
+export component Sidebar inherits Rectangle {
+    width: Tokens.sidebar-w;
+    background: Theme.bg-panel;
+    property <bool> builtins-enabled: !LayoutState.empty-mode;
+
+    // ── Core icons (top cluster) ───────────────────────────────────
+
+    top := VerticalLayout {
+        x: (parent.width - Tokens.icon-size) / 2;
+        y: 16px;
+        spacing: Tokens.space-sm;
+
+        // REPL — prompt chevron → toggles REPL pill
+        SidebarButton {
+            active: root.builtins-enabled && LayoutState.repl-visible;
+            clicked => {
+                if root.builtins-enabled {
+                    if LayoutState.repl-visible {
+                        LayoutState.hide-panel("repl");
+                    } else {
+                        LayoutState.show-panel("repl");
+                    }
+                }
+            }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "\u{203a}";
+                color: root.builtins-enabled && LayoutState.repl-visible ? Theme.cyan : Theme.text-faint;
+                font-size: 24px;
+                font-weight: 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Objects — three horizontal bars → toggles object list
+        SidebarButton {
+            active: root.builtins-enabled && LayoutState.objects-visible;
+            clicked => {
+                if root.builtins-enabled {
+                    if LayoutState.objects-visible {
+                        LayoutState.hide-panel("objects");
+                    } else {
+                        LayoutState.show-panel("objects");
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                padding-left: 8px;
+                padding-right: 8px;
+
+                Rectangle {
+                    height: 3px;
+                    border-radius: 1px;
+                    background: root.builtins-enabled && LayoutState.objects-visible ? Theme.cyan : Theme.text-faint;
+                }
+
+                Rectangle {
+                    height: 3px;
+                    border-radius: 1px;
+                    background: root.builtins-enabled && LayoutState.objects-visible ? Theme.cyan : Theme.text-faint;
+                }
+
+                Rectangle {
+                    height: 3px;
+                    border-radius: 1px;
+                    background: root.builtins-enabled && LayoutState.objects-visible ? Theme.cyan : Theme.text-faint;
+                }
+            }
+        }
+
+        // Selections — crosshair/target → toggles selection list
+        SidebarButton {
+            active: root.builtins-enabled && LayoutState.selections-visible;
+            clicked => {
+                if root.builtins-enabled {
+                    if LayoutState.selections-visible {
+                        LayoutState.hide-panel("selections");
+                    } else {
+                        LayoutState.show-panel("selections");
+                    }
+                }
+            }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "⊕";
+                color: root.builtins-enabled && LayoutState.selections-visible ? Theme.cyan : Theme.text-faint;
+                font-size: 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Sequence — "Aa" → toggles sequence bar
+        SidebarButton {
+            active: root.builtins-enabled && LayoutState.sequence-visible;
+            clicked => {
+                if root.builtins-enabled {
+                    if LayoutState.sequence-visible {
+                        LayoutState.hide-panel("sequence");
+                    } else {
+                        LayoutState.show-panel("sequence");
+                    }
+                }
+            }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "Aa";
+                color: root.builtins-enabled && LayoutState.sequence-visible ? Theme.cyan : Theme.text-faint;
+                font-size: Tokens.font-md;
+                font-weight: 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Movie — filmstrip → toggles movie panel
+        SidebarButton {
+            active: root.builtins-enabled && LayoutState.movie-visible;
+            clicked => {
+                if root.builtins-enabled {
+                    if LayoutState.movie-visible {
+                        LayoutState.hide-panel("movie");
+                    } else {
+                        LayoutState.show-panel("movie");
+                    }
+                }
+            }
+
+            // Clapperboard: top bar with diagonal stripes + bottom board
+            Rectangle {
+                x: (parent.width - 16px) / 2;
+                y: (parent.height - 14px) / 2;
+                width: 16px;
+                height: 14px;
+
+                // Clapper arm (top bar, slightly open)
+                Rectangle {
+                    y: 0;
+                    width: parent.width;
+                    height: 5px;
+                    border-radius: 1px;
+                    background: root.builtins-enabled && LayoutState.movie-visible ? Theme.cyan : Theme.text-faint;
+                    transform-rotation: -15deg;
+                    transform-origin: {x: 0, y: self.height};
+                }
+
+                // Board body
+                Rectangle {
+                    y: 5px;
+                    width: parent.width;
+                    height: 9px;
+                    border-radius: 1px;
+                    background: root.builtins-enabled && LayoutState.movie-visible ? Theme.cyan.with-alpha(0.35) : Theme.text-faint.with-alpha(0.35);
+                    border-width: 1px;
+                    border-color: root.builtins-enabled && LayoutState.movie-visible ? Theme.cyan : Theme.text-faint;
+                }
+            }
+        }
+
+    }
+
+    // ── Hairline separator ─────────────────────────────────────────
+
+    separator := Rectangle {
+        x: Tokens.space-sm;
+        y: top.y + top.preferred-height + 16px;
+        width: parent.width - 2 * Tokens.space-sm;
+        height: 0.5px;
+        background: Theme.line;
+    }
+
+    // ── Plugin panel toggles ───────────────────────────────────────
+
+    VerticalLayout {
+        x: (parent.width - Tokens.icon-size) / 2;
+        y: separator.y + 16px;
+        spacing: Tokens.space-sm;
+
+        for item in PluginState.toolbar-items: SidebarButton {
+            active: item.active;
+            clicked => {
+                PluginState.toggle-panel(item.id);
+            }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: item.icon;
+                color: item.active ? Theme.cyan : Theme.text-faint;
+                font-size: Tokens.font-sm;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // ── Bottom cluster (theme toggle + plugin install) ──────────────
+
+    VerticalLayout {
+        x: (parent.width - Tokens.icon-size) / 2;
+        y: parent.height - 2 * Tokens.icon-size - Tokens.space-sm - 16px;
+        spacing: Tokens.space-sm;
+
+        // Theme toggle — sun/moon
+        SidebarButton {
+            active: !Theme.dark-mode;
+            clicked => {
+                Theme.toggle-theme();
+            }
+
+            // Circle with half-fill to suggest dark/light
+            Rectangle {
+                x: (parent.width - 14px) / 2;
+                y: (parent.height - 14px) / 2;
+                width: 14px;
+                height: 14px;
+                border-radius: 7px;
+                border-width: 1.5px;
+                border-color: Theme.dark-mode ? Theme.text-faint : Theme.amber;
+                background: transparent;
+
+                // Filled half (right side)
+                clip: true;
+                Rectangle {
+                    x: parent.width / 2;
+                    y: 0;
+                    width: parent.width / 2;
+                    height: parent.height;
+                    border-radius: 0;
+                    background: Theme.dark-mode ? Theme.text-faint : Theme.amber;
+                }
+            }
+        }
+
+        // Plugin install (dashed outline)
+        Rectangle {
+            width: Tokens.icon-size;
+            height: Tokens.icon-size;
+            border-radius: Tokens.radius-md;
+            border-width: 0.5px;
+            border-color: Theme.line;
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "+";
+                color: Theme.text-faint;
+                font-size: 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            plugin-ta := TouchArea {
+                mouse-cursor: pointer;
+            }
+
+            states [
+                hover when plugin-ta.has-hover: {
+                    background: Theme.text-ghost.with-alpha(0.18);
+                }
+            ]
+
+            animate background { duration: Tokens.motion-micro; }
+        }
+    }
+}

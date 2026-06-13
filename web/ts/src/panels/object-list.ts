@@ -3,16 +3,16 @@
  * and representation buttons.
  */
 
-import type { PyMolRSViewer } from "../core/api.js";
+import type { PatinaeViewer } from "../core/api.js";
 
 const REPS = ["lines", "sticks", "cartoon", "spheres", "surface"] as const;
 
 export class ObjectListPanel {
   private container: HTMLElement;
-  private viewer: PyMolRSViewer;
+  private viewer: PatinaeViewer;
   private list: HTMLElement;
 
-  constructor(container: HTMLElement, viewer: PyMolRSViewer) {
+  constructor(container: HTMLElement, viewer: PatinaeViewer) {
     this.container = container;
     this.viewer = viewer;
 

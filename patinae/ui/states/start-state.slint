@@ -1,0 +1,9 @@
+export global StartState {
+    in-out property <string> fetch-pdb-id: "";
+    in-out property <bool> fetch-pdb-valid: false;
+    in-out property <string> fetch-status: "";
+
+    callback fetch-pdb-edited(string);
+    callback fetch-submit(string);
+    callback open-example(string);
+}

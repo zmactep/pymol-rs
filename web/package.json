@@ -1,15 +1,15 @@
 {
-  "name": "@pymol-rs/viewer",
-  "version": "0.3.3",
-  "description": "Embeddable WebGPU molecular visualization component powered by PyMOL-RS",
+  "name": "@patinae/viewer",
+  "version": "0.4.0",
+  "description": "Embeddable WebGPU molecular visualization component powered by Patinae",
   "type": "module",
-  "main": "dist/pymol-rs-viewer.js",
-  "module": "dist/pymol-rs-viewer.js",
-  "types": "dist/pymol-rs-viewer.d.ts",
+  "main": "dist/patinae-viewer.js",
+  "module": "dist/patinae-viewer.js",
+  "types": "dist/patinae-viewer.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/pymol-rs-viewer.js",
-      "types": "./dist/pymol-rs-viewer.d.ts"
+      "import": "./dist/patinae-viewer.js",
+      "types": "./dist/patinae-viewer.d.ts"
     }
   },
   "files": [
@@ -25,7 +25,7 @@
   "devDependencies": {
     "typescript": "^5.4",
     "vite": "^6.0",
-    "wasm-pack": "^0.14"
+    "wasm-pack": "^0.15"
   },
   "overrides": {
     "wasm-pack": {
@@ -36,7 +36,7 @@
     }
   },
   "keywords": [
-    "pymol",
+    "patinae",
     "molecular-visualization",
     "webgpu",
     "wasm",
@@ -45,7 +45,7 @@
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yakovlev/pymol-rs",
+    "url": "https://github.com/yakovlev/patinae",
     "directory": "web"
   }
 }

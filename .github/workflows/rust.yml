@@ -10,12 +10,20 @@ env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache APT packages
         uses: awalsh128/cache-apt-pkgs-action@latest
@@ -34,18 +42,34 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build
-        run: cargo build --verbose
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
         env:
           PYO3_PYTHON: python3
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Check workspace
+        run: cargo check --workspace
+        env:
+          PYO3_PYTHON: python3
+
+      - name: Run workspace tests
+        run: cargo test --workspace --verbose
+        env:
+          PYO3_PYTHON: python3
+
+      - name: Check Python crate
+        run: cargo check --manifest-path python/Cargo.toml
         env:
           PYO3_PYTHON: python3
 
       - name: Install Rust wasm32 target
         run: rustup target add wasm32-unknown-unknown
+
+      - name: Check web WASM crate
+        run: cargo check --manifest-path web/Cargo.toml --target wasm32-unknown-unknown
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -56,11 +80,8 @@ jobs:
 
       - name: Build widget assets
         run: |
-          cd web && npm install && npm run build && cd ..
-          mkdir -p python/pymol_rs/widget/static
-          cp web/dist/pymol-rs-viewer.js python/pymol_rs/widget/static/
-          cp web/dist/pymol_web_bg.wasm python/pymol_rs/widget/static/
-          cp web/dist/pymol_web-*.js python/pymol_rs/widget/static/pymol_web_glue.js
+          cd web && npm ci && npm run build && cd ..
+          make widget-assets
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1

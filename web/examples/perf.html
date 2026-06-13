@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Patinae Web Performance</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        background: #0b0d10;
+        color: #d8dee9;
+        font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      #viewer {
+        width: 100%;
+        height: 100%;
+        background: #000;
+      }
+
+      aside {
+        border-left: 1px solid #2b3038;
+        padding: 14px;
+        overflow: auto;
+        background: #151922;
+      }
+
+      label,
+      button,
+      select {
+        font: inherit;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: #9aa4b2;
+      }
+
+      select,
+      button {
+        width: 100%;
+        margin: 4px 0 10px;
+        padding: 7px 8px;
+        border: 1px solid #3a4250;
+        border-radius: 4px;
+        color: #d8dee9;
+        background: #202633;
+      }
+
+      button {
+        cursor: pointer;
+        background: #285c3a;
+        border-color: #34764b;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        padding: 10px;
+        border: 1px solid #2b3038;
+        border-radius: 4px;
+        background: #0f131a;
+        min-height: 320px;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="viewer"></main>
+    <aside>
+      <label>
+        Fixture
+        <select id="fixture">
+          <option value="1fsd.cif">1FSD</option>
+          <option value="3J3Q.cif">3J3Q</option>
+        </select>
+      </label>
+      <label>
+        Representation preset
+        <select id="representation-preset">
+          <option value="cartoon_only">Cartoon only</option>
+          <option value="classic_large">Classic stress</option>
+        </select>
+      </label>
+      <button id="run">Run Benchmark</button>
+      <pre id="output">Ready.</pre>
+    </aside>
+
+    <script type="module">
+      import { PatinaeViewer } from "../ts/src/index.ts";
+
+      const output = document.getElementById("output");
+      const fixture = document.getElementById("fixture");
+      const representationPreset = document.getElementById("representation-preset");
+      const runButton = document.getElementById("run");
+      const viewerElement = document.getElementById("viewer");
+      const harnessVersion = 5;
+      const fixtureFiles = new Set(["1fsd.cif", "3J3Q.cif"]);
+      const viewer = new PatinaeViewer(viewerElement, {
+        picking: true,
+        selectionOverlay: true,
+      });
+
+      function write(value) {
+        output.textContent = typeof value === "string"
+          ? value
+          : JSON.stringify(value, null, 2);
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function nextFrame() {
+        return new Promise(requestAnimationFrame);
+      }
+
+      function round(value) {
+        return Math.round(value * 1000) / 1000;
+      }
+
+      function wasmNumber(snapshot, key) {
+        return Number(snapshot?.wasm?.[key] ?? 0);
+      }
+
+      function wasmBool(snapshot, key) {
+        return Boolean(snapshot?.wasm?.[key]);
+      }
+
+      function scenarioSampleMetrics(samples) {
+        let overlayMarkedOnlySamples = 0;
+        let hoverThrottleActiveSamples = 0;
+        let hoverPendingSamples = 0;
+        let clickPendingSamples = 0;
+        let maxLastRenderMs = 0;
+        let maxLastPollPicksMs = 0;
+        let maxLastSyncComputeDispatchMs = 0;
+
+        for (const sample of samples) {
+          if (wasmBool(sample, "overlay_id_marked_only")) overlayMarkedOnlySamples++;
+          if (wasmBool(sample, "hover_throttle_active")) hoverThrottleActiveSamples++;
+          if (wasmBool(sample, "hover_pending")) hoverPendingSamples++;
+          if (wasmBool(sample, "click_pending")) clickPendingSamples++;
+          maxLastRenderMs = Math.max(maxLastRenderMs, wasmNumber(sample, "last_render_ms"));
+          maxLastPollPicksMs = Math.max(maxLastPollPicksMs, wasmNumber(sample, "last_poll_picks_ms"));
+          maxLastSyncComputeDispatchMs = Math.max(
+            maxLastSyncComputeDispatchMs,
+            wasmNumber(sample, "last_sync_compute_dispatch_ms"),
+          );
+        }
+
+        return {
+          sample_count: samples.length,
+          overlay_id_marked_only_seen: overlayMarkedOnlySamples > 0,
+          overlay_id_marked_only_samples: overlayMarkedOnlySamples,
+          hover_throttle_active_seen: hoverThrottleActiveSamples > 0,
+          hover_throttle_active_samples: hoverThrottleActiveSamples,
+          hover_pending_samples: hoverPendingSamples,
+          click_pending_samples: clickPendingSamples,
+          max_last_render_ms: round(maxLastRenderMs),
+          max_last_poll_picks_ms: round(maxLastPollPicksMs),
+          max_last_sync_compute_dispatch_ms: round(maxLastSyncComputeDispatchMs),
+        };
+      }
+
+      function scenarioMetrics(start, end, durationMs, samples) {
+        const renderedFrames = wasmNumber(end, "render_count") - wasmNumber(start, "render_count");
+        const rafFrames = end.frame_count - start.frame_count;
+        const hoverSubmitted = wasmNumber(end, "hover_submitted") - wasmNumber(start, "hover_submitted");
+        const hoverCompleted = wasmNumber(end, "hover_completed") - wasmNumber(start, "hover_completed");
+        return {
+          duration_ms: round(durationMs),
+          raf_frames: rafFrames,
+          raf_fps: round(rafFrames * 1000 / durationMs),
+          rendered_frames: renderedFrames,
+          rendered_fps: round(renderedFrames * 1000 / durationMs),
+          end_median_frame_ms: round(end.median_frame_ms),
+          end_p95_frame_ms: round(end.p95_frame_ms),
+          end_median_render_ms: round(wasmNumber(end, "median_render_ms")),
+          end_p95_render_ms: round(wasmNumber(end, "p95_render_ms")),
+          end_last_poll_picks_ms: round(wasmNumber(end, "last_poll_picks_ms")),
+          end_last_uniforms_ms: round(wasmNumber(end, "last_uniforms_ms")),
+          end_last_prepare_ms: round(wasmNumber(end, "last_prepare_ms")),
+          end_last_sync_ms: round(wasmNumber(end, "last_sync_ms")),
+          end_last_sync_scene_store_object_ms: round(wasmNumber(end, "last_sync_scene_store_object_ms")),
+          end_last_sync_scene_store_flush_ms: round(wasmNumber(end, "last_sync_scene_store_flush_ms")),
+          end_last_sync_marking_resources_ms: round(wasmNumber(end, "last_sync_marking_resources_ms")),
+          end_last_sync_rep_ms: round(wasmNumber(end, "last_sync_rep_ms")),
+          end_last_sync_map_ms: round(wasmNumber(end, "last_sync_map_ms")),
+          end_last_sync_order_bounds_ms: round(wasmNumber(end, "last_sync_order_bounds_ms")),
+          end_last_sync_compute_dispatch_ms: round(wasmNumber(end, "last_sync_compute_dispatch_ms")),
+          end_last_sync_marker_lut_upload_bytes: wasmNumber(end, "last_sync_marker_lut_upload_bytes"),
+          end_last_sync_marker_lut_upload_ranges: wasmNumber(end, "last_sync_marker_lut_upload_ranges"),
+          end_last_sync_marker_lut_reallocated: wasmBool(end, "last_sync_marker_lut_reallocated"),
+          end_last_sync_scene_store_live_atoms: wasmNumber(end, "last_sync_scene_store_live_atoms"),
+          end_last_sync_scene_store_allocated_atoms: wasmNumber(end, "last_sync_scene_store_allocated_atoms"),
+          end_last_sync_scene_store_orphaned_atoms: wasmNumber(end, "last_sync_scene_store_orphaned_atoms"),
+          end_last_sync_scene_store_live_bonds: wasmNumber(end, "last_sync_scene_store_live_bonds"),
+          end_last_sync_scene_store_allocated_bonds: wasmNumber(end, "last_sync_scene_store_allocated_bonds"),
+          end_last_sync_scene_store_orphaned_bonds: wasmNumber(end, "last_sync_scene_store_orphaned_bonds"),
+          end_last_sync_scene_store_live_table_slots: wasmNumber(end, "last_sync_scene_store_live_table_slots"),
+          end_last_sync_scene_store_allocated_table_slots: wasmNumber(end, "last_sync_scene_store_allocated_table_slots"),
+          end_last_sync_scene_store_orphaned_table_slots: wasmNumber(end, "last_sync_scene_store_orphaned_table_slots"),
+          end_sphere_lod_active: wasmBool(end, "sphere_lod_active"),
+          end_sphere_lod_sample_shift: wasmNumber(end, "sphere_lod_sample_shift"),
+          end_sphere_lod_sample_stride: wasmNumber(end, "sphere_lod_sample_stride"),
+          end_sphere_lod_base_sample_shift: wasmNumber(end, "sphere_lod_base_sample_shift"),
+          end_sphere_lod_source_atom_count: wasmNumber(end, "sphere_lod_source_atom_count"),
+          end_sphere_lod_instance_upper_bound: wasmNumber(end, "sphere_lod_instance_upper_bound"),
+          end_sphere_lod_cull_upper_bound: wasmNumber(end, "sphere_lod_cull_upper_bound"),
+          end_sphere_lod_viewport_visible_count: wasmNumber(end, "sphere_lod_viewport_visible_count"),
+          end_sphere_lod_viewport_full_detail: wasmBool(end, "sphere_lod_viewport_full_detail"),
+          end_stick_lod_active: wasmBool(end, "stick_lod_active"),
+          end_stick_lod_sample_shift: wasmNumber(end, "stick_lod_sample_shift"),
+          end_stick_lod_sample_stride: wasmNumber(end, "stick_lod_sample_stride"),
+          end_stick_lod_base_sample_shift: wasmNumber(end, "stick_lod_base_sample_shift"),
+          end_stick_lod_source_bond_count: wasmNumber(end, "stick_lod_source_bond_count"),
+          end_stick_lod_sampled_bond_upper_bound: wasmNumber(end, "stick_lod_sampled_bond_upper_bound"),
+          end_stick_lod_cull_upper_bound: wasmNumber(end, "stick_lod_cull_upper_bound"),
+          end_stick_lod_viewport_visible_count: wasmNumber(end, "stick_lod_viewport_visible_count"),
+          end_stick_lod_viewport_full_detail: wasmBool(end, "stick_lod_viewport_full_detail"),
+          end_overlay_id_marked_only: wasmBool(end, "overlay_id_marked_only"),
+          end_last_settings_ms: round(wasmNumber(end, "last_settings_ms")),
+          end_last_acquire_ms: round(wasmNumber(end, "last_acquire_ms")),
+          end_last_encode_ms: round(wasmNumber(end, "last_encode_ms")),
+          end_last_submit_present_ms: round(wasmNumber(end, "last_submit_present_ms")),
+          hover_submitted: hoverSubmitted,
+          hover_submitted_fps: round(hoverSubmitted * 1000 / durationMs),
+          hover_completed: hoverCompleted,
+          hover_completed_fps: round(hoverCompleted * 1000 / durationMs),
+          hover_stale: wasmNumber(end, "hover_stale") - wasmNumber(start, "hover_stale"),
+          hover_queued: wasmNumber(end, "hover_queued") - wasmNumber(start, "hover_queued"),
+          hover_deferred: wasmNumber(end, "hover_deferred") - wasmNumber(start, "hover_deferred"),
+          end_hover_throttle_active: wasmBool(end, "hover_throttle_active"),
+          hover_cancelled: wasmNumber(end, "hover_cancelled") - wasmNumber(start, "hover_cancelled"),
+          click_submitted: wasmNumber(end, "click_submitted") - wasmNumber(start, "click_submitted"),
+          click_completed: wasmNumber(end, "click_completed") - wasmNumber(start, "click_completed"),
+          hover_pending: wasmBool(end, "hover_pending"),
+          click_pending: wasmBool(end, "click_pending"),
+          ...scenarioSampleMetrics(samples),
+        };
+      }
+
+      function canvas() {
+        const el = viewerElement.querySelector("canvas");
+        if (!el) throw new Error("viewer canvas not found");
+        return el;
+      }
+
+      async function waitForPickIdle(maxMs = 1000) {
+        const started = performance.now();
+        while (performance.now() - started < maxMs) {
+          const snapshot = viewer.getPerformanceSnapshot();
+          if (!wasmBool(snapshot, "hover_pending") && !wasmBool(snapshot, "click_pending")) {
+            return true;
+          }
+          await nextFrame();
+        }
+        return false;
+      }
+
+      function dispatchMouse(type, x, y, button = 0, buttons = 0) {
+        const c = canvas();
+        const rect = c.getBoundingClientRect();
+        c.dispatchEvent(new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + x,
+          clientY: rect.top + y,
+          button,
+          buttons,
+        }));
+      }
+
+      function applyRepresentationPreset(preset) {
+        viewer.execute("as cartoon");
+        if (preset === "classic_large") {
+          viewer.execute("show sticks");
+          viewer.execute("show spheres");
+        }
+      }
+
+      function fixturePath(file) {
+        if (!fixtureFiles.has(file)) {
+          throw new Error(`unknown fixture: ${file}`);
+        }
+        return `../assets/${file}`;
+      }
+
+      async function loadFixture(file, preset) {
+        write(`Loading ${file} (${preset})...`);
+        const path = fixturePath(file);
+        const response = await fetch(path);
+        if (!response.ok) {
+          throw new Error(`failed to fetch ${file} from ${path}: ${response.status}`);
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const format = file.endsWith(".bcif") || file.endsWith(".bcif.gz") ? "bcif" : "cif";
+        viewer.loadData(bytes, file.replace(/\..+$/, ""), format);
+        applyRepresentationPreset(preset);
+        await sleep(1000);
+      }
+
+      async function runIdle(durationMs) {
+        await sleep(durationMs);
+      }
+
+      async function runHover(durationMs) {
+        const c = canvas();
+        const rect = c.getBoundingClientRect();
+        const started = performance.now();
+        while (performance.now() - started < durationMs) {
+          const t = (performance.now() - started) / durationMs;
+          const x = 0.5 * rect.width + Math.cos(t * Math.PI * 8) * rect.width * 0.3;
+          const y = 0.5 * rect.height + Math.sin(t * Math.PI * 6) * rect.height * 0.3;
+          dispatchMouse("mousemove", x, y, 0, 0);
+          await nextFrame();
+        }
+      }
+
+      async function runOrbit(durationMs) {
+        const c = canvas();
+        const rect = c.getBoundingClientRect();
+        dispatchMouse("mousedown", rect.width * 0.5, rect.height * 0.5, 0, 1);
+        const started = performance.now();
+        while (performance.now() - started < durationMs) {
+          const t = (performance.now() - started) / durationMs;
+          dispatchMouse(
+            "mousemove",
+            rect.width * (0.25 + t * 0.5),
+            rect.height * (0.45 + Math.sin(t * Math.PI * 4) * 0.15),
+            0,
+            1,
+          );
+          await nextFrame();
+        }
+        dispatchMouse("mouseup", rect.width * 0.75, rect.height * 0.5, 0, 0);
+      }
+
+      async function runClick() {
+        const c = canvas();
+        const rect = c.getBoundingClientRect();
+        dispatchMouse("mousedown", rect.width * 0.5, rect.height * 0.5, 0, 1);
+        dispatchMouse("mouseup", rect.width * 0.5, rect.height * 0.5, 0, 0);
+        await sleep(500);
+      }
+
+      async function runWithSamples(fn) {
+        const samples = [];
+        let done = false;
+        const sampler = (async () => {
+          while (!done) {
+            await nextFrame();
+            samples.push(viewer.getPerformanceSnapshot());
+          }
+        })();
+        try {
+          await fn();
+        } finally {
+          done = true;
+          await sampler;
+        }
+        return samples;
+      }
+
+      async function runAll() {
+        runButton.disabled = true;
+        try {
+          const preset = representationPreset.value;
+          await loadFixture(fixture.value, preset);
+          const scenarios = [];
+          for (const [name, fn] of [
+            ["idle", () => runIdle(2500)],
+            ["hover", () => runHover(2500)],
+            ["orbit", () => runOrbit(2500)],
+            ["click", () => runClick()],
+          ]) {
+            write(`Running ${name}...`);
+            await waitForPickIdle();
+            viewer.resetPerformanceStats();
+            await nextFrame();
+            const start = viewer.getPerformanceSnapshot();
+            const scenarioStart = performance.now();
+            const samples = await runWithSamples(fn);
+            const durationMs = performance.now() - scenarioStart;
+            const end = viewer.getPerformanceSnapshot();
+            scenarios.push({
+              name,
+              metrics: scenarioMetrics(start, end, durationMs, samples),
+              start,
+              end,
+            });
+          }
+          write({
+            fixture: fixture.value,
+            representationPreset: preset,
+            harnessVersion,
+            devicePixelRatio: window.devicePixelRatio || 1,
+            viewport: {
+              width: canvas().width,
+              height: canvas().height,
+            },
+            scenarios,
+            final: viewer.getPerformanceSnapshot(),
+          });
+        } finally {
+          runButton.disabled = false;
+        }
+      }
+
+      await viewer.init();
+      window.patinaePerf = { viewer, runAll };
+      runButton.addEventListener("click", runAll);
+
+      const params = new URLSearchParams(location.search);
+      if (params.has("fixture")) {
+        fixture.value = params.get("fixture");
+      }
+      if (params.has("preset")) {
+        representationPreset.value = params.get("preset");
+      }
+      if (params.get("auto") === "1") {
+        runAll().catch((error) => write(String(error)));
+      }
+    </script>
+  </body>
+</html>

@@ -14,6 +14,7 @@ import type {
   ViewerOptions,
   PanelName,
   PanelPlacement,
+  ViewerPerformanceSnapshot,
 } from "./types.js";
 import type { ViewerEventType, ViewerEventMap } from "./events.js";
 import { ReplPanel } from "../panels/repl.js";
@@ -23,7 +24,7 @@ import { MoviePanel } from "../panels/movie.js";
 
 type PanelInstance = ReplPanel | ObjectListPanel | SequencePanel | MoviePanel;
 
-export class PyMolRSViewer {
+export class PatinaeViewer {
   private core: ViewerCore;
   private events = new ViewerEvents();
   private panels = new Map<PanelName, PanelInstance>();
@@ -38,11 +39,17 @@ export class PyMolRSViewer {
   }
 
   async init(): Promise<void> {
-    const wasm = await this.core.init();
+    // `options.picking` flows into WASM construction so the renderer
+    // allocates (or skips) hit-test readback resources. Selection overlay
+    // is a separate visual toggle and defaults to the picking choice.
+    const wasm = await this.core.init({
+      picking: this.options.picking ?? false,
+      selectionOverlay: this.options.selectionOverlay,
+    });
 
-    // Enable picking if requested.
+    // Arm the CPU-side hit-test flag so click/hover events trigger picks.
     if (this.options.picking) {
-      wasm.set_picking_enabled(true);
+      this.core.requireWasm("set_picking_enabled", (wasm) => wasm.set_picking_enabled(true));
     }
 
     // Forward pick results as typed events.
@@ -82,7 +89,7 @@ export class PyMolRSViewer {
       if (!target) continue;
 
       const panelEl = document.createElement("div");
-      panelEl.className = `pymol-panel pymol-panel-${placement.name}`;
+      panelEl.className = `patinae-panel patinae-panel-${placement.name}`;
       if (placement.collapsed) {
         panelEl.classList.add("collapsed");
       }
@@ -133,7 +140,14 @@ export class PyMolRSViewer {
    * `ViewerOptions.picking`.
    */
   setPicking(enabled: boolean): void {
-    this.core.wasmViewer?.set_picking_enabled(enabled);
+    this.core.callWasm("set_picking_enabled", (wasm) => wasm.set_picking_enabled(enabled));
+  }
+
+  /** Enable or disable the visible selection / hover overlay at runtime. */
+  setSelectionOverlay(enabled: boolean): void {
+    this.core.callWasm("set_selection_overlay_enabled", (wasm) =>
+      wasm.set_selection_overlay_enabled(enabled),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -150,9 +164,7 @@ export class PyMolRSViewer {
         : ` Loading ${async_cmd.url}...`;
       return { messages: [{ level: "info", text }] };
     }
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return { messages: [] };
-    const result = wasm.execute(command) as CommandOutput;
+    const result = this.core.requireWasm("execute", (wasm) => wasm.execute(command) as CommandOutput);
     this.events.emit("command-output", result.messages[0] ?? { level: "info", text: "" });
     this.refreshPanels();
     return result;
@@ -183,9 +195,7 @@ export class PyMolRSViewer {
   }
 
   loadData(data: Uint8Array, name: string, format: string): void {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return;
-    wasm.load_data(data, name, format);
+    this.core.requireWasm("load_data", (wasm) => wasm.load_data(data, name, format));
     this.refreshPanels();
   }
 
@@ -211,39 +221,55 @@ export class PyMolRSViewer {
   // ---------------------------------------------------------------------------
 
   getObjectNames(): string[] {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return [];
-    return wasm.get_object_names() as string[];
+    return this.core.queryWasm(
+      "get_object_names",
+      [],
+      (wasm) => wasm.get_object_names() as string[],
+    );
   }
 
   getObjectInfo(name: string): ObjectInfo | null {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return null;
-    return wasm.get_object_info(name) as ObjectInfo | null;
+    return this.core.queryWasm(
+      "get_object_info",
+      null,
+      (wasm) => wasm.get_object_info(name) as ObjectInfo | null,
+    );
   }
 
   getSequenceData(): SequenceChain[] {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return [];
-    return wasm.get_sequence_data() as SequenceChain[];
+    return this.core.queryWasm(
+      "get_sequence_data",
+      [],
+      (wasm) => wasm.get_sequence_data() as SequenceChain[],
+    );
   }
 
   getMovieState(): MovieState {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return { frame_count: 0, current_frame: 0, is_playing: false };
-    return wasm.get_movie_state() as MovieState;
+    return this.core.queryWasm(
+      "get_movie_state",
+      { frame_count: 0, current_frame: 0, is_playing: false, rock_enabled: false },
+      (wasm) => wasm.get_movie_state() as MovieState,
+    );
   }
 
   getSelectionList(): SelectionInfo[] {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return [];
-    return wasm.get_selection_list() as SelectionInfo[];
+    return this.core.queryWasm(
+      "get_selection_list",
+      [],
+      (wasm) => wasm.get_selection_list() as SelectionInfo[],
+    );
+  }
+
+  getPerformanceSnapshot(): ViewerPerformanceSnapshot {
+    return this.core.getPerformanceSnapshot();
+  }
+
+  resetPerformanceStats(): void {
+    this.core.resetPerformanceStats();
   }
 
   countAtoms(selection = "all"): number {
-    const wasm = this.core.wasmViewer;
-    if (!wasm) return 0;
-    return wasm.count_atoms(selection);
+    return this.core.requireWasm("count_atoms", (wasm) => wasm.count_atoms(selection));
   }
 
   // ---------------------------------------------------------------------------
@@ -292,8 +318,8 @@ type AsyncCommand =
   | { kind: "fetch"; code: string; name: string; format: string }
   | { kind: "load"; url: string; name: string; format: string };
 
-/** Parse a PyMOL command string into positional and named args. */
-function parsePymolArgs(argsStr: string): { positional: string[]; named: Record<string, string> } {
+/** Parse a command argument string into positional and named args. */
+function parsePatinaeArgs(argsStr: string): { positional: string[]; named: Record<string, string> } {
   const positional: string[] = [];
   const named: Record<string, string> = {};
   for (const part of argsStr.split(",")) {
@@ -314,7 +340,7 @@ function parseAsyncCommand(command: string): AsyncCommand | null {
   const match = command.match(/^\s*(\w+)\s+(.*)/s);
   if (!match) return null;
   const verb = match[1].toLowerCase();
-  const { positional, named } = parsePymolArgs(match[2]);
+  const { positional, named } = parsePatinaeArgs(match[2]);
 
   if (verb === "fetch" && positional.length >= 1) {
     const code = positional[0];
