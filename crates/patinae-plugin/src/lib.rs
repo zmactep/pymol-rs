@@ -70,12 +70,17 @@ pub mod prelude {
     // Domain types
     pub use patinae_mol::{Atom, Bond, CoordSet, ObjectMolecule};
     pub use patinae_scene::{
-        Camera, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
-        GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource, GpuBindingType,
-        GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats,
-        GpuCacheStatus, GpuCachedHandle, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle,
-        GpuHandleKind, GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
-        GpuSubmitBatch, ObjectRegistry, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+        Camera, GpuAddressMode, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor,
+        GpuBindGroupEntry, GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry,
+        GpuBindingResource, GpuBindingType, GpuBufferBinding, GpuBufferBindingType,
+        GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats, GpuCacheStatus, GpuCachedHandle,
+        GpuCompareFunction, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuExtent3d,
+        GpuFilterMode, GpuHandle, GpuHandleKind, GpuOrigin3d, GpuPipelineLayoutDescriptor,
+        GpuSamplerBindingType, GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
+        GpuStorageTextureAccess, GpuSubmitBatch, GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo,
+        GpuTextureAspect, GpuTextureDescriptor, GpuTextureDimension, GpuTextureFormat,
+        GpuTextureSampleType, GpuTextureUsage, GpuTextureViewDescriptor, GpuTextureViewDimension,
+        ObjectRegistry, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
         RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
         RenderArtifactSnapshotDescriptor, SelectionManager,
     };

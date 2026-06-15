@@ -373,6 +373,30 @@ pub trait ViewerLike {
         Err("GPU command runtime is not available".to_string())
     }
 
+    /// Create a host-owned GPU texture.
+    fn gpu_create_texture(
+        &mut self,
+        _descriptor: crate::GpuTextureDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a host-owned GPU texture view.
+    fn gpu_create_texture_view(
+        &mut self,
+        _descriptor: crate::GpuTextureViewDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a host-owned GPU sampler.
+    fn gpu_create_sampler(
+        &mut self,
+        _descriptor: crate::GpuSamplerDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
     /// Write bytes into a host-owned GPU buffer.
     fn gpu_write_buffer(
         &mut self,

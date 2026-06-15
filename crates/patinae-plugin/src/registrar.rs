@@ -1404,6 +1404,30 @@ impl CommandRuntimeClient {
         })
     }
 
+    fn gpu_create_texture(
+        self,
+        descriptor: patinae_scene::GpuTextureDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateTexture { id: 1, descriptor })
+    }
+
+    fn gpu_create_texture_view(
+        self,
+        descriptor: patinae_scene::GpuTextureViewDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateTextureView {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_sampler(
+        self,
+        descriptor: patinae_scene::GpuSamplerDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateSampler { id: 1, descriptor })
+    }
+
     fn gpu_write_buffer(
         self,
         buffer: patinae_scene::GpuHandle,
@@ -1921,6 +1945,33 @@ impl ViewerLike for RuntimeViewer {
         self.command_runtime
             .ok_or_else(|| "host command runtime is not available".to_string())?
             .gpu_create_buffer(descriptor, initial_data)
+    }
+
+    fn gpu_create_texture(
+        &mut self,
+        descriptor: patinae_scene::GpuTextureDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_texture(descriptor)
+    }
+
+    fn gpu_create_texture_view(
+        &mut self,
+        descriptor: patinae_scene::GpuTextureViewDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_texture_view(descriptor)
+    }
+
+    fn gpu_create_sampler(
+        &mut self,
+        descriptor: patinae_scene::GpuSamplerDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_sampler(descriptor)
     }
 
     fn gpu_write_buffer(

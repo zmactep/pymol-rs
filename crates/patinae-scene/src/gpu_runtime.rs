@@ -18,6 +18,8 @@ pub struct GpuHandle {
 pub enum GpuHandleKind {
     Buffer,
     Texture,
+    TextureView,
+    Sampler,
     ShaderModule,
     BindGroupLayout,
     PipelineLayout,
@@ -65,6 +67,30 @@ impl GpuBufferUsage {
     }
 }
 
+/// Portable texture usage flags understood by the plugin GPU runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuTextureUsage {
+    pub bits: u32,
+}
+
+impl GpuTextureUsage {
+    pub const COPY_SRC: Self = Self { bits: 1 << 0 };
+    pub const COPY_DST: Self = Self { bits: 1 << 1 };
+    pub const TEXTURE_BINDING: Self = Self { bits: 1 << 2 };
+    pub const STORAGE_BINDING: Self = Self { bits: 1 << 3 };
+    pub const RENDER_ATTACHMENT: Self = Self { bits: 1 << 4 };
+
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        (self.bits & other.bits) == other.bits
+    }
+}
+
 /// Portable shader stage flags understood by the plugin GPU runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GpuShaderStages {
@@ -91,6 +117,149 @@ pub struct GpuBufferDescriptor {
     pub usage: GpuBufferUsage,
 }
 
+/// Extent of a texture copy or allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuExtent3d {
+    pub width: u32,
+    pub height: u32,
+    pub depth_or_array_layers: u32,
+}
+
+/// Origin of a texture copy region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuOrigin3d {
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+}
+
+/// Texture allocation dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuTextureDimension {
+    D1,
+    D2,
+    D3,
+}
+
+/// Texture view dimension used in bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuTextureViewDimension {
+    D1,
+    D2,
+    D2Array,
+    Cube,
+    CubeArray,
+    D3,
+}
+
+/// Texture aspect addressed by a copy or view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuTextureAspect {
+    All,
+    StencilOnly,
+    DepthOnly,
+}
+
+/// Portable subset of texture formats exposed to plugins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuTextureFormat {
+    R8Unorm,
+    R8Uint,
+    R8Sint,
+    R16Uint,
+    R16Sint,
+    R16Float,
+    R32Uint,
+    R32Sint,
+    R32Float,
+    Rg8Unorm,
+    Rg8Uint,
+    Rg8Sint,
+    Rg16Float,
+    Rg32Float,
+    Rgba8Unorm,
+    Rgba8UnormSrgb,
+    Rgba8Uint,
+    Rgba8Sint,
+    Bgra8Unorm,
+    Bgra8UnormSrgb,
+    Rgba16Float,
+    Rgba32Float,
+    Depth32Float,
+}
+
+/// Descriptor for a plugin-created GPU texture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuTextureDescriptor {
+    pub label: Option<String>,
+    pub size: GpuExtent3d,
+    pub mip_level_count: u32,
+    pub sample_count: u32,
+    pub dimension: GpuTextureDimension,
+    pub format: GpuTextureFormat,
+    pub usage: GpuTextureUsage,
+}
+
+/// Descriptor for a plugin-created texture view.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpuTextureViewDescriptor {
+    pub label: Option<String>,
+    pub texture: GpuHandle,
+    pub format: Option<GpuTextureFormat>,
+    pub dimension: Option<GpuTextureViewDimension>,
+    pub usage: Option<GpuTextureUsage>,
+    pub aspect: GpuTextureAspect,
+    pub base_mip_level: u32,
+    pub mip_level_count: Option<u32>,
+    pub base_array_layer: u32,
+    pub array_layer_count: Option<u32>,
+}
+
+/// Addressing mode for a sampler axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuAddressMode {
+    ClampToEdge,
+    Repeat,
+    MirrorRepeat,
+    ClampToBorder,
+}
+
+/// Filtering mode for sampler lookups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuFilterMode {
+    Nearest,
+    Linear,
+}
+
+/// Comparison function for sampler depth comparisons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuCompareFunction {
+    Never,
+    Less,
+    Equal,
+    LessEqual,
+    Greater,
+    NotEqual,
+    GreaterEqual,
+    Always,
+}
+
+/// Descriptor for a plugin-created sampler.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GpuSamplerDescriptor {
+    pub label: Option<String>,
+    pub address_mode_u: GpuAddressMode,
+    pub address_mode_v: GpuAddressMode,
+    pub address_mode_w: GpuAddressMode,
+    pub mag_filter: GpuFilterMode,
+    pub min_filter: GpuFilterMode,
+    pub mipmap_filter: GpuFilterMode,
+    pub lod_min_clamp: f32,
+    pub lod_max_clamp: f32,
+    pub compare: Option<GpuCompareFunction>,
+    pub anisotropy_clamp: u16,
+}
+
 /// Buffer binding type for a bind-group layout entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GpuBufferBindingType {
@@ -107,6 +276,43 @@ pub enum GpuBindingType {
         has_dynamic_offset: bool,
         min_binding_size: Option<u64>,
     },
+    Sampler(GpuSamplerBindingType),
+    Texture {
+        sample_type: GpuTextureSampleType,
+        view_dimension: GpuTextureViewDimension,
+        multisampled: bool,
+    },
+    StorageTexture {
+        access: GpuStorageTextureAccess,
+        format: GpuTextureFormat,
+        view_dimension: GpuTextureViewDimension,
+    },
+}
+
+/// Sampler binding type for a bind-group layout entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuSamplerBindingType {
+    Filtering,
+    NonFiltering,
+    Comparison,
+}
+
+/// Texture sample type for a bind-group layout entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuTextureSampleType {
+    Float { filterable: bool },
+    Depth,
+    Sint,
+    Uint,
+}
+
+/// Storage texture access for a bind-group layout entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuStorageTextureAccess {
+    WriteOnly,
+    ReadOnly,
+    ReadWrite,
+    Atomic,
 }
 
 /// One bind-group layout entry.
@@ -183,6 +389,8 @@ pub struct GpuBufferBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GpuBindingResource {
     Buffer(GpuBufferBinding),
+    TextureView(GpuHandle),
+    Sampler(GpuHandle),
 }
 
 /// One bind-group entry.
@@ -198,6 +406,23 @@ pub struct GpuBindGroupDescriptor {
     pub label: Option<String>,
     pub layout: GpuHandle,
     pub entries: Vec<GpuBindGroupEntry>,
+}
+
+/// Buffer layout for a texture copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuTexelCopyBufferLayout {
+    pub offset: u64,
+    pub bytes_per_row: Option<u32>,
+    pub rows_per_image: Option<u32>,
+}
+
+/// Texture subresource addressed by a texture copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuTexelCopyTextureInfo {
+    pub texture: GpuHandle,
+    pub mip_level: u32,
+    pub origin: GpuOrigin3d,
+    pub aspect: GpuTextureAspect,
 }
 
 /// One command recorded into a host-owned GPU batch.
@@ -222,6 +447,26 @@ pub enum GpuBatchCommand {
         destination: GpuHandle,
         destination_offset: u64,
         size: u64,
+    },
+    /// Copy texels from a buffer into a texture.
+    CopyBufferToTexture {
+        source: GpuHandle,
+        source_layout: GpuTexelCopyBufferLayout,
+        destination: GpuTexelCopyTextureInfo,
+        size: GpuExtent3d,
+    },
+    /// Copy texels from a texture into a buffer.
+    CopyTextureToBuffer {
+        source: GpuTexelCopyTextureInfo,
+        destination: GpuHandle,
+        destination_layout: GpuTexelCopyBufferLayout,
+        size: GpuExtent3d,
+    },
+    /// Copy texels between textures.
+    CopyTextureToTexture {
+        source: GpuTexelCopyTextureInfo,
+        destination: GpuTexelCopyTextureInfo,
+        size: GpuExtent3d,
     },
     /// Copy bytes to a temporary readback buffer after previous commands.
     ReadBuffer {

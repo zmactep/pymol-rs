@@ -58,14 +58,18 @@ use patinae_plugin::wire::{
     WireTraceGeometryOpened, WireViewerAction, RUNTIME_WIRE_VERSION,
 };
 use patinae_scene::{
-    parse_key_string, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
-    GpuBindGroupLayoutDescriptor, GpuBindingResource, GpuBindingType, GpuBufferBindingType,
-    GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats, GpuCacheStatus, GpuCachedHandle,
-    GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle, GpuHandleKind,
-    GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages, GpuSubmitBatch,
-    KeyBindings, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
-    RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
-    RenderArtifactSnapshotDescriptor, Session, ViewerLike,
+    parse_key_string, GpuAddressMode, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor,
+    GpuBindGroupEntry, GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource,
+    GpuBindingType, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats,
+    GpuCacheStatus, GpuCachedHandle, GpuCompareFunction, GpuComputePipelineDescriptor,
+    GpuDeviceLimits, GpuExtent3d, GpuFilterMode, GpuHandle, GpuHandleKind, GpuOrigin3d,
+    GpuPipelineLayoutDescriptor, GpuSamplerBindingType, GpuSamplerDescriptor,
+    GpuShaderModuleDescriptor, GpuShaderStages, GpuStorageTextureAccess, GpuSubmitBatch,
+    GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTextureAspect, GpuTextureDescriptor,
+    GpuTextureDimension, GpuTextureFormat, GpuTextureSampleType, GpuTextureUsage,
+    GpuTextureViewDescriptor, GpuTextureViewDimension, KeyBindings, RenderArtifactBufferDescriptor,
+    RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
+    RenderArtifactRepKind, RenderArtifactSnapshotDescriptor, Session, ViewerLike,
 };
 use patinae_settings::{
     DynamicSettingDescriptor, DynamicSettingStore, SettingType, SettingValue, SharedSettingStore,
@@ -1637,6 +1641,18 @@ impl<'a> HostCommandRuntimeState<'a> {
                 let result = self.gpu_create_buffer(descriptor, initial_data);
                 Self::response(id, result)
             }
+            WireCommandRuntimeRequest::GpuCreateTexture { id, descriptor } => {
+                let result = self.gpu_create_texture(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateTextureView { id, descriptor } => {
+                let result = self.gpu_create_texture_view(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateSampler { id, descriptor } => {
+                let result = self.gpu_create_sampler(descriptor);
+                Self::response(id, result)
+            }
             WireCommandRuntimeRequest::GpuWriteBuffer {
                 id,
                 buffer,
@@ -2017,6 +2033,87 @@ impl<'a> HostCommandRuntimeState<'a> {
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
+    fn gpu_create_texture(
+        &mut self,
+        descriptor: GpuTextureDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        validate_texture_descriptor(&descriptor)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let size = wgpu_extent3d(descriptor.size);
+        let format = wgpu_texture_format(descriptor.format);
+        let usage = wgpu_texture_usage(descriptor.usage)?;
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: descriptor.label.as_deref(),
+            size,
+            mip_level_count: descriptor.mip_level_count,
+            sample_count: descriptor.sample_count,
+            dimension: wgpu_texture_dimension(descriptor.dimension),
+            format,
+            usage,
+            view_formats: &[],
+        });
+        let handle = self.gpu_handles.insert_texture(texture, &descriptor);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_texture_view(
+        &mut self,
+        descriptor: GpuTextureViewDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let texture = self.gpu_handles.texture(descriptor.texture)?;
+        validate_texture_view_descriptor(texture, &descriptor)?;
+        let view_format = descriptor.format.unwrap_or(texture.format);
+        let view_usage = descriptor.usage.unwrap_or(texture.usage);
+        let view = texture.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: descriptor.label.as_deref(),
+            format: descriptor.format.map(wgpu_texture_format),
+            dimension: descriptor.dimension.map(wgpu_texture_view_dimension),
+            usage: descriptor.usage.map(wgpu_texture_usage).transpose()?,
+            aspect: wgpu_texture_aspect(descriptor.aspect),
+            base_mip_level: descriptor.base_mip_level,
+            mip_level_count: descriptor.mip_level_count,
+            base_array_layer: descriptor.base_array_layer,
+            array_layer_count: descriptor.array_layer_count,
+        });
+        let handle = self
+            .gpu_handles
+            .insert_texture_view(view, view_format, view_usage);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_sampler(
+        &mut self,
+        descriptor: GpuSamplerDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        validate_sampler_descriptor(&descriptor)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: descriptor.label.as_deref(),
+            address_mode_u: wgpu_address_mode(descriptor.address_mode_u),
+            address_mode_v: wgpu_address_mode(descriptor.address_mode_v),
+            address_mode_w: wgpu_address_mode(descriptor.address_mode_w),
+            mag_filter: wgpu_filter_mode(descriptor.mag_filter),
+            min_filter: wgpu_filter_mode(descriptor.min_filter),
+            mipmap_filter: wgpu_mipmap_filter_mode(descriptor.mipmap_filter),
+            lod_min_clamp: descriptor.lod_min_clamp,
+            lod_max_clamp: descriptor.lod_max_clamp,
+            compare: descriptor.compare.map(wgpu_compare_function),
+            anisotropy_clamp: descriptor.anisotropy_clamp,
+            border_color: None,
+        });
+        let handle = self.gpu_handles.insert_sampler(sampler);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
     fn gpu_write_buffer(
         &mut self,
         buffer: GpuHandle,
@@ -2140,9 +2237,9 @@ impl<'a> HostCommandRuntimeState<'a> {
             label: descriptor.label.as_deref(),
             entries: &entries,
         });
-        let handle = self
-            .gpu_handles
-            .insert_bind_group_layout(layout, fingerprint);
+        let handle =
+            self.gpu_handles
+                .insert_bind_group_layout(layout, fingerprint, descriptor.entries);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
@@ -2266,9 +2363,9 @@ impl<'a> HostCommandRuntimeState<'a> {
             (layout, GpuCacheStatus::Miss)
         };
         drop(cache);
-        let handle = self
-            .gpu_handles
-            .insert_bind_group_layout(layout, fingerprint);
+        let handle =
+            self.gpu_handles
+                .insert_bind_group_layout(layout, fingerprint, descriptor.entries);
         log_gpu_cache_event("bind_group_layout", status, start.elapsed().as_millis());
         Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
             handle,
@@ -2384,14 +2481,30 @@ impl<'a> HostCommandRuntimeState<'a> {
             .gpu_device()
             .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
         let bind_group = {
-            let layout = self.gpu_handles.bind_group_layout(descriptor.layout)?;
+            let layout = self
+                .gpu_handles
+                .bind_group_layout_descriptor(descriptor.layout)?;
             let mut entries = Vec::with_capacity(descriptor.entries.len());
             for entry in descriptor.entries {
-                entries.push(wgpu_bind_group_entry(&self.gpu_handles, entry)?);
+                let layout_entry = layout
+                    .entries
+                    .iter()
+                    .find(|layout_entry| layout_entry.binding == entry.binding)
+                    .ok_or_else(|| {
+                        format!(
+                            "GPU bind group entry {} is not declared by its layout",
+                            entry.binding
+                        )
+                    })?;
+                entries.push(wgpu_bind_group_entry(
+                    &self.gpu_handles,
+                    entry,
+                    layout_entry.ty,
+                )?);
             }
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: descriptor.label.as_deref(),
-                layout,
+                layout: &layout.layout,
                 entries: &entries,
             })
         };
@@ -2525,6 +2638,94 @@ impl<'a> HostCommandRuntimeState<'a> {
                         &destination.buffer,
                         destination_offset,
                         size,
+                    );
+                }
+                GpuBatchCommand::CopyBufferToTexture {
+                    source,
+                    source_layout,
+                    destination,
+                    size,
+                } => {
+                    let source = self.gpu_handles.buffer(source)?;
+                    let destination_texture = self.gpu_handles.texture(destination.texture)?;
+                    validate_texture_usage(
+                        destination_texture,
+                        GpuTextureUsage::COPY_DST,
+                        "copy_buffer_to_texture destination",
+                    )?;
+                    validate_texture_copy_range(destination_texture, &destination, size)?;
+                    validate_texel_copy_buffer_layout(
+                        destination_texture.format,
+                        source_layout,
+                        size,
+                        source.size,
+                    )?;
+                    encoder.copy_buffer_to_texture(
+                        wgpu::TexelCopyBufferInfo {
+                            buffer: &source.buffer,
+                            layout: wgpu_texel_copy_buffer_layout(source_layout),
+                        },
+                        wgpu_texel_copy_texture_info(destination_texture, destination),
+                        wgpu_extent3d(size),
+                    );
+                }
+                GpuBatchCommand::CopyTextureToBuffer {
+                    source,
+                    destination,
+                    destination_layout,
+                    size,
+                } => {
+                    let source_texture = self.gpu_handles.texture(source.texture)?;
+                    let destination = self.gpu_handles.buffer(destination)?;
+                    validate_texture_usage(
+                        source_texture,
+                        GpuTextureUsage::COPY_SRC,
+                        "copy_texture_to_buffer source",
+                    )?;
+                    validate_texture_copy_range(source_texture, &source, size)?;
+                    validate_texel_copy_buffer_layout(
+                        source_texture.format,
+                        destination_layout,
+                        size,
+                        destination.size,
+                    )?;
+                    encoder.copy_texture_to_buffer(
+                        wgpu_texel_copy_texture_info(source_texture, source),
+                        wgpu::TexelCopyBufferInfo {
+                            buffer: &destination.buffer,
+                            layout: wgpu_texel_copy_buffer_layout(destination_layout),
+                        },
+                        wgpu_extent3d(size),
+                    );
+                }
+                GpuBatchCommand::CopyTextureToTexture {
+                    source,
+                    destination,
+                    size,
+                } => {
+                    let source_texture = self.gpu_handles.texture(source.texture)?;
+                    let destination_texture = self.gpu_handles.texture(destination.texture)?;
+                    validate_texture_usage(
+                        source_texture,
+                        GpuTextureUsage::COPY_SRC,
+                        "copy_texture_to_texture source",
+                    )?;
+                    validate_texture_usage(
+                        destination_texture,
+                        GpuTextureUsage::COPY_DST,
+                        "copy_texture_to_texture destination",
+                    )?;
+                    if source_texture.format != destination_texture.format {
+                        return Err(
+                            "texture-to-texture copies require matching formats".to_string()
+                        );
+                    }
+                    validate_texture_copy_range(source_texture, &source, size)?;
+                    validate_texture_copy_range(destination_texture, &destination, size)?;
+                    encoder.copy_texture_to_texture(
+                        wgpu_texel_copy_texture_info(source_texture, source),
+                        wgpu_texel_copy_texture_info(destination_texture, destination),
+                        wgpu_extent3d(size),
                     );
                 }
                 GpuBatchCommand::ReadBuffer {
@@ -2664,6 +2865,29 @@ struct HostGpuBuffer {
     size: u64,
 }
 
+#[derive(Clone)]
+struct HostGpuTexture {
+    texture: wgpu::Texture,
+    size: GpuExtent3d,
+    mip_level_count: u32,
+    dimension: GpuTextureDimension,
+    format: GpuTextureFormat,
+    usage: GpuTextureUsage,
+}
+
+#[derive(Clone)]
+struct HostGpuTextureView {
+    view: wgpu::TextureView,
+    format: GpuTextureFormat,
+    usage: GpuTextureUsage,
+}
+
+#[derive(Clone)]
+struct HostGpuBindGroupLayout {
+    layout: wgpu::BindGroupLayout,
+    entries: Vec<GpuBindGroupLayoutEntry>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct GpuResourceFingerprint {
     kind: GpuHandleKind,
@@ -2673,8 +2897,11 @@ struct GpuResourceFingerprint {
 #[derive(Clone)]
 enum GpuHandleObject {
     Buffer(HostGpuBuffer),
+    Texture(HostGpuTexture),
+    TextureView(HostGpuTextureView),
+    Sampler(wgpu::Sampler),
     ShaderModule(wgpu::ShaderModule),
-    BindGroupLayout(wgpu::BindGroupLayout),
+    BindGroupLayout(HostGpuBindGroupLayout),
     PipelineLayout(wgpu::PipelineLayout),
     BindGroup(wgpu::BindGroup),
     ComputePipeline(wgpu::ComputePipeline),
@@ -2710,6 +2937,50 @@ impl GpuHandleRegistry {
         )
     }
 
+    fn insert_texture(
+        &mut self,
+        texture: wgpu::Texture,
+        descriptor: &GpuTextureDescriptor,
+    ) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::Texture,
+            GpuHandleObject::Texture(HostGpuTexture {
+                texture,
+                size: descriptor.size,
+                mip_level_count: descriptor.mip_level_count,
+                dimension: descriptor.dimension,
+                format: descriptor.format,
+                usage: descriptor.usage,
+            }),
+            None,
+        )
+    }
+
+    fn insert_texture_view(
+        &mut self,
+        view: wgpu::TextureView,
+        format: GpuTextureFormat,
+        usage: GpuTextureUsage,
+    ) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::TextureView,
+            GpuHandleObject::TextureView(HostGpuTextureView {
+                view,
+                format,
+                usage,
+            }),
+            None,
+        )
+    }
+
+    fn insert_sampler(&mut self, sampler: wgpu::Sampler) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::Sampler,
+            GpuHandleObject::Sampler(sampler),
+            None,
+        )
+    }
+
     fn insert_shader_module(
         &mut self,
         module: wgpu::ShaderModule,
@@ -2726,10 +2997,11 @@ impl GpuHandleRegistry {
         &mut self,
         layout: wgpu::BindGroupLayout,
         fingerprint: GpuResourceFingerprint,
+        entries: Vec<GpuBindGroupLayoutEntry>,
     ) -> GpuHandle {
         self.insert(
             GpuHandleKind::BindGroupLayout,
-            GpuHandleObject::BindGroupLayout(layout),
+            GpuHandleObject::BindGroupLayout(HostGpuBindGroupLayout { layout, entries }),
             Some(fingerprint),
         )
     }
@@ -2803,6 +3075,27 @@ impl GpuHandleRegistry {
         }
     }
 
+    fn texture(&self, handle: GpuHandle) -> Result<&HostGpuTexture, String> {
+        match &self.entry(handle, GpuHandleKind::Texture)?.object {
+            GpuHandleObject::Texture(texture) => Ok(texture),
+            _ => Err("GPU handle kind mismatch for texture".to_string()),
+        }
+    }
+
+    fn texture_view(&self, handle: GpuHandle) -> Result<&HostGpuTextureView, String> {
+        match &self.entry(handle, GpuHandleKind::TextureView)?.object {
+            GpuHandleObject::TextureView(view) => Ok(view),
+            _ => Err("GPU handle kind mismatch for texture view".to_string()),
+        }
+    }
+
+    fn sampler(&self, handle: GpuHandle) -> Result<&wgpu::Sampler, String> {
+        match &self.entry(handle, GpuHandleKind::Sampler)?.object {
+            GpuHandleObject::Sampler(sampler) => Ok(sampler),
+            _ => Err("GPU handle kind mismatch for sampler".to_string()),
+        }
+    }
+
     fn shader_module(&self, handle: GpuHandle) -> Result<&wgpu::ShaderModule, String> {
         match &self.entry(handle, GpuHandleKind::ShaderModule)?.object {
             GpuHandleObject::ShaderModule(module) => Ok(module),
@@ -2811,6 +3104,16 @@ impl GpuHandleRegistry {
     }
 
     fn bind_group_layout(&self, handle: GpuHandle) -> Result<&wgpu::BindGroupLayout, String> {
+        match &self.entry(handle, GpuHandleKind::BindGroupLayout)?.object {
+            GpuHandleObject::BindGroupLayout(layout) => Ok(&layout.layout),
+            _ => Err("GPU handle kind mismatch for bind-group layout".to_string()),
+        }
+    }
+
+    fn bind_group_layout_descriptor(
+        &self,
+        handle: GpuHandle,
+    ) -> Result<&HostGpuBindGroupLayout, String> {
         match &self.entry(handle, GpuHandleKind::BindGroupLayout)?.object {
             GpuHandleObject::BindGroupLayout(layout) => Ok(layout),
             _ => Err("GPU handle kind mismatch for bind-group layout".to_string()),
@@ -3104,6 +3407,282 @@ fn validate_buffer_range(size: u64, offset: u64, len: u64) -> Result<(), String>
     Ok(())
 }
 
+fn validate_texture_descriptor(descriptor: &GpuTextureDescriptor) -> Result<(), String> {
+    if descriptor.size.width == 0
+        || descriptor.size.height == 0
+        || descriptor.size.depth_or_array_layers == 0
+    {
+        return Err("GPU texture dimensions must be non-zero".to_string());
+    }
+    if descriptor.mip_level_count == 0 {
+        return Err("GPU texture mip_level_count must be non-zero".to_string());
+    }
+    if descriptor.sample_count == 0 {
+        return Err("GPU texture sample_count must be non-zero".to_string());
+    }
+    wgpu_texture_usage(descriptor.usage)?;
+    Ok(())
+}
+
+fn validate_texture_view_descriptor(
+    texture: &HostGpuTexture,
+    descriptor: &GpuTextureViewDescriptor,
+) -> Result<(), String> {
+    if let Some(format) = descriptor.format {
+        if format != texture.format {
+            return Err("GPU texture view format must match the texture format".to_string());
+        }
+    }
+    validate_mip_range(
+        descriptor.base_mip_level,
+        descriptor.mip_level_count,
+        texture.mip_level_count,
+    )?;
+    validate_layer_range(
+        descriptor.base_array_layer,
+        descriptor.array_layer_count,
+        texture.size.depth_or_array_layers,
+    )?;
+    if let Some(usage) = descriptor.usage {
+        wgpu_texture_usage(usage)?;
+        if usage.bits & !texture.usage.bits != 0 {
+            return Err("GPU texture view usage must be a subset of texture usage".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn validate_mip_range(base: u32, count: Option<u32>, total: u32) -> Result<(), String> {
+    if base >= total {
+        return Err(format!(
+            "GPU texture mip base {} exceeds mip level count {}",
+            base, total
+        ));
+    }
+    if let Some(count) = count {
+        if count == 0 {
+            return Err("GPU texture mip count must be non-zero".to_string());
+        }
+        let end = base
+            .checked_add(count)
+            .ok_or_else(|| "GPU texture mip range overflow".to_string())?;
+        if end > total {
+            return Err(format!(
+                "GPU texture mip range {}..{} exceeds mip level count {}",
+                base, end, total
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_layer_range(base: u32, count: Option<u32>, total: u32) -> Result<(), String> {
+    if base >= total {
+        return Err(format!(
+            "GPU texture layer base {} exceeds layer count {}",
+            base, total
+        ));
+    }
+    if let Some(count) = count {
+        if count == 0 {
+            return Err("GPU texture layer count must be non-zero".to_string());
+        }
+        let end = base
+            .checked_add(count)
+            .ok_or_else(|| "GPU texture layer range overflow".to_string())?;
+        if end > total {
+            return Err(format!(
+                "GPU texture layer range {}..{} exceeds layer count {}",
+                base, end, total
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sampler_descriptor(descriptor: &GpuSamplerDescriptor) -> Result<(), String> {
+    if descriptor.lod_min_clamp > descriptor.lod_max_clamp {
+        return Err("GPU sampler lod_min_clamp must not exceed lod_max_clamp".to_string());
+    }
+    if descriptor.anisotropy_clamp > 1
+        && (descriptor.mag_filter != GpuFilterMode::Linear
+            || descriptor.min_filter != GpuFilterMode::Linear
+            || descriptor.mipmap_filter != GpuFilterMode::Linear)
+    {
+        return Err("GPU sampler anisotropy requires linear filters".to_string());
+    }
+    Ok(())
+}
+
+fn validate_texture_usage(
+    texture: &HostGpuTexture,
+    required: GpuTextureUsage,
+    context: &str,
+) -> Result<(), String> {
+    if !texture.usage.contains(required) {
+        return Err(format!(
+            "{context} requires texture usage bits {}",
+            required.bits
+        ));
+    }
+    Ok(())
+}
+
+fn validate_texture_copy_range(
+    texture: &HostGpuTexture,
+    info: &GpuTexelCopyTextureInfo,
+    size: GpuExtent3d,
+) -> Result<(), String> {
+    validate_mip_range(info.mip_level, Some(1), texture.mip_level_count)?;
+    if size.width == 0 || size.height == 0 || size.depth_or_array_layers == 0 {
+        return Err("GPU texture copy size must be non-zero".to_string());
+    }
+    let mip_size = texture_mip_extent(texture, info.mip_level);
+    validate_texture_axis_range("x", info.origin.x, size.width, mip_size.width)?;
+    validate_texture_axis_range("y", info.origin.y, size.height, mip_size.height)?;
+    validate_texture_axis_range(
+        "z",
+        info.origin.z,
+        size.depth_or_array_layers,
+        mip_size.depth_or_array_layers,
+    )?;
+    Ok(())
+}
+
+fn validate_texture_axis_range(
+    axis: &str,
+    origin: u32,
+    size: u32,
+    limit: u32,
+) -> Result<(), String> {
+    let end = origin
+        .checked_add(size)
+        .ok_or_else(|| format!("GPU texture copy {axis} range overflow"))?;
+    if end > limit {
+        return Err(format!(
+            "GPU texture copy {axis} range {}..{} exceeds extent {}",
+            origin, end, limit
+        ));
+    }
+    Ok(())
+}
+
+fn texture_mip_extent(texture: &HostGpuTexture, mip_level: u32) -> GpuExtent3d {
+    let size = texture.size;
+    GpuExtent3d {
+        width: mip_dimension(size.width, mip_level),
+        height: mip_dimension(size.height, mip_level),
+        depth_or_array_layers: match texture.dimension {
+            GpuTextureDimension::D3 => mip_dimension(size.depth_or_array_layers, mip_level),
+            GpuTextureDimension::D1 | GpuTextureDimension::D2 => size.depth_or_array_layers,
+        },
+    }
+}
+
+fn mip_dimension(value: u32, mip_level: u32) -> u32 {
+    value.checked_shr(mip_level).unwrap_or(0).max(1)
+}
+
+fn validate_texel_copy_buffer_layout(
+    format: GpuTextureFormat,
+    layout: GpuTexelCopyBufferLayout,
+    size: GpuExtent3d,
+    buffer_size: u64,
+) -> Result<(), String> {
+    let bytes_per_texel = texture_format_bytes_per_texel(format).ok_or_else(|| {
+        format!(
+            "GPU texture format {:?} cannot be copied through buffers",
+            format
+        )
+    })?;
+    let row_bytes = u64::from(size.width)
+        .checked_mul(u64::from(bytes_per_texel))
+        .ok_or_else(|| "GPU texture copy row byte size overflow".to_string())?;
+    let multiple_rows = size.height > 1 || size.depth_or_array_layers > 1;
+    let bytes_per_row_was_provided = layout.bytes_per_row.is_some();
+    let bytes_per_row = match layout.bytes_per_row {
+        Some(bytes_per_row) => u64::from(bytes_per_row),
+        None if multiple_rows => {
+            return Err(
+                "GPU texture copy bytes_per_row is required for multi-row copies".to_string(),
+            );
+        }
+        None => row_bytes,
+    };
+    if bytes_per_row < row_bytes {
+        return Err(format!(
+            "GPU texture copy bytes_per_row {} is smaller than row size {}",
+            bytes_per_row, row_bytes
+        ));
+    }
+    if bytes_per_row_was_provided
+        && bytes_per_row % u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) != 0
+    {
+        return Err(format!(
+            "GPU texture copy bytes_per_row {} must be aligned to {}",
+            bytes_per_row,
+            wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+        ));
+    }
+
+    let rows_per_image = match layout.rows_per_image {
+        Some(rows_per_image) => u64::from(rows_per_image),
+        None if size.depth_or_array_layers > 1 => {
+            return Err(
+                "GPU texture copy rows_per_image is required for multi-layer copies".to_string(),
+            );
+        }
+        None => u64::from(size.height),
+    };
+    if rows_per_image < u64::from(size.height) {
+        return Err(format!(
+            "GPU texture copy rows_per_image {} is smaller than copy height {}",
+            rows_per_image, size.height
+        ));
+    }
+
+    let image_stride = rows_per_image
+        .checked_mul(bytes_per_row)
+        .ok_or_else(|| "GPU texture copy image stride overflow".to_string())?;
+    let last_image_offset = u64::from(size.depth_or_array_layers.saturating_sub(1))
+        .checked_mul(image_stride)
+        .ok_or_else(|| "GPU texture copy last image offset overflow".to_string())?;
+    let last_row_offset = u64::from(size.height.saturating_sub(1))
+        .checked_mul(bytes_per_row)
+        .ok_or_else(|| "GPU texture copy last row offset overflow".to_string())?;
+    let required = last_image_offset
+        .checked_add(last_row_offset)
+        .and_then(|value| value.checked_add(row_bytes))
+        .ok_or_else(|| "GPU texture copy required byte size overflow".to_string())?;
+    validate_buffer_range(buffer_size, layout.offset, required)
+}
+
+fn texture_format_bytes_per_texel(format: GpuTextureFormat) -> Option<u32> {
+    let bytes = match format {
+        GpuTextureFormat::R8Unorm | GpuTextureFormat::R8Uint | GpuTextureFormat::R8Sint => 1,
+        GpuTextureFormat::R16Uint
+        | GpuTextureFormat::R16Sint
+        | GpuTextureFormat::R16Float
+        | GpuTextureFormat::Rg8Unorm
+        | GpuTextureFormat::Rg8Uint
+        | GpuTextureFormat::Rg8Sint => 2,
+        GpuTextureFormat::R32Uint
+        | GpuTextureFormat::R32Sint
+        | GpuTextureFormat::R32Float
+        | GpuTextureFormat::Rg16Float
+        | GpuTextureFormat::Rgba8Unorm
+        | GpuTextureFormat::Rgba8UnormSrgb
+        | GpuTextureFormat::Rgba8Uint
+        | GpuTextureFormat::Rgba8Sint
+        | GpuTextureFormat::Bgra8Unorm
+        | GpuTextureFormat::Bgra8UnormSrgb
+        | GpuTextureFormat::Depth32Float => 4,
+        GpuTextureFormat::Rg32Float | GpuTextureFormat::Rgba16Float => 8,
+        GpuTextureFormat::Rgba32Float => 16,
+    };
+    Some(bytes)
+}
+
 fn validate_dispatch_workgroups(
     workgroups: [u32; 3],
     max_workgroups_per_dimension: u32,
@@ -3189,6 +3768,141 @@ fn wgpu_buffer_usage(usage: GpuBufferUsage) -> Result<wgpu::BufferUsages, String
     Ok(out)
 }
 
+fn wgpu_texture_usage(usage: GpuTextureUsage) -> Result<wgpu::TextureUsages, String> {
+    let known = GpuTextureUsage::COPY_SRC
+        .union(GpuTextureUsage::COPY_DST)
+        .union(GpuTextureUsage::TEXTURE_BINDING)
+        .union(GpuTextureUsage::STORAGE_BINDING)
+        .union(GpuTextureUsage::RENDER_ATTACHMENT);
+    if usage.bits & !known.bits != 0 {
+        return Err(format!("unknown GPU texture usage bits: {}", usage.bits));
+    }
+    let mut out = wgpu::TextureUsages::empty();
+    if usage.contains(GpuTextureUsage::COPY_SRC) {
+        out |= wgpu::TextureUsages::COPY_SRC;
+    }
+    if usage.contains(GpuTextureUsage::COPY_DST) {
+        out |= wgpu::TextureUsages::COPY_DST;
+    }
+    if usage.contains(GpuTextureUsage::TEXTURE_BINDING) {
+        out |= wgpu::TextureUsages::TEXTURE_BINDING;
+    }
+    if usage.contains(GpuTextureUsage::STORAGE_BINDING) {
+        out |= wgpu::TextureUsages::STORAGE_BINDING;
+    }
+    if usage.contains(GpuTextureUsage::RENDER_ATTACHMENT) {
+        out |= wgpu::TextureUsages::RENDER_ATTACHMENT;
+    }
+    Ok(out)
+}
+
+fn wgpu_extent3d(extent: GpuExtent3d) -> wgpu::Extent3d {
+    wgpu::Extent3d {
+        width: extent.width,
+        height: extent.height,
+        depth_or_array_layers: extent.depth_or_array_layers,
+    }
+}
+
+fn wgpu_origin3d(origin: GpuOrigin3d) -> wgpu::Origin3d {
+    wgpu::Origin3d {
+        x: origin.x,
+        y: origin.y,
+        z: origin.z,
+    }
+}
+
+fn wgpu_texture_dimension(dimension: GpuTextureDimension) -> wgpu::TextureDimension {
+    match dimension {
+        GpuTextureDimension::D1 => wgpu::TextureDimension::D1,
+        GpuTextureDimension::D2 => wgpu::TextureDimension::D2,
+        GpuTextureDimension::D3 => wgpu::TextureDimension::D3,
+    }
+}
+
+fn wgpu_texture_view_dimension(dimension: GpuTextureViewDimension) -> wgpu::TextureViewDimension {
+    match dimension {
+        GpuTextureViewDimension::D1 => wgpu::TextureViewDimension::D1,
+        GpuTextureViewDimension::D2 => wgpu::TextureViewDimension::D2,
+        GpuTextureViewDimension::D2Array => wgpu::TextureViewDimension::D2Array,
+        GpuTextureViewDimension::Cube => wgpu::TextureViewDimension::Cube,
+        GpuTextureViewDimension::CubeArray => wgpu::TextureViewDimension::CubeArray,
+        GpuTextureViewDimension::D3 => wgpu::TextureViewDimension::D3,
+    }
+}
+
+fn wgpu_texture_aspect(aspect: GpuTextureAspect) -> wgpu::TextureAspect {
+    match aspect {
+        GpuTextureAspect::All => wgpu::TextureAspect::All,
+        GpuTextureAspect::StencilOnly => wgpu::TextureAspect::StencilOnly,
+        GpuTextureAspect::DepthOnly => wgpu::TextureAspect::DepthOnly,
+    }
+}
+
+fn wgpu_texture_format(format: GpuTextureFormat) -> wgpu::TextureFormat {
+    match format {
+        GpuTextureFormat::R8Unorm => wgpu::TextureFormat::R8Unorm,
+        GpuTextureFormat::R8Uint => wgpu::TextureFormat::R8Uint,
+        GpuTextureFormat::R8Sint => wgpu::TextureFormat::R8Sint,
+        GpuTextureFormat::R16Uint => wgpu::TextureFormat::R16Uint,
+        GpuTextureFormat::R16Sint => wgpu::TextureFormat::R16Sint,
+        GpuTextureFormat::R16Float => wgpu::TextureFormat::R16Float,
+        GpuTextureFormat::R32Uint => wgpu::TextureFormat::R32Uint,
+        GpuTextureFormat::R32Sint => wgpu::TextureFormat::R32Sint,
+        GpuTextureFormat::R32Float => wgpu::TextureFormat::R32Float,
+        GpuTextureFormat::Rg8Unorm => wgpu::TextureFormat::Rg8Unorm,
+        GpuTextureFormat::Rg8Uint => wgpu::TextureFormat::Rg8Uint,
+        GpuTextureFormat::Rg8Sint => wgpu::TextureFormat::Rg8Sint,
+        GpuTextureFormat::Rg16Float => wgpu::TextureFormat::Rg16Float,
+        GpuTextureFormat::Rg32Float => wgpu::TextureFormat::Rg32Float,
+        GpuTextureFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
+        GpuTextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+        GpuTextureFormat::Rgba8Uint => wgpu::TextureFormat::Rgba8Uint,
+        GpuTextureFormat::Rgba8Sint => wgpu::TextureFormat::Rgba8Sint,
+        GpuTextureFormat::Bgra8Unorm => wgpu::TextureFormat::Bgra8Unorm,
+        GpuTextureFormat::Bgra8UnormSrgb => wgpu::TextureFormat::Bgra8UnormSrgb,
+        GpuTextureFormat::Rgba16Float => wgpu::TextureFormat::Rgba16Float,
+        GpuTextureFormat::Rgba32Float => wgpu::TextureFormat::Rgba32Float,
+        GpuTextureFormat::Depth32Float => wgpu::TextureFormat::Depth32Float,
+    }
+}
+
+fn wgpu_address_mode(mode: GpuAddressMode) -> wgpu::AddressMode {
+    match mode {
+        GpuAddressMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+        GpuAddressMode::Repeat => wgpu::AddressMode::Repeat,
+        GpuAddressMode::MirrorRepeat => wgpu::AddressMode::MirrorRepeat,
+        GpuAddressMode::ClampToBorder => wgpu::AddressMode::ClampToBorder,
+    }
+}
+
+fn wgpu_filter_mode(mode: GpuFilterMode) -> wgpu::FilterMode {
+    match mode {
+        GpuFilterMode::Nearest => wgpu::FilterMode::Nearest,
+        GpuFilterMode::Linear => wgpu::FilterMode::Linear,
+    }
+}
+
+fn wgpu_mipmap_filter_mode(mode: GpuFilterMode) -> wgpu::MipmapFilterMode {
+    match mode {
+        GpuFilterMode::Nearest => wgpu::MipmapFilterMode::Nearest,
+        GpuFilterMode::Linear => wgpu::MipmapFilterMode::Linear,
+    }
+}
+
+fn wgpu_compare_function(function: GpuCompareFunction) -> wgpu::CompareFunction {
+    match function {
+        GpuCompareFunction::Never => wgpu::CompareFunction::Never,
+        GpuCompareFunction::Less => wgpu::CompareFunction::Less,
+        GpuCompareFunction::Equal => wgpu::CompareFunction::Equal,
+        GpuCompareFunction::LessEqual => wgpu::CompareFunction::LessEqual,
+        GpuCompareFunction::Greater => wgpu::CompareFunction::Greater,
+        GpuCompareFunction::NotEqual => wgpu::CompareFunction::NotEqual,
+        GpuCompareFunction::GreaterEqual => wgpu::CompareFunction::GreaterEqual,
+        GpuCompareFunction::Always => wgpu::CompareFunction::Always,
+    }
+}
+
 fn wgpu_shader_stages(stages: GpuShaderStages) -> Result<wgpu::ShaderStages, String> {
     let known = GpuShaderStages::VERTEX
         .union(GpuShaderStages::FRAGMENT)
@@ -3231,6 +3945,30 @@ fn wgpu_binding_type(ty: GpuBindingType) -> Result<wgpu::BindingType, String> {
             has_dynamic_offset,
             min_binding_size: min_binding_size.and_then(wgpu::BufferSize::new),
         }),
+        GpuBindingType::Sampler(ty) => {
+            Ok(wgpu::BindingType::Sampler(wgpu_sampler_binding_type(ty)))
+        }
+        GpuBindingType::Texture {
+            sample_type,
+            view_dimension,
+            multisampled,
+        } => Ok(wgpu::BindingType::Texture {
+            sample_type: wgpu_texture_sample_type(sample_type),
+            view_dimension: wgpu_texture_view_dimension(view_dimension),
+            multisampled,
+        }),
+        GpuBindingType::StorageTexture {
+            access,
+            format,
+            view_dimension,
+        } => {
+            validate_storage_texture_format(format, access)?;
+            Ok(wgpu::BindingType::StorageTexture {
+                access: wgpu_storage_texture_access(access),
+                format: wgpu_texture_format(format),
+                view_dimension: wgpu_texture_view_dimension(view_dimension),
+            })
+        }
     }
 }
 
@@ -3246,12 +3984,97 @@ fn wgpu_buffer_binding_type(ty: GpuBufferBindingType) -> wgpu::BufferBindingType
     }
 }
 
+fn wgpu_sampler_binding_type(ty: GpuSamplerBindingType) -> wgpu::SamplerBindingType {
+    match ty {
+        GpuSamplerBindingType::Filtering => wgpu::SamplerBindingType::Filtering,
+        GpuSamplerBindingType::NonFiltering => wgpu::SamplerBindingType::NonFiltering,
+        GpuSamplerBindingType::Comparison => wgpu::SamplerBindingType::Comparison,
+    }
+}
+
+fn wgpu_texture_sample_type(ty: GpuTextureSampleType) -> wgpu::TextureSampleType {
+    match ty {
+        GpuTextureSampleType::Float { filterable } => wgpu::TextureSampleType::Float { filterable },
+        GpuTextureSampleType::Depth => wgpu::TextureSampleType::Depth,
+        GpuTextureSampleType::Sint => wgpu::TextureSampleType::Sint,
+        GpuTextureSampleType::Uint => wgpu::TextureSampleType::Uint,
+    }
+}
+
+fn wgpu_storage_texture_access(access: GpuStorageTextureAccess) -> wgpu::StorageTextureAccess {
+    match access {
+        GpuStorageTextureAccess::WriteOnly => wgpu::StorageTextureAccess::WriteOnly,
+        GpuStorageTextureAccess::ReadOnly => wgpu::StorageTextureAccess::ReadOnly,
+        GpuStorageTextureAccess::ReadWrite => wgpu::StorageTextureAccess::ReadWrite,
+        GpuStorageTextureAccess::Atomic => wgpu::StorageTextureAccess::Atomic,
+    }
+}
+
+fn validate_storage_texture_format(
+    format: GpuTextureFormat,
+    access: GpuStorageTextureAccess,
+) -> Result<(), String> {
+    if matches!(access, GpuStorageTextureAccess::Atomic)
+        && !matches!(
+            format,
+            GpuTextureFormat::R32Uint | GpuTextureFormat::R32Sint
+        )
+    {
+        return Err("atomic storage textures require R32Uint or R32Sint format".to_string());
+    }
+    if !matches!(
+        format,
+        GpuTextureFormat::R32Uint
+            | GpuTextureFormat::R32Sint
+            | GpuTextureFormat::R32Float
+            | GpuTextureFormat::Rg32Float
+            | GpuTextureFormat::Rgba8Unorm
+            | GpuTextureFormat::Rgba8Uint
+            | GpuTextureFormat::Rgba8Sint
+            | GpuTextureFormat::Rgba16Float
+            | GpuTextureFormat::Rgba32Float
+    ) {
+        return Err(format!(
+            "texture format {:?} is not supported for storage texture bindings",
+            format
+        ));
+    }
+    Ok(())
+}
+
+fn wgpu_texel_copy_buffer_layout(layout: GpuTexelCopyBufferLayout) -> wgpu::TexelCopyBufferLayout {
+    wgpu::TexelCopyBufferLayout {
+        offset: layout.offset,
+        bytes_per_row: layout.bytes_per_row,
+        rows_per_image: layout.rows_per_image,
+    }
+}
+
+fn wgpu_texel_copy_texture_info<'a>(
+    texture: &'a HostGpuTexture,
+    info: GpuTexelCopyTextureInfo,
+) -> wgpu::TexelCopyTextureInfo<'a> {
+    wgpu::TexelCopyTextureInfo {
+        texture: &texture.texture,
+        mip_level: info.mip_level,
+        origin: wgpu_origin3d(info.origin),
+        aspect: wgpu_texture_aspect(info.aspect),
+    }
+}
+
 fn wgpu_bind_group_entry<'a>(
     registry: &'a GpuHandleRegistry,
     entry: GpuBindGroupEntry,
+    expected: GpuBindingType,
 ) -> Result<wgpu::BindGroupEntry<'a>, String> {
-    match entry.resource {
-        GpuBindingResource::Buffer(binding) => {
+    match (entry.resource, expected) {
+        (GpuBindingResource::Buffer(binding), expected) => {
+            if !matches!(expected, GpuBindingType::Buffer { .. }) {
+                return Err(format!(
+                    "GPU bind group entry {} expected {:?}, got buffer",
+                    entry.binding, expected
+                ));
+            }
             let buffer = registry.buffer(binding.buffer)?;
             let size = binding.size.and_then(wgpu::BufferSize::new);
             let len = binding
@@ -3267,7 +4090,68 @@ fn wgpu_bind_group_entry<'a>(
                 }),
             })
         }
+        (GpuBindingResource::TextureView(handle), expected) => {
+            let view = registry.texture_view(handle)?;
+            match expected {
+                GpuBindingType::Texture { .. } => {
+                    validate_texture_view_usage(
+                        view,
+                        GpuTextureUsage::TEXTURE_BINDING,
+                        entry.binding,
+                    )?;
+                }
+                GpuBindingType::StorageTexture { format, .. } => {
+                    validate_texture_view_usage(
+                        view,
+                        GpuTextureUsage::STORAGE_BINDING,
+                        entry.binding,
+                    )?;
+                    if view.format != format {
+                        return Err(format!(
+                            "GPU bind group entry {} storage texture format {:?} does not match view format {:?}",
+                            entry.binding, format, view.format
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "GPU bind group entry {} expected {:?}, got texture view",
+                        entry.binding, expected
+                    ));
+                }
+            }
+            Ok(wgpu::BindGroupEntry {
+                binding: entry.binding,
+                resource: wgpu::BindingResource::TextureView(&view.view),
+            })
+        }
+        (GpuBindingResource::Sampler(handle), expected) => {
+            if !matches!(expected, GpuBindingType::Sampler(_)) {
+                return Err(format!(
+                    "GPU bind group entry {} expected {:?}, got sampler",
+                    entry.binding, expected
+                ));
+            }
+            Ok(wgpu::BindGroupEntry {
+                binding: entry.binding,
+                resource: wgpu::BindingResource::Sampler(registry.sampler(handle)?),
+            })
+        }
     }
+}
+
+fn validate_texture_view_usage(
+    view: &HostGpuTextureView,
+    required: GpuTextureUsage,
+    binding: u32,
+) -> Result<(), String> {
+    if !view.usage.contains(required) {
+        return Err(format!(
+            "GPU bind group entry {} requires texture view usage bits {}",
+            binding, required.bits
+        ));
+    }
+    Ok(())
 }
 
 fn map_render_artifact_buffer_role(
@@ -4637,5 +5521,82 @@ mod loader_tests {
 
         assert!(err.contains("exceeds buffer size"));
         assert!(validate_buffer_range(16, 12, 4).is_ok());
+    }
+
+    #[test]
+    fn gpu_storage_texture_formats_are_validated_before_wgpu() {
+        let err = validate_storage_texture_format(
+            GpuTextureFormat::Bgra8UnormSrgb,
+            GpuStorageTextureAccess::WriteOnly,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("not supported for storage texture"));
+        assert!(validate_storage_texture_format(
+            GpuTextureFormat::Rgba8Unorm,
+            GpuStorageTextureAccess::WriteOnly,
+        )
+        .is_ok());
+        assert!(validate_storage_texture_format(
+            GpuTextureFormat::R32Uint,
+            GpuStorageTextureAccess::Atomic,
+        )
+        .is_ok());
+        assert!(validate_storage_texture_format(
+            GpuTextureFormat::Rgba8Unorm,
+            GpuStorageTextureAccess::Atomic,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn gpu_texture_copy_row_alignment_is_validated_before_wgpu() {
+        let size = GpuExtent3d {
+            width: 4,
+            height: 2,
+            depth_or_array_layers: 1,
+        };
+        let unaligned = GpuTexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(16),
+            rows_per_image: None,
+        };
+        let err =
+            validate_texel_copy_buffer_layout(GpuTextureFormat::Rgba8Unorm, unaligned, size, 512)
+                .unwrap_err();
+
+        assert!(err.contains("aligned to 256"));
+
+        let aligned = GpuTexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(256),
+            rows_per_image: None,
+        };
+        assert!(validate_texel_copy_buffer_layout(
+            GpuTextureFormat::Rgba8Unorm,
+            aligned,
+            size,
+            512,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn gpu_texture_copy_single_row_allows_implicit_row_pitch() {
+        let size = GpuExtent3d {
+            width: 4,
+            height: 1,
+            depth_or_array_layers: 1,
+        };
+        let layout = GpuTexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: None,
+            rows_per_image: None,
+        };
+
+        assert!(
+            validate_texel_copy_buffer_layout(GpuTextureFormat::Rgba8Unorm, layout, size, 16,)
+                .is_ok()
+        );
     }
 }

@@ -41,14 +41,18 @@ mod viewer_trait;
 pub use camera::{normalize_matrix, Camera, CameraAnimation, Projection, SceneView};
 pub use error::{SceneError, SceneResult, ViewerError};
 pub use gpu_runtime::{
-    GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
+    GpuAddressMode, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
     GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource, GpuBindingType,
     GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats,
-    GpuCacheStatus, GpuCachedHandle, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle,
-    GpuHandleKind, GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
-    GpuSubmitBatch, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
-    RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
-    RenderArtifactSnapshotDescriptor,
+    GpuCacheStatus, GpuCachedHandle, GpuCompareFunction, GpuComputePipelineDescriptor,
+    GpuDeviceLimits, GpuExtent3d, GpuFilterMode, GpuHandle, GpuHandleKind, GpuOrigin3d,
+    GpuPipelineLayoutDescriptor, GpuSamplerBindingType, GpuSamplerDescriptor,
+    GpuShaderModuleDescriptor, GpuShaderStages, GpuStorageTextureAccess, GpuSubmitBatch,
+    GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTextureAspect, GpuTextureDescriptor,
+    GpuTextureDimension, GpuTextureFormat, GpuTextureSampleType, GpuTextureUsage,
+    GpuTextureViewDescriptor, GpuTextureViewDimension, RenderArtifactBufferDescriptor,
+    RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
+    RenderArtifactRepKind, RenderArtifactSnapshotDescriptor,
 };
 pub use highlight_state::HighlightState;
 pub use input::{ButtonState, CameraDelta, InputState, Modifiers, MouseButton, ScrollDelta};

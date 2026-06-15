@@ -23,7 +23,8 @@ use patinae_render::{
 use patinae_scene::{
     Camera, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupLayoutDescriptor,
     GpuBufferDescriptor, GpuCacheStats, GpuCachedHandle, GpuComputePipelineDescriptor, GpuHandle,
-    GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuSubmitBatch, MovieStateSnapshot,
+    GpuPipelineLayoutDescriptor, GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuSubmitBatch,
+    GpuTextureDescriptor, GpuTextureViewDescriptor, MovieStateSnapshot,
     RenderArtifactSnapshotDescriptor, SceneView, Session, ViewportImage,
 };
 use patinae_settings::{
@@ -32,7 +33,7 @@ use patinae_settings::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Runtime wire version for MessagePack DTOs.
-pub const RUNTIME_WIRE_VERSION: u32 = 6;
+pub const RUNTIME_WIRE_VERSION: u32 = 7;
 
 /// Maximum MessagePack payload copied across the runtime ABI.
 pub const MAX_WIRE_PAYLOAD_LEN: usize = 64 * 1024 * 1024;
@@ -549,6 +550,24 @@ pub enum WireCommandRuntimeRequest {
         descriptor: GpuBufferDescriptor,
         /// Optional initial bytes copied by the host.
         initial_data: Option<Vec<u8>>,
+    },
+    /// Create a host-owned GPU texture.
+    GpuCreateTexture {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuTextureDescriptor,
+    },
+    /// Create a host-owned GPU texture view.
+    GpuCreateTextureView {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuTextureViewDescriptor,
+    },
+    /// Create a host-owned GPU sampler.
+    GpuCreateSampler {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuSamplerDescriptor,
     },
     /// Write bytes to a host-owned GPU buffer.
     GpuWriteBuffer {
@@ -1456,9 +1475,12 @@ pub fn dynamic_registry_from_wire(
 mod tests {
     use super::*;
     use patinae_scene::{
-        GpuCacheStats, GpuCacheStatus, GpuCachedHandle, GpuDeviceLimits, GpuHandleKind,
-        RenderArtifactBufferDescriptor, RenderArtifactBufferRole, RenderArtifactPrimitiveTopology,
-        RenderArtifactRepDescriptor, RenderArtifactRepKind,
+        GpuBatchCommand, GpuBindingType, GpuCacheStats, GpuCacheStatus, GpuCachedHandle,
+        GpuDeviceLimits, GpuExtent3d, GpuHandleKind, GpuOrigin3d, GpuStorageTextureAccess,
+        GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTextureAspect, GpuTextureFormat,
+        GpuTextureSampleType, GpuTextureViewDimension, RenderArtifactBufferDescriptor,
+        RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
+        RenderArtifactRepKind,
     };
 
     #[test]
@@ -1559,5 +1581,56 @@ mod tests {
             }
             _ => panic!("unexpected cache stats value"),
         }
+    }
+
+    #[test]
+    fn gpu_texture_batch_and_binding_roundtrip() {
+        let texture = GpuHandle {
+            id: 3,
+            kind: GpuHandleKind::Texture,
+            generation: 1,
+        };
+        let buffer = GpuHandle {
+            id: 4,
+            kind: GpuHandleKind::Buffer,
+            generation: 1,
+        };
+        let command = GpuBatchCommand::CopyTextureToBuffer {
+            source: GpuTexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: GpuOrigin3d { x: 0, y: 0, z: 0 },
+                aspect: GpuTextureAspect::All,
+            },
+            destination: buffer,
+            destination_layout: GpuTexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: Some(4),
+            },
+            size: GpuExtent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+        };
+        let decoded: GpuBatchCommand = decode(&encode(&command).unwrap()).unwrap();
+        assert_eq!(decoded, command);
+
+        let binding = GpuBindingType::StorageTexture {
+            access: GpuStorageTextureAccess::WriteOnly,
+            format: GpuTextureFormat::Rgba8Unorm,
+            view_dimension: GpuTextureViewDimension::D2,
+        };
+        let decoded: GpuBindingType = decode(&encode(&binding).unwrap()).unwrap();
+        assert_eq!(decoded, binding);
+
+        let sampled = GpuBindingType::Texture {
+            sample_type: GpuTextureSampleType::Float { filterable: true },
+            view_dimension: GpuTextureViewDimension::D2,
+            multisampled: false,
+        };
+        let decoded: GpuBindingType = decode(&encode(&sampled).unwrap()).unwrap();
+        assert_eq!(decoded, sampled);
     }
 }
