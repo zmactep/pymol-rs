@@ -499,6 +499,14 @@ export component ReplPill inherits Rectangle {
                     }
 
                     key-pressed(event) => {
+                        // Swallow undo/redo: Rust clears REPL text externally, but Slint
+                        // keeps a private TextInput undo stack that can become stale.
+                        if !event.modifiers.alt
+                           && (event.modifiers.control || event.modifiers.meta)
+                           && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y") {
+                            return accept;
+                        }
+
                         // ── When completion popup is visible ──
                         if ReplState.completion-visible {
                             if event.text == Key.UpArrow {
