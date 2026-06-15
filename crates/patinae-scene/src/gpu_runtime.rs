@@ -25,6 +25,7 @@ pub enum GpuHandleKind {
     PipelineLayout,
     BindGroup,
     ComputePipeline,
+    RenderPipeline,
 }
 
 /// Portable subset of device limits useful to GPU plugins.
@@ -353,6 +354,204 @@ pub struct GpuComputePipelineDescriptor {
     pub entry_point: String,
 }
 
+/// Vertex buffer stepping mode for a render pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuVertexStepMode {
+    Vertex,
+    Instance,
+}
+
+/// Portable subset of vertex formats for plugin render pipelines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuVertexFormat {
+    Uint8,
+    Uint8x2,
+    Uint8x4,
+    Sint8,
+    Sint8x2,
+    Sint8x4,
+    Unorm8,
+    Unorm8x2,
+    Unorm8x4,
+    Snorm8,
+    Snorm8x2,
+    Snorm8x4,
+    Uint16,
+    Uint16x2,
+    Uint16x4,
+    Sint16,
+    Sint16x2,
+    Sint16x4,
+    Unorm16,
+    Unorm16x2,
+    Unorm16x4,
+    Snorm16,
+    Snorm16x2,
+    Snorm16x4,
+    Float16,
+    Float16x2,
+    Float16x4,
+    Float32,
+    Float32x2,
+    Float32x3,
+    Float32x4,
+    Uint32,
+    Uint32x2,
+    Uint32x3,
+    Uint32x4,
+    Sint32,
+    Sint32x2,
+    Sint32x3,
+    Sint32x4,
+    Unorm10_10_10_2,
+    Unorm8x4Bgra,
+}
+
+/// One vertex attribute in a render pipeline vertex buffer layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuVertexAttribute {
+    pub format: GpuVertexFormat,
+    pub offset: u64,
+    pub shader_location: u32,
+}
+
+/// One vertex buffer layout for a render pipeline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuVertexBufferLayout {
+    pub array_stride: u64,
+    pub step_mode: GpuVertexStepMode,
+    pub attributes: Vec<GpuVertexAttribute>,
+}
+
+/// Vertex shader state for a render pipeline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuVertexState {
+    pub module: GpuHandle,
+    pub entry_point: String,
+    pub buffers: Vec<GpuVertexBufferLayout>,
+}
+
+/// Primitive topology for a render pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuPrimitiveTopology {
+    PointList,
+    LineList,
+    LineStrip,
+    TriangleList,
+    TriangleStrip,
+}
+
+/// Index format for indexed render commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuIndexFormat {
+    Uint16,
+    Uint32,
+}
+
+/// Front-face winding for render pipeline culling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuFrontFace {
+    Ccw,
+    Cw,
+}
+
+/// Cullable face for render pipeline culling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuFace {
+    Front,
+    Back,
+}
+
+/// Primitive assembly state for a render pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuPrimitiveState {
+    pub topology: GpuPrimitiveTopology,
+    pub strip_index_format: Option<GpuIndexFormat>,
+    pub front_face: GpuFrontFace,
+    pub cull_mode: Option<GpuFace>,
+}
+
+/// Color write mask for a render pipeline color target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuColorWriteMask {
+    pub bits: u32,
+}
+
+impl GpuColorWriteMask {
+    pub const RED: Self = Self { bits: 1 << 0 };
+    pub const GREEN: Self = Self { bits: 1 << 1 };
+    pub const BLUE: Self = Self { bits: 1 << 2 };
+    pub const ALPHA: Self = Self { bits: 1 << 3 };
+    pub const COLOR: Self = Self {
+        bits: Self::RED.bits | Self::GREEN.bits | Self::BLUE.bits,
+    };
+    pub const ALL: Self = Self {
+        bits: Self::COLOR.bits | Self::ALPHA.bits,
+    };
+
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        (self.bits & other.bits) == other.bits
+    }
+}
+
+/// Preset blend state for a render pipeline color target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuBlendState {
+    Replace,
+    AlphaBlending,
+    PremultipliedAlphaBlending,
+}
+
+/// Color target state for a fragment shader output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuColorTargetState {
+    pub format: GpuTextureFormat,
+    pub blend: Option<GpuBlendState>,
+    pub write_mask: GpuColorWriteMask,
+}
+
+/// Fragment shader state for a render pipeline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuFragmentState {
+    pub module: GpuHandle,
+    pub entry_point: String,
+    pub targets: Vec<Option<GpuColorTargetState>>,
+}
+
+/// Depth state for a render pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuDepthStencilState {
+    pub format: GpuTextureFormat,
+    pub depth_write_enabled: bool,
+    pub depth_compare: GpuCompareFunction,
+}
+
+/// Multisample state for a render pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuMultisampleState {
+    pub count: u32,
+    pub mask: u64,
+    pub alpha_to_coverage_enabled: bool,
+}
+
+/// Descriptor for a plugin-created render pipeline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuRenderPipelineDescriptor {
+    pub label: Option<String>,
+    pub layout: GpuHandle,
+    pub vertex: GpuVertexState,
+    pub primitive: GpuPrimitiveState,
+    pub depth_stencil: Option<GpuDepthStencilState>,
+    pub multisample: GpuMultisampleState,
+    pub fragment: Option<GpuFragmentState>,
+}
+
 /// Cache outcome for a persistent GPU resource request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GpuCacheStatus {
@@ -425,8 +624,133 @@ pub struct GpuTexelCopyTextureInfo {
     pub aspect: GpuTextureAspect,
 }
 
+/// Clear color used by a render pass color attachment.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GpuColor {
+    pub r: f64,
+    pub g: f64,
+    pub b: f64,
+    pub a: f64,
+}
+
+/// Color attachment load operation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum GpuColorLoadOp {
+    Load,
+    Clear(GpuColor),
+}
+
+/// Depth attachment load operation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum GpuDepthLoadOp {
+    Load,
+    Clear(f32),
+}
+
+/// Attachment store operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuStoreOp {
+    Store,
+    Discard,
+}
+
+/// Color attachment operations for a render pass.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GpuColorOperations {
+    pub load: GpuColorLoadOp,
+    pub store: GpuStoreOp,
+}
+
+/// Depth attachment operations for a render pass.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GpuDepthOperations {
+    pub load: GpuDepthLoadOp,
+    pub store: GpuStoreOp,
+}
+
+/// Color attachment for an offscreen render pass.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GpuRenderPassColorAttachment {
+    pub view: GpuHandle,
+    pub ops: GpuColorOperations,
+}
+
+/// Depth attachment for an offscreen render pass.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GpuRenderPassDepthStencilAttachment {
+    pub view: GpuHandle,
+    pub depth_ops: Option<GpuDepthOperations>,
+}
+
+/// Descriptor for an offscreen plugin render pass.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GpuRenderPassDescriptor {
+    pub label: Option<String>,
+    pub color_attachments: Vec<Option<GpuRenderPassColorAttachment>>,
+    pub depth_stencil_attachment: Option<GpuRenderPassDepthStencilAttachment>,
+}
+
+/// One command recorded inside a plugin render pass.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GpuRenderPassCommand {
+    SetPipeline {
+        pipeline: GpuHandle,
+    },
+    SetBindGroup {
+        index: u32,
+        bind_group: GpuHandle,
+    },
+    SetVertexBuffer {
+        slot: u32,
+        buffer: GpuHandle,
+        offset: u64,
+        size: Option<u64>,
+    },
+    SetIndexBuffer {
+        buffer: GpuHandle,
+        format: GpuIndexFormat,
+        offset: u64,
+        size: Option<u64>,
+    },
+    SetViewport {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        min_depth: f32,
+        max_depth: f32,
+    },
+    SetScissorRect {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+    Draw {
+        vertex_start: u32,
+        vertex_count: u32,
+        instance_start: u32,
+        instance_count: u32,
+    },
+    DrawIndexed {
+        index_start: u32,
+        index_count: u32,
+        base_vertex: i32,
+        instance_start: u32,
+        instance_count: u32,
+    },
+    DrawIndirect {
+        buffer: GpuHandle,
+        offset: u64,
+    },
+    DrawIndexedIndirect {
+        buffer: GpuHandle,
+        offset: u64,
+    },
+}
+
 /// One command recorded into a host-owned GPU batch.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GpuBatchCommand {
     /// Write bytes into a buffer before subsequent batch commands run.
     WriteBuffer {
@@ -474,10 +798,15 @@ pub enum GpuBatchCommand {
         offset: u64,
         size: u64,
     },
+    /// Record one offscreen render pass at this batch position.
+    RenderPass {
+        descriptor: GpuRenderPassDescriptor,
+        commands: Vec<GpuRenderPassCommand>,
+    },
 }
 
 /// Ordered GPU command batch submitted by a plugin.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuSubmitBatch {
     pub label: Option<String>,
     pub commands: Vec<GpuBatchCommand>,

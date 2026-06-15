@@ -23,9 +23,9 @@ use patinae_render::{
 use patinae_scene::{
     Camera, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupLayoutDescriptor,
     GpuBufferDescriptor, GpuCacheStats, GpuCachedHandle, GpuComputePipelineDescriptor, GpuHandle,
-    GpuPipelineLayoutDescriptor, GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuSubmitBatch,
-    GpuTextureDescriptor, GpuTextureViewDescriptor, MovieStateSnapshot,
-    RenderArtifactSnapshotDescriptor, SceneView, Session, ViewportImage,
+    GpuPipelineLayoutDescriptor, GpuRenderPipelineDescriptor, GpuSamplerDescriptor,
+    GpuShaderModuleDescriptor, GpuSubmitBatch, GpuTextureDescriptor, GpuTextureViewDescriptor,
+    MovieStateSnapshot, RenderArtifactSnapshotDescriptor, SceneView, Session, ViewportImage,
 };
 use patinae_settings::{
     DynamicSettingDescriptor, DynamicSettingStore, SettingType, SettingValue, SideEffectCategory,
@@ -33,7 +33,7 @@ use patinae_settings::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Runtime wire version for MessagePack DTOs.
-pub const RUNTIME_WIRE_VERSION: u32 = 7;
+pub const RUNTIME_WIRE_VERSION: u32 = 8;
 
 /// Maximum MessagePack payload copied across the runtime ABI.
 pub const MAX_WIRE_PAYLOAD_LEN: usize = 64 * 1024 * 1024;
@@ -622,6 +622,12 @@ pub enum WireCommandRuntimeRequest {
         id: u64,
         descriptor: GpuComputePipelineDescriptor,
     },
+    /// Create a render pipeline.
+    GpuCreateRenderPipeline {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuRenderPipelineDescriptor,
+    },
     /// Create or lease a cached WGSL shader module.
     GpuCreateCachedShaderModule {
         /// Correlation id.
@@ -645,6 +651,12 @@ pub enum WireCommandRuntimeRequest {
         /// Correlation id.
         id: u64,
         descriptor: GpuComputePipelineDescriptor,
+    },
+    /// Create or lease a cached render pipeline.
+    GpuCreateCachedRenderPipeline {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuRenderPipelineDescriptor,
     },
     /// Query persistent GPU cache counters.
     GpuCacheStats {
@@ -1475,12 +1487,17 @@ pub fn dynamic_registry_from_wire(
 mod tests {
     use super::*;
     use patinae_scene::{
-        GpuBatchCommand, GpuBindingType, GpuCacheStats, GpuCacheStatus, GpuCachedHandle,
-        GpuDeviceLimits, GpuExtent3d, GpuHandleKind, GpuOrigin3d, GpuStorageTextureAccess,
-        GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTextureAspect, GpuTextureFormat,
-        GpuTextureSampleType, GpuTextureViewDimension, RenderArtifactBufferDescriptor,
-        RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
-        RenderArtifactRepKind,
+        GpuBatchCommand, GpuBindingType, GpuCacheStats, GpuCacheStatus, GpuCachedHandle, GpuColor,
+        GpuColorLoadOp, GpuColorOperations, GpuColorTargetState, GpuColorWriteMask,
+        GpuCompareFunction, GpuDepthLoadOp, GpuDepthOperations, GpuDepthStencilState,
+        GpuDeviceLimits, GpuExtent3d, GpuFace, GpuFragmentState, GpuFrontFace, GpuHandleKind,
+        GpuMultisampleState, GpuOrigin3d, GpuPrimitiveState, GpuPrimitiveTopology,
+        GpuRenderPassCommand, GpuRenderPassDescriptor, GpuRenderPipelineDescriptor,
+        GpuStorageTextureAccess, GpuStoreOp, GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo,
+        GpuTextureAspect, GpuTextureFormat, GpuTextureSampleType, GpuTextureViewDimension,
+        GpuVertexAttribute, GpuVertexBufferLayout, GpuVertexFormat, GpuVertexState,
+        GpuVertexStepMode, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+        RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
     };
 
     #[test]
@@ -1632,5 +1649,125 @@ mod tests {
         };
         let decoded: GpuBindingType = decode(&encode(&sampled).unwrap()).unwrap();
         assert_eq!(decoded, sampled);
+    }
+
+    #[test]
+    fn gpu_render_pipeline_and_pass_roundtrip() {
+        let shader = GpuHandle {
+            id: 10,
+            kind: GpuHandleKind::ShaderModule,
+            generation: 1,
+        };
+        let layout = GpuHandle {
+            id: 11,
+            kind: GpuHandleKind::PipelineLayout,
+            generation: 1,
+        };
+        let texture_view = GpuHandle {
+            id: 12,
+            kind: GpuHandleKind::TextureView,
+            generation: 1,
+        };
+        let pipeline = GpuHandle {
+            id: 13,
+            kind: GpuHandleKind::RenderPipeline,
+            generation: 1,
+        };
+        let descriptor = GpuRenderPipelineDescriptor {
+            label: Some("wire.render".to_string()),
+            layout,
+            vertex: GpuVertexState {
+                module: shader,
+                entry_point: "vs_main".to_string(),
+                buffers: vec![GpuVertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: GpuVertexStepMode::Vertex,
+                    attributes: vec![GpuVertexAttribute {
+                        format: GpuVertexFormat::Float32x4,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+            },
+            primitive: GpuPrimitiveState {
+                topology: GpuPrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: GpuFrontFace::Ccw,
+                cull_mode: Some(GpuFace::Back),
+            },
+            depth_stencil: Some(GpuDepthStencilState {
+                format: GpuTextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: GpuCompareFunction::LessEqual,
+            }),
+            multisample: GpuMultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(GpuFragmentState {
+                module: shader,
+                entry_point: "fs_main".to_string(),
+                targets: vec![Some(GpuColorTargetState {
+                    format: GpuTextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: GpuColorWriteMask::ALL,
+                })],
+            }),
+        };
+
+        let request = WireCommandRuntimeRequest::GpuCreateCachedRenderPipeline {
+            id: 77,
+            descriptor: descriptor.clone(),
+        };
+        let decoded: WireCommandRuntimeRequest = decode(&encode(&request).unwrap()).unwrap();
+        match decoded {
+            WireCommandRuntimeRequest::GpuCreateCachedRenderPipeline {
+                id,
+                descriptor: got,
+            } => {
+                assert_eq!(id, 77);
+                assert_eq!(got, descriptor);
+            }
+            _ => panic!("unexpected render pipeline request"),
+        }
+
+        let command = GpuBatchCommand::RenderPass {
+            descriptor: GpuRenderPassDescriptor {
+                label: Some("wire.pass".to_string()),
+                color_attachments: vec![Some(patinae_scene::GpuRenderPassColorAttachment {
+                    view: texture_view,
+                    ops: GpuColorOperations {
+                        load: GpuColorLoadOp::Clear(GpuColor {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: GpuStoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(
+                    patinae_scene::GpuRenderPassDepthStencilAttachment {
+                        view: texture_view,
+                        depth_ops: Some(GpuDepthOperations {
+                            load: GpuDepthLoadOp::Clear(1.0),
+                            store: GpuStoreOp::Store,
+                        }),
+                    },
+                ),
+            },
+            commands: vec![
+                GpuRenderPassCommand::SetPipeline { pipeline },
+                GpuRenderPassCommand::Draw {
+                    vertex_start: 0,
+                    vertex_count: 3,
+                    instance_start: 0,
+                    instance_count: 1,
+                },
+            ],
+        };
+        let decoded: GpuBatchCommand = decode(&encode(&command).unwrap()).unwrap();
+        assert_eq!(decoded, command);
     }
 }

@@ -1519,6 +1519,16 @@ impl CommandRuntimeClient {
         })
     }
 
+    fn gpu_create_render_pipeline(
+        self,
+        descriptor: patinae_scene::GpuRenderPipelineDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateRenderPipeline {
+            id: 1,
+            descriptor,
+        })
+    }
+
     fn gpu_create_cached_shader_module(
         self,
         descriptor: patinae_scene::GpuShaderModuleDescriptor,
@@ -1554,6 +1564,16 @@ impl CommandRuntimeClient {
         descriptor: patinae_scene::GpuComputePipelineDescriptor,
     ) -> Result<patinae_scene::GpuCachedHandle, String> {
         self.gpu_cached_handle_response(WireCommandRuntimeRequest::GpuCreateCachedComputePipeline {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_cached_render_pipeline(
+        self,
+        descriptor: patinae_scene::GpuRenderPipelineDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.gpu_cached_handle_response(WireCommandRuntimeRequest::GpuCreateCachedRenderPipeline {
             id: 1,
             descriptor,
         })
@@ -2045,6 +2065,15 @@ impl ViewerLike for RuntimeViewer {
             .gpu_create_compute_pipeline(descriptor)
     }
 
+    fn gpu_create_render_pipeline(
+        &mut self,
+        descriptor: patinae_scene::GpuRenderPipelineDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_render_pipeline(descriptor)
+    }
+
     fn gpu_create_cached_shader_module(
         &mut self,
         descriptor: patinae_scene::GpuShaderModuleDescriptor,
@@ -2079,6 +2108,15 @@ impl ViewerLike for RuntimeViewer {
         self.command_runtime
             .ok_or_else(|| "host command runtime is not available".to_string())?
             .gpu_create_cached_compute_pipeline(descriptor)
+    }
+
+    fn gpu_create_cached_render_pipeline(
+        &mut self,
+        descriptor: patinae_scene::GpuRenderPipelineDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_cached_render_pipeline(descriptor)
     }
 
     fn gpu_cache_stats(&mut self) -> Result<patinae_scene::GpuCacheStats, String> {

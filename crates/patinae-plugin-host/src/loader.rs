@@ -60,16 +60,22 @@ use patinae_plugin::wire::{
 use patinae_scene::{
     parse_key_string, GpuAddressMode, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor,
     GpuBindGroupEntry, GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource,
-    GpuBindingType, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats,
-    GpuCacheStatus, GpuCachedHandle, GpuCompareFunction, GpuComputePipelineDescriptor,
-    GpuDeviceLimits, GpuExtent3d, GpuFilterMode, GpuHandle, GpuHandleKind, GpuOrigin3d,
-    GpuPipelineLayoutDescriptor, GpuSamplerBindingType, GpuSamplerDescriptor,
-    GpuShaderModuleDescriptor, GpuShaderStages, GpuStorageTextureAccess, GpuSubmitBatch,
-    GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo, GpuTextureAspect, GpuTextureDescriptor,
-    GpuTextureDimension, GpuTextureFormat, GpuTextureSampleType, GpuTextureUsage,
-    GpuTextureViewDescriptor, GpuTextureViewDimension, KeyBindings, RenderArtifactBufferDescriptor,
-    RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
-    RenderArtifactRepKind, RenderArtifactSnapshotDescriptor, Session, ViewerLike,
+    GpuBindingType, GpuBlendState, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage,
+    GpuCacheStats, GpuCacheStatus, GpuCachedHandle, GpuColor, GpuColorLoadOp, GpuColorOperations,
+    GpuColorTargetState, GpuColorWriteMask, GpuCompareFunction, GpuComputePipelineDescriptor,
+    GpuDepthLoadOp, GpuDepthOperations, GpuDepthStencilState, GpuDeviceLimits, GpuExtent3d,
+    GpuFace, GpuFilterMode, GpuFrontFace, GpuHandle, GpuHandleKind, GpuIndexFormat,
+    GpuMultisampleState, GpuOrigin3d, GpuPipelineLayoutDescriptor, GpuPrimitiveState,
+    GpuPrimitiveTopology, GpuRenderPassCommand, GpuRenderPassDepthStencilAttachment,
+    GpuRenderPassDescriptor, GpuRenderPipelineDescriptor, GpuSamplerBindingType,
+    GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuShaderStages, GpuStorageTextureAccess,
+    GpuStoreOp, GpuSubmitBatch, GpuTexelCopyBufferLayout, GpuTexelCopyTextureInfo,
+    GpuTextureAspect, GpuTextureDescriptor, GpuTextureDimension, GpuTextureFormat,
+    GpuTextureSampleType, GpuTextureUsage, GpuTextureViewDescriptor, GpuTextureViewDimension,
+    GpuVertexAttribute, GpuVertexBufferLayout, GpuVertexFormat, GpuVertexState, GpuVertexStepMode,
+    KeyBindings, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+    RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
+    RenderArtifactSnapshotDescriptor, Session, ViewerLike,
 };
 use patinae_settings::{
     DynamicSettingDescriptor, DynamicSettingStore, SettingType, SettingValue, SharedSettingStore,
@@ -100,6 +106,8 @@ static DISPLAYED_GEOMETRY_SPOOL_COUNTER: AtomicU64 = AtomicU64::new(0);
 type SharedGpuPluginCache = Arc<Mutex<GpuPluginCache>>;
 
 const GPU_CACHE_LAYOUT_VERSION: u32 = 1;
+const DRAW_INDIRECT_SIZE: u64 = 16;
+const DRAW_INDEXED_INDIRECT_SIZE: u64 = 20;
 
 fn rt_profile_enabled() -> bool {
     std::env::var_os("PATINAE_RT_PROFILE").is_some()
@@ -1704,6 +1712,10 @@ impl<'a> HostCommandRuntimeState<'a> {
                 let result = self.gpu_create_compute_pipeline(descriptor);
                 Self::response(id, result)
             }
+            WireCommandRuntimeRequest::GpuCreateRenderPipeline { id, descriptor } => {
+                let result = self.gpu_create_render_pipeline(descriptor);
+                Self::response(id, result)
+            }
             WireCommandRuntimeRequest::GpuCreateCachedShaderModule { id, descriptor } => {
                 let result = self.gpu_create_cached_shader_module(descriptor);
                 Self::response(id, result)
@@ -1718,6 +1730,10 @@ impl<'a> HostCommandRuntimeState<'a> {
             }
             WireCommandRuntimeRequest::GpuCreateCachedComputePipeline { id, descriptor } => {
                 let result = self.gpu_create_cached_compute_pipeline(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateCachedRenderPipeline { id, descriptor } => {
+                let result = self.gpu_create_cached_render_pipeline(descriptor);
                 Self::response(id, result)
             }
             WireCommandRuntimeRequest::GpuCacheStats { id } => {
@@ -1905,9 +1921,11 @@ impl<'a> HostCommandRuntimeState<'a> {
             .ok_or_else(|| "renderer did not provide a render artifact snapshot".to_string())?;
         let mut buffer_descriptors = Vec::with_capacity(snapshot.buffers.len());
         for buffer in &snapshot.buffers {
-            let handle = self
-                .gpu_handles
-                .insert_buffer(buffer.buffer.clone(), buffer.size);
+            let handle = self.gpu_handles.insert_buffer(
+                buffer.buffer.clone(),
+                buffer.size,
+                render_artifact_buffer_usage(buffer.role),
+            );
             buffer_descriptors.push(RenderArtifactBufferDescriptor {
                 handle,
                 role: buffer.role,
@@ -2029,7 +2047,9 @@ impl<'a> HostCommandRuntimeState<'a> {
                 mapped_at_creation: false,
             })
         };
-        let handle = self.gpu_handles.insert_buffer(buffer, descriptor.size);
+        let handle = self
+            .gpu_handles
+            .insert_buffer(buffer, descriptor.size, descriptor.usage);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
@@ -2297,6 +2317,26 @@ impl<'a> HostCommandRuntimeState<'a> {
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
+    fn gpu_create_render_pipeline(
+        &mut self,
+        descriptor: GpuRenderPipelineDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        validate_render_pipeline_descriptor(&descriptor)?;
+        let fingerprint = self.render_pipeline_fingerprint(&descriptor)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let pipeline = self.create_render_pipeline(device, &descriptor)?;
+        let handle = self.gpu_handles.insert_render_pipeline(
+            pipeline,
+            render_pipeline_metadata(&descriptor),
+            fingerprint,
+        );
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
     fn gpu_create_cached_shader_module(
         &mut self,
         descriptor: GpuShaderModuleDescriptor,
@@ -2459,6 +2499,42 @@ impl<'a> HostCommandRuntimeState<'a> {
         }))
     }
 
+    fn gpu_create_cached_render_pipeline(
+        &mut self,
+        descriptor: GpuRenderPipelineDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        validate_render_pipeline_descriptor(&descriptor)?;
+        let fingerprint = self.render_pipeline_fingerprint(&descriptor)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let start = std::time::Instant::now();
+        let mut cache = self.lock_gpu_cache()?;
+        let key = cache.resource_key(device, fingerprint);
+        let (pipeline, status) = if let Some(object) = cache.cached_object(&key) {
+            let pipeline = object.into_render_pipeline()?;
+            cache.record_hit();
+            (pipeline, GpuCacheStatus::Hit)
+        } else {
+            let pipeline = self.create_render_pipeline(device, &descriptor)?;
+            cache.insert(key, GpuCachedObject::RenderPipeline(pipeline.clone()));
+            (pipeline, GpuCacheStatus::Miss)
+        };
+        drop(cache);
+        let handle = self.gpu_handles.insert_render_pipeline(
+            pipeline,
+            render_pipeline_metadata(&descriptor),
+            fingerprint,
+        );
+        log_gpu_cache_event("render_pipeline", status, start.elapsed().as_millis());
+        Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
+            handle,
+            status,
+        }))
+    }
+
     fn gpu_cache_stats(&mut self) -> Result<WireCommandRuntimeValue, String> {
         self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
         let cache = self.lock_gpu_cache()?;
@@ -2480,10 +2556,11 @@ impl<'a> HostCommandRuntimeState<'a> {
             .viewer
             .gpu_device()
             .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
-        let bind_group = {
+        let (bind_group, has_dynamic_offsets) = {
             let layout = self
                 .gpu_handles
                 .bind_group_layout_descriptor(descriptor.layout)?;
+            let has_dynamic_offsets = bind_group_layout_has_dynamic_offsets(&layout.entries);
             let mut entries = Vec::with_capacity(descriptor.entries.len());
             for entry in descriptor.entries {
                 let layout_entry = layout
@@ -2502,13 +2579,16 @@ impl<'a> HostCommandRuntimeState<'a> {
                     layout_entry.ty,
                 )?);
             }
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: descriptor.label.as_deref(),
                 layout: &layout.layout,
                 entries: &entries,
-            })
+            });
+            (bind_group, has_dynamic_offsets)
         };
-        let handle = self.gpu_handles.insert_bind_group(bind_group);
+        let handle = self
+            .gpu_handles
+            .insert_bind_group(bind_group, has_dynamic_offsets);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
@@ -2546,7 +2626,7 @@ impl<'a> HostCommandRuntimeState<'a> {
             });
             pass.set_pipeline(pipeline);
             for (index, bind_group) in bind_groups.iter().enumerate() {
-                pass.set_bind_group(index as u32, Some(*bind_group), &[]);
+                pass.set_bind_group(index as u32, Some(&bind_group.bind_group), &[]);
             }
             pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
         }
@@ -2617,7 +2697,7 @@ impl<'a> HostCommandRuntimeState<'a> {
                     });
                     pass.set_pipeline(pipeline);
                     for (index, bind_group) in bind_groups.iter().enumerate() {
-                        pass.set_bind_group(index as u32, Some(*bind_group), &[]);
+                        pass.set_bind_group(index as u32, Some(&bind_group.bind_group), &[]);
                     }
                     pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
                 }
@@ -2744,6 +2824,12 @@ impl<'a> HostCommandRuntimeState<'a> {
                     encoder.copy_buffer_to_buffer(&source.buffer, offset, &staging, 0, size);
                     readbacks.push((staging, size));
                 }
+                GpuBatchCommand::RenderPass {
+                    descriptor,
+                    commands,
+                } => {
+                    self.record_render_pass(&mut encoder, descriptor, &commands)?;
+                }
             }
         }
 
@@ -2787,6 +2873,284 @@ impl<'a> HostCommandRuntimeState<'a> {
             .map_err(|_| "GPU plugin cache was poisoned".to_string())
     }
 
+    fn create_render_pipeline(
+        &self,
+        device: &wgpu::Device,
+        descriptor: &GpuRenderPipelineDescriptor,
+    ) -> Result<wgpu::RenderPipeline, String> {
+        let layout = self.gpu_handles.pipeline_layout(descriptor.layout)?;
+        let vertex_module = self.gpu_handles.shader_module(descriptor.vertex.module)?;
+        let vertex_attributes = descriptor
+            .vertex
+            .buffers
+            .iter()
+            .map(|layout| {
+                layout
+                    .attributes
+                    .iter()
+                    .copied()
+                    .map(wgpu_vertex_attribute)
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let vertex_buffers = descriptor
+            .vertex
+            .buffers
+            .iter()
+            .zip(vertex_attributes.iter())
+            .map(|(layout, attributes)| wgpu::VertexBufferLayout {
+                array_stride: layout.array_stride,
+                step_mode: wgpu_vertex_step_mode(layout.step_mode),
+                attributes,
+            })
+            .collect::<Vec<_>>();
+        let fragment_module = descriptor
+            .fragment
+            .as_ref()
+            .map(|fragment| self.gpu_handles.shader_module(fragment.module))
+            .transpose()?;
+        let fragment_targets = descriptor
+            .fragment
+            .as_ref()
+            .map(|fragment| {
+                fragment
+                    .targets
+                    .iter()
+                    .copied()
+                    .map(|target| target.map(wgpu_color_target_state).transpose())
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let fragment_state = descriptor
+            .fragment
+            .as_ref()
+            .map(|fragment| wgpu::FragmentState {
+                module: fragment_module.expect("fragment module was loaded above"),
+                entry_point: Some(&fragment.entry_point),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &fragment_targets,
+            });
+
+        Ok(
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: descriptor.label.as_deref(),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: vertex_module,
+                    entry_point: Some(&descriptor.vertex.entry_point),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &vertex_buffers,
+                },
+                primitive: wgpu_primitive_state(descriptor.primitive),
+                depth_stencil: descriptor.depth_stencil.map(wgpu_depth_stencil_state),
+                multisample: wgpu_multisample_state(descriptor.multisample),
+                fragment: fragment_state,
+                multiview_mask: None,
+                cache: None,
+            }),
+        )
+    }
+
+    fn record_render_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        descriptor: GpuRenderPassDescriptor,
+        commands: &[GpuRenderPassCommand],
+    ) -> Result<(), String> {
+        if descriptor.color_attachments.iter().all(Option::is_none)
+            && descriptor.depth_stencil_attachment.is_none()
+        {
+            return Err("GPU render pass requires at least one attachment".to_string());
+        }
+
+        let mut pass_color_formats = Vec::with_capacity(descriptor.color_attachments.len());
+        let color_attachments = descriptor
+            .color_attachments
+            .iter()
+            .map(|attachment| {
+                let Some(attachment) = attachment else {
+                    pass_color_formats.push(None);
+                    return Ok(None);
+                };
+                let view = self.gpu_handles.texture_view(attachment.view)?;
+                validate_render_color_attachment(view)?;
+                pass_color_formats.push(Some(view.format));
+                Ok(Some(wgpu::RenderPassColorAttachment {
+                    view: &view.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu_color_operations(attachment.ops),
+                }))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let (depth_stencil_attachment, depth_format) =
+            self.render_pass_depth_attachment(descriptor.depth_stencil_attachment)?;
+        let attachment_formats = RenderPassAttachmentFormats {
+            color_targets: pass_color_formats,
+            depth_stencil: depth_format,
+        };
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: descriptor.label.as_deref(),
+            color_attachments: &color_attachments,
+            depth_stencil_attachment,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let mut state = RenderPassRecordingState::default();
+        for command in commands {
+            match *command {
+                GpuRenderPassCommand::SetPipeline { pipeline } => {
+                    let pipeline = self.gpu_handles.render_pipeline(pipeline)?;
+                    validate_render_pipeline_compatible_with_pass(pipeline, &attachment_formats)?;
+                    pass.set_pipeline(&pipeline.pipeline);
+                    state.pipeline_set = true;
+                }
+                GpuRenderPassCommand::SetBindGroup { index, bind_group } => {
+                    let bind_group = self.gpu_handles.bind_group(bind_group)?;
+                    if bind_group.has_dynamic_offsets {
+                        return Err(
+                            "GPU render pass bind groups do not support dynamic offsets in v1"
+                                .to_string(),
+                        );
+                    }
+                    pass.set_bind_group(index, Some(&bind_group.bind_group), &[]);
+                }
+                GpuRenderPassCommand::SetVertexBuffer {
+                    slot,
+                    buffer,
+                    offset,
+                    size,
+                } => {
+                    let buffer = self.gpu_handles.buffer(buffer)?;
+                    validate_buffer_usage(buffer, GpuBufferUsage::VERTEX, "render vertex buffer")?;
+                    let len = validate_buffer_slice(buffer.size, offset, size)?;
+                    pass.set_vertex_buffer(slot, buffer.buffer.slice(offset..offset + len));
+                }
+                GpuRenderPassCommand::SetIndexBuffer {
+                    buffer,
+                    format,
+                    offset,
+                    size,
+                } => {
+                    let buffer = self.gpu_handles.buffer(buffer)?;
+                    validate_buffer_usage(buffer, GpuBufferUsage::INDEX, "render index buffer")?;
+                    let len = validate_buffer_slice(buffer.size, offset, size)?;
+                    let index_size = gpu_index_format_size(format);
+                    if len % index_size != 0 {
+                        return Err(
+                            "GPU render index buffer range must contain whole indices".to_string()
+                        );
+                    }
+                    pass.set_index_buffer(
+                        buffer.buffer.slice(offset..offset + len),
+                        wgpu_index_format(format),
+                    );
+                    state.index_buffer = Some(RenderPassIndexState {
+                        format,
+                        index_count: len / index_size,
+                    });
+                }
+                GpuRenderPassCommand::SetViewport {
+                    x,
+                    y,
+                    width,
+                    height,
+                    min_depth,
+                    max_depth,
+                } => {
+                    validate_viewport(width, height, min_depth, max_depth)?;
+                    pass.set_viewport(x, y, width, height, min_depth, max_depth);
+                }
+                GpuRenderPassCommand::SetScissorRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } => {
+                    validate_scissor_rect(width, height)?;
+                    pass.set_scissor_rect(x, y, width, height);
+                }
+                GpuRenderPassCommand::Draw {
+                    vertex_start,
+                    vertex_count,
+                    instance_start,
+                    instance_count,
+                } => {
+                    validate_draw_counts(vertex_count, instance_count)?;
+                    state.ensure_pipeline_set()?;
+                    let vertex_end = checked_draw_range("vertex", vertex_start, vertex_count)?;
+                    let instance_end =
+                        checked_draw_range("instance", instance_start, instance_count)?;
+                    pass.draw(vertex_start..vertex_end, instance_start..instance_end);
+                }
+                GpuRenderPassCommand::DrawIndexed {
+                    index_start,
+                    index_count,
+                    base_vertex,
+                    instance_start,
+                    instance_count,
+                } => {
+                    validate_draw_counts(index_count, instance_count)?;
+                    state.ensure_pipeline_set()?;
+                    state.validate_index_range(index_start, index_count)?;
+                    let index_end = checked_draw_range("index", index_start, index_count)?;
+                    let instance_end =
+                        checked_draw_range("instance", instance_start, instance_count)?;
+                    pass.draw_indexed(
+                        index_start..index_end,
+                        base_vertex,
+                        instance_start..instance_end,
+                    );
+                }
+                GpuRenderPassCommand::DrawIndirect { buffer, offset } => {
+                    state.ensure_pipeline_set()?;
+                    let buffer = self.gpu_handles.buffer(buffer)?;
+                    validate_indirect_buffer(buffer, offset, DRAW_INDIRECT_SIZE)?;
+                    pass.draw_indirect(&buffer.buffer, offset);
+                }
+                GpuRenderPassCommand::DrawIndexedIndirect { buffer, offset } => {
+                    state.ensure_pipeline_set()?;
+                    state.ensure_index_buffer_set()?;
+                    let buffer = self.gpu_handles.buffer(buffer)?;
+                    validate_indirect_buffer(buffer, offset, DRAW_INDEXED_INDIRECT_SIZE)?;
+                    pass.draw_indexed_indirect(&buffer.buffer, offset);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn render_pass_depth_attachment(
+        &self,
+        attachment: Option<GpuRenderPassDepthStencilAttachment>,
+    ) -> Result<
+        (
+            Option<wgpu::RenderPassDepthStencilAttachment<'_>>,
+            Option<GpuTextureFormat>,
+        ),
+        String,
+    > {
+        let Some(attachment) = attachment else {
+            return Ok((None, None));
+        };
+        let depth_ops = attachment
+            .depth_ops
+            .ok_or_else(|| "GPU render pass depth attachment requires depth ops".to_string())?;
+        let view = self.gpu_handles.texture_view(attachment.view)?;
+        validate_render_depth_attachment(view)?;
+        Ok((
+            Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &view.view,
+                depth_ops: Some(wgpu_depth_operations(depth_ops)),
+                stencil_ops: None,
+            }),
+            Some(view.format),
+        ))
+    }
+
     fn pipeline_layout_fingerprint(
         &self,
         descriptor: &GpuPipelineLayoutDescriptor,
@@ -2816,6 +3180,37 @@ impl<'a> HostCommandRuntimeState<'a> {
             layout,
             module,
             &descriptor.entry_point,
+        ))
+    }
+
+    fn render_pipeline_fingerprint(
+        &self,
+        descriptor: &GpuRenderPipelineDescriptor,
+    ) -> Result<GpuResourceFingerprint, String> {
+        let layout = self
+            .gpu_handles
+            .fingerprint(descriptor.layout, GpuHandleKind::PipelineLayout)?;
+        let vertex_module = self
+            .gpu_handles
+            .fingerprint(descriptor.vertex.module, GpuHandleKind::ShaderModule)?;
+        let fragment = descriptor
+            .fragment
+            .as_ref()
+            .map(|fragment| {
+                self.gpu_handles
+                    .fingerprint(fragment.module, GpuHandleKind::ShaderModule)
+                    .map(|module| (module, fragment.entry_point.as_str(), &fragment.targets))
+            })
+            .transpose()?;
+        Ok(render_pipeline_fingerprint(
+            layout,
+            vertex_module,
+            &descriptor.vertex.entry_point,
+            &descriptor.vertex.buffers,
+            fragment,
+            descriptor.primitive,
+            descriptor.depth_stencil,
+            descriptor.multisample,
         ))
     }
 }
@@ -2863,6 +3258,7 @@ struct HostRenderArtifactRep {
 struct HostGpuBuffer {
     buffer: wgpu::Buffer,
     size: u64,
+    usage: GpuBufferUsage,
 }
 
 #[derive(Clone)]
@@ -2888,6 +3284,75 @@ struct HostGpuBindGroupLayout {
     entries: Vec<GpuBindGroupLayoutEntry>,
 }
 
+#[derive(Clone)]
+struct HostGpuBindGroup {
+    bind_group: wgpu::BindGroup,
+    has_dynamic_offsets: bool,
+}
+
+#[derive(Clone)]
+struct HostGpuRenderPipeline {
+    pipeline: wgpu::RenderPipeline,
+    color_targets: Vec<Option<GpuTextureFormat>>,
+    depth_stencil: Option<GpuTextureFormat>,
+}
+
+struct RenderPipelineMetadata {
+    color_targets: Vec<Option<GpuTextureFormat>>,
+    depth_stencil: Option<GpuTextureFormat>,
+}
+
+struct RenderPassAttachmentFormats {
+    color_targets: Vec<Option<GpuTextureFormat>>,
+    depth_stencil: Option<GpuTextureFormat>,
+}
+
+#[derive(Default)]
+struct RenderPassRecordingState {
+    pipeline_set: bool,
+    index_buffer: Option<RenderPassIndexState>,
+}
+
+struct RenderPassIndexState {
+    format: GpuIndexFormat,
+    index_count: u64,
+}
+
+impl RenderPassRecordingState {
+    fn ensure_pipeline_set(&self) -> Result<(), String> {
+        if self.pipeline_set {
+            Ok(())
+        } else {
+            Err("GPU render draw requires a render pipeline".to_string())
+        }
+    }
+
+    fn ensure_index_buffer_set(&self) -> Result<(), String> {
+        if self.index_buffer.is_some() {
+            Ok(())
+        } else {
+            Err("GPU indexed render draw requires an index buffer".to_string())
+        }
+    }
+
+    fn validate_index_range(&self, index_start: u32, index_count: u32) -> Result<(), String> {
+        let index_buffer = self
+            .index_buffer
+            .as_ref()
+            .ok_or_else(|| "GPU indexed render draw requires an index buffer".to_string())?;
+        let end = u64::from(index_start)
+            .checked_add(u64::from(index_count))
+            .ok_or_else(|| "GPU render index range overflow".to_string())?;
+        if end > index_buffer.index_count {
+            return Err(format!(
+                "GPU render index range {}..{} exceeds {:?} index buffer count {}",
+                index_start, end, index_buffer.format, index_buffer.index_count
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct GpuResourceFingerprint {
     kind: GpuHandleKind,
@@ -2903,8 +3368,9 @@ enum GpuHandleObject {
     ShaderModule(wgpu::ShaderModule),
     BindGroupLayout(HostGpuBindGroupLayout),
     PipelineLayout(wgpu::PipelineLayout),
-    BindGroup(wgpu::BindGroup),
+    BindGroup(HostGpuBindGroup),
     ComputePipeline(wgpu::ComputePipeline),
+    RenderPipeline(HostGpuRenderPipeline),
 }
 
 struct GpuHandleEntry {
@@ -2929,10 +3395,19 @@ impl GpuHandleRegistry {
         }
     }
 
-    fn insert_buffer(&mut self, buffer: wgpu::Buffer, size: u64) -> GpuHandle {
+    fn insert_buffer(
+        &mut self,
+        buffer: wgpu::Buffer,
+        size: u64,
+        usage: GpuBufferUsage,
+    ) -> GpuHandle {
         self.insert(
             GpuHandleKind::Buffer,
-            GpuHandleObject::Buffer(HostGpuBuffer { buffer, size }),
+            GpuHandleObject::Buffer(HostGpuBuffer {
+                buffer,
+                size,
+                usage,
+            }),
             None,
         )
     }
@@ -3018,10 +3493,17 @@ impl GpuHandleRegistry {
         )
     }
 
-    fn insert_bind_group(&mut self, bind_group: wgpu::BindGroup) -> GpuHandle {
+    fn insert_bind_group(
+        &mut self,
+        bind_group: wgpu::BindGroup,
+        has_dynamic_offsets: bool,
+    ) -> GpuHandle {
         self.insert(
             GpuHandleKind::BindGroup,
-            GpuHandleObject::BindGroup(bind_group),
+            GpuHandleObject::BindGroup(HostGpuBindGroup {
+                bind_group,
+                has_dynamic_offsets,
+            }),
             None,
         )
     }
@@ -3034,6 +3516,23 @@ impl GpuHandleRegistry {
         self.insert(
             GpuHandleKind::ComputePipeline,
             GpuHandleObject::ComputePipeline(pipeline),
+            Some(fingerprint),
+        )
+    }
+
+    fn insert_render_pipeline(
+        &mut self,
+        pipeline: wgpu::RenderPipeline,
+        metadata: RenderPipelineMetadata,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::RenderPipeline,
+            GpuHandleObject::RenderPipeline(HostGpuRenderPipeline {
+                pipeline,
+                color_targets: metadata.color_targets,
+                depth_stencil: metadata.depth_stencil,
+            }),
             Some(fingerprint),
         )
     }
@@ -3127,7 +3626,7 @@ impl GpuHandleRegistry {
         }
     }
 
-    fn bind_group(&self, handle: GpuHandle) -> Result<&wgpu::BindGroup, String> {
+    fn bind_group(&self, handle: GpuHandle) -> Result<&HostGpuBindGroup, String> {
         match &self.entry(handle, GpuHandleKind::BindGroup)?.object {
             GpuHandleObject::BindGroup(bind_group) => Ok(bind_group),
             _ => Err("GPU handle kind mismatch for bind group".to_string()),
@@ -3138,6 +3637,13 @@ impl GpuHandleRegistry {
         match &self.entry(handle, GpuHandleKind::ComputePipeline)?.object {
             GpuHandleObject::ComputePipeline(pipeline) => Ok(pipeline),
             _ => Err("GPU handle kind mismatch for compute pipeline".to_string()),
+        }
+    }
+
+    fn render_pipeline(&self, handle: GpuHandle) -> Result<&HostGpuRenderPipeline, String> {
+        match &self.entry(handle, GpuHandleKind::RenderPipeline)?.object {
+            GpuHandleObject::RenderPipeline(pipeline) => Ok(pipeline),
+            _ => Err("GPU handle kind mismatch for render pipeline".to_string()),
         }
     }
 
@@ -3205,6 +3711,7 @@ enum GpuCachedObject {
     BindGroupLayout(wgpu::BindGroupLayout),
     PipelineLayout(wgpu::PipelineLayout),
     ComputePipeline(wgpu::ComputePipeline),
+    RenderPipeline(wgpu::RenderPipeline),
 }
 
 impl GpuCachedObject {
@@ -3233,6 +3740,13 @@ impl GpuCachedObject {
         match self {
             Self::ComputePipeline(pipeline) => Ok(pipeline),
             _ => Err("GPU cache entry kind mismatch for compute pipeline".to_string()),
+        }
+    }
+
+    fn into_render_pipeline(self) -> Result<wgpu::RenderPipeline, String> {
+        match self {
+            Self::RenderPipeline(pipeline) => Ok(pipeline),
+            _ => Err("GPU cache entry kind mismatch for render pipeline".to_string()),
         }
     }
 }
@@ -3365,6 +3879,308 @@ fn compute_pipeline_fingerprint(
         GpuHandleKind::ComputePipeline,
         (layout, module, entry_point),
     )
+}
+
+fn render_pipeline_fingerprint(
+    layout: GpuResourceFingerprint,
+    vertex_module: GpuResourceFingerprint,
+    vertex_entry_point: &str,
+    vertex_buffers: &[GpuVertexBufferLayout],
+    fragment: Option<(
+        GpuResourceFingerprint,
+        &str,
+        &Vec<Option<GpuColorTargetState>>,
+    )>,
+    primitive: GpuPrimitiveState,
+    depth_stencil: Option<GpuDepthStencilState>,
+    multisample: GpuMultisampleState,
+) -> GpuResourceFingerprint {
+    fingerprint_for(
+        GpuHandleKind::RenderPipeline,
+        (
+            layout,
+            vertex_module,
+            vertex_entry_point,
+            vertex_buffers,
+            fragment,
+            primitive,
+            depth_stencil,
+            multisample,
+        ),
+    )
+}
+
+fn render_pipeline_metadata(descriptor: &GpuRenderPipelineDescriptor) -> RenderPipelineMetadata {
+    RenderPipelineMetadata {
+        color_targets: descriptor
+            .fragment
+            .as_ref()
+            .map(|fragment| {
+                fragment
+                    .targets
+                    .iter()
+                    .map(|target| target.map(|target| target.format))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        depth_stencil: descriptor.depth_stencil.as_ref().map(|depth| depth.format),
+    }
+}
+
+fn validate_render_pipeline_descriptor(
+    descriptor: &GpuRenderPipelineDescriptor,
+) -> Result<(), String> {
+    if descriptor.vertex.entry_point.is_empty() {
+        return Err("GPU render pipeline vertex entry point must not be empty".to_string());
+    }
+    validate_vertex_state(&descriptor.vertex)?;
+    for layout in &descriptor.vertex.buffers {
+        validate_vertex_buffer_layout(layout)?;
+    }
+    if let Some(fragment) = &descriptor.fragment {
+        if fragment.entry_point.is_empty() {
+            return Err("GPU render pipeline fragment entry point must not be empty".to_string());
+        }
+        for target in fragment.targets.iter().flatten() {
+            validate_color_target_state(*target)?;
+        }
+    }
+    if let Some(depth) = descriptor.depth_stencil {
+        validate_depth_format(depth.format)?;
+    }
+    if descriptor.multisample.count != 1 {
+        return Err("GPU render pipeline v1 requires multisample count 1".to_string());
+    }
+    if descriptor.multisample.alpha_to_coverage_enabled {
+        return Err("GPU render pipeline v1 does not support alpha-to-coverage".to_string());
+    }
+    Ok(())
+}
+
+fn validate_vertex_state(state: &GpuVertexState) -> Result<(), String> {
+    if state.module.kind != GpuHandleKind::ShaderModule {
+        return Err("GPU render pipeline vertex module must be a shader module handle".to_string());
+    }
+    Ok(())
+}
+
+fn validate_vertex_buffer_layout(layout: &GpuVertexBufferLayout) -> Result<(), String> {
+    if layout.array_stride == 0 {
+        return Err("GPU render pipeline vertex array_stride must be non-zero".to_string());
+    }
+    if layout.array_stride % wgpu::VERTEX_ALIGNMENT != 0 {
+        return Err(format!(
+            "GPU render pipeline vertex array_stride must be aligned to {}",
+            wgpu::VERTEX_ALIGNMENT
+        ));
+    }
+    for attribute in &layout.attributes {
+        let size = gpu_vertex_format_size(attribute.format);
+        let end = attribute
+            .offset
+            .checked_add(size)
+            .ok_or_else(|| "GPU render pipeline vertex attribute range overflow".to_string())?;
+        if end > layout.array_stride {
+            return Err(format!(
+                "GPU render pipeline vertex attribute at location {} exceeds array_stride",
+                attribute.shader_location
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_color_target_state(target: GpuColorTargetState) -> Result<(), String> {
+    validate_color_format(target.format)?;
+    validate_color_write_mask(target.write_mask)
+}
+
+fn validate_color_format(format: GpuTextureFormat) -> Result<(), String> {
+    if matches!(format, GpuTextureFormat::Depth32Float) {
+        return Err("GPU render color targets cannot use depth formats".to_string());
+    }
+    Ok(())
+}
+
+fn validate_depth_format(format: GpuTextureFormat) -> Result<(), String> {
+    if format != GpuTextureFormat::Depth32Float {
+        return Err("GPU render depth targets require Depth32Float format".to_string());
+    }
+    Ok(())
+}
+
+fn validate_color_write_mask(mask: GpuColorWriteMask) -> Result<(), String> {
+    if mask.bits & !GpuColorWriteMask::ALL.bits != 0 {
+        return Err(format!("unknown GPU color write mask bits: {}", mask.bits));
+    }
+    Ok(())
+}
+
+fn bind_group_layout_has_dynamic_offsets(entries: &[GpuBindGroupLayoutEntry]) -> bool {
+    entries.iter().any(|entry| {
+        matches!(
+            entry.ty,
+            GpuBindingType::Buffer {
+                has_dynamic_offset: true,
+                ..
+            }
+        )
+    })
+}
+
+fn render_artifact_buffer_usage(role: RenderArtifactBufferRole) -> GpuBufferUsage {
+    match role {
+        RenderArtifactBufferRole::FrameUniforms => GpuBufferUsage::UNIFORM,
+        RenderArtifactBufferRole::SphereInstances
+        | RenderArtifactBufferRole::StickInstances
+        | RenderArtifactBufferRole::LineInstances
+        | RenderArtifactBufferRole::StdVertices => {
+            GpuBufferUsage::VERTEX.union(GpuBufferUsage::STORAGE)
+        }
+        RenderArtifactBufferRole::IndirectDraw => {
+            GpuBufferUsage::INDIRECT.union(GpuBufferUsage::STORAGE)
+        }
+        RenderArtifactBufferRole::InstanceCount => GpuBufferUsage::STORAGE,
+        RenderArtifactBufferRole::SceneAtoms
+        | RenderArtifactBufferRole::SceneCoords
+        | RenderArtifactBufferRole::SceneBonds
+        | RenderArtifactBufferRole::SceneColorLut
+        | RenderArtifactBufferRole::SceneMaskLut
+        | RenderArtifactBufferRole::SceneMarkerLut
+        | RenderArtifactBufferRole::SceneCsrOffsets
+        | RenderArtifactBufferRole::SceneCsrIndices
+        | RenderArtifactBufferRole::SceneObjectTable => GpuBufferUsage::STORAGE,
+    }
+}
+
+fn validate_render_color_attachment(view: &HostGpuTextureView) -> Result<(), String> {
+    validate_texture_view_usage_bits(view, GpuTextureUsage::RENDER_ATTACHMENT, "color attachment")?;
+    validate_color_format(view.format)
+}
+
+fn validate_render_depth_attachment(view: &HostGpuTextureView) -> Result<(), String> {
+    validate_texture_view_usage_bits(view, GpuTextureUsage::RENDER_ATTACHMENT, "depth attachment")?;
+    validate_depth_format(view.format)
+}
+
+fn validate_render_pipeline_compatible_with_pass(
+    pipeline: &HostGpuRenderPipeline,
+    pass: &RenderPassAttachmentFormats,
+) -> Result<(), String> {
+    validate_render_pipeline_formats(&pipeline.color_targets, pipeline.depth_stencil, pass)
+}
+
+fn validate_render_pipeline_formats(
+    pipeline_color_targets: &[Option<GpuTextureFormat>],
+    pipeline_depth_stencil: Option<GpuTextureFormat>,
+    pass: &RenderPassAttachmentFormats,
+) -> Result<(), String> {
+    if pipeline_color_targets != pass.color_targets {
+        return Err(format!(
+            "GPU render pipeline color targets {:?} do not match pass attachments {:?}",
+            pipeline_color_targets, pass.color_targets
+        ));
+    }
+    if pipeline_depth_stencil != pass.depth_stencil {
+        return Err(format!(
+            "GPU render pipeline depth target {:?} does not match pass attachment {:?}",
+            pipeline_depth_stencil, pass.depth_stencil
+        ));
+    }
+    Ok(())
+}
+
+fn validate_buffer_usage(
+    buffer: &HostGpuBuffer,
+    required: GpuBufferUsage,
+    context: &str,
+) -> Result<(), String> {
+    validate_buffer_usage_bits(buffer.usage, required, context)
+}
+
+fn validate_buffer_usage_bits(
+    usage: GpuBufferUsage,
+    required: GpuBufferUsage,
+    context: &str,
+) -> Result<(), String> {
+    if !usage.contains(required) {
+        return Err(format!(
+            "{context} requires buffer usage bits {}",
+            required.bits
+        ));
+    }
+    Ok(())
+}
+
+fn validate_buffer_slice(size: u64, offset: u64, requested: Option<u64>) -> Result<u64, String> {
+    let len = requested.unwrap_or_else(|| size.saturating_sub(offset));
+    if len == 0 {
+        return Err("GPU buffer slice size must be non-zero".to_string());
+    }
+    validate_buffer_range(size, offset, len)?;
+    Ok(len)
+}
+
+fn validate_indirect_buffer(
+    buffer: &HostGpuBuffer,
+    offset: u64,
+    command_size: u64,
+) -> Result<(), String> {
+    validate_indirect_buffer_range(buffer.usage, buffer.size, offset, command_size)
+}
+
+fn validate_indirect_buffer_range(
+    usage: GpuBufferUsage,
+    buffer_size: u64,
+    offset: u64,
+    command_size: u64,
+) -> Result<(), String> {
+    validate_buffer_usage_bits(usage, GpuBufferUsage::INDIRECT, "render indirect buffer")?;
+    if offset % 4 != 0 {
+        return Err("GPU render indirect buffer offset must be aligned to 4".to_string());
+    }
+    validate_buffer_range(buffer_size, offset, command_size)
+}
+
+fn validate_viewport(
+    width: f32,
+    height: f32,
+    min_depth: f32,
+    max_depth: f32,
+) -> Result<(), String> {
+    if !(width.is_finite() && height.is_finite() && min_depth.is_finite() && max_depth.is_finite())
+    {
+        return Err("GPU render viewport values must be finite".to_string());
+    }
+    if width <= 0.0 || height <= 0.0 {
+        return Err("GPU render viewport dimensions must be positive".to_string());
+    }
+    if min_depth < 0.0 || max_depth > 1.0 || min_depth > max_depth {
+        return Err(
+            "GPU render viewport depth range must satisfy 0 <= min <= max <= 1".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_scissor_rect(width: u32, height: u32) -> Result<(), String> {
+    if width == 0 || height == 0 {
+        return Err("GPU render scissor dimensions must be non-zero".to_string());
+    }
+    Ok(())
+}
+
+fn validate_draw_counts(primary_count: u32, instance_count: u32) -> Result<(), String> {
+    if primary_count == 0 || instance_count == 0 {
+        return Err("GPU render draw counts must be non-zero".to_string());
+    }
+    Ok(())
+}
+
+fn checked_draw_range(label: &str, start: u32, count: u32) -> Result<u32, String> {
+    start
+        .checked_add(count)
+        .ok_or_else(|| format!("GPU render {label} range overflow"))
 }
 
 fn log_gpu_cache_event(resource: &str, status: GpuCacheStatus, elapsed_ms: u128) {
@@ -3903,6 +4719,218 @@ fn wgpu_compare_function(function: GpuCompareFunction) -> wgpu::CompareFunction 
     }
 }
 
+fn wgpu_vertex_step_mode(mode: GpuVertexStepMode) -> wgpu::VertexStepMode {
+    match mode {
+        GpuVertexStepMode::Vertex => wgpu::VertexStepMode::Vertex,
+        GpuVertexStepMode::Instance => wgpu::VertexStepMode::Instance,
+    }
+}
+
+fn wgpu_vertex_attribute(attribute: GpuVertexAttribute) -> Result<wgpu::VertexAttribute, String> {
+    Ok(wgpu::VertexAttribute {
+        format: wgpu_vertex_format(attribute.format),
+        offset: attribute.offset,
+        shader_location: attribute.shader_location,
+    })
+}
+
+fn wgpu_vertex_format(format: GpuVertexFormat) -> wgpu::VertexFormat {
+    match format {
+        GpuVertexFormat::Uint8 => wgpu::VertexFormat::Uint8,
+        GpuVertexFormat::Uint8x2 => wgpu::VertexFormat::Uint8x2,
+        GpuVertexFormat::Uint8x4 => wgpu::VertexFormat::Uint8x4,
+        GpuVertexFormat::Sint8 => wgpu::VertexFormat::Sint8,
+        GpuVertexFormat::Sint8x2 => wgpu::VertexFormat::Sint8x2,
+        GpuVertexFormat::Sint8x4 => wgpu::VertexFormat::Sint8x4,
+        GpuVertexFormat::Unorm8 => wgpu::VertexFormat::Unorm8,
+        GpuVertexFormat::Unorm8x2 => wgpu::VertexFormat::Unorm8x2,
+        GpuVertexFormat::Unorm8x4 => wgpu::VertexFormat::Unorm8x4,
+        GpuVertexFormat::Snorm8 => wgpu::VertexFormat::Snorm8,
+        GpuVertexFormat::Snorm8x2 => wgpu::VertexFormat::Snorm8x2,
+        GpuVertexFormat::Snorm8x4 => wgpu::VertexFormat::Snorm8x4,
+        GpuVertexFormat::Uint16 => wgpu::VertexFormat::Uint16,
+        GpuVertexFormat::Uint16x2 => wgpu::VertexFormat::Uint16x2,
+        GpuVertexFormat::Uint16x4 => wgpu::VertexFormat::Uint16x4,
+        GpuVertexFormat::Sint16 => wgpu::VertexFormat::Sint16,
+        GpuVertexFormat::Sint16x2 => wgpu::VertexFormat::Sint16x2,
+        GpuVertexFormat::Sint16x4 => wgpu::VertexFormat::Sint16x4,
+        GpuVertexFormat::Unorm16 => wgpu::VertexFormat::Unorm16,
+        GpuVertexFormat::Unorm16x2 => wgpu::VertexFormat::Unorm16x2,
+        GpuVertexFormat::Unorm16x4 => wgpu::VertexFormat::Unorm16x4,
+        GpuVertexFormat::Snorm16 => wgpu::VertexFormat::Snorm16,
+        GpuVertexFormat::Snorm16x2 => wgpu::VertexFormat::Snorm16x2,
+        GpuVertexFormat::Snorm16x4 => wgpu::VertexFormat::Snorm16x4,
+        GpuVertexFormat::Float16 => wgpu::VertexFormat::Float16,
+        GpuVertexFormat::Float16x2 => wgpu::VertexFormat::Float16x2,
+        GpuVertexFormat::Float16x4 => wgpu::VertexFormat::Float16x4,
+        GpuVertexFormat::Float32 => wgpu::VertexFormat::Float32,
+        GpuVertexFormat::Float32x2 => wgpu::VertexFormat::Float32x2,
+        GpuVertexFormat::Float32x3 => wgpu::VertexFormat::Float32x3,
+        GpuVertexFormat::Float32x4 => wgpu::VertexFormat::Float32x4,
+        GpuVertexFormat::Uint32 => wgpu::VertexFormat::Uint32,
+        GpuVertexFormat::Uint32x2 => wgpu::VertexFormat::Uint32x2,
+        GpuVertexFormat::Uint32x3 => wgpu::VertexFormat::Uint32x3,
+        GpuVertexFormat::Uint32x4 => wgpu::VertexFormat::Uint32x4,
+        GpuVertexFormat::Sint32 => wgpu::VertexFormat::Sint32,
+        GpuVertexFormat::Sint32x2 => wgpu::VertexFormat::Sint32x2,
+        GpuVertexFormat::Sint32x3 => wgpu::VertexFormat::Sint32x3,
+        GpuVertexFormat::Sint32x4 => wgpu::VertexFormat::Sint32x4,
+        GpuVertexFormat::Unorm10_10_10_2 => wgpu::VertexFormat::Unorm10_10_10_2,
+        GpuVertexFormat::Unorm8x4Bgra => wgpu::VertexFormat::Unorm8x4Bgra,
+    }
+}
+
+fn gpu_vertex_format_size(format: GpuVertexFormat) -> u64 {
+    wgpu_vertex_format(format).size()
+}
+
+fn wgpu_primitive_state(state: GpuPrimitiveState) -> wgpu::PrimitiveState {
+    wgpu::PrimitiveState {
+        topology: wgpu_primitive_topology(state.topology),
+        strip_index_format: state.strip_index_format.map(wgpu_index_format),
+        front_face: wgpu_front_face(state.front_face),
+        cull_mode: state.cull_mode.map(wgpu_face),
+        unclipped_depth: false,
+        polygon_mode: wgpu::PolygonMode::Fill,
+        conservative: false,
+    }
+}
+
+fn wgpu_primitive_topology(topology: GpuPrimitiveTopology) -> wgpu::PrimitiveTopology {
+    match topology {
+        GpuPrimitiveTopology::PointList => wgpu::PrimitiveTopology::PointList,
+        GpuPrimitiveTopology::LineList => wgpu::PrimitiveTopology::LineList,
+        GpuPrimitiveTopology::LineStrip => wgpu::PrimitiveTopology::LineStrip,
+        GpuPrimitiveTopology::TriangleList => wgpu::PrimitiveTopology::TriangleList,
+        GpuPrimitiveTopology::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
+    }
+}
+
+fn wgpu_index_format(format: GpuIndexFormat) -> wgpu::IndexFormat {
+    match format {
+        GpuIndexFormat::Uint16 => wgpu::IndexFormat::Uint16,
+        GpuIndexFormat::Uint32 => wgpu::IndexFormat::Uint32,
+    }
+}
+
+fn gpu_index_format_size(format: GpuIndexFormat) -> u64 {
+    match format {
+        GpuIndexFormat::Uint16 => 2,
+        GpuIndexFormat::Uint32 => 4,
+    }
+}
+
+fn wgpu_front_face(face: GpuFrontFace) -> wgpu::FrontFace {
+    match face {
+        GpuFrontFace::Ccw => wgpu::FrontFace::Ccw,
+        GpuFrontFace::Cw => wgpu::FrontFace::Cw,
+    }
+}
+
+fn wgpu_face(face: GpuFace) -> wgpu::Face {
+    match face {
+        GpuFace::Front => wgpu::Face::Front,
+        GpuFace::Back => wgpu::Face::Back,
+    }
+}
+
+fn wgpu_color_target_state(target: GpuColorTargetState) -> Result<wgpu::ColorTargetState, String> {
+    validate_color_target_state(target)?;
+    Ok(wgpu::ColorTargetState {
+        format: wgpu_texture_format(target.format),
+        blend: target.blend.map(wgpu_blend_state),
+        write_mask: wgpu_color_write_mask(target.write_mask)?,
+    })
+}
+
+fn wgpu_blend_state(state: GpuBlendState) -> wgpu::BlendState {
+    match state {
+        GpuBlendState::Replace => wgpu::BlendState::REPLACE,
+        GpuBlendState::AlphaBlending => wgpu::BlendState::ALPHA_BLENDING,
+        GpuBlendState::PremultipliedAlphaBlending => wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+    }
+}
+
+fn wgpu_color_write_mask(mask: GpuColorWriteMask) -> Result<wgpu::ColorWrites, String> {
+    validate_color_write_mask(mask)?;
+    let mut out = wgpu::ColorWrites::empty();
+    if mask.contains(GpuColorWriteMask::RED) {
+        out |= wgpu::ColorWrites::RED;
+    }
+    if mask.contains(GpuColorWriteMask::GREEN) {
+        out |= wgpu::ColorWrites::GREEN;
+    }
+    if mask.contains(GpuColorWriteMask::BLUE) {
+        out |= wgpu::ColorWrites::BLUE;
+    }
+    if mask.contains(GpuColorWriteMask::ALPHA) {
+        out |= wgpu::ColorWrites::ALPHA;
+    }
+    Ok(out)
+}
+
+fn wgpu_depth_stencil_state(state: GpuDepthStencilState) -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: wgpu_texture_format(state.format),
+        depth_write_enabled: state.depth_write_enabled,
+        depth_compare: wgpu_compare_function(state.depth_compare),
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    }
+}
+
+fn wgpu_multisample_state(state: GpuMultisampleState) -> wgpu::MultisampleState {
+    wgpu::MultisampleState {
+        count: state.count,
+        mask: state.mask,
+        alpha_to_coverage_enabled: state.alpha_to_coverage_enabled,
+    }
+}
+
+fn wgpu_color_operations(operations: GpuColorOperations) -> wgpu::Operations<wgpu::Color> {
+    wgpu::Operations {
+        load: wgpu_color_load_op(operations.load),
+        store: wgpu_store_op(operations.store),
+    }
+}
+
+fn wgpu_depth_operations(operations: GpuDepthOperations) -> wgpu::Operations<f32> {
+    wgpu::Operations {
+        load: wgpu_depth_load_op(operations.load),
+        store: wgpu_store_op(operations.store),
+    }
+}
+
+fn wgpu_color_load_op(load: GpuColorLoadOp) -> wgpu::LoadOp<wgpu::Color> {
+    match load {
+        GpuColorLoadOp::Load => wgpu::LoadOp::Load,
+        GpuColorLoadOp::Clear(color) => wgpu::LoadOp::Clear(wgpu_color(color)),
+    }
+}
+
+fn wgpu_depth_load_op(load: GpuDepthLoadOp) -> wgpu::LoadOp<f32> {
+    match load {
+        GpuDepthLoadOp::Load => wgpu::LoadOp::Load,
+        GpuDepthLoadOp::Clear(value) => wgpu::LoadOp::Clear(value),
+    }
+}
+
+fn wgpu_store_op(store: GpuStoreOp) -> wgpu::StoreOp {
+    match store {
+        GpuStoreOp::Store => wgpu::StoreOp::Store,
+        GpuStoreOp::Discard => wgpu::StoreOp::Discard,
+    }
+}
+
+fn wgpu_color(color: GpuColor) -> wgpu::Color {
+    wgpu::Color {
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        a: color.a,
+    }
+}
+
 fn wgpu_shader_stages(stages: GpuShaderStages) -> Result<wgpu::ShaderStages, String> {
     let known = GpuShaderStages::VERTEX
         .union(GpuShaderStages::FRAGMENT)
@@ -4145,10 +5173,18 @@ fn validate_texture_view_usage(
     required: GpuTextureUsage,
     binding: u32,
 ) -> Result<(), String> {
+    validate_texture_view_usage_bits(view, required, &format!("bind group entry {binding}"))
+}
+
+fn validate_texture_view_usage_bits(
+    view: &HostGpuTextureView,
+    required: GpuTextureUsage,
+    context: &str,
+) -> Result<(), String> {
     if !view.usage.contains(required) {
         return Err(format!(
-            "GPU bind group entry {} requires texture view usage bits {}",
-            binding, required.bits
+            "GPU {context} requires texture view usage bits {}",
+            required.bits
         ));
     }
     Ok(())
@@ -5066,6 +6102,7 @@ fn side_effect_from_abi(value: u8) -> Result<SideEffectCategory, String> {
 #[cfg(test)]
 mod loader_tests {
     use super::*;
+    use patinae_scene::GpuFragmentState;
 
     struct TraceFixtureViewer {
         session: Session,
@@ -5249,6 +6286,60 @@ mod loader_tests {
                 .collect(),
             line_segments: Vec::new(),
             point_samples: Vec::new(),
+        }
+    }
+
+    fn gpu_handle(id: u64, kind: GpuHandleKind) -> GpuHandle {
+        GpuHandle {
+            id,
+            kind,
+            generation: 1,
+        }
+    }
+
+    fn render_pipeline_descriptor() -> GpuRenderPipelineDescriptor {
+        let shader = gpu_handle(1, GpuHandleKind::ShaderModule);
+        GpuRenderPipelineDescriptor {
+            label: Some("test.render.pipeline".to_string()),
+            layout: gpu_handle(2, GpuHandleKind::PipelineLayout),
+            vertex: GpuVertexState {
+                module: shader,
+                entry_point: "vs_main".to_string(),
+                buffers: vec![GpuVertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: GpuVertexStepMode::Vertex,
+                    attributes: vec![GpuVertexAttribute {
+                        format: GpuVertexFormat::Float32x4,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+            },
+            primitive: GpuPrimitiveState {
+                topology: GpuPrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: GpuFrontFace::Ccw,
+                cull_mode: Some(GpuFace::Back),
+            },
+            depth_stencil: Some(GpuDepthStencilState {
+                format: GpuTextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: GpuCompareFunction::LessEqual,
+            }),
+            multisample: GpuMultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(GpuFragmentState {
+                module: shader,
+                entry_point: "fs_main".to_string(),
+                targets: vec![Some(GpuColorTargetState {
+                    format: GpuTextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: GpuColorWriteMask::ALL,
+                })],
+            }),
         }
     }
 
@@ -5598,5 +6689,153 @@ mod loader_tests {
             validate_texel_copy_buffer_layout(GpuTextureFormat::Rgba8Unorm, layout, size, 16,)
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn gpu_render_pipeline_descriptor_is_validated_before_wgpu() {
+        let descriptor = render_pipeline_descriptor();
+        assert!(validate_render_pipeline_descriptor(&descriptor).is_ok());
+
+        let mut multisampled = descriptor.clone();
+        multisampled.multisample.count = 4;
+        let err = validate_render_pipeline_descriptor(&multisampled).unwrap_err();
+        assert!(err.contains("multisample count 1"));
+
+        let mut bad_color = descriptor.clone();
+        bad_color.fragment.as_mut().unwrap().targets[0]
+            .as_mut()
+            .unwrap()
+            .format = GpuTextureFormat::Depth32Float;
+        let err = validate_render_pipeline_descriptor(&bad_color).unwrap_err();
+        assert!(err.contains("color targets cannot use depth"));
+
+        let mut bad_stride = descriptor;
+        bad_stride.vertex.buffers[0].array_stride = 14;
+        let err = validate_render_pipeline_descriptor(&bad_stride).unwrap_err();
+        assert!(err.contains("array_stride"));
+    }
+
+    #[test]
+    fn gpu_render_pipeline_fingerprint_tracks_semantic_descriptor() {
+        let descriptor = render_pipeline_descriptor();
+        let layout = fingerprint_for(GpuHandleKind::PipelineLayout, "layout");
+        let vertex_module = fingerprint_for(GpuHandleKind::ShaderModule, "shader");
+        let fragment = descriptor.fragment.as_ref().map(|fragment| {
+            (
+                vertex_module,
+                fragment.entry_point.as_str(),
+                &fragment.targets,
+            )
+        });
+
+        let first = render_pipeline_fingerprint(
+            layout,
+            vertex_module,
+            &descriptor.vertex.entry_point,
+            &descriptor.vertex.buffers,
+            fragment,
+            descriptor.primitive,
+            descriptor.depth_stencil,
+            descriptor.multisample,
+        );
+
+        let mut changed = descriptor.clone();
+        changed.fragment.as_mut().unwrap().targets[0]
+            .as_mut()
+            .unwrap()
+            .format = GpuTextureFormat::Bgra8Unorm;
+        let changed_fragment = changed.fragment.as_ref().map(|fragment| {
+            (
+                vertex_module,
+                fragment.entry_point.as_str(),
+                &fragment.targets,
+            )
+        });
+        let second = render_pipeline_fingerprint(
+            layout,
+            vertex_module,
+            &changed.vertex.entry_point,
+            &changed.vertex.buffers,
+            changed_fragment,
+            changed.primitive,
+            changed.depth_stencil,
+            changed.multisample,
+        );
+
+        assert_ne!(first, second);
+        assert_eq!(first.kind, GpuHandleKind::RenderPipeline);
+    }
+
+    #[test]
+    fn gpu_render_pipeline_attachment_formats_are_checked_before_wgpu() {
+        let pass = RenderPassAttachmentFormats {
+            color_targets: vec![Some(GpuTextureFormat::Rgba8Unorm)],
+            depth_stencil: Some(GpuTextureFormat::Depth32Float),
+        };
+
+        assert!(validate_render_pipeline_formats(
+            &[Some(GpuTextureFormat::Rgba8Unorm)],
+            Some(GpuTextureFormat::Depth32Float),
+            &pass,
+        )
+        .is_ok());
+
+        let err = validate_render_pipeline_formats(
+            &[Some(GpuTextureFormat::Bgra8Unorm)],
+            Some(GpuTextureFormat::Depth32Float),
+            &pass,
+        )
+        .unwrap_err();
+        assert!(err.contains("color targets"));
+    }
+
+    #[test]
+    fn gpu_render_buffer_usage_is_validated_before_wgpu() {
+        let vertex_usage = GpuBufferUsage::VERTEX.union(GpuBufferUsage::COPY_DST);
+        assert!(validate_buffer_usage_bits(
+            vertex_usage,
+            GpuBufferUsage::VERTEX,
+            "render vertex buffer",
+        )
+        .is_ok());
+        assert!(validate_buffer_usage_bits(
+            vertex_usage,
+            GpuBufferUsage::INDEX,
+            "render index buffer",
+        )
+        .is_err());
+
+        assert!(validate_buffer_slice(64, 16, Some(16)).is_ok());
+        assert!(validate_buffer_slice(64, 16, Some(0)).is_err());
+
+        assert!(validate_indirect_buffer_range(GpuBufferUsage::INDIRECT, 64, 4, 16).is_ok());
+        let err = validate_indirect_buffer_range(GpuBufferUsage::INDIRECT, 64, 2, 16).unwrap_err();
+        assert!(err.contains("aligned to 4"));
+    }
+
+    #[test]
+    fn gpu_render_dynamic_offsets_are_rejected_for_v1() {
+        let entries = vec![GpuBindGroupLayoutEntry {
+            binding: 0,
+            visibility: GpuShaderStages::VERTEX,
+            ty: GpuBindingType::Buffer {
+                ty: GpuBufferBindingType::Uniform,
+                has_dynamic_offset: true,
+                min_binding_size: Some(64),
+            },
+        }];
+
+        assert!(bind_group_layout_has_dynamic_offsets(&entries));
+    }
+
+    #[test]
+    fn gpu_render_draw_state_is_validated_before_wgpu() {
+        assert!(validate_viewport(1.0, 1.0, 0.0, 1.0).is_ok());
+        assert!(validate_viewport(1.0, 1.0, 0.8, 0.2).is_err());
+        assert!(validate_scissor_rect(1, 1).is_ok());
+        assert!(validate_scissor_rect(0, 1).is_err());
+        assert!(validate_draw_counts(3, 1).is_ok());
+        assert!(validate_draw_counts(0, 1).is_err());
+        assert!(checked_draw_range("vertex", u32::MAX, 1).is_err());
     }
 }
