@@ -72,10 +72,10 @@ pub mod prelude {
     pub use patinae_scene::{
         Camera, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
         GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource, GpuBindingType,
-        GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage,
-        GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle, GpuHandleKind,
-        GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages, GpuSubmitBatch,
-        ObjectRegistry, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+        GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats,
+        GpuCacheStatus, GpuCachedHandle, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle,
+        GpuHandleKind, GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
+        GpuSubmitBatch, ObjectRegistry, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
         RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
         RenderArtifactSnapshotDescriptor, SelectionManager,
     };

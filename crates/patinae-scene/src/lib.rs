@@ -43,11 +43,12 @@ pub use error::{SceneError, SceneResult, ViewerError};
 pub use gpu_runtime::{
     GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
     GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource, GpuBindingType,
-    GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage,
-    GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle, GpuHandleKind,
-    GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages, GpuSubmitBatch,
-    RenderArtifactBufferDescriptor, RenderArtifactBufferRole, RenderArtifactPrimitiveTopology,
-    RenderArtifactRepDescriptor, RenderArtifactRepKind, RenderArtifactSnapshotDescriptor,
+    GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats,
+    GpuCacheStatus, GpuCachedHandle, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle,
+    GpuHandleKind, GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
+    GpuSubmitBatch, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+    RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
+    RenderArtifactSnapshotDescriptor,
 };
 pub use highlight_state::HighlightState;
 pub use input::{ButtonState, CameraDelta, InputState, Modifiers, MouseButton, ScrollDelta};

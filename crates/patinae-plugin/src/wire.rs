@@ -22,8 +22,8 @@ use patinae_render::{
 };
 use patinae_scene::{
     Camera, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupLayoutDescriptor,
-    GpuBufferDescriptor, GpuComputePipelineDescriptor, GpuHandle, GpuPipelineLayoutDescriptor,
-    GpuShaderModuleDescriptor, GpuSubmitBatch, MovieStateSnapshot,
+    GpuBufferDescriptor, GpuCacheStats, GpuCachedHandle, GpuComputePipelineDescriptor, GpuHandle,
+    GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuSubmitBatch, MovieStateSnapshot,
     RenderArtifactSnapshotDescriptor, SceneView, Session, ViewportImage,
 };
 use patinae_settings::{
@@ -32,7 +32,7 @@ use patinae_settings::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Runtime wire version for MessagePack DTOs.
-pub const RUNTIME_WIRE_VERSION: u32 = 5;
+pub const RUNTIME_WIRE_VERSION: u32 = 6;
 
 /// Maximum MessagePack payload copied across the runtime ABI.
 pub const MAX_WIRE_PAYLOAD_LEN: usize = 64 * 1024 * 1024;
@@ -603,6 +603,40 @@ pub enum WireCommandRuntimeRequest {
         id: u64,
         descriptor: GpuComputePipelineDescriptor,
     },
+    /// Create or lease a cached WGSL shader module.
+    GpuCreateCachedShaderModule {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuShaderModuleDescriptor,
+    },
+    /// Create or lease a cached bind-group layout.
+    GpuCreateCachedBindGroupLayout {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuBindGroupLayoutDescriptor,
+    },
+    /// Create or lease a cached pipeline layout.
+    GpuCreateCachedPipelineLayout {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuPipelineLayoutDescriptor,
+    },
+    /// Create or lease a cached compute pipeline.
+    GpuCreateCachedComputePipeline {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuComputePipelineDescriptor,
+    },
+    /// Query persistent GPU cache counters.
+    GpuCacheStats {
+        /// Correlation id.
+        id: u64,
+    },
+    /// Drop persistent GPU cache entries for the active plugin.
+    GpuDropPluginCache {
+        /// Correlation id.
+        id: u64,
+    },
     /// Create a bind group.
     GpuCreateBindGroup {
         /// Correlation id.
@@ -661,6 +695,10 @@ pub enum WireCommandRuntimeValue {
     GpuDeviceLimits(patinae_scene::GpuDeviceLimits),
     /// Newly-created GPU resource handle.
     GpuHandle(GpuHandle),
+    /// Command-scoped lease of a cached GPU resource.
+    GpuCachedHandle(GpuCachedHandle),
+    /// Persistent GPU cache counters.
+    GpuCacheStats(GpuCacheStats),
     /// GPU operation completed without a value.
     GpuOk,
     /// Bytes read from a GPU buffer.
@@ -1418,8 +1456,9 @@ pub fn dynamic_registry_from_wire(
 mod tests {
     use super::*;
     use patinae_scene::{
-        GpuDeviceLimits, GpuHandleKind, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
-        RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
+        GpuCacheStats, GpuCacheStatus, GpuCachedHandle, GpuDeviceLimits, GpuHandleKind,
+        RenderArtifactBufferDescriptor, RenderArtifactBufferRole, RenderArtifactPrimitiveTopology,
+        RenderArtifactRepDescriptor, RenderArtifactRepKind,
     };
 
     #[test]
@@ -1481,6 +1520,44 @@ mod tests {
                 assert_eq!(snapshot.reps[0].transparency, 0.25);
             }
             _ => panic!("unexpected runtime value"),
+        }
+    }
+
+    #[test]
+    fn gpu_cached_values_roundtrip() {
+        let handle = GpuHandle {
+            id: 99,
+            kind: GpuHandleKind::ComputePipeline,
+            generation: 7,
+        };
+        let cached = WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
+            handle,
+            status: GpuCacheStatus::Hit,
+        });
+        let decoded: WireCommandRuntimeValue = decode(&encode(&cached).unwrap()).unwrap();
+
+        match decoded {
+            WireCommandRuntimeValue::GpuCachedHandle(cached) => {
+                assert_eq!(cached.handle, handle);
+                assert_eq!(cached.status, GpuCacheStatus::Hit);
+            }
+            _ => panic!("unexpected cached handle value"),
+        }
+
+        let stats = WireCommandRuntimeValue::GpuCacheStats(GpuCacheStats {
+            hits: 3,
+            misses: 2,
+            entries: 4,
+        });
+        let decoded: WireCommandRuntimeValue = decode(&encode(&stats).unwrap()).unwrap();
+
+        match decoded {
+            WireCommandRuntimeValue::GpuCacheStats(stats) => {
+                assert_eq!(stats.hits, 3);
+                assert_eq!(stats.misses, 2);
+                assert_eq!(stats.entries, 4);
+            }
+            _ => panic!("unexpected cache stats value"),
         }
     }
 }

@@ -272,29 +272,37 @@ fn build_triangles(
     max_dispatch_dimension: u32,
     batch_commands: &mut Vec<GpuBatchCommand>,
 ) -> Result<(), String> {
-    let shader = viewer.gpu_create_shader_module(GpuShaderModuleDescriptor {
-        label: Some("ray.artifact.build_triangles.shader".to_string()),
-        wgsl: ARTIFACT_TRIANGLE_SHADER.to_string(),
-    })?;
-    let layout = viewer.gpu_create_bind_group_layout(GpuBindGroupLayoutDescriptor {
-        label: Some("ray.artifact.build_triangles.layout".to_string()),
-        entries: vec![
-            storage_layout(0, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(1, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(2, GpuBufferBindingType::StorageReadWrite),
-            storage_layout(3, GpuBufferBindingType::Uniform),
-        ],
-    })?;
-    let pipeline_layout = viewer.gpu_create_pipeline_layout(GpuPipelineLayoutDescriptor {
-        label: Some("ray.artifact.build_triangles.pipeline_layout".to_string()),
-        bind_group_layouts: vec![layout],
-    })?;
-    let pipeline = viewer.gpu_create_compute_pipeline(GpuComputePipelineDescriptor {
-        label: Some("ray.artifact.build_triangles.pipeline".to_string()),
-        layout: pipeline_layout,
-        module: shader,
-        entry_point: "build_triangles".to_string(),
-    })?;
+    let shader = viewer
+        .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
+            label: Some("ray.artifact.build_triangles.shader".to_string()),
+            wgsl: ARTIFACT_TRIANGLE_SHADER.to_string(),
+        })?
+        .handle;
+    let layout = viewer
+        .gpu_create_cached_bind_group_layout(GpuBindGroupLayoutDescriptor {
+            label: Some("ray.artifact.build_triangles.layout".to_string()),
+            entries: vec![
+                storage_layout(0, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(1, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(2, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(3, GpuBufferBindingType::Uniform),
+            ],
+        })?
+        .handle;
+    let pipeline_layout = viewer
+        .gpu_create_cached_pipeline_layout(GpuPipelineLayoutDescriptor {
+            label: Some("ray.artifact.build_triangles.pipeline_layout".to_string()),
+            bind_group_layouts: vec![layout],
+        })?
+        .handle;
+    let pipeline = viewer
+        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
+            label: Some("ray.artifact.build_triangles.pipeline".to_string()),
+            layout: pipeline_layout,
+            module: shader,
+            entry_point: "build_triangles".to_string(),
+        })?
+        .handle;
     let params_buffer = create_buffer(
         viewer,
         "ray.artifact.build_triangles.params",
@@ -358,35 +366,45 @@ fn build_bvh(
     max_dispatch_dimension: u32,
     batch_commands: &mut Vec<GpuBatchCommand>,
 ) -> Result<(), String> {
-    let shader = viewer.gpu_create_shader_module(GpuShaderModuleDescriptor {
-        label: Some("ray.artifact.bvh.shader".to_string()),
-        wgsl: ARTIFACT_BVH_SHADER.to_string(),
-    })?;
-    let layout = viewer.gpu_create_bind_group_layout(GpuBindGroupLayoutDescriptor {
-        label: Some("ray.artifact.bvh.layout".to_string()),
-        entries: vec![
-            storage_layout(0, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(1, GpuBufferBindingType::StorageReadWrite),
-            storage_layout(2, GpuBufferBindingType::StorageReadWrite),
-            storage_layout(3, GpuBufferBindingType::Uniform),
-        ],
-    })?;
-    let pipeline_layout = viewer.gpu_create_pipeline_layout(GpuPipelineLayoutDescriptor {
-        label: Some("ray.artifact.bvh.pipeline_layout".to_string()),
-        bind_group_layouts: vec![layout],
-    })?;
-    let leaf_pipeline = viewer.gpu_create_compute_pipeline(GpuComputePipelineDescriptor {
-        label: Some("ray.artifact.bvh.leaves.pipeline".to_string()),
-        layout: pipeline_layout,
-        module: shader,
-        entry_point: "build_leaves".to_string(),
-    })?;
-    let internal_pipeline = viewer.gpu_create_compute_pipeline(GpuComputePipelineDescriptor {
-        label: Some("ray.artifact.bvh.internal.pipeline".to_string()),
-        layout: pipeline_layout,
-        module: shader,
-        entry_point: "build_internal".to_string(),
-    })?;
+    let shader = viewer
+        .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
+            label: Some("ray.artifact.bvh.shader".to_string()),
+            wgsl: ARTIFACT_BVH_SHADER.to_string(),
+        })?
+        .handle;
+    let layout = viewer
+        .gpu_create_cached_bind_group_layout(GpuBindGroupLayoutDescriptor {
+            label: Some("ray.artifact.bvh.layout".to_string()),
+            entries: vec![
+                storage_layout(0, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(1, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(2, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(3, GpuBufferBindingType::Uniform),
+            ],
+        })?
+        .handle;
+    let pipeline_layout = viewer
+        .gpu_create_cached_pipeline_layout(GpuPipelineLayoutDescriptor {
+            label: Some("ray.artifact.bvh.pipeline_layout".to_string()),
+            bind_group_layouts: vec![layout],
+        })?
+        .handle;
+    let leaf_pipeline = viewer
+        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
+            label: Some("ray.artifact.bvh.leaves.pipeline".to_string()),
+            layout: pipeline_layout,
+            module: shader,
+            entry_point: "build_leaves".to_string(),
+        })?
+        .handle;
+    let internal_pipeline = viewer
+        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
+            label: Some("ray.artifact.bvh.internal.pipeline".to_string()),
+            layout: pipeline_layout,
+            module: shader,
+            entry_point: "build_internal".to_string(),
+        })?
+        .handle;
     let params_buffer = create_buffer(
         viewer,
         "ray.artifact.bvh.params",
@@ -525,32 +543,40 @@ fn dispatch_raytrace(
         ),
     )?;
 
-    let shader = viewer.gpu_create_shader_module(GpuShaderModuleDescriptor {
-        label: Some("ray.artifact.raytrace.shader".to_string()),
-        wgsl: raytrace_output_buffer_shader(),
-    })?;
-    let layout = viewer.gpu_create_bind_group_layout(GpuBindGroupLayoutDescriptor {
-        label: Some("ray.artifact.raytrace.layout".to_string()),
-        entries: vec![
-            storage_layout(0, GpuBufferBindingType::Uniform),
-            storage_layout(1, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(2, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(3, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(4, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(5, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(6, GpuBufferBindingType::StorageReadWrite),
-        ],
-    })?;
-    let pipeline_layout = viewer.gpu_create_pipeline_layout(GpuPipelineLayoutDescriptor {
-        label: Some("ray.artifact.raytrace.pipeline_layout".to_string()),
-        bind_group_layouts: vec![layout],
-    })?;
-    let pipeline = viewer.gpu_create_compute_pipeline(GpuComputePipelineDescriptor {
-        label: Some("ray.artifact.raytrace.pipeline".to_string()),
-        layout: pipeline_layout,
-        module: shader,
-        entry_point: "main".to_string(),
-    })?;
+    let shader = viewer
+        .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
+            label: Some("ray.artifact.raytrace.shader".to_string()),
+            wgsl: raytrace_output_buffer_shader(),
+        })?
+        .handle;
+    let layout = viewer
+        .gpu_create_cached_bind_group_layout(GpuBindGroupLayoutDescriptor {
+            label: Some("ray.artifact.raytrace.layout".to_string()),
+            entries: vec![
+                storage_layout(0, GpuBufferBindingType::Uniform),
+                storage_layout(1, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(2, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(3, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(4, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(5, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(6, GpuBufferBindingType::StorageReadWrite),
+            ],
+        })?
+        .handle;
+    let pipeline_layout = viewer
+        .gpu_create_cached_pipeline_layout(GpuPipelineLayoutDescriptor {
+            label: Some("ray.artifact.raytrace.pipeline_layout".to_string()),
+            bind_group_layouts: vec![layout],
+        })?
+        .handle;
+    let pipeline = viewer
+        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
+            label: Some("ray.artifact.raytrace.pipeline".to_string()),
+            layout: pipeline_layout,
+            module: shader,
+            entry_point: "main".to_string(),
+        })?
+        .handle;
     let bind_group = viewer.gpu_create_bind_group(GpuBindGroupDescriptor {
         label: Some("ray.artifact.raytrace.bind_group".to_string()),
         layout,
@@ -658,28 +684,36 @@ fn append_downsample(
         uniform_usage(),
         Some(bytemuck::bytes_of(&params).to_vec()),
     )?;
-    let shader = viewer.gpu_create_shader_module(GpuShaderModuleDescriptor {
-        label: Some("ray.artifact.downsample.shader".to_string()),
-        wgsl: DOWNSAMPLE_SHADER.to_string(),
-    })?;
-    let layout = viewer.gpu_create_bind_group_layout(GpuBindGroupLayoutDescriptor {
-        label: Some("ray.artifact.downsample.layout".to_string()),
-        entries: vec![
-            storage_layout(0, GpuBufferBindingType::StorageReadOnly),
-            storage_layout(1, GpuBufferBindingType::StorageReadWrite),
-            storage_layout(2, GpuBufferBindingType::Uniform),
-        ],
-    })?;
-    let pipeline_layout = viewer.gpu_create_pipeline_layout(GpuPipelineLayoutDescriptor {
-        label: Some("ray.artifact.downsample.pipeline_layout".to_string()),
-        bind_group_layouts: vec![layout],
-    })?;
-    let pipeline = viewer.gpu_create_compute_pipeline(GpuComputePipelineDescriptor {
-        label: Some("ray.artifact.downsample.pipeline".to_string()),
-        layout: pipeline_layout,
-        module: shader,
-        entry_point: "main".to_string(),
-    })?;
+    let shader = viewer
+        .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
+            label: Some("ray.artifact.downsample.shader".to_string()),
+            wgsl: DOWNSAMPLE_SHADER.to_string(),
+        })?
+        .handle;
+    let layout = viewer
+        .gpu_create_cached_bind_group_layout(GpuBindGroupLayoutDescriptor {
+            label: Some("ray.artifact.downsample.layout".to_string()),
+            entries: vec![
+                storage_layout(0, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(1, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(2, GpuBufferBindingType::Uniform),
+            ],
+        })?
+        .handle;
+    let pipeline_layout = viewer
+        .gpu_create_cached_pipeline_layout(GpuPipelineLayoutDescriptor {
+            label: Some("ray.artifact.downsample.pipeline_layout".to_string()),
+            bind_group_layouts: vec![layout],
+        })?
+        .handle;
+    let pipeline = viewer
+        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
+            label: Some("ray.artifact.downsample.pipeline".to_string()),
+            layout: pipeline_layout,
+            module: shader,
+            entry_point: "main".to_string(),
+        })?
+        .handle;
     let bind_group = viewer.gpu_create_bind_group(GpuBindGroupDescriptor {
         label: Some("ray.artifact.downsample.bind_group".to_string()),
         layout,

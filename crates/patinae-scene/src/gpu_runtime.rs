@@ -147,6 +147,30 @@ pub struct GpuComputePipelineDescriptor {
     pub entry_point: String,
 }
 
+/// Cache outcome for a persistent GPU resource request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GpuCacheStatus {
+    /// The host reused a previously-created resource.
+    Hit,
+    /// The host created and stored a new resource.
+    Miss,
+}
+
+/// Command-scoped lease for a persistent cached GPU resource.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuCachedHandle {
+    pub handle: GpuHandle,
+    pub status: GpuCacheStatus,
+}
+
+/// Persistent GPU cache counters for the active plugin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GpuCacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub entries: u64,
+}
+
 /// Buffer resource bound into a bind group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GpuBufferBinding {

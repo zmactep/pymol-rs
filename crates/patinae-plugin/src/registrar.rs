@@ -1495,6 +1495,59 @@ impl CommandRuntimeClient {
         })
     }
 
+    fn gpu_create_cached_shader_module(
+        self,
+        descriptor: patinae_scene::GpuShaderModuleDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.gpu_cached_handle_response(WireCommandRuntimeRequest::GpuCreateCachedShaderModule {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_cached_bind_group_layout(
+        self,
+        descriptor: patinae_scene::GpuBindGroupLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.gpu_cached_handle_response(WireCommandRuntimeRequest::GpuCreateCachedBindGroupLayout {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_cached_pipeline_layout(
+        self,
+        descriptor: patinae_scene::GpuPipelineLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.gpu_cached_handle_response(WireCommandRuntimeRequest::GpuCreateCachedPipelineLayout {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_cached_compute_pipeline(
+        self,
+        descriptor: patinae_scene::GpuComputePipelineDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.gpu_cached_handle_response(WireCommandRuntimeRequest::GpuCreateCachedComputePipeline {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_cache_stats(self) -> Result<patinae_scene::GpuCacheStats, String> {
+        let response = self.request(&WireCommandRuntimeRequest::GpuCacheStats { id: 1 })?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuCacheStats(stats) => Ok(stats),
+            _ => Err("host returned unexpected GPU cache stats response".to_string()),
+        }
+    }
+
+    fn gpu_drop_plugin_cache(self) -> Result<(), String> {
+        self.gpu_ok_response(WireCommandRuntimeRequest::GpuDropPluginCache { id: 1 })
+    }
+
     fn gpu_create_bind_group(
         self,
         descriptor: patinae_scene::GpuBindGroupDescriptor,
@@ -1544,6 +1597,18 @@ impl CommandRuntimeClient {
         match response.result? {
             WireCommandRuntimeValue::GpuHandle(handle) => Ok(handle),
             _ => Err("host returned unexpected GPU handle response".to_string()),
+        }
+    }
+
+    fn gpu_cached_handle_response(
+        self,
+        request: WireCommandRuntimeRequest,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        let response = self.request(&request)?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuCachedHandle(handle) => Ok(handle),
+            _ => Err("host returned unexpected GPU cached handle response".to_string()),
         }
     }
 
@@ -1927,6 +1992,54 @@ impl ViewerLike for RuntimeViewer {
         self.command_runtime
             .ok_or_else(|| "host command runtime is not available".to_string())?
             .gpu_create_compute_pipeline(descriptor)
+    }
+
+    fn gpu_create_cached_shader_module(
+        &mut self,
+        descriptor: patinae_scene::GpuShaderModuleDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_cached_shader_module(descriptor)
+    }
+
+    fn gpu_create_cached_bind_group_layout(
+        &mut self,
+        descriptor: patinae_scene::GpuBindGroupLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_cached_bind_group_layout(descriptor)
+    }
+
+    fn gpu_create_cached_pipeline_layout(
+        &mut self,
+        descriptor: patinae_scene::GpuPipelineLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_cached_pipeline_layout(descriptor)
+    }
+
+    fn gpu_create_cached_compute_pipeline(
+        &mut self,
+        descriptor: patinae_scene::GpuComputePipelineDescriptor,
+    ) -> Result<patinae_scene::GpuCachedHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_cached_compute_pipeline(descriptor)
+    }
+
+    fn gpu_cache_stats(&mut self) -> Result<patinae_scene::GpuCacheStats, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_cache_stats()
+    }
+
+    fn gpu_drop_plugin_cache(&mut self) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_drop_plugin_cache()
     }
 
     fn gpu_create_bind_group(

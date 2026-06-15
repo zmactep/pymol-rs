@@ -1,11 +1,12 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{hash_map::DefaultHasher, HashMap, VecDeque};
 use std::ffi::c_void;
 use std::fs::OpenOptions;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use libloading::Library;
 use wgpu::util::DeviceExt;
@@ -59,9 +60,10 @@ use patinae_plugin::wire::{
 use patinae_scene::{
     parse_key_string, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
     GpuBindGroupLayoutDescriptor, GpuBindingResource, GpuBindingType, GpuBufferBindingType,
-    GpuBufferDescriptor, GpuBufferUsage, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle,
-    GpuHandleKind, GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
-    GpuSubmitBatch, KeyBindings, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+    GpuBufferDescriptor, GpuBufferUsage, GpuCacheStats, GpuCacheStatus, GpuCachedHandle,
+    GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle, GpuHandleKind,
+    GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages, GpuSubmitBatch,
+    KeyBindings, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
     RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
     RenderArtifactSnapshotDescriptor, Session, ViewerLike,
 };
@@ -90,6 +92,10 @@ const DISPLAYED_GEOMETRY_SPOOL_MESH_VERTICES: usize = 24_576;
 const DISPLAYED_GEOMETRY_SPOOL_PRIMITIVES: usize = 32_768;
 
 static DISPLAYED_GEOMETRY_SPOOL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+type SharedGpuPluginCache = Arc<Mutex<GpuPluginCache>>;
+
+const GPU_CACHE_LAYOUT_VERSION: u32 = 1;
 
 fn rt_profile_enabled() -> bool {
     std::env::var_os("PATINAE_RT_PROFILE").is_some()
@@ -206,9 +212,11 @@ fn finish_registration(
         .take()
         .ok_or("Plugin did not set metadata")?;
     let plugin_name = format!("{} v{}", metadata.name, metadata.version);
+    let plugin_id = format!("{}@{}", metadata.name, metadata.version);
+    let gpu_cache = Arc::new(Mutex::new(GpuPluginCache::new(plugin_id)));
     let library = Arc::new(library_handle);
 
-    install_registration_assets(executor, &mut registration, library.clone());
+    install_registration_assets(executor, &mut registration, library.clone(), gpu_cache);
 
     let mut panels = Vec::new();
     for panel in registration.panels {
@@ -322,11 +330,16 @@ fn install_registration_assets(
     executor: &mut CommandExecutor,
     registration: &mut RegistrationSink,
     library: Arc<LibraryHandle>,
+    gpu_cache: SharedGpuPluginCache,
 ) {
     for command in std::mem::take(&mut registration.commands) {
         executor
             .registry_mut()
-            .register_boxed(Box::new(AbiCommandProxy::new(command, library.clone())));
+            .register_boxed(Box::new(AbiCommandProxy::new(
+                command,
+                library.clone(),
+                gpu_cache.clone(),
+            )));
     }
 
     for script in std::mem::take(&mut registration.script_handlers) {
@@ -1053,13 +1066,19 @@ impl RegisteredHotkey {
 struct AbiCommandProxy {
     command: RegisteredCommand,
     _library: Arc<LibraryHandle>,
+    gpu_cache: SharedGpuPluginCache,
 }
 
 impl AbiCommandProxy {
-    fn new(command: RegisteredCommand, library: Arc<LibraryHandle>) -> Self {
+    fn new(
+        command: RegisteredCommand,
+        library: Arc<LibraryHandle>,
+        gpu_cache: SharedGpuPluginCache,
+    ) -> Self {
         Self {
             command,
             _library: library,
+            gpu_cache,
         }
     }
 }
@@ -1091,8 +1110,11 @@ impl Command for AbiCommandProxy {
             .execute
             .ok_or_else(|| CmdError::execution("plugin command execute callback was null"))?;
         let output: WireCommandOutput = {
-            let mut runtime_state =
-                HostCommandRuntimeState::new(ctx.viewer, self.command.runtime_requirements);
+            let mut runtime_state = HostCommandRuntimeState::with_cache(
+                ctx.viewer,
+                self.command.runtime_requirements,
+                self.gpu_cache.clone(),
+            );
             invoke_runtime("command execute", &input.input, |slice, sink, user_data| {
                 // SAFETY: The descriptor was validated during registration and the
                 // library is kept alive by this proxy while the callback runs.
@@ -1541,21 +1563,36 @@ struct HostCommandRuntimeState<'a> {
     runtime_requirements: CommandRuntimeRequirements,
     streams: Vec<HostTraceGeometryStream>,
     gpu_handles: GpuHandleRegistry,
+    gpu_cache: SharedGpuPluginCache,
     snapshots: Vec<HostRenderArtifactSnapshot>,
     next_stream_id: u64,
     next_snapshot_id: u64,
 }
 
 impl<'a> HostCommandRuntimeState<'a> {
+    #[cfg(test)]
     fn new(
         viewer: &'a mut dyn ViewerLike,
         runtime_requirements: CommandRuntimeRequirements,
+    ) -> Self {
+        Self::with_cache(
+            viewer,
+            runtime_requirements,
+            Arc::new(Mutex::new(GpuPluginCache::new("test".to_string()))),
+        )
+    }
+
+    fn with_cache(
+        viewer: &'a mut dyn ViewerLike,
+        runtime_requirements: CommandRuntimeRequirements,
+        gpu_cache: SharedGpuPluginCache,
     ) -> Self {
         Self {
             viewer,
             runtime_requirements,
             streams: Vec::new(),
             gpu_handles: GpuHandleRegistry::new(),
+            gpu_cache,
             snapshots: Vec::new(),
             next_stream_id: 1,
             next_snapshot_id: 1,
@@ -1649,6 +1686,30 @@ impl<'a> HostCommandRuntimeState<'a> {
             }
             WireCommandRuntimeRequest::GpuCreateComputePipeline { id, descriptor } => {
                 let result = self.gpu_create_compute_pipeline(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateCachedShaderModule { id, descriptor } => {
+                let result = self.gpu_create_cached_shader_module(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateCachedBindGroupLayout { id, descriptor } => {
+                let result = self.gpu_create_cached_bind_group_layout(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateCachedPipelineLayout { id, descriptor } => {
+                let result = self.gpu_create_cached_pipeline_layout(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateCachedComputePipeline { id, descriptor } => {
+                let result = self.gpu_create_cached_compute_pipeline(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCacheStats { id } => {
+                let result = self.gpu_cache_stats();
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuDropPluginCache { id } => {
+                let result = self.gpu_drop_plugin_cache();
                 Self::response(id, result)
             }
             WireCommandRuntimeRequest::GpuCreateBindGroup { id, descriptor } => {
@@ -2046,6 +2107,7 @@ impl<'a> HostCommandRuntimeState<'a> {
         descriptor: GpuShaderModuleDescriptor,
     ) -> Result<WireCommandRuntimeValue, String> {
         self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = shader_module_fingerprint(&descriptor);
         let device = self
             .viewer
             .gpu_device()
@@ -2054,7 +2116,7 @@ impl<'a> HostCommandRuntimeState<'a> {
             label: descriptor.label.as_deref(),
             source: wgpu::ShaderSource::Wgsl(descriptor.wgsl.into()),
         });
-        let handle = self.gpu_handles.insert_shader_module(module);
+        let handle = self.gpu_handles.insert_shader_module(module, fingerprint);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
@@ -2063,6 +2125,7 @@ impl<'a> HostCommandRuntimeState<'a> {
         descriptor: GpuBindGroupLayoutDescriptor,
     ) -> Result<WireCommandRuntimeValue, String> {
         self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = bind_group_layout_fingerprint(&descriptor);
         let device = self
             .viewer
             .gpu_device()
@@ -2077,7 +2140,9 @@ impl<'a> HostCommandRuntimeState<'a> {
             label: descriptor.label.as_deref(),
             entries: &entries,
         });
-        let handle = self.gpu_handles.insert_bind_group_layout(layout);
+        let handle = self
+            .gpu_handles
+            .insert_bind_group_layout(layout, fingerprint);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
@@ -2086,6 +2151,7 @@ impl<'a> HostCommandRuntimeState<'a> {
         descriptor: GpuPipelineLayoutDescriptor,
     ) -> Result<WireCommandRuntimeValue, String> {
         self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = self.pipeline_layout_fingerprint(&descriptor)?;
         let device = self
             .viewer
             .gpu_device()
@@ -2102,7 +2168,7 @@ impl<'a> HostCommandRuntimeState<'a> {
                 immediate_size: 0,
             })
         };
-        let handle = self.gpu_handles.insert_pipeline_layout(layout);
+        let handle = self.gpu_handles.insert_pipeline_layout(layout, fingerprint);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
     }
 
@@ -2111,6 +2177,7 @@ impl<'a> HostCommandRuntimeState<'a> {
         descriptor: GpuComputePipelineDescriptor,
     ) -> Result<WireCommandRuntimeValue, String> {
         self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = self.compute_pipeline_fingerprint(&descriptor)?;
         let device = self
             .viewer
             .gpu_device()
@@ -2127,8 +2194,184 @@ impl<'a> HostCommandRuntimeState<'a> {
                 cache: None,
             })
         };
-        let handle = self.gpu_handles.insert_compute_pipeline(pipeline);
+        let handle = self
+            .gpu_handles
+            .insert_compute_pipeline(pipeline, fingerprint);
         Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_cached_shader_module(
+        &mut self,
+        descriptor: GpuShaderModuleDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = shader_module_fingerprint(&descriptor);
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let start = std::time::Instant::now();
+        let mut cache = self.lock_gpu_cache()?;
+        let key = cache.resource_key(device, fingerprint);
+        let (module, status) = if let Some(object) = cache.cached_object(&key) {
+            let module = object.into_shader_module()?;
+            cache.record_hit();
+            (module, GpuCacheStatus::Hit)
+        } else {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: descriptor.label.as_deref(),
+                source: wgpu::ShaderSource::Wgsl(descriptor.wgsl.clone().into()),
+            });
+            cache.insert(key, GpuCachedObject::ShaderModule(module.clone()));
+            (module, GpuCacheStatus::Miss)
+        };
+        drop(cache);
+        let handle = self.gpu_handles.insert_shader_module(module, fingerprint);
+        log_gpu_cache_event("shader_module", status, start.elapsed().as_millis());
+        Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
+            handle,
+            status,
+        }))
+    }
+
+    fn gpu_create_cached_bind_group_layout(
+        &mut self,
+        descriptor: GpuBindGroupLayoutDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = bind_group_layout_fingerprint(&descriptor);
+        let entries = descriptor
+            .entries
+            .iter()
+            .copied()
+            .map(wgpu_bind_group_layout_entry)
+            .collect::<Result<Vec<_>, _>>()?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let start = std::time::Instant::now();
+        let mut cache = self.lock_gpu_cache()?;
+        let key = cache.resource_key(device, fingerprint);
+        let (layout, status) = if let Some(object) = cache.cached_object(&key) {
+            let layout = object.into_bind_group_layout()?;
+            cache.record_hit();
+            (layout, GpuCacheStatus::Hit)
+        } else {
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: descriptor.label.as_deref(),
+                entries: &entries,
+            });
+            cache.insert(key, GpuCachedObject::BindGroupLayout(layout.clone()));
+            (layout, GpuCacheStatus::Miss)
+        };
+        drop(cache);
+        let handle = self
+            .gpu_handles
+            .insert_bind_group_layout(layout, fingerprint);
+        log_gpu_cache_event("bind_group_layout", status, start.elapsed().as_millis());
+        Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
+            handle,
+            status,
+        }))
+    }
+
+    fn gpu_create_cached_pipeline_layout(
+        &mut self,
+        descriptor: GpuPipelineLayoutDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = self.pipeline_layout_fingerprint(&descriptor)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let start = std::time::Instant::now();
+        let mut cache = self.lock_gpu_cache()?;
+        let key = cache.resource_key(device, fingerprint);
+        let (layout, status) = if let Some(object) = cache.cached_object(&key) {
+            let layout = object.into_pipeline_layout()?;
+            cache.record_hit();
+            (layout, GpuCacheStatus::Hit)
+        } else {
+            let layout = {
+                let layouts = descriptor
+                    .bind_group_layouts
+                    .iter()
+                    .map(|handle| self.gpu_handles.bind_group_layout(*handle))
+                    .collect::<Result<Vec<_>, _>>()?;
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: descriptor.label.as_deref(),
+                    bind_group_layouts: &layouts,
+                    immediate_size: 0,
+                })
+            };
+            cache.insert(key, GpuCachedObject::PipelineLayout(layout.clone()));
+            (layout, GpuCacheStatus::Miss)
+        };
+        drop(cache);
+        let handle = self.gpu_handles.insert_pipeline_layout(layout, fingerprint);
+        log_gpu_cache_event("pipeline_layout", status, start.elapsed().as_millis());
+        Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
+            handle,
+            status,
+        }))
+    }
+
+    fn gpu_create_cached_compute_pipeline(
+        &mut self,
+        descriptor: GpuComputePipelineDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let fingerprint = self.compute_pipeline_fingerprint(&descriptor)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let start = std::time::Instant::now();
+        let mut cache = self.lock_gpu_cache()?;
+        let key = cache.resource_key(device, fingerprint);
+        let (pipeline, status) = if let Some(object) = cache.cached_object(&key) {
+            let pipeline = object.into_compute_pipeline()?;
+            cache.record_hit();
+            (pipeline, GpuCacheStatus::Hit)
+        } else {
+            let pipeline = {
+                let layout = self.gpu_handles.pipeline_layout(descriptor.layout)?;
+                let module = self.gpu_handles.shader_module(descriptor.module)?;
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: descriptor.label.as_deref(),
+                    layout: Some(layout),
+                    module,
+                    entry_point: Some(&descriptor.entry_point),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    cache: None,
+                })
+            };
+            cache.insert(key, GpuCachedObject::ComputePipeline(pipeline.clone()));
+            (pipeline, GpuCacheStatus::Miss)
+        };
+        drop(cache);
+        let handle = self
+            .gpu_handles
+            .insert_compute_pipeline(pipeline, fingerprint);
+        log_gpu_cache_event("compute_pipeline", status, start.elapsed().as_millis());
+        Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
+            handle,
+            status,
+        }))
+    }
+
+    fn gpu_cache_stats(&mut self) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let cache = self.lock_gpu_cache()?;
+        Ok(WireCommandRuntimeValue::GpuCacheStats(cache.stats()))
+    }
+
+    fn gpu_drop_plugin_cache(&mut self) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        self.lock_gpu_cache()?.clear();
+        Ok(WireCommandRuntimeValue::GpuOk)
     }
 
     fn gpu_create_bind_group(
@@ -2336,6 +2579,44 @@ impl<'a> HostCommandRuntimeState<'a> {
         }
         Ok(WireCommandRuntimeValue::GpuOk)
     }
+
+    fn lock_gpu_cache(&self) -> Result<std::sync::MutexGuard<'_, GpuPluginCache>, String> {
+        self.gpu_cache
+            .lock()
+            .map_err(|_| "GPU plugin cache was poisoned".to_string())
+    }
+
+    fn pipeline_layout_fingerprint(
+        &self,
+        descriptor: &GpuPipelineLayoutDescriptor,
+    ) -> Result<GpuResourceFingerprint, String> {
+        let layouts = descriptor
+            .bind_group_layouts
+            .iter()
+            .map(|handle| {
+                self.gpu_handles
+                    .fingerprint(*handle, GpuHandleKind::BindGroupLayout)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(pipeline_layout_fingerprint(&layouts))
+    }
+
+    fn compute_pipeline_fingerprint(
+        &self,
+        descriptor: &GpuComputePipelineDescriptor,
+    ) -> Result<GpuResourceFingerprint, String> {
+        let layout = self
+            .gpu_handles
+            .fingerprint(descriptor.layout, GpuHandleKind::PipelineLayout)?;
+        let module = self
+            .gpu_handles
+            .fingerprint(descriptor.module, GpuHandleKind::ShaderModule)?;
+        Ok(compute_pipeline_fingerprint(
+            layout,
+            module,
+            &descriptor.entry_point,
+        ))
+    }
 }
 
 struct HostTraceGeometryStream {
@@ -2383,6 +2664,13 @@ struct HostGpuBuffer {
     size: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct GpuResourceFingerprint {
+    kind: GpuHandleKind,
+    hash: u64,
+}
+
+#[derive(Clone)]
 enum GpuHandleObject {
     Buffer(HostGpuBuffer),
     ShaderModule(wgpu::ShaderModule),
@@ -2395,6 +2683,7 @@ enum GpuHandleObject {
 struct GpuHandleEntry {
     generation: u64,
     kind: GpuHandleKind,
+    fingerprint: Option<GpuResourceFingerprint>,
     object: GpuHandleObject,
 }
 
@@ -2417,27 +2706,43 @@ impl GpuHandleRegistry {
         self.insert(
             GpuHandleKind::Buffer,
             GpuHandleObject::Buffer(HostGpuBuffer { buffer, size }),
+            None,
         )
     }
 
-    fn insert_shader_module(&mut self, module: wgpu::ShaderModule) -> GpuHandle {
+    fn insert_shader_module(
+        &mut self,
+        module: wgpu::ShaderModule,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuHandle {
         self.insert(
             GpuHandleKind::ShaderModule,
             GpuHandleObject::ShaderModule(module),
+            Some(fingerprint),
         )
     }
 
-    fn insert_bind_group_layout(&mut self, layout: wgpu::BindGroupLayout) -> GpuHandle {
+    fn insert_bind_group_layout(
+        &mut self,
+        layout: wgpu::BindGroupLayout,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuHandle {
         self.insert(
             GpuHandleKind::BindGroupLayout,
             GpuHandleObject::BindGroupLayout(layout),
+            Some(fingerprint),
         )
     }
 
-    fn insert_pipeline_layout(&mut self, layout: wgpu::PipelineLayout) -> GpuHandle {
+    fn insert_pipeline_layout(
+        &mut self,
+        layout: wgpu::PipelineLayout,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuHandle {
         self.insert(
             GpuHandleKind::PipelineLayout,
             GpuHandleObject::PipelineLayout(layout),
+            Some(fingerprint),
         )
     }
 
@@ -2445,17 +2750,28 @@ impl GpuHandleRegistry {
         self.insert(
             GpuHandleKind::BindGroup,
             GpuHandleObject::BindGroup(bind_group),
+            None,
         )
     }
 
-    fn insert_compute_pipeline(&mut self, pipeline: wgpu::ComputePipeline) -> GpuHandle {
+    fn insert_compute_pipeline(
+        &mut self,
+        pipeline: wgpu::ComputePipeline,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuHandle {
         self.insert(
             GpuHandleKind::ComputePipeline,
             GpuHandleObject::ComputePipeline(pipeline),
+            Some(fingerprint),
         )
     }
 
-    fn insert(&mut self, kind: GpuHandleKind, object: GpuHandleObject) -> GpuHandle {
+    fn insert(
+        &mut self,
+        kind: GpuHandleKind,
+        object: GpuHandleObject,
+        fingerprint: Option<GpuResourceFingerprint>,
+    ) -> GpuHandle {
         let id = self.next_id;
         self.next_id += 1;
         self.entries.insert(
@@ -2463,6 +2779,7 @@ impl GpuHandleRegistry {
             GpuHandleEntry {
                 generation: self.generation,
                 kind,
+                fingerprint,
                 object,
             },
         );
@@ -2521,6 +2838,20 @@ impl GpuHandleRegistry {
         }
     }
 
+    fn fingerprint(
+        &self,
+        handle: GpuHandle,
+        expected: GpuHandleKind,
+    ) -> Result<GpuResourceFingerprint, String> {
+        let entry = self.entry(handle, expected)?;
+        entry.fingerprint.ok_or_else(|| {
+            format!(
+                "GPU handle {} of kind {:?} cannot be used in cached descriptor",
+                handle.id, expected
+            )
+        })
+    }
+
     fn entry(&self, handle: GpuHandle, expected: GpuHandleKind) -> Result<&GpuHandleEntry, String> {
         self.validate(handle)?;
         let entry = self
@@ -2554,6 +2885,193 @@ impl GpuHandleRegistry {
             ));
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct GpuCacheKey {
+    plugin_id_hash: u64,
+    device_generation: u64,
+    layout_version: u32,
+    fingerprint: GpuResourceFingerprint,
+}
+
+#[derive(Clone)]
+enum GpuCachedObject {
+    ShaderModule(wgpu::ShaderModule),
+    BindGroupLayout(wgpu::BindGroupLayout),
+    PipelineLayout(wgpu::PipelineLayout),
+    ComputePipeline(wgpu::ComputePipeline),
+}
+
+impl GpuCachedObject {
+    fn into_shader_module(self) -> Result<wgpu::ShaderModule, String> {
+        match self {
+            Self::ShaderModule(module) => Ok(module),
+            _ => Err("GPU cache entry kind mismatch for shader module".to_string()),
+        }
+    }
+
+    fn into_bind_group_layout(self) -> Result<wgpu::BindGroupLayout, String> {
+        match self {
+            Self::BindGroupLayout(layout) => Ok(layout),
+            _ => Err("GPU cache entry kind mismatch for bind-group layout".to_string()),
+        }
+    }
+
+    fn into_pipeline_layout(self) -> Result<wgpu::PipelineLayout, String> {
+        match self {
+            Self::PipelineLayout(layout) => Ok(layout),
+            _ => Err("GPU cache entry kind mismatch for pipeline layout".to_string()),
+        }
+    }
+
+    fn into_compute_pipeline(self) -> Result<wgpu::ComputePipeline, String> {
+        match self {
+            Self::ComputePipeline(pipeline) => Ok(pipeline),
+            _ => Err("GPU cache entry kind mismatch for compute pipeline".to_string()),
+        }
+    }
+}
+
+struct GpuCacheEntry {
+    object: GpuCachedObject,
+}
+
+struct GpuPluginCache {
+    plugin_id_hash: u64,
+    device_identity: Option<usize>,
+    device_generation: u64,
+    hits: u64,
+    misses: u64,
+    entries: HashMap<GpuCacheKey, GpuCacheEntry>,
+}
+
+impl GpuPluginCache {
+    fn new(plugin_id: String) -> Self {
+        Self {
+            plugin_id_hash: semantic_hash(&plugin_id),
+            device_identity: None,
+            device_generation: 0,
+            hits: 0,
+            misses: 0,
+            entries: HashMap::new(),
+        }
+    }
+
+    fn resource_key(
+        &mut self,
+        device: &wgpu::Device,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuCacheKey {
+        self.resource_key_for_identity(device as *const wgpu::Device as usize, fingerprint)
+    }
+
+    fn resource_key_for_identity(
+        &mut self,
+        identity: usize,
+        fingerprint: GpuResourceFingerprint,
+    ) -> GpuCacheKey {
+        let device_generation = self.ensure_device_identity(identity);
+        GpuCacheKey {
+            plugin_id_hash: self.plugin_id_hash,
+            device_generation,
+            layout_version: GPU_CACHE_LAYOUT_VERSION,
+            fingerprint,
+        }
+    }
+
+    fn cached_object(&self, key: &GpuCacheKey) -> Option<GpuCachedObject> {
+        self.entries.get(key).map(|entry| entry.object.clone())
+    }
+
+    fn insert(&mut self, key: GpuCacheKey, object: GpuCachedObject) {
+        self.entries.insert(key, GpuCacheEntry { object });
+        self.record_miss();
+    }
+
+    fn record_hit(&mut self) {
+        self.hits = self.hits.saturating_add(1);
+    }
+
+    fn record_miss(&mut self) {
+        self.misses = self.misses.saturating_add(1);
+    }
+
+    fn stats(&self) -> GpuCacheStats {
+        GpuCacheStats {
+            hits: self.hits,
+            misses: self.misses,
+            entries: self.entries.len() as u64,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    fn ensure_device_identity(&mut self, identity: usize) -> u64 {
+        if self.device_identity != Some(identity) {
+            self.device_identity = Some(identity);
+            self.device_generation = self.device_generation.saturating_add(1);
+            self.entries.clear();
+        }
+        self.device_generation
+    }
+}
+
+fn semantic_hash<T: Hash>(value: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn fingerprint_for(kind: GpuHandleKind, value: impl Hash) -> GpuResourceFingerprint {
+    let mut hasher = DefaultHasher::new();
+    GPU_CACHE_LAYOUT_VERSION.hash(&mut hasher);
+    kind.hash(&mut hasher);
+    value.hash(&mut hasher);
+    GpuResourceFingerprint {
+        kind,
+        hash: hasher.finish(),
+    }
+}
+
+fn shader_module_fingerprint(descriptor: &GpuShaderModuleDescriptor) -> GpuResourceFingerprint {
+    fingerprint_for(GpuHandleKind::ShaderModule, &descriptor.wgsl)
+}
+
+fn bind_group_layout_fingerprint(
+    descriptor: &GpuBindGroupLayoutDescriptor,
+) -> GpuResourceFingerprint {
+    fingerprint_for(GpuHandleKind::BindGroupLayout, &descriptor.entries)
+}
+
+fn pipeline_layout_fingerprint(
+    bind_group_layouts: &[GpuResourceFingerprint],
+) -> GpuResourceFingerprint {
+    fingerprint_for(GpuHandleKind::PipelineLayout, bind_group_layouts)
+}
+
+fn compute_pipeline_fingerprint(
+    layout: GpuResourceFingerprint,
+    module: GpuResourceFingerprint,
+    entry_point: &str,
+) -> GpuResourceFingerprint {
+    fingerprint_for(
+        GpuHandleKind::ComputePipeline,
+        (layout, module, entry_point),
+    )
+}
+
+fn log_gpu_cache_event(resource: &str, status: GpuCacheStatus, elapsed_ms: u128) {
+    if rt_profile_enabled() {
+        log::info!(
+            "patinae.rt_profile host.gpu_cache resource={} status={:?} lazy_create_ms={}",
+            resource,
+            status,
+            elapsed_ms
+        );
     }
 }
 
@@ -4014,6 +4532,95 @@ mod loader_tests {
 
         assert_eq!(response.id, 10);
         assert!(response.result.is_err());
+    }
+
+    #[test]
+    fn gpu_cache_fingerprints_ignore_debug_labels() {
+        let first = shader_module_fingerprint(&GpuShaderModuleDescriptor {
+            label: Some("first".to_string()),
+            wgsl: "@compute @workgroup_size(1) fn main() {}".to_string(),
+        });
+        let second = shader_module_fingerprint(&GpuShaderModuleDescriptor {
+            label: Some("second".to_string()),
+            wgsl: "@compute @workgroup_size(1) fn main() {}".to_string(),
+        });
+        let different_source = shader_module_fingerprint(&GpuShaderModuleDescriptor {
+            label: Some("first".to_string()),
+            wgsl: "@compute @workgroup_size(2) fn main() {}".to_string(),
+        });
+
+        assert_eq!(first, second);
+        assert_ne!(first, different_source);
+    }
+
+    #[test]
+    fn gpu_cache_keys_are_plugin_scoped_and_device_scoped() {
+        let fingerprint = shader_module_fingerprint(&GpuShaderModuleDescriptor {
+            label: Some("shader".to_string()),
+            wgsl: "@compute @workgroup_size(1) fn main() {}".to_string(),
+        });
+        let mut plugin_a = GpuPluginCache::new("plugin-a@1".to_string());
+        let mut plugin_b = GpuPluginCache::new("plugin-b@1".to_string());
+
+        let first = plugin_a.resource_key_for_identity(10, fingerprint);
+        let repeated = plugin_a.resource_key_for_identity(10, fingerprint);
+        let other_plugin = plugin_b.resource_key_for_identity(10, fingerprint);
+        let other_device = plugin_a.resource_key_for_identity(11, fingerprint);
+
+        assert_eq!(first, repeated);
+        assert_ne!(first, other_plugin);
+        assert_ne!(first, other_device);
+        assert_eq!(plugin_a.stats().entries, 0);
+
+        plugin_a.record_hit();
+        plugin_a.record_miss();
+        let stats = plugin_a.stats();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+    }
+
+    #[test]
+    fn gpu_cache_stats_and_drop_require_gpu_runtime() {
+        let mut viewer = TraceFixtureViewer {
+            session: Session::new(),
+            chunks: Vec::new(),
+        };
+        let mut state = HostCommandRuntimeState::new(&mut viewer, CommandRuntimeRequirements::NONE);
+
+        let stats = state.handle_request(WireCommandRuntimeRequest::GpuCacheStats { id: 11 });
+        let drop = state.handle_request(WireCommandRuntimeRequest::GpuDropPluginCache { id: 12 });
+
+        assert_eq!(stats.id, 11);
+        assert_eq!(drop.id, 12);
+        assert!(stats.result.is_err());
+        assert!(drop.result.is_err());
+    }
+
+    #[test]
+    fn gpu_cache_stats_and_drop_roundtrip_without_device() {
+        let mut viewer = TraceFixtureViewer {
+            session: Session::new(),
+            chunks: Vec::new(),
+        };
+        let mut state =
+            HostCommandRuntimeState::new(&mut viewer, CommandRuntimeRequirements::GPU_COMMANDS);
+
+        let stats = state.handle_request(WireCommandRuntimeRequest::GpuCacheStats { id: 21 });
+        match stats.result.unwrap() {
+            WireCommandRuntimeValue::GpuCacheStats(stats) => {
+                assert_eq!(stats.hits, 0);
+                assert_eq!(stats.misses, 0);
+                assert_eq!(stats.entries, 0);
+            }
+            _ => panic!("unexpected cache stats response"),
+        }
+
+        let dropped =
+            state.handle_request(WireCommandRuntimeRequest::GpuDropPluginCache { id: 22 });
+        assert!(matches!(
+            dropped.result.unwrap(),
+            WireCommandRuntimeValue::GpuOk
+        ));
     }
 
     #[test]

@@ -437,6 +437,48 @@ pub trait ViewerLike {
         Err("GPU command runtime is not available".to_string())
     }
 
+    /// Create or lease a cached WGSL shader module.
+    fn gpu_create_cached_shader_module(
+        &mut self,
+        _descriptor: crate::GpuShaderModuleDescriptor,
+    ) -> Result<crate::GpuCachedHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create or lease a cached bind-group layout.
+    fn gpu_create_cached_bind_group_layout(
+        &mut self,
+        _descriptor: crate::GpuBindGroupLayoutDescriptor,
+    ) -> Result<crate::GpuCachedHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create or lease a cached pipeline layout.
+    fn gpu_create_cached_pipeline_layout(
+        &mut self,
+        _descriptor: crate::GpuPipelineLayoutDescriptor,
+    ) -> Result<crate::GpuCachedHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create or lease a cached compute pipeline.
+    fn gpu_create_cached_compute_pipeline(
+        &mut self,
+        _descriptor: crate::GpuComputePipelineDescriptor,
+    ) -> Result<crate::GpuCachedHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Query persistent GPU cache counters for the active plugin.
+    fn gpu_cache_stats(&mut self) -> Result<crate::GpuCacheStats, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Drop persistent cached GPU resources for the active plugin.
+    fn gpu_drop_plugin_cache(&mut self) -> Result<(), String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
     /// Create a bind group.
     fn gpu_create_bind_group(
         &mut self,
