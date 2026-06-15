@@ -20,6 +20,7 @@ pub(crate) mod passes;
 pub mod picking;
 pub(crate) mod pipelines;
 pub(crate) mod postprocess;
+mod render_artifacts;
 mod render_input;
 mod render_state;
 #[allow(dead_code)]
@@ -39,8 +40,14 @@ pub use frame::FrameTargets;
 pub use geometry_export::{
     DisplayedGeometry, DisplayedMaterial, DisplayedMesh, DisplayedMeshVertex,
     DisplayedObjectGeometry, DisplayedPrimitive, GeometryExportError, GeometryExportOptions,
+    TraceCylinder, TraceGeometryChunk, TraceLineSegment, TraceMaterial, TracePointSample,
+    TraceSphere, TraceTriangle,
 };
 pub use picking::{ObjectId, PackedId, PickHit, PickingMode, RenderConfig, RepKind};
+pub use render_artifacts::{
+    RenderArtifactBufferRef, RenderArtifactBufferRole, RenderArtifactPrimitiveTopology,
+    RenderArtifactRep, RenderArtifactSnapshot, RENDER_ARTIFACT_LAYOUT_VERSION,
+};
 pub use render_input::{
     pack_rep_rgb8, ColorLutEntry, MarkerUpdate, RenderInput, RenderMapInput, RenderMapMode,
     RenderObjectInput, RepColorLutEntry, SceneLod, REP_COLOR_INHERIT,

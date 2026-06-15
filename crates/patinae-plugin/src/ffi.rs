@@ -8,10 +8,13 @@
 use core::ffi::c_void;
 
 /// ABI version bumped when [`PluginDeclaration`] layout changes.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 6;
 
-/// Host callback table version expected by ABI v3 plugins.
-pub const HOST_CALLBACKS_VERSION: u32 = 3;
+/// Host callback table version expected by ABI v5 plugins.
+pub const HOST_CALLBACKS_VERSION: u32 = 5;
+
+/// Command runtime callback table version expected by ABI v4 plugins.
+pub const HOST_COMMAND_RUNTIME_CALLBACKS_VERSION: u32 = 1;
 
 /// SDK version checked between host and plugin at load time.
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -49,10 +52,19 @@ pub const CAPABILITY_HOTKEYS: u64 = 1 << 10;
 pub const COMMAND_RUNTIME_DISPLAYED_GEOMETRY: u64 = 1 << 0;
 /// Command runtime input: full serialized scene session.
 pub const COMMAND_RUNTIME_FULL_SESSION: u64 = 1 << 1;
+/// Command runtime input: command-scoped compact trace geometry stream.
+pub const COMMAND_RUNTIME_TRACE_GEOMETRY_STREAM: u64 = 1 << 2;
+/// Command runtime input: host-executed GPU command callbacks.
+pub const COMMAND_RUNTIME_GPU_COMMANDS: u64 = 1 << 3;
+/// Command runtime input: renderer-owned GPU artifact snapshot.
+pub const COMMAND_RUNTIME_RENDER_ARTIFACTS: u64 = 1 << 4;
 
 /// Runtime input bits known by this ABI.
-pub const KNOWN_COMMAND_RUNTIME_REQUIREMENTS: u64 =
-    COMMAND_RUNTIME_DISPLAYED_GEOMETRY | COMMAND_RUNTIME_FULL_SESSION;
+pub const KNOWN_COMMAND_RUNTIME_REQUIREMENTS: u64 = COMMAND_RUNTIME_DISPLAYED_GEOMETRY
+    | COMMAND_RUNTIME_FULL_SESSION
+    | COMMAND_RUNTIME_TRACE_GEOMETRY_STREAM
+    | COMMAND_RUNTIME_GPU_COMMANDS
+    | COMMAND_RUNTIME_RENDER_ARTIFACTS;
 
 /// Panel runtime input: full serialized scene session.
 pub const PANEL_RUNTIME_FULL_SESSION: u64 = 1 << 0;
@@ -202,6 +214,11 @@ pub struct PluginFormatHandlerHandle(pub *mut c_void);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PluginHotkeyHandle(pub *mut c_void);
 
+/// Opaque handle to host command runtime state.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostCommandRuntimeHandle(pub *mut c_void);
+
 /// ABI status returned by plugin and host callbacks.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,9 +258,33 @@ impl AbiStatus {
 /// Host-provided sink that copies runtime output bytes.
 pub type AbiBytesSinkFn = unsafe extern "C" fn(*mut c_void, AbiU8Slice) -> AbiStatus;
 
+/// Host command-runtime request callback.
+pub type HostCommandRuntimeRequestFn = unsafe extern "C" fn(
+    HostCommandRuntimeHandle,
+    AbiU8Slice,
+    AbiBytesSinkFn,
+    *mut c_void,
+) -> AbiStatus;
+
+/// Host command-runtime callback table.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct HostCommandRuntimeCallbacks {
+    /// Must equal [`HOST_COMMAND_RUNTIME_CALLBACKS_VERSION`].
+    pub table_version: u32,
+    /// Execute a command-scoped runtime request.
+    pub request: Option<HostCommandRuntimeRequestFn>,
+}
+
 /// Plugin command execution callback.
-pub type PluginCommandExecuteFn =
-    unsafe extern "C" fn(PluginCommandHandle, AbiU8Slice, AbiBytesSinkFn, *mut c_void) -> AbiStatus;
+pub type PluginCommandExecuteFn = unsafe extern "C" fn(
+    PluginCommandHandle,
+    AbiU8Slice,
+    *const HostCommandRuntimeCallbacks,
+    HostCommandRuntimeHandle,
+    AbiBytesSinkFn,
+    *mut c_void,
+) -> AbiStatus;
 /// Plugin command destroy callback.
 pub type PluginCommandDestroyFn = unsafe extern "C" fn(PluginCommandHandle) -> AbiStatus;
 

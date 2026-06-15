@@ -29,24 +29,26 @@ use crate::ffi::{
     AbiMessageHandlerVTable, AbiPanelDescriptor, AbiPanelVTable, AbiScriptHandlerDescriptor,
     AbiScriptHandlerVTable, AbiSettingDescriptor, AbiSettingValue, AbiSettingValueHint,
     AbiSettingValueHintSlice, AbiStatus, AbiStr, AbiStrSlice, AbiU8Slice, HostCallbacks,
-    HostRegistrarHandle, PluginCommandHandle, PluginFormatHandlerHandle, PluginHotkeyHandle,
-    PluginMessageHandlerHandle, PluginPanelHandle, PluginScriptHandlerHandle, ARG_HINT_COLOR,
-    ARG_HINT_COMMAND, ARG_HINT_LABEL_PROPERTY, ARG_HINT_NAMED_SELECTION, ARG_HINT_NONE,
-    ARG_HINT_OBJECT, ARG_HINT_PATH, ARG_HINT_REPRESENTATION, ARG_HINT_SELECTION, ARG_HINT_SETTING,
-    ARG_HINT_SETTING_VALUE, HOST_CALLBACKS_VERSION, PANEL_PLACEMENT_BOTTOM, PANEL_PLACEMENT_RIGHT,
-    SETTING_TYPE_BLANK, SETTING_TYPE_BOOL, SETTING_TYPE_COLOR, SETTING_TYPE_FLOAT,
-    SETTING_TYPE_FLOAT3, SETTING_TYPE_INT, SETTING_TYPE_STRING, SETTING_VALUE_BOOL,
-    SETTING_VALUE_COLOR, SETTING_VALUE_FLOAT, SETTING_VALUE_FLOAT3, SETTING_VALUE_INT,
-    SETTING_VALUE_STRING, SIDE_EFFECT_COLOR_REBUILD, SIDE_EFFECT_FULL_REBUILD,
-    SIDE_EFFECT_ORTHO_DIRTY, SIDE_EFFECT_REPRESENTATION_REBUILD, SIDE_EFFECT_SCENE_CHANGED,
-    SIDE_EFFECT_SCENE_INVALIDATE, SIDE_EFFECT_SEQ_CHANGED, SIDE_EFFECT_SHADER_COMPUTE_LIGHTING,
-    SIDE_EFFECT_SHADER_RELOAD, SIDE_EFFECT_STEREO_UPDATE, SIDE_EFFECT_SURFACE_TRANSPARENCY,
-    SIDE_EFFECT_VIEWPORT_UPDATE,
+    HostCommandRuntimeCallbacks, HostCommandRuntimeHandle, HostRegistrarHandle,
+    PluginCommandHandle, PluginFormatHandlerHandle, PluginHotkeyHandle, PluginMessageHandlerHandle,
+    PluginPanelHandle, PluginScriptHandlerHandle, ARG_HINT_COLOR, ARG_HINT_COMMAND,
+    ARG_HINT_LABEL_PROPERTY, ARG_HINT_NAMED_SELECTION, ARG_HINT_NONE, ARG_HINT_OBJECT,
+    ARG_HINT_PATH, ARG_HINT_REPRESENTATION, ARG_HINT_SELECTION, ARG_HINT_SETTING,
+    ARG_HINT_SETTING_VALUE, HOST_CALLBACKS_VERSION, HOST_COMMAND_RUNTIME_CALLBACKS_VERSION,
+    PANEL_PLACEMENT_BOTTOM, PANEL_PLACEMENT_RIGHT, SETTING_TYPE_BLANK, SETTING_TYPE_BOOL,
+    SETTING_TYPE_COLOR, SETTING_TYPE_FLOAT, SETTING_TYPE_FLOAT3, SETTING_TYPE_INT,
+    SETTING_TYPE_STRING, SETTING_VALUE_BOOL, SETTING_VALUE_COLOR, SETTING_VALUE_FLOAT,
+    SETTING_VALUE_FLOAT3, SETTING_VALUE_INT, SETTING_VALUE_STRING, SIDE_EFFECT_COLOR_REBUILD,
+    SIDE_EFFECT_FULL_REBUILD, SIDE_EFFECT_ORTHO_DIRTY, SIDE_EFFECT_REPRESENTATION_REBUILD,
+    SIDE_EFFECT_SCENE_CHANGED, SIDE_EFFECT_SCENE_INVALIDATE, SIDE_EFFECT_SEQ_CHANGED,
+    SIDE_EFFECT_SHADER_COMPUTE_LIGHTING, SIDE_EFFECT_SHADER_RELOAD, SIDE_EFFECT_STEREO_UPDATE,
+    SIDE_EFFECT_SURFACE_TRANSPARENCY, SIDE_EFFECT_VIEWPORT_UPDATE,
 };
 use crate::wire::{
-    self, WireCommandInput, WireCommandOutput, WireDynCmdRegistration, WireFormatReadInput,
-    WireFormatReadOutput, WireFormatWriteInput, WireFormatWriteOutput, WireHostQuery,
-    WireHostQueryResult, WireHotkeyAction, WireHotkeyRegistration, WireMessageInput,
+    self, WireCommandInput, WireCommandOutput, WireCommandRuntimeRequest,
+    WireCommandRuntimeResponse, WireCommandRuntimeValue, WireDynCmdRegistration,
+    WireFormatReadInput, WireFormatReadOutput, WireFormatWriteInput, WireFormatWriteOutput,
+    WireHostQuery, WireHostQueryResult, WireHotkeyAction, WireHotkeyRegistration, WireMessageInput,
     WireMessageOutput, WirePanelEventInput, WirePanelEventOutput, WirePanelSnapshotOutput,
     WirePollInput, WirePollOutput, WirePollSharedInput, WireScriptInput, WireScriptOutput,
     WireViewerAction, RUNTIME_WIRE_VERSION,
@@ -712,17 +714,22 @@ impl<'a> PluginRegistrar<'a> {
 unsafe extern "C" fn plugin_command_execute(
     handle: PluginCommandHandle,
     input: AbiU8Slice,
+    runtime_callbacks: *const HostCommandRuntimeCallbacks,
+    runtime_handle: HostCommandRuntimeHandle,
     sink: AbiBytesSinkFn,
     sink_user_data: *mut c_void,
 ) -> AbiStatus {
     runtime_status(|| {
         let input: WireCommandInput = decode_abi(input)?;
         validate_wire_version(input.wire_version)?;
+        let command_runtime = CommandRuntimeClient::from_abi(runtime_callbacks, runtime_handle)?;
         let mut viewer = RuntimeViewer::from_session_bytes(
             &input.session,
             input.viewport_width,
             input.viewport_height,
             input.displayed_geometry,
+            input.displayed_geometry_spool,
+            command_runtime,
         )?;
         viewer.session.viewport_image = input.viewport_image;
         let dynamic_settings = wire::dynamic_registry_from_wire(&input.dynamic_settings)?;
@@ -1237,10 +1244,379 @@ impl Write for SharedVecWriter {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CommandRuntimeClient {
+    callbacks: *const HostCommandRuntimeCallbacks,
+    handle: HostCommandRuntimeHandle,
+}
+
+impl CommandRuntimeClient {
+    fn from_abi(
+        callbacks: *const HostCommandRuntimeCallbacks,
+        handle: HostCommandRuntimeHandle,
+    ) -> Result<Option<Self>, String> {
+        if callbacks.is_null() {
+            return Ok(None);
+        }
+
+        // SAFETY: The host passes a callback table that must remain valid for
+        // the duration of the command execution call.
+        let table = unsafe { &*callbacks };
+        if table.table_version != HOST_COMMAND_RUNTIME_CALLBACKS_VERSION {
+            return Err(format!(
+                "host command runtime callback version mismatch: got {}, expected {}",
+                table.table_version, HOST_COMMAND_RUNTIME_CALLBACKS_VERSION
+            ));
+        }
+        if table.request.is_none() {
+            return Ok(None);
+        }
+
+        Ok(Some(Self { callbacks, handle }))
+    }
+
+    fn request(
+        self,
+        request: &WireCommandRuntimeRequest,
+    ) -> Result<WireCommandRuntimeResponse, String> {
+        // SAFETY: `CommandRuntimeClient` is only created after validating the
+        // callback table pointer for the active command execution call.
+        let table = unsafe { &*self.callbacks };
+        let request_fn = table
+            .request
+            .ok_or_else(|| "host command runtime request callback was null".to_string())?;
+        let input_bytes = wire::encode(request)?;
+        let input = AbiU8Slice {
+            ptr: input_bytes.as_ptr(),
+            len: input_bytes.len(),
+        };
+        let mut output = RuntimeBytes::default();
+        let output_ptr = (&mut output as *mut RuntimeBytes).cast::<c_void>();
+        // SAFETY: The input bytes live until the callback returns, and the
+        // output sink copies host-owned bytes into `output`.
+        let status = unsafe { request_fn(self.handle, input, runtime_bytes_sink, output_ptr) };
+        if !status.is_ok() {
+            return Err(format!(
+                "host command runtime request returned status {}",
+                status.code
+            ));
+        }
+        let response: WireCommandRuntimeResponse = wire::decode(&output.bytes)?;
+        validate_wire_version(response.wire_version)?;
+        Ok(response)
+    }
+
+    fn for_each_trace_geometry_chunk(
+        self,
+        visitor: &mut dyn FnMut(patinae_render::TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut next_id = 1u64;
+        let open =
+            self.request(&WireCommandRuntimeRequest::OpenTraceGeometryStream { id: next_id })?;
+        validate_runtime_response_id(&open, next_id)?;
+        let stream_id = match open.result? {
+            WireCommandRuntimeValue::TraceGeometryOpened(opened) => opened.stream_id,
+            _ => return Err("host returned unexpected trace stream open response".to_string()),
+        };
+        next_id += 1;
+
+        let result = loop {
+            let response = self.request(&WireCommandRuntimeRequest::ReadTraceGeometryStream {
+                id: next_id,
+                stream_id,
+            })?;
+            validate_runtime_response_id(&response, next_id)?;
+            next_id += 1;
+            match response.result? {
+                WireCommandRuntimeValue::TraceGeometryChunk(Some(chunk)) => {
+                    visitor(wire::trace_geometry_chunk_from_wire(chunk))?;
+                }
+                WireCommandRuntimeValue::TraceGeometryChunkBytes(Some(bytes)) => {
+                    let chunk = wire::decode(&bytes)?;
+                    visitor(wire::trace_geometry_chunk_from_wire(chunk))?;
+                }
+                WireCommandRuntimeValue::TraceGeometryChunk(None) => break Ok(()),
+                WireCommandRuntimeValue::TraceGeometryChunkBytes(None) => break Ok(()),
+                _ => break Err("host returned unexpected trace stream read response".to_string()),
+            }
+        };
+
+        let close = self.request(&WireCommandRuntimeRequest::CloseTraceGeometryStream {
+            id: next_id,
+            stream_id,
+        });
+        match (result, close) {
+            (Ok(()), Ok(response)) => {
+                validate_runtime_response_id(&response, next_id)?;
+                match response.result? {
+                    WireCommandRuntimeValue::TraceGeometryClosed => Ok(()),
+                    _ => Err("host returned unexpected trace stream close response".to_string()),
+                }
+            }
+            (Err(error), Ok(_)) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(close_error)) => Err(format!("{error}; close failed: {close_error}")),
+        }
+    }
+
+    fn open_render_artifact_snapshot(
+        self,
+    ) -> Result<patinae_scene::RenderArtifactSnapshotDescriptor, String> {
+        let response =
+            self.request(&WireCommandRuntimeRequest::OpenRenderArtifactSnapshot { id: 1 })?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::RenderArtifactSnapshotOpened(snapshot) => Ok(snapshot),
+            _ => Err("host returned unexpected render artifact snapshot response".to_string()),
+        }
+    }
+
+    fn close_render_artifact_snapshot(self, snapshot_id: u64) -> Result<(), String> {
+        let response = self.request(&WireCommandRuntimeRequest::CloseRenderArtifactSnapshot {
+            id: 1,
+            snapshot_id,
+        })?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::RenderArtifactSnapshotClosed => Ok(()),
+            _ => Err("host returned unexpected render artifact close response".to_string()),
+        }
+    }
+
+    fn gpu_device_limits(self) -> Result<patinae_scene::GpuDeviceLimits, String> {
+        let response = self.request(&WireCommandRuntimeRequest::GpuDeviceLimits { id: 1 })?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuDeviceLimits(limits) => Ok(limits),
+            _ => Err("host returned unexpected GPU limits response".to_string()),
+        }
+    }
+
+    fn gpu_create_buffer(
+        self,
+        descriptor: patinae_scene::GpuBufferDescriptor,
+        initial_data: Option<Vec<u8>>,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateBuffer {
+            id: 1,
+            descriptor,
+            initial_data,
+        })
+    }
+
+    fn gpu_write_buffer(
+        self,
+        buffer: patinae_scene::GpuHandle,
+        offset: u64,
+        data: Vec<u8>,
+    ) -> Result<(), String> {
+        self.gpu_ok_response(WireCommandRuntimeRequest::GpuWriteBuffer {
+            id: 1,
+            buffer,
+            offset,
+            data,
+        })
+    }
+
+    fn gpu_copy_buffer_to_buffer(
+        self,
+        source: patinae_scene::GpuHandle,
+        source_offset: u64,
+        destination: patinae_scene::GpuHandle,
+        destination_offset: u64,
+        size: u64,
+    ) -> Result<(), String> {
+        self.gpu_ok_response(WireCommandRuntimeRequest::GpuCopyBufferToBuffer {
+            id: 1,
+            source,
+            source_offset,
+            destination,
+            destination_offset,
+            size,
+        })
+    }
+
+    fn gpu_read_buffer(
+        self,
+        buffer: patinae_scene::GpuHandle,
+        offset: u64,
+        size: u64,
+    ) -> Result<Vec<u8>, String> {
+        let response = self.request(&WireCommandRuntimeRequest::GpuReadBuffer {
+            id: 1,
+            buffer,
+            offset,
+            size,
+        })?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuBytes(bytes) => Ok(bytes),
+            _ => Err("host returned unexpected GPU read response".to_string()),
+        }
+    }
+
+    fn gpu_create_shader_module(
+        self,
+        descriptor: patinae_scene::GpuShaderModuleDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateShaderModule {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_bind_group_layout(
+        self,
+        descriptor: patinae_scene::GpuBindGroupLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateBindGroupLayout {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_pipeline_layout(
+        self,
+        descriptor: patinae_scene::GpuPipelineLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreatePipelineLayout {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_compute_pipeline(
+        self,
+        descriptor: patinae_scene::GpuComputePipelineDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateComputePipeline {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_create_bind_group(
+        self,
+        descriptor: patinae_scene::GpuBindGroupDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.gpu_handle_response(WireCommandRuntimeRequest::GpuCreateBindGroup {
+            id: 1,
+            descriptor,
+        })
+    }
+
+    fn gpu_dispatch_compute(
+        self,
+        pipeline: patinae_scene::GpuHandle,
+        bind_groups: Vec<patinae_scene::GpuHandle>,
+        workgroups: [u32; 3],
+    ) -> Result<(), String> {
+        self.gpu_ok_response(WireCommandRuntimeRequest::GpuDispatchCompute {
+            id: 1,
+            pipeline,
+            bind_groups,
+            workgroups,
+        })
+    }
+
+    fn gpu_submit_batch(
+        self,
+        batch: patinae_scene::GpuSubmitBatch,
+    ) -> Result<patinae_scene::GpuBatchResult, String> {
+        let response = self.request(&WireCommandRuntimeRequest::GpuSubmitBatch { id: 1, batch })?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuBatchResult(result) => Ok(result),
+            _ => Err("host returned unexpected GPU batch response".to_string()),
+        }
+    }
+
+    fn gpu_drop_handles(self, handles: Vec<patinae_scene::GpuHandle>) -> Result<(), String> {
+        self.gpu_ok_response(WireCommandRuntimeRequest::GpuDropHandles { id: 1, handles })
+    }
+
+    fn gpu_handle_response(
+        self,
+        request: WireCommandRuntimeRequest,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        let response = self.request(&request)?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuHandle(handle) => Ok(handle),
+            _ => Err("host returned unexpected GPU handle response".to_string()),
+        }
+    }
+
+    fn gpu_ok_response(self, request: WireCommandRuntimeRequest) -> Result<(), String> {
+        let response = self.request(&request)?;
+        validate_runtime_response_id(&response, 1)?;
+        match response.result? {
+            WireCommandRuntimeValue::GpuOk => Ok(()),
+            _ => Err("host returned unexpected GPU ok response".to_string()),
+        }
+    }
+}
+
+#[derive(Default)]
+struct RuntimeBytes {
+    bytes: Vec<u8>,
+}
+
+unsafe extern "C" fn runtime_bytes_sink(user_data: *mut c_void, bytes: AbiU8Slice) -> AbiStatus {
+    if user_data.is_null() {
+        return AbiStatus::INVALID;
+    }
+    let copied = match copy_abi_bytes(bytes) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            log::warn!(
+                "Plugin command runtime byte sink rejected output: {}",
+                error
+            );
+            return AbiStatus::INVALID;
+        }
+    };
+    // SAFETY: The caller provides a valid `RuntimeBytes` pointer for the
+    // duration of this sink call. Null was checked above.
+    unsafe { &mut *(user_data.cast::<RuntimeBytes>()) }.bytes = copied;
+    AbiStatus::OK
+}
+
+fn copy_abi_bytes(bytes: AbiU8Slice) -> Result<Vec<u8>, String> {
+    if bytes.len == 0 {
+        return Ok(Vec::new());
+    }
+    if bytes.ptr.is_null() {
+        return Err("runtime response pointer was null".to_string());
+    }
+    if bytes.len > wire::MAX_WIRE_PAYLOAD_LEN {
+        return Err("runtime response exceeds ABI limit".to_string());
+    }
+    // SAFETY: The host callback must provide initialized bytes for the
+    // duration of the sink call. Null and length were checked above.
+    Ok(unsafe { std::slice::from_raw_parts(bytes.ptr, bytes.len) }.to_vec())
+}
+
+fn validate_runtime_response_id(
+    response: &WireCommandRuntimeResponse,
+    expected: u64,
+) -> Result<(), String> {
+    if response.id == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "host command runtime response id mismatch: got {}, expected {}",
+            response.id, expected
+        ))
+    }
+}
+
 struct RuntimeViewer {
     session: patinae_scene::Session,
     viewport_size: (u32, u32),
     displayed_geometry: Option<crate::wire::WireDisplayedGeometry>,
+    displayed_geometry_spool: Option<crate::wire::WireDisplayedGeometrySpool>,
+    command_runtime: Option<CommandRuntimeClient>,
     redraw_requested: bool,
 }
 
@@ -1250,11 +1626,18 @@ impl RuntimeViewer {
         width: u32,
         height: u32,
         displayed_geometry: Option<crate::wire::WireDisplayedGeometry>,
+        displayed_geometry_spool: Option<crate::wire::WireDisplayedGeometrySpool>,
+        command_runtime: Option<CommandRuntimeClient>,
     ) -> Result<Self, String> {
+        if displayed_geometry.is_some() && displayed_geometry_spool.is_some() {
+            return Err("displayed geometry was supplied twice".to_string());
+        }
         Ok(Self {
             session: wire::decode_session(bytes)?,
             viewport_size: (width, height),
             displayed_geometry,
+            displayed_geometry_spool,
+            command_runtime,
             redraw_requested: false,
         })
     }
@@ -1401,10 +1784,184 @@ impl ViewerLike for RuntimeViewer {
         &mut self,
         _options: &patinae_render::GeometryExportOptions,
     ) -> Result<patinae_render::DisplayedGeometry, String> {
-        self.displayed_geometry
-            .clone()
-            .map(wire::displayed_geometry_from_wire)
-            .ok_or_else(|| "displayed geometry was not supplied by the host".to_string())
+        if let Some(displayed_geometry) = self.displayed_geometry.clone() {
+            return Ok(wire::displayed_geometry_from_wire(displayed_geometry));
+        }
+        let Some(spool) = &self.displayed_geometry_spool else {
+            return Err("displayed geometry was not supplied by the host".to_string());
+        };
+
+        let mut displayed = patinae_render::DisplayedGeometry::default();
+        wire::for_each_displayed_geometry_spool_chunk(spool, |chunk| {
+            displayed.objects.extend(chunk.objects);
+            Ok(())
+        })?;
+        Ok(displayed)
+    }
+
+    fn for_each_displayed_geometry_chunk(
+        &mut self,
+        _options: &patinae_render::GeometryExportOptions,
+        visitor: &mut dyn FnMut(patinae_render::DisplayedGeometry) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some(displayed_geometry) = self.displayed_geometry.clone() {
+            return visitor(wire::displayed_geometry_from_wire(displayed_geometry));
+        }
+        let Some(spool) = &self.displayed_geometry_spool else {
+            return Err("displayed geometry was not supplied by the host".to_string());
+        };
+        wire::for_each_displayed_geometry_spool_chunk(spool, visitor)
+    }
+
+    fn for_each_trace_geometry_chunk(
+        &mut self,
+        options: &patinae_render::GeometryExportOptions,
+        visitor: &mut dyn FnMut(patinae_render::TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if let Some(command_runtime) = self.command_runtime {
+            return command_runtime.for_each_trace_geometry_chunk(visitor);
+        }
+        self.for_each_displayed_geometry_chunk(options, &mut |displayed| {
+            visitor(patinae_render::TraceGeometryChunk::from_displayed(
+                &displayed,
+            ))
+        })
+    }
+
+    fn open_render_artifact_snapshot(
+        &mut self,
+    ) -> Result<patinae_scene::RenderArtifactSnapshotDescriptor, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .open_render_artifact_snapshot()
+    }
+
+    fn close_render_artifact_snapshot(&mut self, snapshot_id: u64) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .close_render_artifact_snapshot(snapshot_id)
+    }
+
+    fn gpu_device_limits_for_plugins(&mut self) -> Result<patinae_scene::GpuDeviceLimits, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_device_limits()
+    }
+
+    fn gpu_create_buffer(
+        &mut self,
+        descriptor: patinae_scene::GpuBufferDescriptor,
+        initial_data: Option<Vec<u8>>,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_buffer(descriptor, initial_data)
+    }
+
+    fn gpu_write_buffer(
+        &mut self,
+        buffer: patinae_scene::GpuHandle,
+        offset: u64,
+        data: Vec<u8>,
+    ) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_write_buffer(buffer, offset, data)
+    }
+
+    fn gpu_copy_buffer_to_buffer(
+        &mut self,
+        source: patinae_scene::GpuHandle,
+        source_offset: u64,
+        destination: patinae_scene::GpuHandle,
+        destination_offset: u64,
+        size: u64,
+    ) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_copy_buffer_to_buffer(source, source_offset, destination, destination_offset, size)
+    }
+
+    fn gpu_read_buffer(
+        &mut self,
+        buffer: patinae_scene::GpuHandle,
+        offset: u64,
+        size: u64,
+    ) -> Result<Vec<u8>, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_read_buffer(buffer, offset, size)
+    }
+
+    fn gpu_create_shader_module(
+        &mut self,
+        descriptor: patinae_scene::GpuShaderModuleDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_shader_module(descriptor)
+    }
+
+    fn gpu_create_bind_group_layout(
+        &mut self,
+        descriptor: patinae_scene::GpuBindGroupLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_bind_group_layout(descriptor)
+    }
+
+    fn gpu_create_pipeline_layout(
+        &mut self,
+        descriptor: patinae_scene::GpuPipelineLayoutDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_pipeline_layout(descriptor)
+    }
+
+    fn gpu_create_compute_pipeline(
+        &mut self,
+        descriptor: patinae_scene::GpuComputePipelineDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_compute_pipeline(descriptor)
+    }
+
+    fn gpu_create_bind_group(
+        &mut self,
+        descriptor: patinae_scene::GpuBindGroupDescriptor,
+    ) -> Result<patinae_scene::GpuHandle, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_create_bind_group(descriptor)
+    }
+
+    fn gpu_dispatch_compute(
+        &mut self,
+        pipeline: patinae_scene::GpuHandle,
+        bind_groups: Vec<patinae_scene::GpuHandle>,
+        workgroups: [u32; 3],
+    ) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_dispatch_compute(pipeline, bind_groups, workgroups)
+    }
+
+    fn gpu_submit_batch(
+        &mut self,
+        batch: patinae_scene::GpuSubmitBatch,
+    ) -> Result<patinae_scene::GpuBatchResult, String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_submit_batch(batch)
+    }
+
+    fn gpu_drop_handles(&mut self, handles: Vec<patinae_scene::GpuHandle>) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .gpu_drop_handles(handles)
     }
 }
 
@@ -1420,7 +1977,7 @@ struct RuntimeShared {
 impl RuntimeShared {
     fn from_wire(input: crate::wire::WireSharedInput) -> Result<Self, String> {
         validate_wire_version(input.wire_version)?;
-        let mut viewer = RuntimeViewer::from_session_bytes(&input.session, 0, 0, None)?;
+        let mut viewer = RuntimeViewer::from_session_bytes(&input.session, 0, 0, None, None, None)?;
         viewer.session.viewport_image = input.viewport_image;
         Ok(Self {
             viewer,
@@ -1453,6 +2010,8 @@ impl RuntimeShared {
                 session,
                 viewport_size: (0, 0),
                 displayed_geometry: None,
+                displayed_geometry_spool: None,
+                command_runtime: None,
                 redraw_requested: false,
             },
             command_registry: CommandRegistry::new(),

@@ -6,6 +6,7 @@
 use patinae_plugin::{define_plugin_settings, patinae_plugin};
 
 // Raytracer engine modules
+mod artifact_gpu;
 pub mod bvh;
 pub mod collect;
 pub mod commands;

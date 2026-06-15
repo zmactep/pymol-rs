@@ -255,6 +255,23 @@ impl StickRep {
         self.gpu.instance_capacity_count()
     }
 
+    pub(crate) fn export_instances(
+        &self,
+    ) -> Option<(
+        &wgpu::Buffer,
+        Option<&wgpu::Buffer>,
+        Option<&wgpu::Buffer>,
+        u32,
+    )> {
+        let buffer = self.gpu.compacted_instance_buffer()?;
+        Some((
+            buffer,
+            self.gpu.raw_count_buffer(),
+            self.gpu.indirect_buffer(),
+            self.gpu.instance_capacity_count(),
+        ))
+    }
+
     /// Upper bound on raw instances written by the build kernel. Used by
     /// `dispatch_cull` to size the cull dispatch.
     pub fn cull_upper_bound(&self) -> Option<u32> {

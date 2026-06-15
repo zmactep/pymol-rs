@@ -20,10 +20,11 @@ use patinae_mol::{Atom, ObjectMolecule};
 use patinae_plugin::ffi::{
     AbiBytesSinkFn, AbiCommandDescriptor, AbiCommandVTable, AbiPanelDescriptor, AbiPanelVTable,
     AbiSettingDescriptor, AbiSettingValue, AbiStatus, AbiStr, AbiStrSlice, AbiU8Slice,
-    HostCallbacks, HostRegistrarHandle, PluginCommandHandle, PluginDeclaration, PluginPanelHandle,
-    PluginRegisterFn, ABI_VERSION, CAPABILITY_COMMANDS, CAPABILITY_DIAGNOSTICS, CAPABILITY_PANELS,
-    CAPABILITY_REGISTRATION, CAPABILITY_SETTINGS, HOST_CALLBACKS_VERSION, MAX_ABI_STRING_LEN,
-    PANEL_PLACEMENT_RIGHT, SDK_VERSION, SETTING_TYPE_BOOL, SETTING_VALUE_BOOL,
+    HostCallbacks, HostCommandRuntimeCallbacks, HostCommandRuntimeHandle, HostRegistrarHandle,
+    PluginCommandHandle, PluginDeclaration, PluginPanelHandle, PluginRegisterFn, ABI_VERSION,
+    CAPABILITY_COMMANDS, CAPABILITY_DIAGNOSTICS, CAPABILITY_PANELS, CAPABILITY_REGISTRATION,
+    CAPABILITY_SETTINGS, HOST_CALLBACKS_VERSION, MAX_ABI_STRING_LEN, PANEL_PLACEMENT_RIGHT,
+    SDK_VERSION, SETTING_TYPE_BOOL, SETTING_VALUE_BOOL,
 };
 use patinae_plugin::registrar::{DynCmdRegistration, MessageHandler, PluginMetadata, PollContext};
 use patinae_plugin::wire::{
@@ -174,6 +175,19 @@ fn command_input_with_full_session_preserves_registry() {
     let decoded = decoded_wire_session(&input.session);
 
     assert!(decoded.registry.get("big_group").is_some());
+}
+
+#[test]
+fn command_input_with_trace_stream_omits_displayed_geometry_payloads() {
+    let mut session = Session::new();
+
+    let input = command_input_for_session(
+        &mut session,
+        CommandRuntimeRequirements::TRACE_GEOMETRY_STREAM,
+    );
+
+    assert!(input.displayed_geometry.is_none());
+    assert!(input.displayed_geometry_spool.is_none());
 }
 
 #[test]
@@ -611,6 +625,8 @@ fn fixture_send<T: Serialize>(
 unsafe extern "C" fn fixture_command_execute(
     handle: PluginCommandHandle,
     input: AbiU8Slice,
+    _runtime_callbacks: *const HostCommandRuntimeCallbacks,
+    _runtime_handle: HostCommandRuntimeHandle,
     sink: AbiBytesSinkFn,
     user_data: *mut c_void,
 ) -> AbiStatus {

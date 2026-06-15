@@ -6,14 +6,23 @@ use patinae_algos::surface::{extract_isomesh, extract_isosurface, ContourGeometr
 use super::state::*;
 use crate::geometry_export::analytic::{append_cpu_object_geometry, material_for_atom, oct_decode};
 use crate::geometry_export::{
-    DisplayedGeometry, DisplayedMaterial, DisplayedMesh, DisplayedMeshVertex,
-    DisplayedObjectGeometry, DisplayedPrimitive, GeometryExportError, GeometryExportOptions,
+    append_displayed_primitive_to_trace, trace_triangle_material, DisplayedGeometry,
+    DisplayedMaterial, DisplayedMesh, DisplayedMeshVertex, DisplayedObjectGeometry,
+    DisplayedPrimitive, GeometryExportError, GeometryExportOptions, TraceGeometryChunk,
+    TraceLineSegment, TraceMaterial, TraceTriangle,
 };
 use crate::picking::RepKind;
 use crate::render_input::{RenderInput, RenderMapInput, RenderMapMode, RenderObjectInput};
 use crate::representations::cartoon::CartoonRep;
 use crate::representations::mesh::StdVertex;
 use crate::representations::surface::SurfaceRep;
+
+/// Vertices per trace mesh readback.
+///
+/// The value is divisible by both two and three so trace chunks never split a
+/// line segment or triangle. It keeps MessagePack chunks well below the 64 MiB
+/// plugin runtime ABI limit while avoiding excessive GPU map calls.
+const TRACE_MESH_READBACK_VERTICES: usize = 196_608;
 
 impl RenderState {
     /// Export the geometry currently displayed by the renderer.
@@ -139,6 +148,126 @@ impl RenderState {
             .retain(|object| !object.primitives.is_empty());
         Ok(geometry)
     }
+
+    /// Visit compact trace geometry for the currently displayed scene.
+    ///
+    /// This export follows the same renderer sync and representation builders
+    /// as [`Self::export_displayed_geometry`], but it converts directly into
+    /// compact trace chunks. GPU mesh buffers are read back in bounded ranges
+    /// and never assembled into one whole-scene displayed-geometry payload.
+    pub fn for_each_trace_geometry_chunk(
+        &mut self,
+        input: &RenderInput<'_>,
+        options: &GeometryExportOptions,
+        visitor: &mut dyn FnMut(TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), GeometryExportError> {
+        self.sync(input);
+
+        let mut object_lookup: HashMap<u32, &RenderObjectInput<'_>> =
+            HashMap::with_capacity(input.objects.len());
+
+        for object in input.objects {
+            object_lookup.insert(object.object_id.0, object);
+            let mut displayed = DisplayedObjectGeometry {
+                object_id: object.object_id,
+                primitives: Vec::new(),
+            };
+            append_cpu_object_geometry(&mut displayed, object, input.settings, options);
+            visit_displayed_object_as_trace(&displayed, visitor)?;
+        }
+
+        if options.include_meshes {
+            for map in input.maps {
+                let mut displayed = DisplayedObjectGeometry {
+                    object_id: map.object_id,
+                    primitives: Vec::new(),
+                };
+                append_map_geometry(&mut displayed, map);
+                visit_displayed_object_as_trace(&displayed, visitor)?;
+            }
+
+            for &(object_id, rep_kind) in &self.scene.draw_order {
+                let Some(entry) = self.scene.reps.get(&(object_id, rep_kind)) else {
+                    continue;
+                };
+                let Some(object_input) = object_lookup.get(&object_id).copied() else {
+                    continue;
+                };
+
+                match rep_kind {
+                    RepKind::Cartoon | RepKind::Ribbon => {
+                        let Some(rep) = entry.rep.as_any().downcast_ref::<CartoonRep>() else {
+                            continue;
+                        };
+                        let Some((buffer, vertex_count)) = rep.export_vertices() else {
+                            continue;
+                        };
+                        for_each_buffer_range::<StdVertex>(
+                            &self.ctx.device,
+                            &self.ctx.queue,
+                            buffer,
+                            vertex_count as usize,
+                            TRACE_MESH_READBACK_VERTICES,
+                            "patinae.trace.cartoon_vertices",
+                            &mut |vertices| {
+                                let chunk = trace_chunk_from_mesh_vertices(
+                                    rep_kind,
+                                    vertices,
+                                    object_input,
+                                    input.settings,
+                                );
+                                visit_trace_chunk(chunk, visitor)
+                            },
+                        )?;
+                    }
+                    RepKind::Surface | RepKind::Mesh => {
+                        let Some(rep) = entry.rep.as_any().downcast_ref::<SurfaceRep>() else {
+                            continue;
+                        };
+                        for part in rep.export_parts() {
+                            let count = read_surface_vertex_count(
+                                &self.ctx.device,
+                                &self.ctx.queue,
+                                part.indirect_buf,
+                                part.max_vertices,
+                            )?;
+                            if count == 0 {
+                                continue;
+                            }
+                            for_each_buffer_range::<StdVertex>(
+                                &self.ctx.device,
+                                &self.ctx.queue,
+                                part.vertex_buf,
+                                count as usize,
+                                TRACE_MESH_READBACK_VERTICES,
+                                "patinae.trace.surface_vertices",
+                                &mut |vertices| {
+                                    let chunk = if rep_kind == RepKind::Mesh {
+                                        trace_chunk_from_mesh_lines(
+                                            vertices,
+                                            object_input,
+                                            input.settings,
+                                        )
+                                    } else {
+                                        trace_chunk_from_mesh_vertices(
+                                            rep_kind,
+                                            vertices,
+                                            object_input,
+                                            input.settings,
+                                        )
+                                    };
+                                    visit_trace_chunk(chunk, visitor)
+                                },
+                            )?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn append_map_geometry(object: &mut DisplayedObjectGeometry, input: &RenderMapInput<'_>) {
@@ -254,6 +383,106 @@ fn append_mesh_lines(
     }
 }
 
+fn visit_displayed_object_as_trace(
+    object: &DisplayedObjectGeometry,
+    visitor: &mut dyn FnMut(TraceGeometryChunk) -> Result<(), String>,
+) -> Result<(), GeometryExportError> {
+    let mut chunk = TraceGeometryChunk::default();
+    for primitive in &object.primitives {
+        append_displayed_primitive_to_trace(primitive, &mut chunk);
+    }
+    visit_trace_chunk(chunk, visitor)
+}
+
+fn visit_trace_chunk(
+    chunk: TraceGeometryChunk,
+    visitor: &mut dyn FnMut(TraceGeometryChunk) -> Result<(), String>,
+) -> Result<(), GeometryExportError> {
+    if chunk.is_empty() {
+        return Ok(());
+    }
+    visitor(chunk).map_err(GeometryExportError::Visitor)
+}
+
+fn trace_chunk_from_mesh_vertices(
+    rep: RepKind,
+    vertices: Vec<StdVertex>,
+    input: &RenderObjectInput<'_>,
+    scene_settings: &patinae_settings::ResolvedSettings,
+) -> TraceGeometryChunk {
+    let mut chunk = TraceGeometryChunk {
+        triangles: Vec::with_capacity(vertices.len() / 3),
+        ..TraceGeometryChunk::default()
+    };
+
+    for tri in vertices.chunks_exact(3) {
+        let a = trace_vertex_from_std(tri[0], rep, input, scene_settings);
+        let b = trace_vertex_from_std(tri[1], rep, input, scene_settings);
+        let c = trace_vertex_from_std(tri[2], rep, input, scene_settings);
+        chunk.triangles.push(TraceTriangle {
+            positions: [a.position, b.position, c.position],
+            normals: [a.normal, b.normal, c.normal],
+            material: trace_triangle_material(a.material, b.material, c.material),
+        });
+    }
+
+    chunk
+}
+
+fn trace_chunk_from_mesh_lines(
+    vertices: Vec<StdVertex>,
+    input: &RenderObjectInput<'_>,
+    scene_settings: &patinae_settings::ResolvedSettings,
+) -> TraceGeometryChunk {
+    let mut chunk = TraceGeometryChunk {
+        line_segments: Vec::with_capacity(vertices.len() / 2),
+        ..TraceGeometryChunk::default()
+    };
+
+    for pair in vertices.chunks_exact(2) {
+        let a = pair[0];
+        let b = pair[1];
+        chunk.line_segments.push(TraceLineSegment {
+            start: a.position,
+            end: b.position,
+            width_px: 1.0,
+            material_start: TraceMaterial::from_displayed(material_for_atom(
+                input,
+                scene_settings,
+                RepKind::Mesh,
+                a.group_id,
+            )),
+            material_end: TraceMaterial::from_displayed(material_for_atom(
+                input,
+                scene_settings,
+                RepKind::Mesh,
+                b.group_id,
+            )),
+        });
+    }
+
+    chunk
+}
+
+struct TraceVertex {
+    position: [f32; 3],
+    normal: [f32; 3],
+    material: DisplayedMaterial,
+}
+
+fn trace_vertex_from_std(
+    vertex: StdVertex,
+    rep: RepKind,
+    input: &RenderObjectInput<'_>,
+    scene_settings: &patinae_settings::ResolvedSettings,
+) -> TraceVertex {
+    TraceVertex {
+        position: vertex.position,
+        normal: oct_decode(vertex.normal_oct),
+        material: material_for_atom(input, scene_settings, rep, vertex.group_id),
+    }
+}
+
 fn transform_point(m: &[[f32; 4]; 4], p: [f32; 3]) -> [f32; 3] {
     [
         m[0][0] * p[0] + m[1][0] * p[1] + m[2][0] * p[2] + m[3][0],
@@ -299,10 +528,53 @@ fn read_buffer_prefix<T: Pod>(
     count: usize,
     label: &str,
 ) -> Result<Vec<T>, GeometryExportError> {
+    read_buffer_range(device, queue, source, 0, count, label)
+}
+
+fn for_each_buffer_range<T: Pod>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    source: &wgpu::Buffer,
+    count: usize,
+    chunk_len: usize,
+    label: &str,
+    visitor: &mut dyn FnMut(Vec<T>) -> Result<(), GeometryExportError>,
+) -> Result<(), GeometryExportError> {
+    if count == 0 || chunk_len == 0 {
+        return Ok(());
+    }
+
+    let mut start = 0usize;
+    while start < count {
+        let len = (count - start).min(chunk_len);
+        let vertices = read_buffer_range(device, queue, source, start, len, label)?;
+        visitor(vertices)?;
+        start += len;
+    }
+
+    Ok(())
+}
+
+fn read_buffer_range<T: Pod>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    source: &wgpu::Buffer,
+    start: usize,
+    count: usize,
+    label: &str,
+) -> Result<Vec<T>, GeometryExportError> {
     if count == 0 {
         return Ok(Vec::new());
     }
-    let byte_len = (count * std::mem::size_of::<T>()) as u64;
+    let elem_size = std::mem::size_of::<T>();
+    let byte_offset = start
+        .checked_mul(elem_size)
+        .ok_or_else(|| GeometryExportError::Gpu("GPU readback range overflow".to_string()))?
+        as u64;
+    let byte_len = count
+        .checked_mul(elem_size)
+        .ok_or_else(|| GeometryExportError::Gpu("GPU readback range overflow".to_string()))?
+        as u64;
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: byte_len.max(4),
@@ -313,7 +585,7 @@ fn read_buffer_prefix<T: Pod>(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("patinae.export.readback"),
     });
-    encoder.copy_buffer_to_buffer(source, 0, &staging, 0, byte_len);
+    encoder.copy_buffer_to_buffer(source, byte_offset, &staging, 0, byte_len);
     queue.submit(std::iter::once(encoder.finish()));
 
     let slice = staging.slice(0..byte_len);

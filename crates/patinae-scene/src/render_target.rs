@@ -16,7 +16,9 @@ use crate::error::ViewerError;
 use crate::object::ObjectRegistry;
 
 #[cfg(feature = "render-bridge")]
-use patinae_render::{DisplayedGeometry, GeometryExportOptions};
+use patinae_render::{
+    DisplayedGeometry, GeometryExportOptions, RenderArtifactSnapshot, TraceGeometryChunk,
+};
 
 /// Headless-renderable target. The host owns the GPU resources and
 /// implements `capture_png` however it wishes.
@@ -77,6 +79,67 @@ pub trait CaptureRenderer {
         );
         Err(ViewerError::capture_error(
             "Displayed geometry export not supported by this renderer",
+        ))
+    }
+
+    /// Visit compact trace geometry for the current displayed scene.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the renderer does not support trace export.
+    #[cfg(feature = "render-bridge")]
+    #[allow(clippy::too_many_arguments)]
+    fn for_each_trace_geometry_chunk(
+        &mut self,
+        camera: &mut Camera,
+        registry: &mut ObjectRegistry,
+        settings: &Settings,
+        named: &NamedPalette,
+        themed: &ThemedPalette,
+        clear_color: [f32; 3],
+        options: &GeometryExportOptions,
+        visitor: &mut dyn FnMut(TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), ViewerError> {
+        let displayed = self.export_displayed_geometry(
+            camera,
+            registry,
+            settings,
+            named,
+            themed,
+            clear_color,
+            options,
+        )?;
+        visitor(TraceGeometryChunk::from_displayed(&displayed)).map_err(ViewerError::capture_error)
+    }
+
+    /// Visit renderer-owned GPU artifacts for the current displayed scene.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the renderer cannot expose artifact handles.
+    #[cfg(feature = "render-bridge")]
+    #[allow(clippy::too_many_arguments)]
+    fn visit_render_artifacts(
+        &mut self,
+        camera: &mut Camera,
+        registry: &mut ObjectRegistry,
+        settings: &Settings,
+        named: &NamedPalette,
+        themed: &ThemedPalette,
+        clear_color: [f32; 3],
+        visitor: &mut dyn FnMut(RenderArtifactSnapshot<'_>) -> Result<(), String>,
+    ) -> Result<(), ViewerError> {
+        let _ = (
+            camera,
+            registry,
+            settings,
+            named,
+            themed,
+            clear_color,
+            visitor,
+        );
+        Err(ViewerError::capture_error(
+            "Render artifact snapshot not supported by this renderer",
         ))
     }
 }

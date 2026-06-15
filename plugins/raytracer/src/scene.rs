@@ -3,16 +3,11 @@
 //! Collects primitives from the viewer, builds a BVH, resolves settings,
 //! extracts camera matrices, and dispatches GPU raytracing.
 
-use std::sync::OnceLock;
-
 use patinae_color::NamedPalette;
 use patinae_plugin::prelude::*;
-use patinae_render::{
-    DisplayedGeometry, DisplayedMaterial, DisplayedMeshVertex, DisplayedPrimitive,
-    GeometryExportOptions,
-};
-use patinae_scene::{normalize_matrix, Object};
-use patinae_settings::ResolvedSettings;
+#[cfg(test)]
+use patinae_render::{DisplayedGeometry, TraceGeometryChunk};
+use patinae_scene::normalize_matrix;
 
 /// Reflect-scale adjustment for classic shading so multiple positional lights
 /// do not pile up.
@@ -36,257 +31,104 @@ fn compute_reflect_scale(light_count: i32, light_dirs: &[[f32; 3]]) -> f32 {
     }
 }
 
-use crate::bvh::Bvh;
-use crate::collect::{collect_from_molecule, CollectOptions, RayColorResolver};
-use crate::gpu::{raytrace, RaytraceParams};
-use crate::primitive::{GpuCylinder, GpuSphere, GpuTriangle, PrimitiveCollector, Primitives};
+use crate::gpu::RaytraceParams;
+#[cfg(test)]
+use crate::primitive::{GpuCylinder, GpuSphere};
+#[cfg(test)]
+use crate::primitive::{GpuTriangle, PrimitiveCollector, Primitives};
 use crate::settings::{RaytraceSettings, ResolvedRaySettings};
 
+#[cfg(test)]
 const RAY_LINE_RADIUS: f32 = 0.035;
+#[cfg(test)]
 const RAY_POINT_RADIUS: f32 = 0.035;
-
-static RAY_GPU_RUNTIME: OnceLock<RayGpuRuntime> = OnceLock::new();
-
 // ---------------------------------------------------------------------------
 // Error
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RaytraceSceneError {
-    #[error("No primitives to raytrace")]
-    NoPrimitives,
-    #[error("BVH construction failed: {0}")]
-    BvhFailed(String),
-    #[error("Displayed geometry export failed: {0}")]
-    GeometryExport(String),
-    #[error("Raytracing failed: {0}")]
-    RaytraceFailed(String),
-}
-
-struct RayGpuRuntime {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    #[error("Render artifact ray path failed: {0}")]
+    RenderArtifacts(String),
 }
 
 // ---------------------------------------------------------------------------
-// Shared helpers
+// Test/support helpers
 // ---------------------------------------------------------------------------
 
-/// Collect all raytracing primitives from the object registry and build a BVH.
-fn collect_scene_primitives(
-    viewer: &mut dyn ViewerLike,
-) -> Result<(Primitives, Bvh), RaytraceSceneError> {
-    let mut export_error = None;
-    let primitives = match viewer.export_displayed_geometry(&GeometryExportOptions::default()) {
-        Ok(displayed) => primitives_from_displayed_geometry(&displayed),
-        Err(err) => {
-            export_error = Some(err);
-            collect_scene_primitives_from_molecules(viewer)
-        }
-    };
-
-    if primitives.is_empty() {
-        if let Some(err) = export_error {
-            return Err(RaytraceSceneError::GeometryExport(format!(
-                "{err}; molecular fallback found no primitives"
-            )));
-        }
-        return Err(RaytraceSceneError::NoPrimitives);
-    }
-
-    let bvh = Bvh::build(&primitives).map_err(|e| RaytraceSceneError::BvhFailed(e.to_string()))?;
-
-    Ok((primitives, bvh))
-}
-
-fn collect_scene_primitives_from_molecules(viewer: &dyn ViewerLike) -> Primitives {
-    let mut collector = PrimitiveCollector::new();
-    let colors = RayColorResolver::new(viewer.named_palette(), &viewer.session().palette);
-
-    for name in viewer.objects().names() {
-        let Some(molecule_object) = viewer.objects().get_molecule(name) else {
-            continue;
-        };
-        if !molecule_object.state().enabled {
-            continue;
-        }
-        let Some(coord_set) = molecule_object.display_coord_set() else {
-            continue;
-        };
-
-        let resolved = ResolvedSettings::resolve(viewer.settings(), molecule_object.overrides());
-        let options = CollectOptions {
-            sphere_scale: resolved.sphere.scale,
-            stick_radius: resolved.stick.radius,
-            sphere_transparency: resolved.sphere.transparency,
-            stick_transparency: resolved.stick.transparency,
-            collect_spheres: molecule_object
-                .state()
-                .visible_reps
-                .is_visible(patinae_mol::RepMask::SPHERES),
-            collect_sticks: molecule_object
-                .state()
-                .visible_reps
-                .is_visible(patinae_mol::RepMask::STICKS),
-            collect_cartoon: false,
-            collect_surface: false,
-        };
-        let primitives =
-            collect_from_molecule(molecule_object.molecule(), coord_set, &colors, &options);
-        collector.add_spheres(primitives.spheres);
-        collector.add_cylinders(primitives.cylinders);
-        collector.add_triangles(primitives.triangles);
-    }
-
-    collector.build()
-}
-
-fn ray_gpu_runtime() -> Result<&'static RayGpuRuntime, RaytraceSceneError> {
-    if let Some(runtime) = RAY_GPU_RUNTIME.get() {
-        return Ok(runtime);
-    }
-
-    let runtime = create_ray_gpu_runtime()?;
-    let _ = RAY_GPU_RUNTIME.set(runtime);
-    RAY_GPU_RUNTIME.get().ok_or_else(|| {
-        RaytraceSceneError::RaytraceFailed("plugin GPU runtime was not initialized".into())
-    })
-}
-
-fn create_ray_gpu_runtime() -> Result<RayGpuRuntime, RaytraceSceneError> {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: None,
-    }))
-    .map_err(|err| RaytraceSceneError::RaytraceFailed(format!("GPU adapter unavailable: {err}")))?;
-
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("raytracer.plugin.device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: adapter.limits(),
-        memory_hints: wgpu::MemoryHints::Performance,
-        experimental_features: wgpu::ExperimentalFeatures::default(),
-        trace: wgpu::Trace::Off,
-    }))
-    .map_err(|err| RaytraceSceneError::RaytraceFailed(format!("GPU device unavailable: {err}")))?;
-
-    Ok(RayGpuRuntime { device, queue })
-}
-
+#[cfg(test)]
 fn primitives_from_displayed_geometry(displayed: &DisplayedGeometry) -> Primitives {
     let mut collector = PrimitiveCollector::new();
-    for object in &displayed.objects {
-        for primitive in &object.primitives {
-            match primitive {
-                DisplayedPrimitive::Mesh { mesh, .. } => {
-                    for tri in mesh.vertices.chunks_exact(3) {
-                        collector
-                            .add_triangle(ray_triangle_from_vertices(&tri[0], &tri[1], &tri[2]));
-                    }
-                }
-                DisplayedPrimitive::Sphere {
-                    center,
-                    radius,
-                    material,
-                    ..
-                } => {
-                    collector.add_sphere(GpuSphere::new(
-                        *center,
-                        *radius,
-                        material.rgba,
-                        material.transparency,
-                    ));
-                }
-                DisplayedPrimitive::Cylinder {
-                    start,
-                    end,
-                    radius,
-                    material_start,
-                    material_end,
-                    ..
-                } => {
-                    collector.add_cylinder(GpuCylinder::new(
-                        *start,
-                        *end,
-                        *radius,
-                        material_start.rgba,
-                        material_end.rgba,
-                        material_start.transparency.max(material_end.transparency),
-                    ));
-                }
-                DisplayedPrimitive::LineSegment {
-                    start,
-                    end,
-                    material_start,
-                    material_end,
-                    ..
-                } => {
-                    // Screen-space lines have no physical radius. The ray
-                    // adapter renders them as a thin world-space cylinder so
-                    // line/mesh displays still produce a visible ray image.
-                    collector.add_cylinder(GpuCylinder::new(
-                        *start,
-                        *end,
-                        RAY_LINE_RADIUS,
-                        material_start.rgba,
-                        material_end.rgba,
-                        material_start.transparency.max(material_end.transparency),
-                    ));
-                }
-                DisplayedPrimitive::PointSample {
-                    position, material, ..
-                } => {
-                    // Screen-space points are semantic samples; ray uses a
-                    // small physical sphere approximation.
-                    collector.add_sphere(GpuSphere::new(
-                        *position,
-                        RAY_POINT_RADIUS,
-                        material.rgba,
-                        material.transparency,
-                    ));
-                }
-            }
-        }
-    }
+    add_trace_geometry_primitives(
+        &TraceGeometryChunk::from_displayed(displayed),
+        &mut collector,
+    );
     collector.build()
 }
 
-fn ray_triangle_from_vertices(
-    a: &DisplayedMeshVertex,
-    b: &DisplayedMeshVertex,
-    c: &DisplayedMeshVertex,
-) -> GpuTriangle {
-    let material = triangle_material(a.material, b.material, c.material);
-    GpuTriangle::new(
-        a.position,
-        b.position,
-        c.position,
-        a.normal,
-        b.normal,
-        c.normal,
-        material.rgba,
-        material.transparency,
-    )
-}
+#[cfg(test)]
+fn add_trace_geometry_primitives(chunk: &TraceGeometryChunk, collector: &mut PrimitiveCollector) {
+    for sphere in &chunk.spheres {
+        collector.add_sphere(GpuSphere::new(
+            sphere.center,
+            sphere.radius,
+            sphere.material.rgba,
+            sphere.material.transparency,
+        ));
+    }
 
-fn triangle_material(
-    a: DisplayedMaterial,
-    b: DisplayedMaterial,
-    c: DisplayedMaterial,
-) -> DisplayedMaterial {
-    let rgba = [
-        (a.rgba[0] + b.rgba[0] + c.rgba[0]) / 3.0,
-        (a.rgba[1] + b.rgba[1] + c.rgba[1]) / 3.0,
-        (a.rgba[2] + b.rgba[2] + c.rgba[2]) / 3.0,
-        (a.rgba[3] + b.rgba[3] + c.rgba[3]) / 3.0,
-    ];
-    DisplayedMaterial {
-        base_rgba: rgba,
-        rep_rgba: rgba,
-        rgba,
-        transparency: a.transparency.max(b.transparency).max(c.transparency),
+    for cylinder in &chunk.cylinders {
+        collector.add_cylinder(GpuCylinder::new(
+            cylinder.start,
+            cylinder.end,
+            cylinder.radius,
+            cylinder.material_start.rgba,
+            cylinder.material_end.rgba,
+            cylinder
+                .material_start
+                .transparency
+                .max(cylinder.material_end.transparency),
+        ));
+    }
+
+    for triangle in &chunk.triangles {
+        collector.add_triangle(GpuTriangle::new(
+            triangle.positions[0],
+            triangle.positions[1],
+            triangle.positions[2],
+            triangle.normals[0],
+            triangle.normals[1],
+            triangle.normals[2],
+            triangle.material.rgba,
+            triangle.material.transparency,
+        ));
+    }
+
+    for line in &chunk.line_segments {
+        // Screen-space lines have no physical radius. The ray adapter renders
+        // them as a thin world-space cylinder so line/mesh displays remain
+        // visible in the ray image.
+        collector.add_cylinder(GpuCylinder::new(
+            line.start,
+            line.end,
+            RAY_LINE_RADIUS,
+            line.material_start.rgba,
+            line.material_end.rgba,
+            line.material_start
+                .transparency
+                .max(line.material_end.transparency),
+        ));
+    }
+
+    for point in &chunk.point_samples {
+        // Screen-space points are semantic samples; ray uses a small physical
+        // sphere approximation.
+        collector.add_sphere(GpuSphere::new(
+            point.position,
+            RAY_POINT_RADIUS,
+            point.material.rgba,
+            point.material.transparency,
+        ));
     }
 }
 
@@ -441,8 +283,6 @@ pub(crate) fn raytrace_scene(
     let final_width = width.unwrap_or(1024);
     let final_height = height.unwrap_or(768);
 
-    let (primitives, bvh) = collect_scene_primitives(viewer)?;
-
     let rt_settings = resolve_raytrace_settings(
         viewer.settings(),
         viewer.named_palette(),
@@ -457,8 +297,6 @@ pub(crate) fn raytrace_scene(
     let cam = extract_camera_matrices(camera.view_matrix(), camera.projection_matrix());
     camera.set_aspect(original_aspect);
 
-    let gpu = ray_gpu_runtime()?;
-
     let params = RaytraceParams::new(final_width, final_height)
         .with_antialias(antialias)
         .with_camera(
@@ -470,8 +308,19 @@ pub(crate) fn raytrace_scene(
         )
         .with_settings(rt_settings);
 
-    let image_data = raytrace(&gpu.device, &gpu.queue, &primitives, &bvh, &params)
-        .map_err(|e| RaytraceSceneError::RaytraceFailed(e.to_string()))?;
+    let snapshot = viewer
+        .open_render_artifact_snapshot()
+        .map_err(RaytraceSceneError::RenderArtifacts)?;
+    let snapshot_id = snapshot.snapshot_id;
+    let render_result = crate::artifact_gpu::raytrace_artifacts(viewer, &snapshot, &params)
+        .map_err(RaytraceSceneError::RenderArtifacts);
+    let close_result = viewer.close_render_artifact_snapshot(snapshot_id);
+    if let Err(err) = close_result {
+        return Err(RaytraceSceneError::RenderArtifacts(format!(
+            "failed to close render artifact snapshot: {err}"
+        )));
+    }
+    let image_data = render_result?;
 
     Ok((image_data, final_width, final_height))
 }
@@ -488,7 +337,16 @@ fn matrix_to_array(m: lin_alg::f32::Mat4) -> [[f32; 4]; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patinae_render::{DisplayedMesh, DisplayedObjectGeometry, ObjectId, RepKind};
+    use patinae_render::{
+        DisplayedMaterial, DisplayedMesh, DisplayedMeshVertex, DisplayedObjectGeometry,
+        DisplayedPrimitive, ObjectId, RepKind, TraceLineSegment, TraceMaterial, TracePointSample,
+    };
+
+    fn primitives_from_trace_geometry_chunk(chunk: &TraceGeometryChunk) -> Primitives {
+        let mut collector = PrimitiveCollector::new();
+        add_trace_geometry_primitives(chunk, &mut collector);
+        collector.build()
+    }
 
     #[test]
     fn displayed_cartoon_mesh_converts_to_ray_triangle() {
@@ -534,34 +392,78 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "GPU smoke; run explicitly when validating ray runtime"]
-    fn ray_smoke_writes_nonempty_png_from_displayed_geometry() {
-        let gpu = ray_gpu_runtime().expect("ray smoke runtime");
-
-        let material = DisplayedMaterial::from_rgba([0.2, 0.8, 0.4, 1.0]);
+    fn trace_triangle_matches_displayed_triangle_count() {
+        let material = DisplayedMaterial::from_rgba([0.8, 0.1, 0.2, 1.0]);
         let displayed = DisplayedGeometry {
             objects: vec![DisplayedObjectGeometry {
                 object_id: ObjectId(1),
-                primitives: vec![DisplayedPrimitive::Sphere {
-                    rep: RepKind::Sphere,
-                    owner_atom_id: 0,
-                    center: [0.0, 0.0, -5.0],
-                    radius: 1.2,
-                    material,
+                primitives: vec![DisplayedPrimitive::Mesh {
+                    rep: RepKind::Cartoon,
+                    mesh: DisplayedMesh {
+                        vertices: vec![
+                            DisplayedMeshVertex {
+                                position: [0.0, 0.0, 0.0],
+                                normal: [0.0, 0.0, 1.0],
+                                owner_atom_id: 0,
+                                material,
+                                flags: 0,
+                            },
+                            DisplayedMeshVertex {
+                                position: [1.0, 0.0, 0.0],
+                                normal: [0.0, 0.0, 1.0],
+                                owner_atom_id: 0,
+                                material,
+                                flags: 0,
+                            },
+                            DisplayedMeshVertex {
+                                position: [0.0, 1.0, 0.0],
+                                normal: [0.0, 0.0, 1.0],
+                                owner_atom_id: 0,
+                                material,
+                                flags: 0,
+                            },
+                        ],
+                    },
                 }],
             }],
         };
-        let primitives = primitives_from_displayed_geometry(&displayed);
-        let bvh = Bvh::build(&primitives).expect("ray smoke bvh");
-        let params = RaytraceParams::new(64, 64);
+        let displayed_primitives = primitives_from_displayed_geometry(&displayed);
+        let trace = TraceGeometryChunk::from_displayed(&displayed);
+        let trace_primitives = primitives_from_trace_geometry_chunk(&trace);
 
-        let image_data = raytrace(&gpu.device, &gpu.queue, &primitives, &bvh, &params)
-            .expect("ray smoke render");
-        assert!(image_data.iter().any(|&byte| byte != 0));
+        assert_eq!(
+            trace_primitives.total_count(),
+            displayed_primitives.total_count()
+        );
+        assert_eq!(trace_primitives.triangles.len(), 1);
+    }
 
-        let path = std::path::Path::new("/private/tmp/patinae-ray-export-smoke.png");
-        image::save_buffer(path, &image_data, 64, 64, image::ColorType::Rgba8)
-            .expect("save ray smoke png");
-        assert!(std::fs::metadata(path).unwrap().len() > 0);
+    #[test]
+    fn trace_line_and_point_samples_map_to_cylinder_and_sphere() {
+        let material = TraceMaterial {
+            rgba: [0.2, 0.8, 0.4, 1.0],
+            transparency: 0.0,
+        };
+        let trace = TraceGeometryChunk {
+            line_segments: vec![TraceLineSegment {
+                start: [0.0, 0.0, 0.0],
+                end: [1.0, 0.0, 0.0],
+                width_px: 1.0,
+                material_start: material,
+                material_end: material,
+            }],
+            point_samples: vec![TracePointSample {
+                position: [0.0, 1.0, 0.0],
+                radius_px: 1.0,
+                material,
+            }],
+            ..TraceGeometryChunk::default()
+        };
+
+        let primitives = primitives_from_trace_geometry_chunk(&trace);
+
+        assert_eq!(primitives.cylinders.len(), 1);
+        assert_eq!(primitives.spheres.len(), 1);
+        assert_eq!(primitives.total_count(), 2);
     }
 }

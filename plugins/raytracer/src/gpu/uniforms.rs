@@ -69,6 +69,23 @@ pub struct RaytraceUniforms {
 impl RaytraceUniforms {
     /// Create uniforms from raytracing parameters.
     pub fn from_params(params: &RaytraceParams, primitives: &Primitives, bvh: &Bvh) -> Self {
+        Self::from_counts(
+            params,
+            primitives.spheres.len() as u32,
+            primitives.cylinders.len() as u32,
+            primitives.triangles.len() as u32,
+            bvh.nodes.len() as u32,
+        )
+    }
+
+    /// Create uniforms from GPU-resident primitive and BVH counts.
+    pub(crate) fn from_counts(
+        params: &RaytraceParams,
+        sphere_count: u32,
+        cylinder_count: u32,
+        triangle_count: u32,
+        bvh_node_count: u32,
+    ) -> Self {
         let settings = &params.settings;
         let supersample = params.antialias.max(1);
         let width = (params.width * supersample) as f32;
@@ -100,10 +117,10 @@ impl RaytraceUniforms {
             fog_density: settings.fog_density,
             _pad0: 0.0,
             fog_color: settings.fog_color,
-            sphere_count: primitives.spheres.len() as u32,
-            cylinder_count: primitives.cylinders.len() as u32,
-            triangle_count: primitives.triangles.len() as u32,
-            bvh_node_count: bvh.nodes.len() as u32,
+            sphere_count,
+            cylinder_count,
+            triangle_count,
+            bvh_node_count,
             ray_shadow: if settings.ray_shadow { 1 } else { 0 },
             ray_max_passes: settings.ray_max_passes,
             ray_trace_fog: if settings.ray_trace_fog { 1 } else { 0 },

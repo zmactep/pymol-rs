@@ -4212,6 +4212,7 @@ dependencies = [
  "patinae-settings",
  "rmp-serde",
  "serde",
+ "wgpu",
 ]
 
 [[package]]
@@ -4872,6 +4873,7 @@ dependencies = [
  "image",
  "lin_alg",
  "log",
+ "naga",
  "patinae-color",
  "patinae-mol",
  "patinae-plugin",

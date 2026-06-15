@@ -309,6 +309,15 @@ impl CommandRuntimeRequirements {
     /// The command needs a full serialized session.
     pub const FULL_SESSION: Self = Self { bits: 1 << 1 };
 
+    /// The command needs a host-streamed compact trace geometry source.
+    pub const TRACE_GEOMETRY_STREAM: Self = Self { bits: 1 << 2 };
+
+    /// The command needs host-executed GPU runtime callbacks.
+    pub const GPU_COMMANDS: Self = Self { bits: 1 << 3 };
+
+    /// The command needs renderer-owned GPU artifact handles.
+    pub const RENDER_ARTIFACTS: Self = Self { bits: 1 << 4 };
+
     /// Builds requirements from raw ABI bits.
     pub const fn from_bits(bits: u64) -> Self {
         Self { bits }

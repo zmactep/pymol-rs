@@ -283,6 +283,23 @@ impl SphereRep {
         self.gpu.instance_capacity_count()
     }
 
+    pub(crate) fn export_instances(
+        &self,
+    ) -> Option<(
+        &wgpu::Buffer,
+        Option<&wgpu::Buffer>,
+        Option<&wgpu::Buffer>,
+        u32,
+    )> {
+        let buffer = self.gpu.compacted_instance_buffer()?;
+        Some((
+            buffer,
+            self.gpu.raw_count_buffer(),
+            self.gpu.indirect_buffer(),
+            self.gpu.instance_capacity_count(),
+        ))
+    }
+
     pub fn last_atom_count(&self) -> Option<u32> {
         self.last_atom_count
     }

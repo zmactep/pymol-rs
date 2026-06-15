@@ -315,6 +315,159 @@ pub trait ViewerLike {
         Err("Displayed geometry export not supported by this viewer".to_string())
     }
 
+    /// Visit displayed geometry in one or more renderer-neutral chunks.
+    #[cfg(feature = "render-bridge")]
+    fn for_each_displayed_geometry_chunk(
+        &mut self,
+        options: &patinae_render::GeometryExportOptions,
+        visitor: &mut dyn FnMut(patinae_render::DisplayedGeometry) -> Result<(), String>,
+    ) -> Result<(), String> {
+        visitor(self.export_displayed_geometry(options)?)
+    }
+
+    /// Visit compact trace geometry in one or more runtime chunks.
+    #[cfg(feature = "render-bridge")]
+    fn for_each_trace_geometry_chunk(
+        &mut self,
+        options: &patinae_render::GeometryExportOptions,
+        visitor: &mut dyn FnMut(patinae_render::TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), String> {
+        self.for_each_displayed_geometry_chunk(options, &mut |displayed| {
+            visitor(patinae_render::TraceGeometryChunk::from_displayed(
+                &displayed,
+            ))
+        })
+    }
+
+    /// Visit renderer-owned GPU artifacts for the currently displayed scene.
+    fn visit_render_artifacts(
+        &mut self,
+        _visitor: &mut dyn FnMut(patinae_render::RenderArtifactSnapshot<'_>) -> Result<(), String>,
+    ) -> Result<(), String> {
+        Err("render artifact snapshot was not supplied by the host".to_string())
+    }
+
+    /// Open a command-scoped renderer artifact snapshot.
+    fn open_render_artifact_snapshot(
+        &mut self,
+    ) -> Result<crate::RenderArtifactSnapshotDescriptor, String> {
+        Err("render artifact snapshot runtime is not available".to_string())
+    }
+
+    /// Close a command-scoped renderer artifact snapshot.
+    fn close_render_artifact_snapshot(&mut self, _snapshot_id: u64) -> Result<(), String> {
+        Err("render artifact snapshot runtime is not available".to_string())
+    }
+
+    /// Query GPU device limits for command-scoped plugin compute work.
+    fn gpu_device_limits_for_plugins(&mut self) -> Result<crate::GpuDeviceLimits, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a host-owned GPU buffer.
+    fn gpu_create_buffer(
+        &mut self,
+        _descriptor: crate::GpuBufferDescriptor,
+        _initial_data: Option<Vec<u8>>,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Write bytes into a host-owned GPU buffer.
+    fn gpu_write_buffer(
+        &mut self,
+        _buffer: crate::GpuHandle,
+        _offset: u64,
+        _data: Vec<u8>,
+    ) -> Result<(), String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Copy bytes between host-owned GPU buffers.
+    fn gpu_copy_buffer_to_buffer(
+        &mut self,
+        _source: crate::GpuHandle,
+        _source_offset: u64,
+        _destination: crate::GpuHandle,
+        _destination_offset: u64,
+        _size: u64,
+    ) -> Result<(), String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Read bytes from a host-owned GPU buffer.
+    fn gpu_read_buffer(
+        &mut self,
+        _buffer: crate::GpuHandle,
+        _offset: u64,
+        _size: u64,
+    ) -> Result<Vec<u8>, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a WGSL shader module.
+    fn gpu_create_shader_module(
+        &mut self,
+        _descriptor: crate::GpuShaderModuleDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a bind-group layout.
+    fn gpu_create_bind_group_layout(
+        &mut self,
+        _descriptor: crate::GpuBindGroupLayoutDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a pipeline layout.
+    fn gpu_create_pipeline_layout(
+        &mut self,
+        _descriptor: crate::GpuPipelineLayoutDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a compute pipeline.
+    fn gpu_create_compute_pipeline(
+        &mut self,
+        _descriptor: crate::GpuComputePipelineDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Create a bind group.
+    fn gpu_create_bind_group(
+        &mut self,
+        _descriptor: crate::GpuBindGroupDescriptor,
+    ) -> Result<crate::GpuHandle, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Dispatch a compute pipeline.
+    fn gpu_dispatch_compute(
+        &mut self,
+        _pipeline: crate::GpuHandle,
+        _bind_groups: Vec<crate::GpuHandle>,
+        _workgroups: [u32; 3],
+    ) -> Result<(), String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Submit one ordered GPU command batch.
+    fn gpu_submit_batch(
+        &mut self,
+        _batch: crate::GpuSubmitBatch,
+    ) -> Result<crate::GpuBatchResult, String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
+    /// Drop command-scoped GPU handles before command end.
+    fn gpu_drop_handles(&mut self, _handles: Vec<crate::GpuHandle>) -> Result<(), String> {
+        Err("GPU command runtime is not available".to_string())
+    }
+
     // =========================================================================
     // GPU Access — Optional Overrides
     // =========================================================================

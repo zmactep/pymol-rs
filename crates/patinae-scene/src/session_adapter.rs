@@ -201,6 +201,51 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
             .map_err(|e| e.to_string())
     }
 
+    #[cfg(feature = "render-bridge")]
+    fn for_each_trace_geometry_chunk(
+        &mut self,
+        options: &patinae_render::GeometryExportOptions,
+        visitor: &mut dyn FnMut(patinae_render::TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let target = self
+            .render_context
+            .as_deref_mut()
+            .ok_or_else(|| "No render context available".to_string())?;
+        target
+            .for_each_trace_geometry_chunk(
+                &mut self.session.camera,
+                &mut self.session.registry,
+                &self.session.settings,
+                &self.session.named_palette,
+                &self.session.palette,
+                self.session.clear_color,
+                options,
+                visitor,
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    fn visit_render_artifacts(
+        &mut self,
+        visitor: &mut dyn FnMut(patinae_render::RenderArtifactSnapshot<'_>) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let Some(render_context) = &mut self.render_context else {
+            return Err("render artifact snapshot requires an active renderer".to_string());
+        };
+
+        render_context
+            .visit_render_artifacts(
+                &mut self.session.camera,
+                &mut self.session.registry,
+                &self.session.settings,
+                &self.session.named_palette,
+                &self.session.palette,
+                self.session.clear_color,
+                visitor,
+            )
+            .map_err(|e| e.to_string())
+    }
+
     fn gpu_device(&self) -> Option<&wgpu::Device> {
         // `Arc::as_ref(&Arc<T>) -> &T` deref to the underlying device
         // without bumping the refcount.

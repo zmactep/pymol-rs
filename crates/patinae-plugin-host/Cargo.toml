@@ -23,6 +23,7 @@ patinae-select = { workspace = true }
 patinae-settings = { workspace = true }
 rmp-serde = { workspace = true }
 serde = { workspace = true }
+wgpu = { workspace = true }
 
 [lints]
 workspace = true

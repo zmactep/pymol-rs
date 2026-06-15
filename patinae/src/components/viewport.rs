@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use patinae_color::{NamedPalette, ThemedPalette};
 use patinae_render::picking::readback::PendingPick;
 use patinae_render::{
-    DisplayedGeometry, GeometryExportOptions, RenderInput, RenderState, SceneLod,
+    DisplayedGeometry, GeometryExportOptions, RenderArtifactSnapshot, RenderInput, RenderState,
+    SceneLod, TraceGeometryChunk,
 };
 use patinae_scene::{Camera, CaptureRenderer, ObjectRegistry, PickHit, Session, ViewerError};
 use patinae_settings::{ResolvedSettings, Settings, ShadingMode};
@@ -468,6 +469,96 @@ impl CaptureRenderer for ViewportRenderer {
         // Restore live viewport size on the next frame, matching capture.
         self.last_viewport_size = None;
         Ok(geometry)
+    }
+
+    fn for_each_trace_geometry_chunk(
+        &mut self,
+        _camera: &mut Camera,
+        registry: &mut ObjectRegistry,
+        settings: &Settings,
+        named: &NamedPalette,
+        themed: &ThemedPalette,
+        _clear_color: [f32; 3],
+        options: &GeometryExportOptions,
+        visitor: &mut dyn FnMut(TraceGeometryChunk) -> Result<(), String>,
+    ) -> Result<(), ViewerError> {
+        let colors = ResolvedSceneColors::build(registry, settings, named, themed);
+        let markers = ResolvedSceneMarkers::default();
+        let mut object_inputs = Vec::new();
+        let mut map_inputs = Vec::new();
+        visit_render_scene(
+            registry,
+            settings,
+            &colors,
+            &markers,
+            &mut |_name, obj| object_inputs.push(obj),
+            &mut |_name, map| map_inputs.push(map),
+        );
+
+        let resolved = ResolvedSettings::resolve(settings, None);
+        let lod = object_inputs
+            .first()
+            .map(|o| o.lod)
+            .unwrap_or(SceneLod::Auto);
+        let input = RenderInput {
+            objects: &object_inputs,
+            maps: &map_inputs,
+            settings: &resolved,
+            lod,
+        };
+
+        self.state
+            .for_each_trace_geometry_chunk(&input, options, visitor)
+            .map_err(|e| ViewerError::capture_error(e.to_string()))?;
+        registry.clear_all_dirty_molecules();
+        registry.clear_all_dirty_maps();
+
+        self.last_viewport_size = None;
+        Ok(())
+    }
+
+    fn visit_render_artifacts(
+        &mut self,
+        _camera: &mut Camera,
+        registry: &mut ObjectRegistry,
+        settings: &Settings,
+        named: &NamedPalette,
+        themed: &ThemedPalette,
+        _clear_color: [f32; 3],
+        visitor: &mut dyn FnMut(RenderArtifactSnapshot<'_>) -> Result<(), String>,
+    ) -> Result<(), ViewerError> {
+        let colors = ResolvedSceneColors::build(registry, settings, named, themed);
+        let markers = ResolvedSceneMarkers::default();
+        let mut object_inputs = Vec::new();
+        let mut map_inputs = Vec::new();
+        visit_render_scene(
+            registry,
+            settings,
+            &colors,
+            &markers,
+            &mut |_name, obj| object_inputs.push(obj),
+            &mut |_name, map| map_inputs.push(map),
+        );
+
+        let resolved = ResolvedSettings::resolve(settings, None);
+        let lod = object_inputs
+            .first()
+            .map(|o| o.lod)
+            .unwrap_or(SceneLod::Auto);
+        let input = RenderInput {
+            objects: &object_inputs,
+            maps: &map_inputs,
+            settings: &resolved,
+            lod,
+        };
+
+        let snapshot = self.state.render_artifact_snapshot(&input);
+        visitor(snapshot).map_err(ViewerError::capture_error)?;
+        registry.clear_all_dirty_molecules();
+        registry.clear_all_dirty_maps();
+
+        self.last_viewport_size = None;
+        Ok(())
     }
 }
 

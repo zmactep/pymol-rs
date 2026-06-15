@@ -21,6 +21,7 @@
 pub mod bridge;
 mod camera;
 mod error;
+mod gpu_runtime;
 pub mod highlight_state;
 mod input;
 mod keybindings;
@@ -39,6 +40,15 @@ mod viewer_trait;
 // Re-export main types
 pub use camera::{normalize_matrix, Camera, CameraAnimation, Projection, SceneView};
 pub use error::{SceneError, SceneResult, ViewerError};
+pub use gpu_runtime::{
+    GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
+    GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBindingResource, GpuBindingType,
+    GpuBufferBinding, GpuBufferBindingType, GpuBufferDescriptor, GpuBufferUsage,
+    GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle, GpuHandleKind,
+    GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages, GpuSubmitBatch,
+    RenderArtifactBufferDescriptor, RenderArtifactBufferRole, RenderArtifactPrimitiveTopology,
+    RenderArtifactRepDescriptor, RenderArtifactRepKind, RenderArtifactSnapshotDescriptor,
+};
 pub use highlight_state::HighlightState;
 pub use input::{ButtonState, CameraDelta, InputState, Modifiers, MouseButton, ScrollDelta};
 pub use keybindings::{parse_key_string, KeyBinding, KeyBindings, KeyCode};

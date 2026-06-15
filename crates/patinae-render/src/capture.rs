@@ -5,12 +5,11 @@
 //! modulo the requested resolution.
 //!
 //! The function is synchronous: it submits the encoder, blocks on
-//! `device.poll(Wait)` until the readback buffer is mapped, then encodes
-//! the PNG via the `image` crate.
+//! `device.poll(Wait)` until the readback buffer is mapped. Callers can either
+//! receive RGBA bytes directly or encode them as PNG.
 
 use std::path::Path;
 
-use crate::frame::FrameTargets;
 use crate::render_input::RenderInput;
 use crate::render_state::RenderState;
 use crate::uniforms::FrameUniforms;
@@ -32,16 +31,38 @@ pub fn capture_png(
     frame_uniforms: &FrameUniforms,
     input: &RenderInput,
 ) -> Result<(), CaptureError> {
+    let tightly_packed = capture_rgba(state, width, height, frame_uniforms, input)?;
+    let width = width.max(1);
+    let height = height.max(1);
+    let buffer = image::RgbaImage::from_raw(width, height, tightly_packed).ok_or(
+        CaptureError::Image("RgbaImage::from_raw size mismatch".into()),
+    )?;
+    buffer
+        .save_with_format(path, image::ImageFormat::Png)
+        .map_err(|e| CaptureError::Image(format!("PNG encode failed: {e}")))?;
+    Ok(())
+}
+
+/// Render `input` headlessly and return tightly-packed RGBA8 bytes.
+///
+/// The output is row-major, top-to-bottom, and has exactly
+/// `width.max(1) * height.max(1) * 4` bytes.
+pub fn capture_rgba(
+    state: &mut RenderState,
+    width: u32,
+    height: u32,
+    frame_uniforms: &FrameUniforms,
+    input: &RenderInput,
+) -> Result<Vec<u8>, CaptureError> {
     let width = width.max(1);
     let height = height.max(1);
 
-    // Resize internal targets to the requested aspect. We do not restore
-    // the previous size — the caller owns the live viewport size and will
-    // resize on its next frame anyway.
-    state.targets = FrameTargets::new(&state.ctx.device, width, height, state.ctx.color_format);
     state.uniforms = *frame_uniforms;
     state.uniforms.set_viewport(width, height);
-    state.ctx.upload_frame(&state.uniforms);
+    // Use the normal resize path so all target-dependent bind groups
+    // (WBOIT composite, SSAO, FXAA, overlay resources) point at the capture
+    // targets instead of stale live-viewport targets.
+    state.resize((width, height));
     state.sync(input);
 
     // Offscreen colour target — Rgba8Unorm so we can directly read it
@@ -135,13 +156,7 @@ pub fn capture_png(
     drop(mapped);
     staging.unmap();
 
-    let buffer = image::RgbaImage::from_raw(width, height, tightly_packed).ok_or(
-        CaptureError::Image("RgbaImage::from_raw size mismatch".into()),
-    )?;
-    buffer
-        .save_with_format(path, image::ImageFormat::Png)
-        .map_err(|e| CaptureError::Image(format!("PNG encode failed: {e}")))?;
-    Ok(())
+    Ok(tightly_packed)
 }
 
 #[derive(Debug, thiserror::Error)]

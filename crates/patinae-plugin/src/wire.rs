@@ -4,6 +4,7 @@
 //! bytes. This module owns those DTOs so the FFI boundary stays limited to
 //! pointer-length byte views and opaque handles.
 
+use std::io::Read;
 use std::sync::{Arc, RwLock};
 
 use patinae_cmd::{
@@ -15,19 +16,33 @@ use patinae_framework::plugin_ui::{PanelAction, PanelEvent, PanelSnapshot};
 use patinae_mol::ObjectMolecule;
 use patinae_render::{
     DisplayedGeometry, DisplayedMaterial, DisplayedMesh, DisplayedMeshVertex,
-    DisplayedObjectGeometry, DisplayedPrimitive, ObjectId, RepKind,
+    DisplayedObjectGeometry, DisplayedPrimitive, ObjectId, RepKind, TraceCylinder,
+    TraceGeometryChunk, TraceLineSegment, TraceMaterial, TracePointSample, TraceSphere,
+    TraceTriangle,
 };
-use patinae_scene::{Camera, MovieStateSnapshot, SceneView, Session, ViewportImage};
+use patinae_scene::{
+    Camera, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupLayoutDescriptor,
+    GpuBufferDescriptor, GpuComputePipelineDescriptor, GpuHandle, GpuPipelineLayoutDescriptor,
+    GpuShaderModuleDescriptor, GpuSubmitBatch, MovieStateSnapshot,
+    RenderArtifactSnapshotDescriptor, SceneView, Session, ViewportImage,
+};
 use patinae_settings::{
     DynamicSettingDescriptor, DynamicSettingStore, SettingType, SettingValue, SideEffectCategory,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Runtime wire version for MessagePack DTOs.
-pub const RUNTIME_WIRE_VERSION: u32 = 3;
+pub const RUNTIME_WIRE_VERSION: u32 = 5;
 
 /// Maximum MessagePack payload copied across the runtime ABI.
 pub const MAX_WIRE_PAYLOAD_LEN: usize = 64 * 1024 * 1024;
+
+/// Magic header for displayed-geometry spool files.
+///
+/// Spools are process-local handoff files used when geometry is too large for
+/// one ABI payload. Keeping a versioned header makes stale or mismatched files
+/// fail before any chunk decoding starts.
+pub const DISPLAYED_GEOMETRY_SPOOL_MAGIC: &[u8; 8] = b"PTGEO01\0";
 
 /// Serialized dynamic setting state.
 #[derive(Clone, Serialize, Deserialize)]
@@ -104,6 +119,109 @@ pub struct WirePollSharedInput {
 pub struct WireDisplayedGeometry {
     /// Display objects in render order.
     pub objects: Vec<WireDisplayedObjectGeometry>,
+}
+
+/// One renderer-neutral displayed-geometry chunk.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WireDisplayedGeometryChunk {
+    /// Display objects in render order for this chunk.
+    pub objects: Vec<WireDisplayedObjectGeometry>,
+}
+
+/// Process-local chunk spool for oversized displayed geometry.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WireDisplayedGeometrySpool {
+    /// Filesystem path to the length-prefixed chunk stream.
+    pub path: String,
+    /// Number of chunks written by the host.
+    pub chunk_count: usize,
+}
+
+/// Compact trace geometry chunk for command-scoped streaming.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WireTraceGeometryChunk {
+    /// Analytic spheres.
+    pub spheres: Vec<WireTraceSphere>,
+    /// Analytic cylinders.
+    pub cylinders: Vec<WireTraceCylinder>,
+    /// Triangle-list mesh primitives.
+    pub triangles: Vec<WireTraceTriangle>,
+    /// Semantic line samples.
+    pub line_segments: Vec<WireTraceLineSegment>,
+    /// Semantic point samples.
+    pub point_samples: Vec<WireTracePointSample>,
+}
+
+/// Compact trace material.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WireTraceMaterial {
+    /// Final resolved RGBA color.
+    pub rgba: [f32; 4],
+    /// PyMOL-style transparency.
+    pub transparency: f32,
+}
+
+/// Compact trace sphere.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WireTraceSphere {
+    /// Sphere center.
+    pub center: [f32; 3],
+    /// Sphere radius.
+    pub radius: f32,
+    /// Resolved material.
+    pub material: WireTraceMaterial,
+}
+
+/// Compact trace cylinder.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WireTraceCylinder {
+    /// Cylinder start.
+    pub start: [f32; 3],
+    /// Cylinder end.
+    pub end: [f32; 3],
+    /// Cylinder radius.
+    pub radius: f32,
+    /// Material at the start.
+    pub material_start: WireTraceMaterial,
+    /// Material at the end.
+    pub material_end: WireTraceMaterial,
+}
+
+/// Compact trace triangle.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WireTraceTriangle {
+    /// Triangle vertex positions.
+    pub positions: [[f32; 3]; 3],
+    /// Triangle vertex normals.
+    pub normals: [[f32; 3]; 3],
+    /// Pre-reduced material.
+    pub material: WireTraceMaterial,
+}
+
+/// Semantic line sample.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WireTraceLineSegment {
+    /// Line start.
+    pub start: [f32; 3],
+    /// Line end.
+    pub end: [f32; 3],
+    /// Screen-space width in pixels.
+    pub width_px: f32,
+    /// Material at the start.
+    pub material_start: WireTraceMaterial,
+    /// Material at the end.
+    pub material_end: WireTraceMaterial,
+}
+
+/// Semantic point sample.
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WireTracePointSample {
+    /// Point position.
+    pub position: [f32; 3],
+    /// Screen-space radius in pixels.
+    pub radius_px: f32,
+    /// Resolved material.
+    pub material: WireTraceMaterial,
 }
 
 /// Displayed geometry for one renderer object.
@@ -380,6 +498,182 @@ pub struct WireCommandInput {
     pub dynamic_settings: Vec<WireDynamicSetting>,
     /// Host-resolved displayed geometry, when requested by the command.
     pub displayed_geometry: Option<WireDisplayedGeometry>,
+    /// Host-resolved displayed geometry in process-local chunks.
+    pub displayed_geometry_spool: Option<WireDisplayedGeometrySpool>,
+}
+
+/// Command-scoped host runtime request.
+#[derive(Clone, Serialize, Deserialize)]
+pub enum WireCommandRuntimeRequest {
+    /// Open a compact trace geometry stream.
+    OpenTraceGeometryStream {
+        /// Correlation id.
+        id: u64,
+    },
+    /// Read the next compact trace geometry chunk.
+    ReadTraceGeometryStream {
+        /// Correlation id.
+        id: u64,
+        /// Host-owned stream id.
+        stream_id: u64,
+    },
+    /// Close a compact trace geometry stream.
+    CloseTraceGeometryStream {
+        /// Correlation id.
+        id: u64,
+        /// Host-owned stream id.
+        stream_id: u64,
+    },
+    /// Open a renderer artifact snapshot.
+    OpenRenderArtifactSnapshot {
+        /// Correlation id.
+        id: u64,
+    },
+    /// Close a renderer artifact snapshot.
+    CloseRenderArtifactSnapshot {
+        /// Correlation id.
+        id: u64,
+        /// Host-owned snapshot id.
+        snapshot_id: u64,
+    },
+    /// Query command-scoped GPU device limits.
+    GpuDeviceLimits {
+        /// Correlation id.
+        id: u64,
+    },
+    /// Create a host-owned GPU buffer.
+    GpuCreateBuffer {
+        /// Correlation id.
+        id: u64,
+        /// Portable buffer descriptor.
+        descriptor: GpuBufferDescriptor,
+        /// Optional initial bytes copied by the host.
+        initial_data: Option<Vec<u8>>,
+    },
+    /// Write bytes to a host-owned GPU buffer.
+    GpuWriteBuffer {
+        /// Correlation id.
+        id: u64,
+        /// Destination buffer handle.
+        buffer: GpuHandle,
+        /// Destination byte offset.
+        offset: u64,
+        /// Bytes copied by the host.
+        data: Vec<u8>,
+    },
+    /// Copy bytes between host-owned GPU buffers.
+    GpuCopyBufferToBuffer {
+        /// Correlation id.
+        id: u64,
+        source: GpuHandle,
+        source_offset: u64,
+        destination: GpuHandle,
+        destination_offset: u64,
+        size: u64,
+    },
+    /// Read bytes from a host-owned GPU buffer.
+    GpuReadBuffer {
+        /// Correlation id.
+        id: u64,
+        buffer: GpuHandle,
+        offset: u64,
+        size: u64,
+    },
+    /// Create a WGSL shader module.
+    GpuCreateShaderModule {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuShaderModuleDescriptor,
+    },
+    /// Create a bind-group layout.
+    GpuCreateBindGroupLayout {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuBindGroupLayoutDescriptor,
+    },
+    /// Create a pipeline layout.
+    GpuCreatePipelineLayout {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuPipelineLayoutDescriptor,
+    },
+    /// Create a compute pipeline.
+    GpuCreateComputePipeline {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuComputePipelineDescriptor,
+    },
+    /// Create a bind group.
+    GpuCreateBindGroup {
+        /// Correlation id.
+        id: u64,
+        descriptor: GpuBindGroupDescriptor,
+    },
+    /// Dispatch a compute pipeline.
+    GpuDispatchCompute {
+        /// Correlation id.
+        id: u64,
+        pipeline: GpuHandle,
+        bind_groups: Vec<GpuHandle>,
+        workgroups: [u32; 3],
+    },
+    /// Submit one ordered GPU command batch.
+    GpuSubmitBatch {
+        /// Correlation id.
+        id: u64,
+        batch: GpuSubmitBatch,
+    },
+    /// Drop host-owned GPU handles before command end.
+    GpuDropHandles {
+        /// Correlation id.
+        id: u64,
+        handles: Vec<GpuHandle>,
+    },
+}
+
+/// Command-scoped host runtime response.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WireCommandRuntimeResponse {
+    /// Must equal [`RUNTIME_WIRE_VERSION`].
+    pub wire_version: u32,
+    /// Correlation id.
+    pub id: u64,
+    /// Response value or portable error.
+    pub result: Result<WireCommandRuntimeValue, String>,
+}
+
+/// Command-scoped host runtime response value.
+#[derive(Clone, Serialize, Deserialize)]
+pub enum WireCommandRuntimeValue {
+    /// Trace geometry stream was opened.
+    TraceGeometryOpened(WireTraceGeometryOpened),
+    /// Next trace geometry chunk, or `None` at end of stream.
+    TraceGeometryChunk(Option<WireTraceGeometryChunk>),
+    /// Pre-encoded trace geometry chunk bytes, or `None` at end of stream.
+    TraceGeometryChunkBytes(Option<Vec<u8>>),
+    /// Trace geometry stream was closed.
+    TraceGeometryClosed,
+    /// Render artifact snapshot was opened.
+    RenderArtifactSnapshotOpened(RenderArtifactSnapshotDescriptor),
+    /// Render artifact snapshot was closed.
+    RenderArtifactSnapshotClosed,
+    /// GPU device limits.
+    GpuDeviceLimits(patinae_scene::GpuDeviceLimits),
+    /// Newly-created GPU resource handle.
+    GpuHandle(GpuHandle),
+    /// GPU operation completed without a value.
+    GpuOk,
+    /// Bytes read from a GPU buffer.
+    GpuBytes(Vec<u8>),
+    /// Result of an ordered GPU command batch.
+    GpuBatchResult(GpuBatchResult),
+}
+
+/// Open trace geometry stream metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireTraceGeometryOpened {
+    /// Host-owned stream id.
+    pub stream_id: u64,
 }
 
 /// Command execution output.
@@ -620,14 +914,7 @@ pub fn displayed_geometry_to_wire(displayed: &DisplayedGeometry) -> WireDisplaye
         objects: displayed
             .objects
             .iter()
-            .map(|object| WireDisplayedObjectGeometry {
-                object_id: object.object_id.0,
-                primitives: object
-                    .primitives
-                    .iter()
-                    .map(displayed_primitive_to_wire)
-                    .collect(),
-            })
+            .map(displayed_object_geometry_to_wire)
             .collect(),
     }
 }
@@ -638,19 +925,51 @@ pub fn displayed_geometry_from_wire(displayed: WireDisplayedGeometry) -> Display
         objects: displayed
             .objects
             .into_iter()
-            .map(|object| DisplayedObjectGeometry {
-                object_id: ObjectId(object.object_id),
-                primitives: object
-                    .primitives
-                    .into_iter()
-                    .map(displayed_primitive_from_wire)
-                    .collect(),
-            })
+            .map(displayed_object_geometry_from_wire)
             .collect(),
     }
 }
 
-fn displayed_primitive_to_wire(primitive: &DisplayedPrimitive) -> WireDisplayedPrimitive {
+/// Converts one displayed-geometry chunk into host geometry.
+pub fn displayed_geometry_chunk_from_wire(chunk: WireDisplayedGeometryChunk) -> DisplayedGeometry {
+    DisplayedGeometry {
+        objects: chunk
+            .objects
+            .into_iter()
+            .map(displayed_object_geometry_from_wire)
+            .collect(),
+    }
+}
+
+/// Converts one displayed object into its wire DTO.
+pub fn displayed_object_geometry_to_wire(
+    object: &DisplayedObjectGeometry,
+) -> WireDisplayedObjectGeometry {
+    WireDisplayedObjectGeometry {
+        object_id: object.object_id.0,
+        primitives: object
+            .primitives
+            .iter()
+            .map(displayed_primitive_to_wire)
+            .collect(),
+    }
+}
+
+fn displayed_object_geometry_from_wire(
+    object: WireDisplayedObjectGeometry,
+) -> DisplayedObjectGeometry {
+    DisplayedObjectGeometry {
+        object_id: ObjectId(object.object_id),
+        primitives: object
+            .primitives
+            .into_iter()
+            .map(displayed_primitive_from_wire)
+            .collect(),
+    }
+}
+
+/// Converts one displayed primitive into its wire DTO.
+pub fn displayed_primitive_to_wire(primitive: &DisplayedPrimitive) -> WireDisplayedPrimitive {
     match primitive {
         DisplayedPrimitive::Mesh { rep, mesh } => WireDisplayedPrimitive::Mesh {
             rep: rep.as_raw(),
@@ -835,6 +1154,207 @@ fn displayed_material_from_wire(material: WireDisplayedMaterial) -> DisplayedMat
     }
 }
 
+/// Converts compact trace geometry into wire DTOs.
+pub fn trace_geometry_chunk_to_wire(chunk: TraceGeometryChunk) -> WireTraceGeometryChunk {
+    WireTraceGeometryChunk {
+        spheres: chunk
+            .spheres
+            .into_iter()
+            .map(trace_sphere_to_wire)
+            .collect(),
+        cylinders: chunk
+            .cylinders
+            .into_iter()
+            .map(trace_cylinder_to_wire)
+            .collect(),
+        triangles: chunk
+            .triangles
+            .into_iter()
+            .map(trace_triangle_to_wire)
+            .collect(),
+        line_segments: chunk
+            .line_segments
+            .into_iter()
+            .map(trace_line_segment_to_wire)
+            .collect(),
+        point_samples: chunk
+            .point_samples
+            .into_iter()
+            .map(trace_point_sample_to_wire)
+            .collect(),
+    }
+}
+
+/// Converts compact trace wire DTOs into host trace geometry.
+pub fn trace_geometry_chunk_from_wire(chunk: WireTraceGeometryChunk) -> TraceGeometryChunk {
+    TraceGeometryChunk {
+        spheres: chunk
+            .spheres
+            .into_iter()
+            .map(trace_sphere_from_wire)
+            .collect(),
+        cylinders: chunk
+            .cylinders
+            .into_iter()
+            .map(trace_cylinder_from_wire)
+            .collect(),
+        triangles: chunk
+            .triangles
+            .into_iter()
+            .map(trace_triangle_from_wire)
+            .collect(),
+        line_segments: chunk
+            .line_segments
+            .into_iter()
+            .map(trace_line_segment_from_wire)
+            .collect(),
+        point_samples: chunk
+            .point_samples
+            .into_iter()
+            .map(trace_point_sample_from_wire)
+            .collect(),
+    }
+}
+
+fn trace_material_to_wire(material: TraceMaterial) -> WireTraceMaterial {
+    WireTraceMaterial {
+        rgba: material.rgba,
+        transparency: material.transparency,
+    }
+}
+
+fn trace_material_from_wire(material: WireTraceMaterial) -> TraceMaterial {
+    TraceMaterial {
+        rgba: material.rgba,
+        transparency: material.transparency,
+    }
+}
+
+fn trace_sphere_to_wire(sphere: TraceSphere) -> WireTraceSphere {
+    WireTraceSphere {
+        center: sphere.center,
+        radius: sphere.radius,
+        material: trace_material_to_wire(sphere.material),
+    }
+}
+
+fn trace_sphere_from_wire(sphere: WireTraceSphere) -> TraceSphere {
+    TraceSphere {
+        center: sphere.center,
+        radius: sphere.radius,
+        material: trace_material_from_wire(sphere.material),
+    }
+}
+
+fn trace_cylinder_to_wire(cylinder: TraceCylinder) -> WireTraceCylinder {
+    WireTraceCylinder {
+        start: cylinder.start,
+        end: cylinder.end,
+        radius: cylinder.radius,
+        material_start: trace_material_to_wire(cylinder.material_start),
+        material_end: trace_material_to_wire(cylinder.material_end),
+    }
+}
+
+fn trace_cylinder_from_wire(cylinder: WireTraceCylinder) -> TraceCylinder {
+    TraceCylinder {
+        start: cylinder.start,
+        end: cylinder.end,
+        radius: cylinder.radius,
+        material_start: trace_material_from_wire(cylinder.material_start),
+        material_end: trace_material_from_wire(cylinder.material_end),
+    }
+}
+
+fn trace_triangle_to_wire(triangle: TraceTriangle) -> WireTraceTriangle {
+    WireTraceTriangle {
+        positions: triangle.positions,
+        normals: triangle.normals,
+        material: trace_material_to_wire(triangle.material),
+    }
+}
+
+fn trace_triangle_from_wire(triangle: WireTraceTriangle) -> TraceTriangle {
+    TraceTriangle {
+        positions: triangle.positions,
+        normals: triangle.normals,
+        material: trace_material_from_wire(triangle.material),
+    }
+}
+
+fn trace_line_segment_to_wire(line: TraceLineSegment) -> WireTraceLineSegment {
+    WireTraceLineSegment {
+        start: line.start,
+        end: line.end,
+        width_px: line.width_px,
+        material_start: trace_material_to_wire(line.material_start),
+        material_end: trace_material_to_wire(line.material_end),
+    }
+}
+
+fn trace_line_segment_from_wire(line: WireTraceLineSegment) -> TraceLineSegment {
+    TraceLineSegment {
+        start: line.start,
+        end: line.end,
+        width_px: line.width_px,
+        material_start: trace_material_from_wire(line.material_start),
+        material_end: trace_material_from_wire(line.material_end),
+    }
+}
+
+fn trace_point_sample_to_wire(point: TracePointSample) -> WireTracePointSample {
+    WireTracePointSample {
+        position: point.position,
+        radius_px: point.radius_px,
+        material: trace_material_to_wire(point.material),
+    }
+}
+
+fn trace_point_sample_from_wire(point: WireTracePointSample) -> TracePointSample {
+    TracePointSample {
+        position: point.position,
+        radius_px: point.radius_px,
+        material: trace_material_from_wire(point.material),
+    }
+}
+
+/// Reads displayed-geometry chunks from a process-local spool.
+///
+/// # Errors
+///
+/// Returns a string when the file is missing, malformed, exceeds the ABI
+/// payload limit for any chunk, or the visitor rejects a decoded chunk.
+pub fn for_each_displayed_geometry_spool_chunk(
+    spool: &WireDisplayedGeometrySpool,
+    mut visitor: impl FnMut(DisplayedGeometry) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut file = std::fs::File::open(&spool.path)
+        .map_err(|error| format!("open displayed geometry spool: {error}"))?;
+    let mut magic = [0u8; DISPLAYED_GEOMETRY_SPOOL_MAGIC.len()];
+    file.read_exact(&mut magic)
+        .map_err(|error| format!("read displayed geometry spool header: {error}"))?;
+    if &magic != DISPLAYED_GEOMETRY_SPOOL_MAGIC {
+        return Err("displayed geometry spool header did not match".to_string());
+    }
+
+    for _ in 0..spool.chunk_count {
+        let mut len_bytes = [0u8; 8];
+        file.read_exact(&mut len_bytes)
+            .map_err(|error| format!("read displayed geometry chunk length: {error}"))?;
+        let len = u64::from_le_bytes(len_bytes) as usize;
+        if len > MAX_WIRE_PAYLOAD_LEN {
+            return Err("displayed geometry chunk exceeds ABI limit".to_string());
+        }
+        let mut bytes = vec![0u8; len];
+        file.read_exact(&mut bytes)
+            .map_err(|error| format!("read displayed geometry chunk: {error}"))?;
+        let chunk: WireDisplayedGeometryChunk = decode(&bytes)?;
+        visitor(displayed_geometry_chunk_from_wire(chunk))?;
+    }
+
+    Ok(())
+}
+
 /// Serialize a wire value to MessagePack bytes.
 ///
 /// # Errors
@@ -892,4 +1412,75 @@ pub fn dynamic_registry_from_wire(
         registry.register(descriptor, Arc::new(RwLock::new(store)))?;
     }
     Ok(registry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use patinae_scene::{
+        GpuDeviceLimits, GpuHandleKind, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+        RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
+    };
+
+    #[test]
+    fn render_artifact_snapshot_value_roundtrips() {
+        let handle = GpuHandle {
+            id: 7,
+            kind: GpuHandleKind::Buffer,
+            generation: 1,
+        };
+        let snapshot = RenderArtifactSnapshotDescriptor {
+            snapshot_id: 11,
+            layout_version: 1,
+            scene_generation: 42,
+            scene_bounds_min: [-1.0, -2.0, -3.0],
+            scene_bounds_max: [1.0, 2.0, 3.0],
+            cull_pass_initialized: true,
+            device_limits: GpuDeviceLimits {
+                max_buffer_size: 1024,
+                max_storage_buffer_binding_size: 512,
+                max_compute_workgroups_per_dimension: 65_535,
+                max_compute_invocations_per_workgroup: 256,
+                max_compute_workgroup_size_x: 256,
+                max_compute_workgroup_size_y: 256,
+                max_compute_workgroup_size_z: 64,
+            },
+            buffers: vec![RenderArtifactBufferDescriptor {
+                handle,
+                role: RenderArtifactBufferRole::StdVertices,
+                size: 240,
+                stride: 24,
+                element_count: 10,
+            }],
+            reps: vec![RenderArtifactRepDescriptor {
+                object_id: 3,
+                rep_kind: RenderArtifactRepKind::Cartoon,
+                topology: RenderArtifactPrimitiveTopology::TriangleList,
+                geometry: handle,
+                count: None,
+                indirect: None,
+                element_count: 10,
+                max_element_count: 10,
+                atom_offset: 20,
+                atom_count: 5,
+                material_rgba: [0.1, 0.2, 0.3, 1.0],
+                transparency: 0.25,
+            }],
+        };
+
+        let value = WireCommandRuntimeValue::RenderArtifactSnapshotOpened(snapshot);
+        let decoded: WireCommandRuntimeValue = decode(&encode(&value).unwrap()).unwrap();
+
+        match decoded {
+            WireCommandRuntimeValue::RenderArtifactSnapshotOpened(snapshot) => {
+                assert_eq!(snapshot.snapshot_id, 11);
+                assert_eq!(snapshot.buffers[0].handle, handle);
+                assert_eq!(snapshot.reps[0].rep_kind, RenderArtifactRepKind::Cartoon);
+                assert_eq!(snapshot.scene_bounds_min, [-1.0, -2.0, -3.0]);
+                assert_eq!(snapshot.reps[0].atom_offset, 20);
+                assert_eq!(snapshot.reps[0].transparency, 0.25);
+            }
+            _ => panic!("unexpected runtime value"),
+        }
+    }
 }

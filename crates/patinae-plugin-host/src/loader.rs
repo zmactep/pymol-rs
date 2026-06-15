@@ -1,10 +1,14 @@
+use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use libloading::Library;
+use wgpu::util::DeviceExt;
 
 use patinae_cmd::{
     ArgHint, CmdError, CmdResult, Command, CommandAction, CommandContext, CommandExecutor,
@@ -24,19 +28,20 @@ use patinae_plugin::ffi::{
     AbiMessageHandlerVTable, AbiPanelDescriptor, AbiPanelVTable, AbiReadError,
     AbiScriptHandlerDescriptor, AbiScriptHandlerVTable, AbiSettingDescriptor, AbiSettingValue,
     AbiSettingValueHint, AbiStatus, AbiStr, AbiStrSlice, AbiU8Slice, HostCallbacks,
-    HostRegistrarHandle, PluginCommandHandle, PluginDeclaration, PluginFormatHandlerHandle,
-    PluginHotkeyHandle, PluginMessageHandlerHandle, PluginPanelHandle, PluginScriptHandlerHandle,
+    HostCommandRuntimeCallbacks, HostCommandRuntimeHandle, HostRegistrarHandle,
+    PluginCommandHandle, PluginDeclaration, PluginFormatHandlerHandle, PluginHotkeyHandle,
+    PluginMessageHandlerHandle, PluginPanelHandle, PluginScriptHandlerHandle,
     ABI_STATUS_HOST_ERROR, ABI_STATUS_INVALID, ABI_STATUS_PANIC, ABI_STATUS_UNSUPPORTED,
     ABI_VERSION, ARG_HINT_COLOR, ARG_HINT_COMMAND, ARG_HINT_LABEL_PROPERTY,
     ARG_HINT_NAMED_SELECTION, ARG_HINT_OBJECT, ARG_HINT_PATH, ARG_HINT_REPRESENTATION,
     ARG_HINT_SELECTION, ARG_HINT_SETTING, ARG_HINT_SETTING_VALUE, CAPABILITY_REGISTRATION,
-    HOST_CALLBACKS_VERSION, KNOWN_CAPABILITIES, KNOWN_COMMAND_RUNTIME_REQUIREMENTS,
-    KNOWN_PANEL_RUNTIME_REQUIREMENTS, MAX_ABI_SLICE_LEN, MAX_ABI_STRING_LEN,
-    PANEL_PLACEMENT_BOTTOM, PANEL_PLACEMENT_RIGHT, SDK_VERSION, SETTING_TYPE_BLANK,
-    SETTING_TYPE_BOOL, SETTING_TYPE_COLOR, SETTING_TYPE_FLOAT, SETTING_TYPE_FLOAT3,
-    SETTING_TYPE_INT, SETTING_TYPE_STRING, SETTING_VALUE_BOOL, SETTING_VALUE_COLOR,
-    SETTING_VALUE_FLOAT, SETTING_VALUE_FLOAT3, SETTING_VALUE_INT, SETTING_VALUE_NONE,
-    SETTING_VALUE_STRING, SIDE_EFFECT_COLOR_REBUILD, SIDE_EFFECT_FULL_REBUILD,
+    HOST_CALLBACKS_VERSION, HOST_COMMAND_RUNTIME_CALLBACKS_VERSION, KNOWN_CAPABILITIES,
+    KNOWN_COMMAND_RUNTIME_REQUIREMENTS, KNOWN_PANEL_RUNTIME_REQUIREMENTS, MAX_ABI_SLICE_LEN,
+    MAX_ABI_STRING_LEN, PANEL_PLACEMENT_BOTTOM, PANEL_PLACEMENT_RIGHT, SDK_VERSION,
+    SETTING_TYPE_BLANK, SETTING_TYPE_BOOL, SETTING_TYPE_COLOR, SETTING_TYPE_FLOAT,
+    SETTING_TYPE_FLOAT3, SETTING_TYPE_INT, SETTING_TYPE_STRING, SETTING_VALUE_BOOL,
+    SETTING_VALUE_COLOR, SETTING_VALUE_FLOAT, SETTING_VALUE_FLOAT3, SETTING_VALUE_INT,
+    SETTING_VALUE_NONE, SETTING_VALUE_STRING, SIDE_EFFECT_COLOR_REBUILD, SIDE_EFFECT_FULL_REBUILD,
     SIDE_EFFECT_ORTHO_DIRTY, SIDE_EFFECT_REPRESENTATION_REBUILD, SIDE_EFFECT_SCENE_CHANGED,
     SIDE_EFFECT_SCENE_INVALIDATE, SIDE_EFFECT_SEQ_CHANGED, SIDE_EFFECT_SHADER_COMPUTE_LIGHTING,
     SIDE_EFFECT_SHADER_RELOAD, SIDE_EFFECT_STEREO_UPDATE, SIDE_EFFECT_SURFACE_TRANSPARENCY,
@@ -44,13 +49,22 @@ use patinae_plugin::ffi::{
 };
 use patinae_plugin::registrar::{MessageHandler, PluginKeyAction, PluginMetadata, PollContext};
 use patinae_plugin::wire::{
-    self, WireCommandInput, WireCommandOutput, WireFormatReadInput, WireFormatReadOutput,
+    self, WireCommandInput, WireCommandOutput, WireCommandRuntimeRequest,
+    WireCommandRuntimeResponse, WireCommandRuntimeValue, WireFormatReadInput, WireFormatReadOutput,
     WireFormatWriteInput, WireFormatWriteOutput, WireHotkeyAction, WireMessageInput,
     WireMessageOutput, WirePanelEventInput, WirePanelEventOutput, WirePanelSnapshotOutput,
     WirePollInput, WirePollOutput, WireScriptInput, WireScriptOutput, WireSharedInput,
-    WireViewerAction, RUNTIME_WIRE_VERSION,
+    WireTraceGeometryOpened, WireViewerAction, RUNTIME_WIRE_VERSION,
 };
-use patinae_scene::{parse_key_string, KeyBindings, Session, ViewerLike};
+use patinae_scene::{
+    parse_key_string, GpuBatchCommand, GpuBatchResult, GpuBindGroupDescriptor, GpuBindGroupEntry,
+    GpuBindGroupLayoutDescriptor, GpuBindingResource, GpuBindingType, GpuBufferBindingType,
+    GpuBufferDescriptor, GpuBufferUsage, GpuComputePipelineDescriptor, GpuDeviceLimits, GpuHandle,
+    GpuHandleKind, GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor, GpuShaderStages,
+    GpuSubmitBatch, KeyBindings, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
+    RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
+    RenderArtifactSnapshotDescriptor, Session, ViewerLike,
+};
 use patinae_settings::{
     DynamicSettingDescriptor, DynamicSettingStore, SettingType, SettingValue, SharedSettingStore,
     SideEffectCategory,
@@ -61,6 +75,25 @@ use crate::host::PluginHost;
 use crate::panic::panic_payload_to_string;
 use crate::paths::{is_plugin_library_path, PluginDiscovery};
 use crate::plugin::{LibraryHandle, LoadedPanel, LoadedPlugin};
+
+/// Vertices per spooled mesh chunk.
+///
+/// `DisplayedMesh` is a triangle list. The value is divisible by three so
+/// chunks never split a triangle, and it keeps encoded chunks far below the
+/// 64 MiB ABI payload ceiling.
+const DISPLAYED_GEOMETRY_SPOOL_MESH_VERTICES: usize = 24_576;
+
+/// Non-mesh primitives per spooled chunk.
+///
+/// Analytic primitives encode much smaller than mesh vertices; this still
+/// leaves wide headroom below the ABI payload ceiling.
+const DISPLAYED_GEOMETRY_SPOOL_PRIMITIVES: usize = 32_768;
+
+static DISPLAYED_GEOMETRY_SPOOL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn rt_profile_enabled() -> bool {
+    std::env::var_os("PATINAE_RT_PROFILE").is_some()
+}
 
 static HOST_CALLBACKS: HostCallbacks = HostCallbacks {
     table_version: HOST_CALLBACKS_VERSION,
@@ -73,6 +106,11 @@ static HOST_CALLBACKS: HostCallbacks = HostCallbacks {
     register_format_handler: Some(host_register_format_handler),
     register_hotkey: Some(host_register_hotkey),
     report_unsupported: Some(host_report_unsupported),
+};
+
+static HOST_COMMAND_RUNTIME_CALLBACKS: HostCommandRuntimeCallbacks = HostCommandRuntimeCallbacks {
+    table_version: HOST_COMMAND_RUNTIME_CALLBACKS_VERSION,
+    request: Some(host_command_runtime_request),
 };
 
 impl PluginHost {
@@ -742,6 +780,75 @@ where
         .map_err(|error| format!("plugin {phase} returned malformed MessagePack: {error}"))
 }
 
+unsafe extern "C" fn host_command_runtime_request(
+    handle: HostCommandRuntimeHandle,
+    input: AbiU8Slice,
+    sink: AbiBytesSinkFn,
+    sink_user_data: *mut c_void,
+) -> AbiStatus {
+    if handle.0.is_null() {
+        return AbiStatus::INVALID;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let request: WireCommandRuntimeRequest = decode_runtime_input(input)?;
+        // SAFETY: `AbiCommandProxy::execute` passes a pointer to a live
+        // `HostCommandRuntimeState` for the duration of the plugin command
+        // call. Null was checked above.
+        let state = unsafe { &mut *(handle.0.cast::<HostCommandRuntimeState<'static>>()) };
+        let response = state.handle_request(request);
+        send_runtime_output(sink, sink_user_data, &response)
+    }));
+
+    match result {
+        Ok(Ok(())) => AbiStatus::OK,
+        Ok(Err(error)) => {
+            log::warn!("Plugin command runtime request failed: {}", error);
+            AbiStatus::HOST_ERROR
+        }
+        Err(panic_info) => {
+            log::warn!(
+                "Plugin command runtime request panicked: {}",
+                panic_payload_to_string(&panic_info)
+            );
+            AbiStatus::PANIC
+        }
+    }
+}
+
+fn decode_runtime_input<T: DeserializeOwned>(input: AbiU8Slice) -> Result<T, String> {
+    if input.len == 0 {
+        return wire::decode(&[]);
+    }
+    if input.ptr.is_null() {
+        return Err("runtime request pointer was null".to_string());
+    }
+    if input.len > wire::MAX_WIRE_PAYLOAD_LEN {
+        return Err("runtime request exceeds ABI limit".to_string());
+    }
+    // SAFETY: The plugin ABI contract requires non-null byte slices to remain
+    // initialized and readable for the duration of this callback.
+    let bytes = unsafe { std::slice::from_raw_parts(input.ptr, input.len) };
+    wire::decode(bytes)
+}
+
+fn send_runtime_output<T: Serialize>(
+    sink: AbiBytesSinkFn,
+    sink_user_data: *mut c_void,
+    output: &T,
+) -> Result<(), String> {
+    let bytes = wire::encode(output)?;
+    ensure_runtime_payload_within_limit("command runtime request", bytes.len(), "runtime output")?;
+    let slice = AbiU8Slice {
+        ptr: bytes.as_ptr(),
+        len: bytes.len(),
+    };
+    // SAFETY: `slice` points to `bytes`, which lives until the sink returns.
+    // The plugin sink copies the bytes synchronously.
+    let status = unsafe { sink(sink_user_data, slice) };
+    status_to_result("command runtime request", status)
+}
+
 fn validate_runtime_wire_version(version: u32) -> Result<(), String> {
     if version == RUNTIME_WIRE_VERSION {
         Ok(())
@@ -975,20 +1082,33 @@ impl Command for AbiCommandProxy {
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
-        let input = command_input_from_context(ctx, args, self.command.runtime_requirements)
-            .map_err(|error| CmdError::execution(format!("plugin command input: {error}")))?;
+        let input =
+            command_runtime_input_from_context(ctx, args, self.command.runtime_requirements)
+                .map_err(|error| CmdError::execution(format!("plugin command input: {error}")))?;
         let execute = self
             .command
             .vtable
             .execute
             .ok_or_else(|| CmdError::execution("plugin command execute callback was null"))?;
-        let output: WireCommandOutput =
-            invoke_runtime("command execute", &input, |slice, sink, user_data| {
+        let output: WireCommandOutput = {
+            let mut runtime_state =
+                HostCommandRuntimeState::new(ctx.viewer, self.command.runtime_requirements);
+            invoke_runtime("command execute", &input.input, |slice, sink, user_data| {
                 // SAFETY: The descriptor was validated during registration and the
                 // library is kept alive by this proxy while the callback runs.
-                unsafe { execute(self.command.handle, slice, sink, user_data) }
+                unsafe {
+                    execute(
+                        self.command.handle,
+                        slice,
+                        &HOST_COMMAND_RUNTIME_CALLBACKS,
+                        runtime_state.handle(),
+                        sink,
+                        user_data,
+                    )
+                }
             })
-            .map_err(CmdError::execution)?;
+        }
+        .map_err(CmdError::execution)?;
         apply_command_output(ctx, output, self.command.runtime_requirements)
     }
 
@@ -1411,21 +1531,1376 @@ impl Drop for AbiHotkeyProxy {
     }
 }
 
+struct CommandRuntimeInput {
+    input: WireCommandInput,
+    _spools: Vec<RuntimePayloadSpool>,
+}
+
+struct HostCommandRuntimeState<'a> {
+    viewer: &'a mut dyn ViewerLike,
+    runtime_requirements: CommandRuntimeRequirements,
+    streams: Vec<HostTraceGeometryStream>,
+    gpu_handles: GpuHandleRegistry,
+    snapshots: Vec<HostRenderArtifactSnapshot>,
+    next_stream_id: u64,
+    next_snapshot_id: u64,
+}
+
+impl<'a> HostCommandRuntimeState<'a> {
+    fn new(
+        viewer: &'a mut dyn ViewerLike,
+        runtime_requirements: CommandRuntimeRequirements,
+    ) -> Self {
+        Self {
+            viewer,
+            runtime_requirements,
+            streams: Vec::new(),
+            gpu_handles: GpuHandleRegistry::new(),
+            snapshots: Vec::new(),
+            next_stream_id: 1,
+            next_snapshot_id: 1,
+        }
+    }
+
+    fn handle(&mut self) -> HostCommandRuntimeHandle {
+        HostCommandRuntimeHandle((self as *mut Self).cast::<c_void>())
+    }
+
+    fn handle_request(&mut self, request: WireCommandRuntimeRequest) -> WireCommandRuntimeResponse {
+        match request {
+            WireCommandRuntimeRequest::OpenTraceGeometryStream { id } => {
+                let result = self.open_trace_geometry_stream();
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::ReadTraceGeometryStream { id, stream_id } => {
+                let result = self.read_trace_geometry_stream(stream_id);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::CloseTraceGeometryStream { id, stream_id } => {
+                let result = self.close_trace_geometry_stream(stream_id);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::OpenRenderArtifactSnapshot { id } => {
+                let result = self.open_render_artifact_snapshot();
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::CloseRenderArtifactSnapshot { id, snapshot_id } => {
+                let result = self.close_render_artifact_snapshot(snapshot_id);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuDeviceLimits { id } => {
+                let result = self.gpu_device_limits();
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateBuffer {
+                id,
+                descriptor,
+                initial_data,
+            } => {
+                let result = self.gpu_create_buffer(descriptor, initial_data);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuWriteBuffer {
+                id,
+                buffer,
+                offset,
+                data,
+            } => {
+                let result = self.gpu_write_buffer(buffer, offset, &data);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCopyBufferToBuffer {
+                id,
+                source,
+                source_offset,
+                destination,
+                destination_offset,
+                size,
+            } => {
+                let result = self.gpu_copy_buffer_to_buffer(
+                    source,
+                    source_offset,
+                    destination,
+                    destination_offset,
+                    size,
+                );
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuReadBuffer {
+                id,
+                buffer,
+                offset,
+                size,
+            } => {
+                let result = self.gpu_read_buffer(buffer, offset, size);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateShaderModule { id, descriptor } => {
+                let result = self.gpu_create_shader_module(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateBindGroupLayout { id, descriptor } => {
+                let result = self.gpu_create_bind_group_layout(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreatePipelineLayout { id, descriptor } => {
+                let result = self.gpu_create_pipeline_layout(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateComputePipeline { id, descriptor } => {
+                let result = self.gpu_create_compute_pipeline(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuCreateBindGroup { id, descriptor } => {
+                let result = self.gpu_create_bind_group(descriptor);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuDispatchCompute {
+                id,
+                pipeline,
+                bind_groups,
+                workgroups,
+            } => {
+                let result = self.gpu_dispatch_compute(pipeline, &bind_groups, workgroups);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuSubmitBatch { id, batch } => {
+                let result = self.gpu_submit_batch(batch);
+                Self::response(id, result)
+            }
+            WireCommandRuntimeRequest::GpuDropHandles { id, handles } => {
+                let result = self.gpu_drop_handles(&handles);
+                Self::response(id, result)
+            }
+        }
+    }
+
+    fn response(
+        id: u64,
+        result: Result<WireCommandRuntimeValue, String>,
+    ) -> WireCommandRuntimeResponse {
+        WireCommandRuntimeResponse {
+            wire_version: RUNTIME_WIRE_VERSION,
+            id,
+            result,
+        }
+    }
+
+    fn ensure_requirement(&self, requirement: CommandRuntimeRequirements) -> Result<(), String> {
+        if self.runtime_requirements.contains(requirement) {
+            Ok(())
+        } else {
+            Err("plugin command did not declare the required runtime input".to_string())
+        }
+    }
+
+    fn open_trace_geometry_stream(&mut self) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::TRACE_GEOMETRY_STREAM)?;
+        let stream_id = self.next_stream_id;
+        self.next_stream_id += 1;
+        let start = std::time::Instant::now();
+        let mut chunks = VecDeque::new();
+        let mut chunk_count = 0usize;
+        let mut primitive_count = 0usize;
+
+        self.viewer.for_each_trace_geometry_chunk(
+            &patinae_render::GeometryExportOptions::default(),
+            &mut |chunk| {
+                primitive_count += chunk.primitive_count();
+                let wire_chunk = wire::trace_geometry_chunk_to_wire(chunk);
+                let encoded = wire::encode(&wire_chunk)?;
+                ensure_runtime_payload_within_limit(
+                    "command trace geometry stream",
+                    encoded.len(),
+                    "trace geometry chunk",
+                )?;
+                chunks.push_back(encoded);
+                chunk_count += 1;
+                Ok(())
+            },
+        )?;
+
+        if rt_profile_enabled() {
+            log::info!(
+                "patinae.rt_profile host.trace_export_ms={} chunks={} primitives={}",
+                start.elapsed().as_millis(),
+                chunk_count,
+                primitive_count
+            );
+        }
+
+        self.streams.push(HostTraceGeometryStream {
+            id: stream_id,
+            chunks,
+        });
+        Ok(WireCommandRuntimeValue::TraceGeometryOpened(
+            WireTraceGeometryOpened { stream_id },
+        ))
+    }
+
+    fn read_trace_geometry_stream(
+        &mut self,
+        stream_id: u64,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::TRACE_GEOMETRY_STREAM)?;
+        let stream = self
+            .streams
+            .iter_mut()
+            .find(|stream| stream.id == stream_id)
+            .ok_or_else(|| format!("trace geometry stream {stream_id} was not open"))?;
+        Ok(WireCommandRuntimeValue::TraceGeometryChunkBytes(
+            stream.chunks.pop_front(),
+        ))
+    }
+
+    fn close_trace_geometry_stream(
+        &mut self,
+        stream_id: u64,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::TRACE_GEOMETRY_STREAM)?;
+        let index = self
+            .streams
+            .iter()
+            .position(|stream| stream.id == stream_id)
+            .ok_or_else(|| format!("trace geometry stream {stream_id} was not open"))?;
+        self.streams.swap_remove(index);
+        Ok(WireCommandRuntimeValue::TraceGeometryClosed)
+    }
+
+    fn open_render_artifact_snapshot(&mut self) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::RENDER_ARTIFACTS)?;
+        let snapshot_id = self.next_snapshot_id;
+        self.next_snapshot_id += 1;
+
+        let limits = gpu_device_limits_from_viewer(self.viewer)?;
+        let scene_generation = self
+            .viewer
+            .objects()
+            .generation()
+            .wrapping_add(self.viewer.selections().generation().rotate_left(1))
+            .wrapping_add(self.viewer.movie().generation().rotate_left(2));
+        let mut captured = None;
+        self.viewer.visit_render_artifacts(&mut |snapshot| {
+            let buffers = snapshot
+                .buffers
+                .iter()
+                .map(|buffer| HostRenderArtifactBuffer {
+                    role: map_render_artifact_buffer_role(buffer.role),
+                    buffer: buffer.buffer.clone(),
+                    size: buffer.size,
+                    stride: buffer.stride,
+                    element_count: buffer.element_count,
+                })
+                .collect();
+            let reps = snapshot
+                .reps
+                .iter()
+                .copied()
+                .map(|rep| HostRenderArtifactRep {
+                    object_id: rep.object_id,
+                    rep_kind: map_render_artifact_rep_kind(rep.rep_kind),
+                    topology: map_render_artifact_topology(rep.topology),
+                    geometry_buffer_index: rep.geometry_buffer_index,
+                    count_buffer_index: rep.count_buffer_index,
+                    indirect_buffer_index: rep.indirect_buffer_index,
+                    element_count: rep.element_count,
+                    max_element_count: rep.max_element_count,
+                    atom_offset: rep.atom_offset,
+                    atom_count: rep.atom_count,
+                    material_rgba: rep.material_rgba,
+                    transparency: rep.transparency,
+                })
+                .collect();
+            captured = Some(HostRenderArtifactSnapshot {
+                id: snapshot_id,
+                layout_version: snapshot.layout_version,
+                scene_generation,
+                scene_bounds_min: snapshot.scene_bounds_min,
+                scene_bounds_max: snapshot.scene_bounds_max,
+                cull_pass_initialized: snapshot.cull_pass_initialized,
+                buffers,
+                reps,
+            });
+            Ok(())
+        })?;
+
+        let snapshot = captured
+            .ok_or_else(|| "renderer did not provide a render artifact snapshot".to_string())?;
+        let mut buffer_descriptors = Vec::with_capacity(snapshot.buffers.len());
+        for buffer in &snapshot.buffers {
+            let handle = self
+                .gpu_handles
+                .insert_buffer(buffer.buffer.clone(), buffer.size);
+            buffer_descriptors.push(RenderArtifactBufferDescriptor {
+                handle,
+                role: buffer.role,
+                size: buffer.size,
+                stride: buffer.stride,
+                element_count: buffer.element_count,
+            });
+        }
+
+        let mut rep_descriptors = Vec::with_capacity(snapshot.reps.len());
+        for rep in &snapshot.reps {
+            let geometry = buffer_descriptors
+                .get(rep.geometry_buffer_index)
+                .ok_or_else(|| {
+                    "render artifact rep referenced missing geometry buffer".to_string()
+                })?
+                .handle;
+            let count = rep
+                .count_buffer_index
+                .map(|index| {
+                    buffer_descriptors
+                        .get(index)
+                        .map(|descriptor| descriptor.handle)
+                        .ok_or_else(|| {
+                            "render artifact rep referenced missing count buffer".to_string()
+                        })
+                })
+                .transpose()?;
+            let indirect = rep
+                .indirect_buffer_index
+                .map(|index| {
+                    buffer_descriptors
+                        .get(index)
+                        .map(|descriptor| descriptor.handle)
+                        .ok_or_else(|| {
+                            "render artifact rep referenced missing indirect buffer".to_string()
+                        })
+                })
+                .transpose()?;
+            rep_descriptors.push(RenderArtifactRepDescriptor {
+                object_id: rep.object_id,
+                rep_kind: rep.rep_kind,
+                topology: rep.topology,
+                geometry,
+                count,
+                indirect,
+                element_count: rep.element_count,
+                max_element_count: rep.max_element_count,
+                atom_offset: rep.atom_offset,
+                atom_count: rep.atom_count,
+                material_rgba: rep.material_rgba,
+                transparency: rep.transparency,
+            });
+        }
+
+        let descriptor = RenderArtifactSnapshotDescriptor {
+            snapshot_id,
+            layout_version: snapshot.layout_version,
+            scene_generation: snapshot.scene_generation,
+            scene_bounds_min: snapshot.scene_bounds_min,
+            scene_bounds_max: snapshot.scene_bounds_max,
+            cull_pass_initialized: snapshot.cull_pass_initialized,
+            device_limits: limits,
+            buffers: buffer_descriptors,
+            reps: rep_descriptors,
+        };
+        self.snapshots.push(snapshot);
+        Ok(WireCommandRuntimeValue::RenderArtifactSnapshotOpened(
+            descriptor,
+        ))
+    }
+
+    fn close_render_artifact_snapshot(
+        &mut self,
+        snapshot_id: u64,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::RENDER_ARTIFACTS)?;
+        let index = self
+            .snapshots
+            .iter()
+            .position(|snapshot| snapshot.id == snapshot_id)
+            .ok_or_else(|| format!("render artifact snapshot {snapshot_id} was not open"))?;
+        self.snapshots.swap_remove(index);
+        Ok(WireCommandRuntimeValue::RenderArtifactSnapshotClosed)
+    }
+
+    fn gpu_device_limits(&mut self) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        Ok(WireCommandRuntimeValue::GpuDeviceLimits(
+            gpu_device_limits_from_viewer(self.viewer)?,
+        ))
+    }
+
+    fn gpu_create_buffer(
+        &mut self,
+        descriptor: GpuBufferDescriptor,
+        initial_data: Option<Vec<u8>>,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let usage = wgpu_buffer_usage(descriptor.usage)?;
+        let buffer = if let Some(data) = initial_data {
+            if data.len() as u64 > descriptor.size {
+                return Err("initial GPU buffer data exceeds descriptor size".to_string());
+            }
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: descriptor.label.as_deref(),
+                contents: &data,
+                usage,
+            })
+        } else {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: descriptor.label.as_deref(),
+                size: descriptor.size,
+                usage,
+                mapped_at_creation: false,
+            })
+        };
+        let handle = self.gpu_handles.insert_buffer(buffer, descriptor.size);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_write_buffer(
+        &mut self,
+        buffer: GpuHandle,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let queue = self
+            .viewer
+            .gpu_queue()
+            .ok_or_else(|| "GPU command runtime requires an active queue".to_string())?;
+        let target = self.gpu_handles.buffer(buffer)?;
+        validate_buffer_range(target.size, offset, data.len() as u64)?;
+        queue.write_buffer(&target.buffer, offset, data);
+        Ok(WireCommandRuntimeValue::GpuOk)
+    }
+
+    fn gpu_copy_buffer_to_buffer(
+        &mut self,
+        source: GpuHandle,
+        source_offset: u64,
+        destination: GpuHandle,
+        destination_offset: u64,
+        size: u64,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let queue = self
+            .viewer
+            .gpu_queue()
+            .ok_or_else(|| "GPU command runtime requires an active queue".to_string())?;
+        let source = self.gpu_handles.buffer(source)?;
+        let destination = self.gpu_handles.buffer(destination)?;
+        validate_buffer_range(source.size, source_offset, size)?;
+        validate_buffer_range(destination.size, destination_offset, size)?;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("patinae.plugin.gpu.copy_buffer_to_buffer"),
+        });
+        encoder.copy_buffer_to_buffer(
+            &source.buffer,
+            source_offset,
+            &destination.buffer,
+            destination_offset,
+            size,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        Ok(WireCommandRuntimeValue::GpuOk)
+    }
+
+    fn gpu_read_buffer(
+        &mut self,
+        buffer: GpuHandle,
+        offset: u64,
+        size: u64,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let queue = self
+            .viewer
+            .gpu_queue()
+            .ok_or_else(|| "GPU command runtime requires an active queue".to_string())?;
+        let source = self.gpu_handles.buffer(buffer)?;
+        validate_buffer_range(source.size, offset, size)?;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("patinae.plugin.gpu.readback"),
+            size: size.max(4),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("patinae.plugin.gpu.readback.copy"),
+        });
+        encoder.copy_buffer_to_buffer(&source.buffer, offset, &staging, 0, size);
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let bytes = map_readback_buffer(device, staging, size)?;
+        Ok(WireCommandRuntimeValue::GpuBytes(bytes))
+    }
+
+    fn gpu_create_shader_module(
+        &mut self,
+        descriptor: GpuShaderModuleDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: descriptor.label.as_deref(),
+            source: wgpu::ShaderSource::Wgsl(descriptor.wgsl.into()),
+        });
+        let handle = self.gpu_handles.insert_shader_module(module);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_bind_group_layout(
+        &mut self,
+        descriptor: GpuBindGroupLayoutDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let entries = descriptor
+            .entries
+            .iter()
+            .copied()
+            .map(wgpu_bind_group_layout_entry)
+            .collect::<Result<Vec<_>, _>>()?;
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: descriptor.label.as_deref(),
+            entries: &entries,
+        });
+        let handle = self.gpu_handles.insert_bind_group_layout(layout);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_pipeline_layout(
+        &mut self,
+        descriptor: GpuPipelineLayoutDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let layout = {
+            let layouts = descriptor
+                .bind_group_layouts
+                .iter()
+                .map(|handle| self.gpu_handles.bind_group_layout(*handle))
+                .collect::<Result<Vec<_>, _>>()?;
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: descriptor.label.as_deref(),
+                bind_group_layouts: &layouts,
+                immediate_size: 0,
+            })
+        };
+        let handle = self.gpu_handles.insert_pipeline_layout(layout);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_compute_pipeline(
+        &mut self,
+        descriptor: GpuComputePipelineDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let pipeline = {
+            let layout = self.gpu_handles.pipeline_layout(descriptor.layout)?;
+            let module = self.gpu_handles.shader_module(descriptor.module)?;
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: descriptor.label.as_deref(),
+                layout: Some(layout),
+                module,
+                entry_point: Some(&descriptor.entry_point),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None,
+            })
+        };
+        let handle = self.gpu_handles.insert_compute_pipeline(pipeline);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_create_bind_group(
+        &mut self,
+        descriptor: GpuBindGroupDescriptor,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let bind_group = {
+            let layout = self.gpu_handles.bind_group_layout(descriptor.layout)?;
+            let mut entries = Vec::with_capacity(descriptor.entries.len());
+            for entry in descriptor.entries {
+                entries.push(wgpu_bind_group_entry(&self.gpu_handles, entry)?);
+            }
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: descriptor.label.as_deref(),
+                layout,
+                entries: &entries,
+            })
+        };
+        let handle = self.gpu_handles.insert_bind_group(bind_group);
+        Ok(WireCommandRuntimeValue::GpuHandle(handle))
+    }
+
+    fn gpu_dispatch_compute(
+        &mut self,
+        pipeline: GpuHandle,
+        bind_groups: &[GpuHandle],
+        workgroups: [u32; 3],
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let queue = self
+            .viewer
+            .gpu_queue()
+            .ok_or_else(|| "GPU command runtime requires an active queue".to_string())?;
+        validate_dispatch_workgroups(
+            workgroups,
+            device.limits().max_compute_workgroups_per_dimension,
+        )?;
+        let pipeline = self.gpu_handles.compute_pipeline(pipeline)?;
+        let bind_groups = bind_groups
+            .iter()
+            .map(|handle| self.gpu_handles.bind_group(*handle))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("patinae.plugin.gpu.dispatch_compute"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("patinae.plugin.gpu.dispatch_compute.pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            for (index, bind_group) in bind_groups.iter().enumerate() {
+                pass.set_bind_group(index as u32, Some(*bind_group), &[]);
+            }
+            pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+        Ok(WireCommandRuntimeValue::GpuOk)
+    }
+
+    fn gpu_submit_batch(
+        &mut self,
+        batch: GpuSubmitBatch,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let device = self
+            .viewer
+            .gpu_device()
+            .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+        let queue = self
+            .viewer
+            .gpu_queue()
+            .ok_or_else(|| "GPU command runtime requires an active queue".to_string())?;
+        let record_start = std::time::Instant::now();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: batch.label.as_deref().or(Some("patinae.plugin.gpu.batch")),
+        });
+        let mut readbacks = Vec::new();
+        let mut upload_staging = Vec::new();
+
+        for command in batch.commands {
+            match command {
+                GpuBatchCommand::WriteBuffer {
+                    buffer,
+                    offset,
+                    data,
+                } => {
+                    let target = self.gpu_handles.buffer(buffer)?;
+                    validate_buffer_range(target.size, offset, data.len() as u64)?;
+                    let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("patinae.plugin.gpu.batch.upload"),
+                        contents: &data,
+                        usage: wgpu::BufferUsages::COPY_SRC,
+                    });
+                    encoder.copy_buffer_to_buffer(
+                        &staging,
+                        0,
+                        &target.buffer,
+                        offset,
+                        data.len() as u64,
+                    );
+                    upload_staging.push(staging);
+                }
+                GpuBatchCommand::DispatchCompute {
+                    pipeline,
+                    bind_groups,
+                    workgroups,
+                } => {
+                    validate_dispatch_workgroups(
+                        workgroups,
+                        device.limits().max_compute_workgroups_per_dimension,
+                    )?;
+                    let pipeline = self.gpu_handles.compute_pipeline(pipeline)?;
+                    let bind_groups = bind_groups
+                        .iter()
+                        .map(|handle| self.gpu_handles.bind_group(*handle))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("patinae.plugin.gpu.batch.compute"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(pipeline);
+                    for (index, bind_group) in bind_groups.iter().enumerate() {
+                        pass.set_bind_group(index as u32, Some(*bind_group), &[]);
+                    }
+                    pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
+                }
+                GpuBatchCommand::CopyBufferToBuffer {
+                    source,
+                    source_offset,
+                    destination,
+                    destination_offset,
+                    size,
+                } => {
+                    let source = self.gpu_handles.buffer(source)?;
+                    let destination = self.gpu_handles.buffer(destination)?;
+                    validate_buffer_range(source.size, source_offset, size)?;
+                    validate_buffer_range(destination.size, destination_offset, size)?;
+                    encoder.copy_buffer_to_buffer(
+                        &source.buffer,
+                        source_offset,
+                        &destination.buffer,
+                        destination_offset,
+                        size,
+                    );
+                }
+                GpuBatchCommand::ReadBuffer {
+                    buffer,
+                    offset,
+                    size,
+                } => {
+                    let source = self.gpu_handles.buffer(buffer)?;
+                    validate_buffer_range(source.size, offset, size)?;
+                    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("patinae.plugin.gpu.batch.readback"),
+                        size: size.max(4),
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    });
+                    encoder.copy_buffer_to_buffer(&source.buffer, offset, &staging, 0, size);
+                    readbacks.push((staging, size));
+                }
+            }
+        }
+
+        let record_ms = record_start.elapsed().as_millis();
+        let submit_start = std::time::Instant::now();
+        queue.submit(std::iter::once(encoder.finish()));
+        let submit_wait_ms = submit_start.elapsed().as_millis();
+        let read_start = std::time::Instant::now();
+        let mut bytes = Vec::with_capacity(readbacks.len());
+        for (buffer, size) in readbacks {
+            bytes.push(map_readback_buffer(device, buffer, size)?);
+        }
+        if rt_profile_enabled() {
+            log::info!(
+                "patinae.rt_profile host.batch_record_ms={} host.batch_submit_wait_ms={} host.batch_readback_ms={} readbacks={}",
+                record_ms,
+                submit_wait_ms,
+                read_start.elapsed().as_millis(),
+                bytes.len()
+            );
+        }
+        Ok(WireCommandRuntimeValue::GpuBatchResult(GpuBatchResult {
+            readbacks: bytes,
+        }))
+    }
+
+    fn gpu_drop_handles(
+        &mut self,
+        handles: &[GpuHandle],
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        for handle in handles {
+            self.gpu_handles.drop_handle(*handle)?;
+        }
+        Ok(WireCommandRuntimeValue::GpuOk)
+    }
+}
+
+struct HostTraceGeometryStream {
+    id: u64,
+    chunks: VecDeque<Vec<u8>>,
+}
+
+struct HostRenderArtifactSnapshot {
+    id: u64,
+    layout_version: u32,
+    scene_generation: u64,
+    scene_bounds_min: [f32; 3],
+    scene_bounds_max: [f32; 3],
+    cull_pass_initialized: bool,
+    buffers: Vec<HostRenderArtifactBuffer>,
+    reps: Vec<HostRenderArtifactRep>,
+}
+
+struct HostRenderArtifactBuffer {
+    role: RenderArtifactBufferRole,
+    buffer: wgpu::Buffer,
+    size: u64,
+    stride: u64,
+    element_count: u64,
+}
+
+struct HostRenderArtifactRep {
+    object_id: u32,
+    rep_kind: RenderArtifactRepKind,
+    topology: RenderArtifactPrimitiveTopology,
+    geometry_buffer_index: usize,
+    count_buffer_index: Option<usize>,
+    indirect_buffer_index: Option<usize>,
+    element_count: u64,
+    max_element_count: u64,
+    atom_offset: u32,
+    atom_count: u32,
+    material_rgba: [f32; 4],
+    transparency: f32,
+}
+
+#[derive(Clone)]
+struct HostGpuBuffer {
+    buffer: wgpu::Buffer,
+    size: u64,
+}
+
+enum GpuHandleObject {
+    Buffer(HostGpuBuffer),
+    ShaderModule(wgpu::ShaderModule),
+    BindGroupLayout(wgpu::BindGroupLayout),
+    PipelineLayout(wgpu::PipelineLayout),
+    BindGroup(wgpu::BindGroup),
+    ComputePipeline(wgpu::ComputePipeline),
+}
+
+struct GpuHandleEntry {
+    generation: u64,
+    kind: GpuHandleKind,
+    object: GpuHandleObject,
+}
+
+struct GpuHandleRegistry {
+    next_id: u64,
+    generation: u64,
+    entries: HashMap<u64, GpuHandleEntry>,
+}
+
+impl GpuHandleRegistry {
+    fn new() -> Self {
+        Self {
+            next_id: 1,
+            generation: 1,
+            entries: HashMap::new(),
+        }
+    }
+
+    fn insert_buffer(&mut self, buffer: wgpu::Buffer, size: u64) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::Buffer,
+            GpuHandleObject::Buffer(HostGpuBuffer { buffer, size }),
+        )
+    }
+
+    fn insert_shader_module(&mut self, module: wgpu::ShaderModule) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::ShaderModule,
+            GpuHandleObject::ShaderModule(module),
+        )
+    }
+
+    fn insert_bind_group_layout(&mut self, layout: wgpu::BindGroupLayout) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::BindGroupLayout,
+            GpuHandleObject::BindGroupLayout(layout),
+        )
+    }
+
+    fn insert_pipeline_layout(&mut self, layout: wgpu::PipelineLayout) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::PipelineLayout,
+            GpuHandleObject::PipelineLayout(layout),
+        )
+    }
+
+    fn insert_bind_group(&mut self, bind_group: wgpu::BindGroup) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::BindGroup,
+            GpuHandleObject::BindGroup(bind_group),
+        )
+    }
+
+    fn insert_compute_pipeline(&mut self, pipeline: wgpu::ComputePipeline) -> GpuHandle {
+        self.insert(
+            GpuHandleKind::ComputePipeline,
+            GpuHandleObject::ComputePipeline(pipeline),
+        )
+    }
+
+    fn insert(&mut self, kind: GpuHandleKind, object: GpuHandleObject) -> GpuHandle {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.entries.insert(
+            id,
+            GpuHandleEntry {
+                generation: self.generation,
+                kind,
+                object,
+            },
+        );
+        GpuHandle {
+            id,
+            kind,
+            generation: self.generation,
+        }
+    }
+
+    fn drop_handle(&mut self, handle: GpuHandle) -> Result<(), String> {
+        self.validate(handle)?;
+        self.entries.remove(&handle.id);
+        Ok(())
+    }
+
+    fn buffer(&self, handle: GpuHandle) -> Result<&HostGpuBuffer, String> {
+        match &self.entry(handle, GpuHandleKind::Buffer)?.object {
+            GpuHandleObject::Buffer(buffer) => Ok(buffer),
+            _ => Err("GPU handle kind mismatch for buffer".to_string()),
+        }
+    }
+
+    fn shader_module(&self, handle: GpuHandle) -> Result<&wgpu::ShaderModule, String> {
+        match &self.entry(handle, GpuHandleKind::ShaderModule)?.object {
+            GpuHandleObject::ShaderModule(module) => Ok(module),
+            _ => Err("GPU handle kind mismatch for shader module".to_string()),
+        }
+    }
+
+    fn bind_group_layout(&self, handle: GpuHandle) -> Result<&wgpu::BindGroupLayout, String> {
+        match &self.entry(handle, GpuHandleKind::BindGroupLayout)?.object {
+            GpuHandleObject::BindGroupLayout(layout) => Ok(layout),
+            _ => Err("GPU handle kind mismatch for bind-group layout".to_string()),
+        }
+    }
+
+    fn pipeline_layout(&self, handle: GpuHandle) -> Result<&wgpu::PipelineLayout, String> {
+        match &self.entry(handle, GpuHandleKind::PipelineLayout)?.object {
+            GpuHandleObject::PipelineLayout(layout) => Ok(layout),
+            _ => Err("GPU handle kind mismatch for pipeline layout".to_string()),
+        }
+    }
+
+    fn bind_group(&self, handle: GpuHandle) -> Result<&wgpu::BindGroup, String> {
+        match &self.entry(handle, GpuHandleKind::BindGroup)?.object {
+            GpuHandleObject::BindGroup(bind_group) => Ok(bind_group),
+            _ => Err("GPU handle kind mismatch for bind group".to_string()),
+        }
+    }
+
+    fn compute_pipeline(&self, handle: GpuHandle) -> Result<&wgpu::ComputePipeline, String> {
+        match &self.entry(handle, GpuHandleKind::ComputePipeline)?.object {
+            GpuHandleObject::ComputePipeline(pipeline) => Ok(pipeline),
+            _ => Err("GPU handle kind mismatch for compute pipeline".to_string()),
+        }
+    }
+
+    fn entry(&self, handle: GpuHandle, expected: GpuHandleKind) -> Result<&GpuHandleEntry, String> {
+        self.validate(handle)?;
+        let entry = self
+            .entries
+            .get(&handle.id)
+            .ok_or_else(|| format!("GPU handle {} was not found", handle.id))?;
+        if entry.kind != expected {
+            return Err(format!(
+                "GPU handle {} has kind {:?}, expected {:?}",
+                handle.id, entry.kind, expected
+            ));
+        }
+        Ok(entry)
+    }
+
+    fn validate(&self, handle: GpuHandle) -> Result<(), String> {
+        let entry = self
+            .entries
+            .get(&handle.id)
+            .ok_or_else(|| format!("GPU handle {} was not found", handle.id))?;
+        if entry.generation != handle.generation {
+            return Err(format!(
+                "GPU handle {} generation mismatch: got {}, expected {}",
+                handle.id, handle.generation, entry.generation
+            ));
+        }
+        if entry.kind != handle.kind {
+            return Err(format!(
+                "GPU handle {} kind mismatch: got {:?}, expected {:?}",
+                handle.id, handle.kind, entry.kind
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn gpu_device_limits_from_viewer(viewer: &dyn ViewerLike) -> Result<GpuDeviceLimits, String> {
+    let device = viewer
+        .gpu_device()
+        .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
+    let limits = device.limits();
+    Ok(GpuDeviceLimits {
+        max_buffer_size: limits.max_buffer_size,
+        max_storage_buffer_binding_size: u64::from(limits.max_storage_buffer_binding_size),
+        max_compute_workgroups_per_dimension: limits.max_compute_workgroups_per_dimension,
+        max_compute_invocations_per_workgroup: limits.max_compute_invocations_per_workgroup,
+        max_compute_workgroup_size_x: limits.max_compute_workgroup_size_x,
+        max_compute_workgroup_size_y: limits.max_compute_workgroup_size_y,
+        max_compute_workgroup_size_z: limits.max_compute_workgroup_size_z,
+    })
+}
+
+fn validate_buffer_range(size: u64, offset: u64, len: u64) -> Result<(), String> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| "GPU buffer range overflow".to_string())?;
+    if end > size {
+        return Err(format!(
+            "GPU buffer range {}..{} exceeds buffer size {}",
+            offset, end, size
+        ));
+    }
+    Ok(())
+}
+
+fn validate_dispatch_workgroups(
+    workgroups: [u32; 3],
+    max_workgroups_per_dimension: u32,
+) -> Result<(), String> {
+    for (axis, count) in ["x", "y", "z"].into_iter().zip(workgroups) {
+        if count > max_workgroups_per_dimension {
+            return Err(format!(
+                "compute dispatch workgroups.{axis}={} exceeds GPU limit {}",
+                count, max_workgroups_per_dimension
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn map_readback_buffer(
+    device: &wgpu::Device,
+    buffer: wgpu::Buffer,
+    size: u64,
+) -> Result<Vec<u8>, String> {
+    let slice = buffer.slice(0..size);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })
+        .map_err(|error| error.to_string())?;
+    rx.recv()
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    let mapped = slice.get_mapped_range();
+    let bytes = mapped.to_vec();
+    drop(mapped);
+    buffer.unmap();
+    Ok(bytes)
+}
+
+fn wgpu_buffer_usage(usage: GpuBufferUsage) -> Result<wgpu::BufferUsages, String> {
+    let known = GpuBufferUsage::MAP_READ
+        .union(GpuBufferUsage::COPY_SRC)
+        .union(GpuBufferUsage::COPY_DST)
+        .union(GpuBufferUsage::INDEX)
+        .union(GpuBufferUsage::VERTEX)
+        .union(GpuBufferUsage::UNIFORM)
+        .union(GpuBufferUsage::STORAGE)
+        .union(GpuBufferUsage::INDIRECT)
+        .union(GpuBufferUsage::QUERY_RESOLVE);
+    if usage.bits & !known.bits != 0 {
+        return Err(format!("unknown GPU buffer usage bits: {}", usage.bits));
+    }
+    let mut out = wgpu::BufferUsages::empty();
+    if usage.contains(GpuBufferUsage::MAP_READ) {
+        out |= wgpu::BufferUsages::MAP_READ;
+    }
+    if usage.contains(GpuBufferUsage::COPY_SRC) {
+        out |= wgpu::BufferUsages::COPY_SRC;
+    }
+    if usage.contains(GpuBufferUsage::COPY_DST) {
+        out |= wgpu::BufferUsages::COPY_DST;
+    }
+    if usage.contains(GpuBufferUsage::INDEX) {
+        out |= wgpu::BufferUsages::INDEX;
+    }
+    if usage.contains(GpuBufferUsage::VERTEX) {
+        out |= wgpu::BufferUsages::VERTEX;
+    }
+    if usage.contains(GpuBufferUsage::UNIFORM) {
+        out |= wgpu::BufferUsages::UNIFORM;
+    }
+    if usage.contains(GpuBufferUsage::STORAGE) {
+        out |= wgpu::BufferUsages::STORAGE;
+    }
+    if usage.contains(GpuBufferUsage::INDIRECT) {
+        out |= wgpu::BufferUsages::INDIRECT;
+    }
+    if usage.contains(GpuBufferUsage::QUERY_RESOLVE) {
+        out |= wgpu::BufferUsages::QUERY_RESOLVE;
+    }
+    Ok(out)
+}
+
+fn wgpu_shader_stages(stages: GpuShaderStages) -> Result<wgpu::ShaderStages, String> {
+    let known = GpuShaderStages::VERTEX
+        .union(GpuShaderStages::FRAGMENT)
+        .union(GpuShaderStages::COMPUTE);
+    if stages.bits & !known.bits != 0 {
+        return Err(format!("unknown GPU shader stage bits: {}", stages.bits));
+    }
+    let mut out = wgpu::ShaderStages::empty();
+    if stages.bits & GpuShaderStages::VERTEX.bits != 0 {
+        out |= wgpu::ShaderStages::VERTEX;
+    }
+    if stages.bits & GpuShaderStages::FRAGMENT.bits != 0 {
+        out |= wgpu::ShaderStages::FRAGMENT;
+    }
+    if stages.bits & GpuShaderStages::COMPUTE.bits != 0 {
+        out |= wgpu::ShaderStages::COMPUTE;
+    }
+    Ok(out)
+}
+
+fn wgpu_bind_group_layout_entry(
+    entry: patinae_scene::GpuBindGroupLayoutEntry,
+) -> Result<wgpu::BindGroupLayoutEntry, String> {
+    Ok(wgpu::BindGroupLayoutEntry {
+        binding: entry.binding,
+        visibility: wgpu_shader_stages(entry.visibility)?,
+        ty: wgpu_binding_type(entry.ty)?,
+        count: None,
+    })
+}
+
+fn wgpu_binding_type(ty: GpuBindingType) -> Result<wgpu::BindingType, String> {
+    match ty {
+        GpuBindingType::Buffer {
+            ty,
+            has_dynamic_offset,
+            min_binding_size,
+        } => Ok(wgpu::BindingType::Buffer {
+            ty: wgpu_buffer_binding_type(ty),
+            has_dynamic_offset,
+            min_binding_size: min_binding_size.and_then(wgpu::BufferSize::new),
+        }),
+    }
+}
+
+fn wgpu_buffer_binding_type(ty: GpuBufferBindingType) -> wgpu::BufferBindingType {
+    match ty {
+        GpuBufferBindingType::Uniform => wgpu::BufferBindingType::Uniform,
+        GpuBufferBindingType::StorageReadOnly => {
+            wgpu::BufferBindingType::Storage { read_only: true }
+        }
+        GpuBufferBindingType::StorageReadWrite => {
+            wgpu::BufferBindingType::Storage { read_only: false }
+        }
+    }
+}
+
+fn wgpu_bind_group_entry<'a>(
+    registry: &'a GpuHandleRegistry,
+    entry: GpuBindGroupEntry,
+) -> Result<wgpu::BindGroupEntry<'a>, String> {
+    match entry.resource {
+        GpuBindingResource::Buffer(binding) => {
+            let buffer = registry.buffer(binding.buffer)?;
+            let size = binding.size.and_then(wgpu::BufferSize::new);
+            let len = binding
+                .size
+                .unwrap_or(buffer.size.saturating_sub(binding.offset));
+            validate_buffer_range(buffer.size, binding.offset, len)?;
+            Ok(wgpu::BindGroupEntry {
+                binding: entry.binding,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buffer.buffer,
+                    offset: binding.offset,
+                    size,
+                }),
+            })
+        }
+    }
+}
+
+fn map_render_artifact_buffer_role(
+    role: patinae_render::RenderArtifactBufferRole,
+) -> RenderArtifactBufferRole {
+    match role {
+        patinae_render::RenderArtifactBufferRole::FrameUniforms => {
+            RenderArtifactBufferRole::FrameUniforms
+        }
+        patinae_render::RenderArtifactBufferRole::SceneAtoms => {
+            RenderArtifactBufferRole::SceneAtoms
+        }
+        patinae_render::RenderArtifactBufferRole::SceneCoords => {
+            RenderArtifactBufferRole::SceneCoords
+        }
+        patinae_render::RenderArtifactBufferRole::SceneBonds => {
+            RenderArtifactBufferRole::SceneBonds
+        }
+        patinae_render::RenderArtifactBufferRole::SceneColorLut => {
+            RenderArtifactBufferRole::SceneColorLut
+        }
+        patinae_render::RenderArtifactBufferRole::SceneMaskLut => {
+            RenderArtifactBufferRole::SceneMaskLut
+        }
+        patinae_render::RenderArtifactBufferRole::SceneMarkerLut => {
+            RenderArtifactBufferRole::SceneMarkerLut
+        }
+        patinae_render::RenderArtifactBufferRole::SceneCsrOffsets => {
+            RenderArtifactBufferRole::SceneCsrOffsets
+        }
+        patinae_render::RenderArtifactBufferRole::SceneCsrIndices => {
+            RenderArtifactBufferRole::SceneCsrIndices
+        }
+        patinae_render::RenderArtifactBufferRole::SceneObjectTable => {
+            RenderArtifactBufferRole::SceneObjectTable
+        }
+        patinae_render::RenderArtifactBufferRole::SphereInstances => {
+            RenderArtifactBufferRole::SphereInstances
+        }
+        patinae_render::RenderArtifactBufferRole::StickInstances => {
+            RenderArtifactBufferRole::StickInstances
+        }
+        patinae_render::RenderArtifactBufferRole::LineInstances => {
+            RenderArtifactBufferRole::LineInstances
+        }
+        patinae_render::RenderArtifactBufferRole::StdVertices => {
+            RenderArtifactBufferRole::StdVertices
+        }
+        patinae_render::RenderArtifactBufferRole::InstanceCount => {
+            RenderArtifactBufferRole::InstanceCount
+        }
+        patinae_render::RenderArtifactBufferRole::IndirectDraw => {
+            RenderArtifactBufferRole::IndirectDraw
+        }
+    }
+}
+
+fn map_render_artifact_topology(
+    topology: patinae_render::RenderArtifactPrimitiveTopology,
+) -> RenderArtifactPrimitiveTopology {
+    match topology {
+        patinae_render::RenderArtifactPrimitiveTopology::SphereInstances => {
+            RenderArtifactPrimitiveTopology::SphereInstances
+        }
+        patinae_render::RenderArtifactPrimitiveTopology::CylinderInstances => {
+            RenderArtifactPrimitiveTopology::CylinderInstances
+        }
+        patinae_render::RenderArtifactPrimitiveTopology::LineInstances => {
+            RenderArtifactPrimitiveTopology::LineInstances
+        }
+        patinae_render::RenderArtifactPrimitiveTopology::TriangleList => {
+            RenderArtifactPrimitiveTopology::TriangleList
+        }
+        patinae_render::RenderArtifactPrimitiveTopology::LineList => {
+            RenderArtifactPrimitiveTopology::LineList
+        }
+    }
+}
+
+fn map_render_artifact_rep_kind(kind: patinae_render::RepKind) -> RenderArtifactRepKind {
+    match kind {
+        patinae_render::RepKind::Sphere => RenderArtifactRepKind::Sphere,
+        patinae_render::RepKind::Stick => RenderArtifactRepKind::Stick,
+        patinae_render::RepKind::Line => RenderArtifactRepKind::Line,
+        patinae_render::RepKind::Cartoon => RenderArtifactRepKind::Cartoon,
+        patinae_render::RepKind::Ribbon => RenderArtifactRepKind::Ribbon,
+        patinae_render::RepKind::Surface => RenderArtifactRepKind::Surface,
+        patinae_render::RepKind::Mesh => RenderArtifactRepKind::Mesh,
+        patinae_render::RepKind::Dot => RenderArtifactRepKind::Dot,
+        patinae_render::RepKind::Ellipsoid => RenderArtifactRepKind::Ellipsoid,
+        _ => RenderArtifactRepKind::Other,
+    }
+}
+
+struct RuntimePayloadSpool {
+    path: PathBuf,
+}
+
+impl Drop for RuntimePayloadSpool {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn command_runtime_input_from_context<V: ViewerLike + ?Sized>(
+    ctx: &mut CommandContext<'_, '_, V>,
+    args: &ParsedCommand,
+    runtime_requirements: CommandRuntimeRequirements,
+) -> Result<CommandRuntimeInput, String> {
+    let mut spools = Vec::new();
+    let input = build_command_input_from_context(
+        ctx,
+        args,
+        runtime_requirements,
+        DisplayedGeometryInputMode::Spool(&mut spools),
+    )?;
+    Ok(CommandRuntimeInput {
+        input,
+        _spools: spools,
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn command_input_from_context<V: ViewerLike + ?Sized>(
     ctx: &mut CommandContext<'_, '_, V>,
     args: &ParsedCommand,
     runtime_requirements: CommandRuntimeRequirements,
 ) -> Result<WireCommandInput, String> {
+    build_command_input_from_context(
+        ctx,
+        args,
+        runtime_requirements,
+        DisplayedGeometryInputMode::Inline,
+    )
+}
+
+enum DisplayedGeometryInputMode<'a> {
+    #[cfg(test)]
+    Inline,
+    Spool(&'a mut Vec<RuntimePayloadSpool>),
+}
+
+fn build_command_input_from_context<V: ViewerLike + ?Sized>(
+    ctx: &mut CommandContext<'_, '_, V>,
+    args: &ParsedCommand,
+    runtime_requirements: CommandRuntimeRequirements,
+    geometry_mode: DisplayedGeometryInputMode<'_>,
+) -> Result<WireCommandInput, String> {
     let (viewport_width, viewport_height) = ctx.viewer.viewport_size();
-    let displayed_geometry =
-        if runtime_requirements.contains(CommandRuntimeRequirements::DISPLAYED_GEOMETRY) {
-            let displayed = ctx
-                .viewer
-                .export_displayed_geometry(&patinae_render::GeometryExportOptions::default())?;
-            Some(wire::displayed_geometry_to_wire(&displayed))
-        } else {
-            None
-        };
+    let (displayed_geometry, displayed_geometry_spool) =
+        command_displayed_geometry_input(ctx, runtime_requirements, geometry_mode)?;
     Ok(WireCommandInput {
         wire_version: RUNTIME_WIRE_VERSION,
         session: command_session_bytes(ctx.viewer, runtime_requirements)?,
@@ -1436,7 +2911,175 @@ pub(crate) fn command_input_from_context<V: ViewerLike + ?Sized>(
         viewport_height,
         dynamic_settings: dynamic_settings_to_wire(ctx.dynamic_settings()),
         displayed_geometry,
+        displayed_geometry_spool,
     })
+}
+
+fn command_displayed_geometry_input<V: ViewerLike + ?Sized>(
+    ctx: &mut CommandContext<'_, '_, V>,
+    runtime_requirements: CommandRuntimeRequirements,
+    geometry_mode: DisplayedGeometryInputMode<'_>,
+) -> Result<
+    (
+        Option<wire::WireDisplayedGeometry>,
+        Option<wire::WireDisplayedGeometrySpool>,
+    ),
+    String,
+> {
+    if !runtime_requirements.contains(CommandRuntimeRequirements::DISPLAYED_GEOMETRY) {
+        return Ok((None, None));
+    }
+
+    let displayed = ctx
+        .viewer
+        .export_displayed_geometry(&patinae_render::GeometryExportOptions::default())?;
+    match geometry_mode {
+        #[cfg(test)]
+        DisplayedGeometryInputMode::Inline => {
+            Ok((Some(wire::displayed_geometry_to_wire(&displayed)), None))
+        }
+        DisplayedGeometryInputMode::Spool(spools) => {
+            let spool = write_displayed_geometry_spool(&displayed)?;
+            let descriptor = wire::WireDisplayedGeometrySpool {
+                path: spool.path.to_string_lossy().into_owned(),
+                chunk_count: spool.chunk_count,
+            };
+            spools.push(RuntimePayloadSpool { path: spool.path });
+            Ok((None, Some(descriptor)))
+        }
+    }
+}
+
+struct DisplayedGeometrySpool {
+    path: PathBuf,
+    chunk_count: usize,
+}
+
+fn write_displayed_geometry_spool(
+    displayed: &patinae_render::DisplayedGeometry,
+) -> Result<DisplayedGeometrySpool, String> {
+    let (path, mut file) = create_displayed_geometry_spool_file()?;
+    let cleanup = RuntimePayloadSpool { path: path.clone() };
+    file.write_all(wire::DISPLAYED_GEOMETRY_SPOOL_MAGIC)
+        .map_err(|error| format!("write displayed geometry spool header: {error}"))?;
+
+    let mut chunk_count = 0usize;
+    for object in &displayed.objects {
+        write_displayed_object_spool_chunks(object, &mut file, &mut chunk_count)?;
+    }
+    file.flush()
+        .map_err(|error| format!("flush displayed geometry spool: {error}"))?;
+
+    std::mem::forget(cleanup);
+    Ok(DisplayedGeometrySpool { path, chunk_count })
+}
+
+fn create_displayed_geometry_spool_file() -> Result<(PathBuf, std::fs::File), String> {
+    for _ in 0..32 {
+        let path = next_displayed_geometry_spool_path();
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!("create displayed geometry spool: {error}"));
+            }
+        }
+    }
+    Err("create displayed geometry spool: exhausted unique path attempts".to_string())
+}
+
+fn next_displayed_geometry_spool_path() -> PathBuf {
+    let id = DISPLAYED_GEOMETRY_SPOOL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "patinae-displayed-geometry-{}-{id}.mpack",
+        std::process::id()
+    ))
+}
+
+fn write_displayed_object_spool_chunks(
+    object: &patinae_render::DisplayedObjectGeometry,
+    file: &mut std::fs::File,
+    chunk_count: &mut usize,
+) -> Result<(), String> {
+    let object_id = object.object_id.0;
+    let mut primitives = Vec::new();
+    for primitive in &object.primitives {
+        match primitive {
+            patinae_render::DisplayedPrimitive::Mesh { rep, mesh } => {
+                write_displayed_spool_primitive_chunk(
+                    object_id,
+                    &mut primitives,
+                    file,
+                    chunk_count,
+                )?;
+                for vertices in mesh.vertices.chunks(DISPLAYED_GEOMETRY_SPOOL_MESH_VERTICES) {
+                    let chunk_primitive = patinae_render::DisplayedPrimitive::Mesh {
+                        rep: *rep,
+                        mesh: patinae_render::DisplayedMesh {
+                            vertices: vertices.to_vec(),
+                        },
+                    };
+                    primitives.push(wire::displayed_primitive_to_wire(&chunk_primitive));
+                    write_displayed_spool_primitive_chunk(
+                        object_id,
+                        &mut primitives,
+                        file,
+                        chunk_count,
+                    )?;
+                }
+            }
+            _ => {
+                primitives.push(wire::displayed_primitive_to_wire(primitive));
+                if primitives.len() >= DISPLAYED_GEOMETRY_SPOOL_PRIMITIVES {
+                    write_displayed_spool_primitive_chunk(
+                        object_id,
+                        &mut primitives,
+                        file,
+                        chunk_count,
+                    )?;
+                }
+            }
+        }
+    }
+
+    write_displayed_spool_primitive_chunk(object_id, &mut primitives, file, chunk_count)
+}
+
+fn write_displayed_spool_primitive_chunk(
+    object_id: u32,
+    primitives: &mut Vec<wire::WireDisplayedPrimitive>,
+    file: &mut std::fs::File,
+    chunk_count: &mut usize,
+) -> Result<(), String> {
+    if primitives.is_empty() {
+        return Ok(());
+    }
+
+    let chunk = wire::WireDisplayedGeometryChunk {
+        objects: vec![wire::WireDisplayedObjectGeometry {
+            object_id,
+            primitives: std::mem::take(primitives),
+        }],
+    };
+    write_displayed_spool_chunk(file, &chunk)?;
+    *chunk_count += 1;
+    Ok(())
+}
+
+fn write_displayed_spool_chunk(
+    file: &mut std::fs::File,
+    chunk: &wire::WireDisplayedGeometryChunk,
+) -> Result<(), String> {
+    let bytes = wire::encode(chunk)?;
+    ensure_runtime_payload_within_limit(
+        "command execute",
+        bytes.len(),
+        "displayed geometry chunk",
+    )?;
+    file.write_all(&(bytes.len() as u64).to_le_bytes())
+        .map_err(|error| format!("write displayed geometry chunk length: {error}"))?;
+    file.write_all(&bytes)
+        .map_err(|error| format!("write displayed geometry chunk: {error}"))
 }
 
 pub(crate) fn apply_command_output<V: ViewerLike + ?Sized>(
@@ -2015,5 +3658,377 @@ fn side_effect_from_abi(value: u8) -> Result<SideEffectCategory, String> {
         SIDE_EFFECT_FULL_REBUILD => Ok(SideEffectCategory::FullRebuild),
         SIDE_EFFECT_VIEWPORT_UPDATE => Ok(SideEffectCategory::ViewportUpdate),
         other => Err(format!("unknown side-effect code {other}")),
+    }
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::*;
+
+    struct TraceFixtureViewer {
+        session: Session,
+        chunks: Vec<patinae_render::TraceGeometryChunk>,
+    }
+
+    impl ViewerLike for TraceFixtureViewer {
+        fn objects(&self) -> &patinae_scene::ObjectRegistry {
+            &self.session.registry
+        }
+
+        fn objects_mut(&mut self) -> &mut patinae_scene::ObjectRegistry {
+            &mut self.session.registry
+        }
+
+        fn camera(&self) -> &patinae_scene::Camera {
+            &self.session.camera
+        }
+
+        fn camera_mut(&mut self) -> &mut patinae_scene::Camera {
+            &mut self.session.camera
+        }
+
+        fn settings(&self) -> &patinae_settings::Settings {
+            &self.session.settings
+        }
+
+        fn settings_mut(&mut self) -> &mut patinae_settings::Settings {
+            &mut self.session.settings
+        }
+
+        fn request_redraw(&mut self) {}
+
+        fn session(&self) -> &Session {
+            &self.session
+        }
+
+        fn session_mut(&mut self) -> &mut Session {
+            &mut self.session
+        }
+
+        fn replace_session(&mut self, session: Session) {
+            self.session = session;
+        }
+
+        fn movie(&self) -> &patinae_scene::Movie {
+            &self.session.movie
+        }
+
+        fn movie_mut(&mut self) -> &mut patinae_scene::Movie {
+            &mut self.session.movie
+        }
+
+        fn scenes(&self) -> &patinae_scene::SceneManager {
+            &self.session.scenes
+        }
+
+        fn scenes_mut(&mut self) -> &mut patinae_scene::SceneManager {
+            &mut self.session.scenes
+        }
+
+        fn scene_store(&mut self, key: &str, storemask: u32) {
+            let mask = patinae_scene::SceneStoreMask::from_bits_truncate(storemask);
+            self.session
+                .scenes
+                .store(key, mask, &self.session.camera, &self.session.registry);
+        }
+
+        fn scene_recall(&mut self, key: &str, animate: bool, duration: f32) -> Result<(), String> {
+            self.session
+                .scenes
+                .recall(
+                    key,
+                    &mut self.session.camera,
+                    &mut self.session.registry,
+                    animate,
+                    duration,
+                )
+                .map_err(|error| error.to_string())
+        }
+
+        fn views(&self) -> &patinae_scene::ViewManager {
+            &self.session.views
+        }
+
+        fn views_mut(&mut self) -> &mut patinae_scene::ViewManager {
+            &mut self.session.views
+        }
+
+        fn view_recall(&mut self, key: &str, animate: f32) -> Result<(), String> {
+            self.session
+                .views
+                .recall(key, &mut self.session.camera, animate)
+                .map_err(|error| error.to_string())
+        }
+
+        fn selections(&self) -> &patinae_scene::SelectionManager {
+            &self.session.selections
+        }
+
+        fn selections_mut(&mut self) -> &mut patinae_scene::SelectionManager {
+            &mut self.session.selections
+        }
+
+        fn named_palette(&self) -> &patinae_scene::NamedPalette {
+            &self.session.named_palette
+        }
+
+        fn named_palette_mut(&mut self) -> &mut patinae_scene::NamedPalette {
+            &mut self.session.named_palette
+        }
+
+        fn clear_color(&self) -> [f32; 3] {
+            self.session.clear_color
+        }
+
+        fn set_clear_color(&mut self, color: [f32; 3]) {
+            self.session.clear_color = color;
+        }
+
+        fn viewport_image_ref(&self) -> Option<&patinae_scene::ViewportImage> {
+            self.session.viewport_image.as_ref()
+        }
+
+        fn set_viewport_image_internal(&mut self, image: Option<patinae_scene::ViewportImage>) {
+            self.session.viewport_image = image;
+        }
+
+        fn for_each_trace_geometry_chunk(
+            &mut self,
+            _options: &patinae_render::GeometryExportOptions,
+            visitor: &mut dyn FnMut(patinae_render::TraceGeometryChunk) -> Result<(), String>,
+        ) -> Result<(), String> {
+            for chunk in self.chunks.clone() {
+                visitor(chunk)?;
+            }
+            Ok(())
+        }
+    }
+
+    fn trace_material() -> patinae_render::TraceMaterial {
+        patinae_render::TraceMaterial {
+            rgba: [0.2, 0.4, 0.8, 1.0],
+            transparency: 0.0,
+        }
+    }
+
+    fn trace_chunk(
+        sphere_count: usize,
+        cylinder_count: usize,
+        triangle_count: usize,
+    ) -> patinae_render::TraceGeometryChunk {
+        let material = trace_material();
+        patinae_render::TraceGeometryChunk {
+            spheres: (0..sphere_count)
+                .map(|i| patinae_render::TraceSphere {
+                    center: [i as f32, 0.0, 0.0],
+                    radius: 1.0,
+                    material,
+                })
+                .collect(),
+            cylinders: (0..cylinder_count)
+                .map(|i| patinae_render::TraceCylinder {
+                    start: [i as f32, 0.0, 0.0],
+                    end: [i as f32, 1.0, 0.0],
+                    radius: 0.2,
+                    material_start: material,
+                    material_end: material,
+                })
+                .collect(),
+            triangles: (0..triangle_count)
+                .map(|i| patinae_render::TraceTriangle {
+                    positions: [
+                        [i as f32, 0.0, 0.0],
+                        [i as f32, 1.0, 0.0],
+                        [i as f32, 0.0, 1.0],
+                    ],
+                    normals: [[0.0, 0.0, 1.0]; 3],
+                    material,
+                })
+                .collect(),
+            line_segments: Vec::new(),
+            point_samples: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn displayed_geometry_spool_splits_and_reads_mesh_chunks() {
+        let material = patinae_render::DisplayedMaterial::from_rgba([0.2, 0.4, 0.8, 1.0]);
+        let vertex_count = DISPLAYED_GEOMETRY_SPOOL_MESH_VERTICES + 3;
+        let vertices = (0..vertex_count)
+            .map(|i| patinae_render::DisplayedMeshVertex {
+                position: [i as f32, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                owner_atom_id: i as u32,
+                material,
+                flags: 0,
+            })
+            .collect::<Vec<_>>();
+        let displayed = patinae_render::DisplayedGeometry {
+            objects: vec![patinae_render::DisplayedObjectGeometry {
+                object_id: patinae_render::ObjectId(7),
+                primitives: vec![patinae_render::DisplayedPrimitive::Mesh {
+                    rep: patinae_render::RepKind::Cartoon,
+                    mesh: patinae_render::DisplayedMesh {
+                        vertices: vertices.clone(),
+                    },
+                }],
+            }],
+        };
+
+        let spool = write_displayed_geometry_spool(&displayed).unwrap();
+        let _cleanup = RuntimePayloadSpool {
+            path: spool.path.clone(),
+        };
+        assert!(spool.chunk_count >= 2);
+
+        let descriptor = wire::WireDisplayedGeometrySpool {
+            path: spool.path.to_string_lossy().into_owned(),
+            chunk_count: spool.chunk_count,
+        };
+        let mut chunk_vertex_counts = Vec::new();
+        wire::for_each_displayed_geometry_spool_chunk(&descriptor, |chunk| {
+            for object in chunk.objects {
+                for primitive in object.primitives {
+                    if let patinae_render::DisplayedPrimitive::Mesh { mesh, .. } = primitive {
+                        chunk_vertex_counts.push(mesh.vertices.len());
+                    }
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(chunk_vertex_counts.iter().sum::<usize>(), vertices.len());
+        assert!(chunk_vertex_counts
+            .iter()
+            .all(|&count| count <= DISPLAYED_GEOMETRY_SPOOL_MESH_VERTICES));
+    }
+
+    #[test]
+    fn trace_geometry_chunk_stays_below_abi_limit() {
+        let chunk = trace_chunk(0, 0, 65_536);
+        let wire_chunk = wire::trace_geometry_chunk_to_wire(chunk);
+        let encoded = wire::encode(&wire_chunk).unwrap();
+
+        ensure_runtime_payload_within_limit(
+            "test trace geometry stream",
+            encoded.len(),
+            "trace geometry chunk",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn trace_geometry_stream_reads_multiple_chunks() {
+        let mut viewer = TraceFixtureViewer {
+            session: Session::new(),
+            chunks: vec![trace_chunk(1, 2, 3), trace_chunk(4, 5, 6)],
+        };
+        let mut state = HostCommandRuntimeState::new(
+            &mut viewer,
+            CommandRuntimeRequirements::TRACE_GEOMETRY_STREAM,
+        );
+
+        let opened =
+            state.handle_request(WireCommandRuntimeRequest::OpenTraceGeometryStream { id: 1 });
+        let stream_id = match opened.result.unwrap() {
+            WireCommandRuntimeValue::TraceGeometryOpened(opened) => opened.stream_id,
+            _ => panic!("unexpected open response"),
+        };
+
+        let mut counts = (0usize, 0usize, 0usize);
+        for id in [2, 3] {
+            let response =
+                state.handle_request(WireCommandRuntimeRequest::ReadTraceGeometryStream {
+                    id,
+                    stream_id,
+                });
+            let chunk = match response.result.unwrap() {
+                WireCommandRuntimeValue::TraceGeometryChunk(Some(chunk)) => chunk,
+                WireCommandRuntimeValue::TraceGeometryChunkBytes(Some(bytes)) => {
+                    wire::decode(&bytes).unwrap()
+                }
+                _ => panic!("unexpected read response"),
+            };
+            counts.0 += chunk.spheres.len();
+            counts.1 += chunk.cylinders.len();
+            counts.2 += chunk.triangles.len();
+        }
+
+        let end = state.handle_request(WireCommandRuntimeRequest::ReadTraceGeometryStream {
+            id: 4,
+            stream_id,
+        });
+        assert!(matches!(
+            end.result.unwrap(),
+            WireCommandRuntimeValue::TraceGeometryChunkBytes(None)
+        ));
+        let closed = state.handle_request(WireCommandRuntimeRequest::CloseTraceGeometryStream {
+            id: 5,
+            stream_id,
+        });
+        assert!(matches!(
+            closed.result.unwrap(),
+            WireCommandRuntimeValue::TraceGeometryClosed
+        ));
+        assert_eq!(counts, (5, 7, 9));
+    }
+
+    #[test]
+    fn gpu_runtime_request_requires_declared_requirement() {
+        let mut viewer = TraceFixtureViewer {
+            session: Session::new(),
+            chunks: Vec::new(),
+        };
+        let mut state = HostCommandRuntimeState::new(&mut viewer, CommandRuntimeRequirements::NONE);
+
+        let response = state.handle_request(WireCommandRuntimeRequest::GpuDeviceLimits { id: 9 });
+
+        assert_eq!(response.id, 9);
+        assert!(response.result.is_err());
+    }
+
+    #[test]
+    fn gpu_batch_request_requires_declared_requirement() {
+        let mut viewer = TraceFixtureViewer {
+            session: Session::new(),
+            chunks: Vec::new(),
+        };
+        let mut state = HostCommandRuntimeState::new(&mut viewer, CommandRuntimeRequirements::NONE);
+
+        let response = state.handle_request(WireCommandRuntimeRequest::GpuSubmitBatch {
+            id: 10,
+            batch: GpuSubmitBatch {
+                label: Some("test.batch".to_string()),
+                commands: vec![GpuBatchCommand::ReadBuffer {
+                    buffer: GpuHandle {
+                        id: 1,
+                        kind: GpuHandleKind::Buffer,
+                        generation: 1,
+                    },
+                    offset: 0,
+                    size: 4,
+                }],
+            },
+        });
+
+        assert_eq!(response.id, 10);
+        assert!(response.result.is_err());
+    }
+
+    #[test]
+    fn gpu_dispatch_workgroups_are_validated_before_wgpu() {
+        let err = validate_dispatch_workgroups([65_536, 1, 1], 65_535).unwrap_err();
+
+        assert!(err.contains("workgroups.x=65536"));
+        assert!(validate_dispatch_workgroups([65_535, 2, 1], 65_535).is_ok());
+    }
+
+    #[test]
+    fn gpu_batch_buffer_ranges_are_validated_before_wgpu() {
+        let err = validate_buffer_range(16, 12, 8).unwrap_err();
+
+        assert!(err.contains("exceeds buffer size"));
+        assert!(validate_buffer_range(16, 12, 4).is_ok());
     }
 }

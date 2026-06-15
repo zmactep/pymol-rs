@@ -140,6 +140,14 @@ impl CullableBuffers {
         self.compacted_instance_buffer.as_ref()
     }
 
+    pub(crate) fn instance_stride(&self) -> u64 {
+        self.instance_size
+    }
+
+    pub(crate) fn instance_capacity(&self) -> u64 {
+        self.instance_capacity
+    }
+
     pub(crate) fn raw_count_buffer(&self) -> Option<&wgpu::Buffer> {
         self.raw_count_buffer.as_ref()
     }

@@ -20,8 +20,7 @@ impl Command for RayCommand {
     }
 
     fn runtime_requirements(&self) -> CommandRuntimeRequirements {
-        CommandRuntimeRequirements::FULL_SESSION
-            .union(CommandRuntimeRequirements::DISPLAYED_GEOMETRY)
+        CommandRuntimeRequirements::GPU_COMMANDS.union(CommandRuntimeRequirements::RENDER_ARTIFACTS)
     }
 
     command_help! {
@@ -185,10 +184,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ray_command_requests_displayed_geometry() {
+    fn ray_command_requests_native_gpu_artifacts() {
         let requirements = RayCommand.runtime_requirements();
 
-        assert!(requirements.contains(CommandRuntimeRequirements::DISPLAYED_GEOMETRY));
-        assert!(requirements.contains(CommandRuntimeRequirements::FULL_SESSION));
+        assert!(requirements.contains(CommandRuntimeRequirements::GPU_COMMANDS));
+        assert!(requirements.contains(CommandRuntimeRequirements::RENDER_ARTIFACTS));
+        assert!(!requirements.contains(CommandRuntimeRequirements::TRACE_GEOMETRY_STREAM));
+        assert!(!requirements.contains(CommandRuntimeRequirements::DISPLAYED_GEOMETRY));
+        assert!(!requirements.contains(CommandRuntimeRequirements::FULL_SESSION));
     }
 }

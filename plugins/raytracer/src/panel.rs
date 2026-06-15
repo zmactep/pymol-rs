@@ -544,6 +544,10 @@ impl PluginPanel for RtPanel {
             .default_visible(false)
     }
 
+    fn runtime_requirements(&self) -> PanelRuntimeRequirements {
+        PanelRuntimeRequirements::NONE
+    }
+
     fn snapshot(&mut self, ctx: &SharedContext<'_>) -> PanelSnapshot {
         self.sync_from_settings(ctx);
         PanelSnapshot::new(self.controls())
@@ -790,6 +794,13 @@ mod tests {
         let ids = control_ids(&panel.controls());
 
         assert!(!ids.iter().any(|id| id == "save_path"));
+    }
+
+    #[test]
+    fn snapshot_does_not_request_full_session() {
+        let panel = RtPanel::default();
+
+        assert!(panel.runtime_requirements().is_empty());
     }
 
     #[test]
