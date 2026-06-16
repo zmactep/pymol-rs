@@ -6,7 +6,7 @@ pub(crate) const COMPOSITE: &str = include_str!("shaders/composite.wgsl");
 
 const ARTIFACT_COLOR: &str = include_str!("shaders/artifacts/color.wgsl");
 const ARTIFACT_SPHERES: &str = include_str!("shaders/artifacts/build_spheres.wgsl");
-const ARTIFACT_STICK_CYLINDERS: &str = include_str!("shaders/artifacts/build_stick_cylinders.wgsl");
+const ARTIFACT_STICK_CAPSULES: &str = include_str!("shaders/artifacts/build_stick_capsules.wgsl");
 const ARTIFACT_LINE_CYLINDERS: &str = include_str!("shaders/artifacts/build_line_cylinders.wgsl");
 const ARTIFACT_TRIANGLES: &str = include_str!("shaders/artifacts/build_triangles.wgsl");
 
@@ -21,8 +21,8 @@ pub(crate) fn artifact_spheres() -> String {
     expand_artifact(ARTIFACT_SPHERES)
 }
 
-pub(crate) fn artifact_stick_cylinders() -> String {
-    expand_artifact(ARTIFACT_STICK_CYLINDERS)
+pub(crate) fn artifact_stick_capsules() -> String {
+    expand_artifact(ARTIFACT_STICK_CAPSULES)
 }
 
 pub(crate) fn artifact_line_cylinders() -> String {

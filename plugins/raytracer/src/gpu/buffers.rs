@@ -14,13 +14,16 @@ pub(crate) fn validate_buffer_sizes(
     let sphere_size = primitives.spheres.len() * std::mem::size_of::<crate::primitive::GpuSphere>();
     let cylinder_size =
         primitives.cylinders.len() * std::mem::size_of::<crate::primitive::GpuCylinder>();
+    let capsule_size =
+        primitives.capsules.len() * std::mem::size_of::<crate::primitive::GpuCapsule>();
     let triangle_size =
         primitives.triangles.len() * std::mem::size_of::<crate::primitive::GpuTriangle>();
 
     log::debug!(
-        "Buffer sizes: spheres={:.1}MB, cylinders={:.1}MB, triangles={:.1}MB (limit={:.1}MB)",
+        "Buffer sizes: spheres={:.1}MB, cylinders={:.1}MB, capsules={:.1}MB, triangles={:.1}MB (limit={:.1}MB)",
         sphere_size as f64 / (1024.0 * 1024.0),
         cylinder_size as f64 / (1024.0 * 1024.0),
+        capsule_size as f64 / (1024.0 * 1024.0),
         triangle_size as f64 / (1024.0 * 1024.0),
         max_buffer_size as f64 / (1024.0 * 1024.0)
     );
@@ -48,6 +51,14 @@ pub(crate) fn validate_buffer_sizes(
             cylinder_size as f64 / (1024.0 * 1024.0),
             max_buffer_size as f64 / (1024.0 * 1024.0),
             primitives.cylinders.len()
+        )));
+    }
+    if capsule_size > max_buffer_size {
+        return Err(RaytraceError::RenderFailed(format!(
+            "Capsule buffer too large ({:.1} MB, limit {:.1} MB). Scene has {} capsules.",
+            capsule_size as f64 / (1024.0 * 1024.0),
+            max_buffer_size as f64 / (1024.0 * 1024.0),
+            primitives.capsules.len()
         )));
     }
 

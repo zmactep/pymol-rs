@@ -60,6 +60,7 @@ pub(super) fn dispatch_raytrace(
                 params,
                 input.counts.spheres,
                 input.counts.cylinders,
+                input.counts.capsules,
                 input.counts.triangles,
                 input.bvh_node_count,
             ))
@@ -83,7 +84,8 @@ pub(super) fn dispatch_raytrace(
                 storage_layout(3, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(4, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(5, GpuBufferBindingType::StorageReadOnly),
-                storage_layout(6, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(6, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(7, GpuBufferBindingType::StorageReadWrite),
             ],
         })?
         .handle;
@@ -113,10 +115,11 @@ pub(super) fn dispatch_raytrace(
             ),
             buffer_entry(1, input.primitives.spheres, 0, None),
             buffer_entry(2, input.primitives.cylinders, 0, None),
-            buffer_entry(3, input.primitives.triangles, 0, None),
-            buffer_entry(4, input.bvh.nodes, 0, None),
-            buffer_entry(5, input.bvh.indices, 0, None),
-            buffer_entry(6, output_buffer, 0, None),
+            buffer_entry(3, input.primitives.capsules, 0, None),
+            buffer_entry(4, input.primitives.triangles, 0, None),
+            buffer_entry(5, input.bvh.nodes, 0, None),
+            buffer_entry(6, input.bvh.indices, 0, None),
+            buffer_entry(7, output_buffer, 0, None),
         ],
     })?;
 

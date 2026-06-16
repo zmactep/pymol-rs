@@ -49,7 +49,7 @@ impl RaytracePipeline {
                     },
                     count: None,
                 },
-                // Triangles
+                // Capsules
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -60,7 +60,7 @@ impl RaytracePipeline {
                     },
                     count: None,
                 },
-                // BVH nodes
+                // Triangles
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -71,7 +71,7 @@ impl RaytracePipeline {
                     },
                     count: None,
                 },
-                // BVH primitive indices
+                // BVH nodes
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -82,9 +82,20 @@ impl RaytracePipeline {
                     },
                     count: None,
                 },
-                // Output texture (color)
+                // BVH primitive indices
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Output texture (color)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
@@ -95,7 +106,7 @@ impl RaytracePipeline {
                 },
                 // Depth output texture (for edge detection)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 7,
+                    binding: 8,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,
@@ -106,7 +117,7 @@ impl RaytracePipeline {
                 },
                 // Normal output texture (for edge detection)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 8,
+                    binding: 9,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::WriteOnly,

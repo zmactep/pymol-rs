@@ -2,7 +2,7 @@
 //!
 //! The product `ray` command must not pull displayed geometry back through the
 //! ABI. This module consumes renderer-owned artifact handles, builds the ray
-//! sphere, cylinder, triangle, and BVH buffers on the host GPU, and dispatches
+//! sphere, cylinder, capsule, triangle, and BVH buffers on the host GPU, and dispatches
 //! the ray shader via the safe GPU command callbacks.
 //!
 //! The generic artifact contract ends at `RenderArtifactSnapshotDescriptor`.
@@ -12,7 +12,8 @@
 //! through the portable GPU batch API.
 //!
 //! Supported input is intentionally renderer-neutral: sphere instances become
-//! `GpuSphere`, stick and line instances become `GpuCylinder`, direct
+//! `GpuSphere`, stick instances become `GpuCapsule`, line instances become
+//! `GpuCylinder`, direct
 //! cartoon/ribbon triangles use `element_count`, and surface triangle parts use
 //! their indirect vertex count on the GPU. Mesh line-list artifacts still
 //! return a clear error until a line-list ray path lands.
@@ -27,7 +28,7 @@ use patinae_scene::{GpuHandle, RenderArtifactRepDescriptor, RenderArtifactSnapsh
 
 use crate::bvh::BvhNode;
 use crate::gpu::RaytraceParams;
-use crate::primitive::{GpuCylinder, GpuSphere, GpuTriangle};
+use crate::primitive::{GpuCapsule, GpuCylinder, GpuSphere, GpuTriangle};
 
 mod batch;
 mod bvh;
@@ -90,10 +91,24 @@ struct ArtifactCylinderParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+struct ArtifactCapsuleParams {
+    instance_capacity: u32,
+    capsule_offset: u32,
+    atom_offset: u32,
+    rep_slot: u32,
+    transparency: f32,
+    dispatch_width: u32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 struct ArtifactBvhParams {
     primitive_count: u32,
     sphere_count: u32,
     cylinder_count: u32,
+    capsule_count: u32,
     triangle_count: u32,
     leaf_slots: u32,
     leaf_start: u32,
@@ -102,7 +117,6 @@ struct ArtifactBvhParams {
     dispatch_width: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 
 #[repr(C)]
@@ -135,12 +149,6 @@ impl SphereArtifactRep<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CylinderArtifactKind {
-    Stick,
-    Line,
-}
-
 struct CylinderArtifactRep<'a> {
     rep: &'a RenderArtifactRepDescriptor,
     cylinder_offset: u32,
@@ -148,10 +156,30 @@ struct CylinderArtifactRep<'a> {
     geometry_binding_size: u64,
     rep_slot: u32,
     radius: f32,
-    kind: CylinderArtifactKind,
 }
 
 impl CylinderArtifactRep<'_> {
+    fn indirect_or_direct_args(
+        &self,
+        viewer: &mut dyn ViewerLike,
+        label: &str,
+    ) -> Result<GpuHandle, String> {
+        if let Some(indirect) = self.rep.indirect {
+            return Ok(indirect);
+        }
+        direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
+    }
+}
+
+struct CapsuleArtifactRep<'a> {
+    rep: &'a RenderArtifactRepDescriptor,
+    capsule_offset: u32,
+    instance_capacity: u32,
+    geometry_binding_size: u64,
+    rep_slot: u32,
+}
+
+impl CapsuleArtifactRep<'_> {
     fn indirect_or_direct_args(
         &self,
         viewer: &mut dyn ViewerLike,
@@ -190,9 +218,11 @@ struct ArtifactPlan<'a> {
     color_lut: GpuHandle,
     sphere_reps: Vec<SphereArtifactRep<'a>>,
     cylinder_reps: Vec<CylinderArtifactRep<'a>>,
+    capsule_reps: Vec<CapsuleArtifactRep<'a>>,
     triangle_reps: Vec<TriangleArtifactRep<'a>>,
     sphere_count: u32,
     cylinder_count: u32,
+    capsule_count: u32,
     triangle_count: u32,
 }
 
@@ -200,6 +230,7 @@ struct ArtifactPlan<'a> {
 struct PrimitiveBuffers {
     spheres: GpuHandle,
     cylinders: GpuHandle,
+    capsules: GpuHandle,
     triangles: GpuHandle,
 }
 
@@ -207,6 +238,7 @@ struct PrimitiveBuffers {
 struct PrimitiveCounts {
     spheres: u32,
     cylinders: u32,
+    capsules: u32,
     triangles: u32,
 }
 
@@ -215,6 +247,7 @@ impl ArtifactPlan<'_> {
         PrimitiveCounts {
             spheres: self.sphere_count,
             cylinders: self.cylinder_count,
+            capsules: self.capsule_count,
             triangles: self.triangle_count,
         }
     }
@@ -257,6 +290,7 @@ impl ArtifactPlan<'_> {
     fn primitive_count(&self) -> Result<u32, String> {
         self.sphere_count
             .checked_add(self.cylinder_count)
+            .and_then(|count| count.checked_add(self.capsule_count))
             .and_then(|count| count.checked_add(self.triangle_count))
             .ok_or_else(|| "artifact primitive count overflow".to_string())
     }
@@ -306,6 +340,13 @@ pub(crate) fn raytrace_artifacts(
         storage_usage(),
         None,
     )?;
+    let capsule_buffer = create_buffer(
+        viewer,
+        "ray.artifact.capsules",
+        storage_bytes_for::<GpuCapsule>(plan.capsule_count, "ray artifact capsules")?,
+        storage_usage(),
+        None,
+    )?;
     let triangle_buffer = create_buffer(
         viewer,
         "ray.artifact.triangles",
@@ -316,6 +357,7 @@ pub(crate) fn raytrace_artifacts(
     let primitive_buffers = PrimitiveBuffers {
         spheres: sphere_buffer,
         cylinders: cylinder_buffer,
+        capsules: capsule_buffer,
         triangles: triangle_buffer,
     };
     let primitive_counts = plan.primitive_counts();
@@ -333,6 +375,14 @@ pub(crate) fn raytrace_artifacts(
         &plan,
         plan.color_lut,
         primitive_buffers.cylinders,
+        max_dispatch_dimension,
+        &mut batch_commands,
+    )?;
+    batch::build_capsules(
+        viewer,
+        &plan,
+        plan.color_lut,
+        primitive_buffers.capsules,
         max_dispatch_dimension,
         &mut batch_commands,
     )?;
@@ -378,10 +428,11 @@ pub(crate) fn raytrace_artifacts(
     )?;
     if rt_profile_enabled() {
         log::info!(
-            "patinae.rt_profile plugin.temp_resource_setup_ms={} spheres={} cylinders={} triangles={} bvh_nodes={}",
+            "patinae.rt_profile plugin.temp_resource_setup_ms={} spheres={} cylinders={} capsules={} triangles={} bvh_nodes={}",
             setup_start.elapsed().as_millis(),
             plan.sphere_count,
             plan.cylinder_count,
+            plan.capsule_count,
             plan.triangle_count,
             bvh_shape.node_count
         );

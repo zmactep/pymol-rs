@@ -49,8 +49,12 @@ pub struct RaytraceUniforms {
     // Primitive counts
     pub sphere_count: u32,
     pub cylinder_count: u32,
+    pub capsule_count: u32,
     pub triangle_count: u32,
     pub bvh_node_count: u32,
+    pub _pad_count_0: u32,
+    pub _pad_count_1: u32,
+    pub _pad_count_2: u32,
 
     // Ray settings
     pub ray_shadow: u32,
@@ -73,6 +77,7 @@ impl RaytraceUniforms {
             params,
             primitives.spheres.len() as u32,
             primitives.cylinders.len() as u32,
+            primitives.capsules.len() as u32,
             primitives.triangles.len() as u32,
             bvh.nodes.len() as u32,
         )
@@ -83,6 +88,7 @@ impl RaytraceUniforms {
         params: &RaytraceParams,
         sphere_count: u32,
         cylinder_count: u32,
+        capsule_count: u32,
         triangle_count: u32,
         bvh_node_count: u32,
     ) -> Self {
@@ -119,8 +125,12 @@ impl RaytraceUniforms {
             fog_color: settings.fog_color,
             sphere_count,
             cylinder_count,
+            capsule_count,
             triangle_count,
             bvh_node_count,
+            _pad_count_0: 0,
+            _pad_count_1: 0,
+            _pad_count_2: 0,
             ray_shadow: if settings.ray_shadow { 1 } else { 0 },
             ray_max_passes: settings.ray_max_passes,
             ray_trace_fog: if settings.ray_trace_fog { 1 } else { 0 },

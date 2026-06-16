@@ -136,6 +136,82 @@ impl GpuCylinder {
     }
 }
 
+/// GPU-friendly capsule primitive.
+///
+/// Represents a rounded stick with cylindrical body and spherical end caps.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct GpuCapsule {
+    /// Start position (x, y, z)
+    pub start: [f32; 3],
+    /// Capsule radius
+    pub radius: f32,
+    /// End position (x, y, z)
+    pub end: [f32; 3],
+    /// Padding for alignment
+    pub _pad0: f32,
+    /// RGBA color at start
+    pub color1: [f32; 4],
+    /// RGBA color at end
+    pub color2: [f32; 4],
+    /// Transparency (0 = opaque, 1 = fully transparent)
+    pub transparency: f32,
+    /// Padding for alignment
+    pub _padding: [f32; 3],
+}
+
+impl GpuCapsule {
+    /// Create a new capsule primitive.
+    pub fn new(
+        start: [f32; 3],
+        end: [f32; 3],
+        radius: f32,
+        color1: [f32; 4],
+        color2: [f32; 4],
+        transparency: f32,
+    ) -> Self {
+        Self {
+            start,
+            radius,
+            end,
+            _pad0: 0.0,
+            color1,
+            color2,
+            transparency,
+            _padding: [0.0; 3],
+        }
+    }
+
+    /// Check if capsule is transparent.
+    pub fn is_transparent(&self) -> bool {
+        self.transparency > 0.001 || self.color1[3] < 0.999 || self.color2[3] < 0.999
+    }
+
+    /// Get axis-aligned bounding box.
+    pub fn aabb(&self) -> ([f32; 3], [f32; 3]) {
+        let min = [
+            self.start[0].min(self.end[0]) - self.radius,
+            self.start[1].min(self.end[1]) - self.radius,
+            self.start[2].min(self.end[2]) - self.radius,
+        ];
+        let max = [
+            self.start[0].max(self.end[0]) + self.radius,
+            self.start[1].max(self.end[1]) + self.radius,
+            self.start[2].max(self.end[2]) + self.radius,
+        ];
+        (min, max)
+    }
+
+    /// Get centroid.
+    pub fn centroid(&self) -> [f32; 3] {
+        [
+            (self.start[0] + self.end[0]) * 0.5,
+            (self.start[1] + self.end[1]) * 0.5,
+            (self.start[2] + self.end[2]) * 0.5,
+        ]
+    }
+}
+
 /// GPU-friendly triangle primitive
 ///
 /// Represents a surface triangle with vertices, normals, and color.
@@ -261,8 +337,10 @@ impl GpuTriangle {
 pub struct Primitives {
     /// Sphere primitives (atoms)
     pub spheres: Vec<GpuSphere>,
-    /// Cylinder primitives (bonds)
+    /// Cylinder primitives (line-like segments)
     pub cylinders: Vec<GpuCylinder>,
+    /// Capsule primitives (sticks)
+    pub capsules: Vec<GpuCapsule>,
     /// Triangle primitives (surfaces, cartoons)
     pub triangles: Vec<GpuTriangle>,
 }
@@ -275,12 +353,15 @@ impl Primitives {
 
     /// Total number of primitives
     pub fn total_count(&self) -> usize {
-        self.spheres.len() + self.cylinders.len() + self.triangles.len()
+        self.spheres.len() + self.cylinders.len() + self.capsules.len() + self.triangles.len()
     }
 
     /// Check if empty
     pub fn is_empty(&self) -> bool {
-        self.spheres.is_empty() && self.cylinders.is_empty() && self.triangles.is_empty()
+        self.spheres.is_empty()
+            && self.cylinders.is_empty()
+            && self.capsules.is_empty()
+            && self.triangles.is_empty()
     }
 
     /// Compute overall bounding box
@@ -300,6 +381,15 @@ impl Primitives {
 
         for cyl in &self.cylinders {
             let (cmin, cmax) = cyl.aabb();
+            for i in 0..3 {
+                min[i] = min[i].min(cmin[i]);
+                max[i] = max[i].max(cmax[i]);
+            }
+            has_any = true;
+        }
+
+        for capsule in &self.capsules {
+            let (cmin, cmax) = capsule.aabb();
             for i in 0..3 {
                 min[i] = min[i].min(cmin[i]);
                 max[i] = max[i].max(cmax[i]);
@@ -356,6 +446,16 @@ impl PrimitiveCollector {
         self.primitives.cylinders.extend(cylinders);
     }
 
+    /// Add a capsule.
+    pub fn add_capsule(&mut self, capsule: GpuCapsule) {
+        self.primitives.capsules.push(capsule);
+    }
+
+    /// Add multiple capsules.
+    pub fn add_capsules(&mut self, capsules: impl IntoIterator<Item = GpuCapsule>) {
+        self.primitives.capsules.extend(capsules);
+    }
+
     /// Add a triangle
     pub fn add_triangle(&mut self, triangle: GpuTriangle) {
         self.primitives.triangles.push(triangle);
@@ -405,6 +505,22 @@ mod tests {
     }
 
     #[test]
+    fn test_capsule_aabb() {
+        let capsule = GpuCapsule::new(
+            [0.0, 0.0, 0.0],
+            [2.0, 2.0, 2.0],
+            0.5,
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            0.0,
+        );
+        let (min, max) = capsule.aabb();
+        assert_eq!(min, [-0.5, -0.5, -0.5]);
+        assert_eq!(max, [2.5, 2.5, 2.5]);
+        assert_eq!(capsule.centroid(), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
     fn test_triangle_normal() {
         let tri = GpuTriangle::flat(
             [0.0, 0.0, 0.0],
@@ -424,7 +540,10 @@ mod tests {
         collector.add_cylinder(GpuCylinder::new(
             [0.0; 3], [1.0; 3], 0.1, [1.0; 4], [1.0; 4], 0.0,
         ));
+        collector.add_capsule(GpuCapsule::new(
+            [0.0; 3], [1.0; 3], 0.1, [1.0; 4], [1.0; 4], 0.0,
+        ));
         let prims = collector.build();
-        assert_eq!(prims.total_count(), 2);
+        assert_eq!(prims.total_count(), 3);
     }
 }

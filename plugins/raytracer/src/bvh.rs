@@ -61,7 +61,7 @@ impl BvhNode {
 #[derive(Clone, Copy)]
 struct PrimitiveRef {
     /// Index into the original primitive arrays (encoded with type)
-    /// High 2 bits: type (0=sphere, 1=cylinder, 2=triangle)
+    /// High 2 bits: type (0=sphere, 1=cylinder, 2=triangle, 3=capsule)
     /// Low 30 bits: index
     pub encoded_index: u32,
     /// Cached centroid for binning
@@ -143,6 +143,18 @@ impl Bvh {
             ));
         }
 
+        // Add capsules (type 3)
+        for (i, capsule) in primitives.capsules.iter().enumerate() {
+            let (aabb_min, aabb_max) = capsule.aabb();
+            refs.push(PrimitiveRef::new(
+                3,
+                i as u32,
+                capsule.centroid(),
+                aabb_min,
+                aabb_max,
+            ));
+        }
+
         // Allocate nodes (at most 2N-1 nodes for N primitives)
         let max_nodes = refs.len() * 2;
         let mut nodes = Vec::with_capacity(max_nodes);
@@ -176,6 +188,7 @@ impl Bvh {
     /// - 0 = sphere
     /// - 1 = cylinder
     /// - 2 = triangle
+    /// - 3 = capsule
     pub fn decode_index(encoded: u32) -> (u32, u32) {
         let prim_type = encoded >> 30;
         let index = encoded & 0x3FFFFFFF;

@@ -4,9 +4,9 @@ use patinae_scene::{
 };
 
 use super::{
-    ArtifactPlan, CylinderArtifactKind, CylinderArtifactRep, SphereArtifactRep,
-    TriangleArtifactRep, COLOR_LUT_STRIDE, LINE_INSTANCE_STRIDE, MAX_ENCODED_PRIMITIVE_INDEX,
-    RAY_LINE_RADIUS, SPHERE_INSTANCE_STRIDE, STD_VERTEX_STRIDE, STICK_INSTANCE_STRIDE,
+    ArtifactPlan, CapsuleArtifactRep, CylinderArtifactRep, SphereArtifactRep, TriangleArtifactRep,
+    COLOR_LUT_STRIDE, LINE_INSTANCE_STRIDE, MAX_ENCODED_PRIMITIVE_INDEX, RAY_LINE_RADIUS,
+    SPHERE_INSTANCE_STRIDE, STD_VERTEX_STRIDE, STICK_INSTANCE_STRIDE,
 };
 
 pub(super) fn plan_artifact_primitives<'a>(
@@ -21,9 +21,11 @@ pub(super) fn plan_artifact_primitives<'a>(
 
     let mut sphere_reps = Vec::new();
     let mut cylinder_reps = Vec::new();
+    let mut capsule_reps = Vec::new();
     let mut triangle_reps = Vec::new();
     let mut sphere_count = 0_u32;
     let mut cylinder_count = 0_u32;
+    let mut capsule_count = 0_u32;
     let mut triangle_count = 0_u32;
     for rep in &snapshot.reps {
         match rep.topology {
@@ -61,11 +63,11 @@ pub(super) fn plan_artifact_primitives<'a>(
                     checked_add(sphere_count, instance_capacity, "artifact sphere count")?;
             }
             RenderArtifactPrimitiveTopology::CylinderInstances => {
-                let Some(rep_slot) = cylinder_rep_slot(rep.rep_kind) else {
+                let Some(rep_slot) = capsule_rep_slot(rep.rep_kind) else {
                     reject_nonempty_rep(rep)?;
                     continue;
                 };
-                let instance_capacity = instance_capacity_for(rep, snapshot, "cylinder")?;
+                let instance_capacity = instance_capacity_for(rep, snapshot, "capsule")?;
                 if instance_capacity == 0 {
                     continue;
                 }
@@ -75,28 +77,23 @@ pub(super) fn plan_artifact_primitives<'a>(
                     RenderArtifactBufferRole::StickInstances,
                     STICK_INSTANCE_STRIDE,
                     instance_capacity,
-                    "cylinder",
+                    "capsule",
                 )?;
                 if instance_capacity == 0 {
                     continue;
                 }
-                let geometry_binding_size = binding_size_for(
-                    instance_capacity,
-                    STICK_INSTANCE_STRIDE,
-                    "cylinder geometry",
-                )?;
-                ensure_encoded_index(instance_capacity, "cylinder")?;
-                cylinder_reps.push(CylinderArtifactRep {
+                let geometry_binding_size =
+                    binding_size_for(instance_capacity, STICK_INSTANCE_STRIDE, "capsule geometry")?;
+                ensure_encoded_index(instance_capacity, "capsule")?;
+                capsule_reps.push(CapsuleArtifactRep {
                     rep,
-                    cylinder_offset: cylinder_count,
+                    capsule_offset: capsule_count,
                     instance_capacity,
                     geometry_binding_size,
                     rep_slot,
-                    radius: 0.0,
-                    kind: CylinderArtifactKind::Stick,
                 });
-                cylinder_count =
-                    checked_add(cylinder_count, instance_capacity, "artifact cylinder count")?;
+                capsule_count =
+                    checked_add(capsule_count, instance_capacity, "artifact capsule count")?;
             }
             RenderArtifactPrimitiveTopology::LineInstances => {
                 let Some(rep_slot) = line_rep_slot(rep.rep_kind) else {
@@ -128,7 +125,6 @@ pub(super) fn plan_artifact_primitives<'a>(
                     geometry_binding_size,
                     rep_slot,
                     radius: RAY_LINE_RADIUS,
-                    kind: CylinderArtifactKind::Line,
                 });
                 cylinder_count =
                     checked_add(cylinder_count, instance_capacity, "artifact cylinder count")?;
@@ -197,9 +193,11 @@ pub(super) fn plan_artifact_primitives<'a>(
         color_lut: color_lut.handle,
         sphere_reps,
         cylinder_reps,
+        capsule_reps,
         triangle_reps,
         sphere_count,
         cylinder_count,
+        capsule_count,
         triangle_count,
     })
 }
@@ -280,7 +278,7 @@ fn sphere_rep_slot(kind: RenderArtifactRepKind) -> Option<u32> {
     }
 }
 
-fn cylinder_rep_slot(kind: RenderArtifactRepKind) -> Option<u32> {
+fn capsule_rep_slot(kind: RenderArtifactRepKind) -> Option<u32> {
     match kind {
         RenderArtifactRepKind::Stick => Some(1),
         _ => None,

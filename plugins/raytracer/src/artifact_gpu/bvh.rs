@@ -27,9 +27,10 @@ pub(super) fn build_bvh(
                 storage_layout(0, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(1, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(2, GpuBufferBindingType::StorageReadOnly),
-                storage_layout(3, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(3, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(4, GpuBufferBindingType::StorageReadWrite),
-                storage_layout(5, GpuBufferBindingType::Uniform),
+                storage_layout(5, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(6, GpuBufferBindingType::Uniform),
             ],
         })?
         .handle;
@@ -68,11 +69,12 @@ pub(super) fn build_bvh(
         entries: vec![
             buffer_entry(0, input.primitives.spheres, 0, None),
             buffer_entry(1, input.primitives.cylinders, 0, None),
-            buffer_entry(2, input.primitives.triangles, 0, None),
-            buffer_entry(3, input.bvh.nodes, 0, None),
-            buffer_entry(4, input.bvh.indices, 0, None),
+            buffer_entry(2, input.primitives.capsules, 0, None),
+            buffer_entry(3, input.primitives.triangles, 0, None),
+            buffer_entry(4, input.bvh.nodes, 0, None),
+            buffer_entry(5, input.bvh.indices, 0, None),
             buffer_entry(
-                5,
+                6,
                 params_buffer,
                 0,
                 Some(std::mem::size_of::<ArtifactBvhParams>() as u64),
@@ -84,6 +86,7 @@ pub(super) fn build_bvh(
         primitive_count: input.primitive_count,
         sphere_count: input.counts.spheres,
         cylinder_count: input.counts.cylinders,
+        capsule_count: input.counts.capsules,
         triangle_count: input.counts.triangles,
         leaf_slots: input.shape.leaf_slots,
         leaf_start: input.shape.leaf_start,
@@ -92,7 +95,6 @@ pub(super) fn build_bvh(
         dispatch_width: 0,
         _pad0: 0,
         _pad1: 0,
-        _pad2: 0,
     };
     let leaf_grid = dispatch_grid_for(input.shape.leaf_slots, input.max_dispatch_dimension)?;
     params.dispatch_width = leaf_grid.invocation_width;

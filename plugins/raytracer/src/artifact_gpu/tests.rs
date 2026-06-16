@@ -43,6 +43,10 @@ fn typed_storage_buffers_keep_one_element_for_empty_arrays() {
         std::mem::size_of::<GpuCylinder>() as u64
     );
     assert_eq!(
+        resources::storage_bytes_for::<GpuCapsule>(0, "capsules").expect("capsule bytes"),
+        std::mem::size_of::<GpuCapsule>() as u64
+    );
+    assert_eq!(
         resources::storage_bytes_for::<GpuTriangle>(0, "triangles").expect("triangle bytes"),
         std::mem::size_of::<GpuTriangle>() as u64
     );
@@ -61,11 +65,12 @@ fn raytrace_output_buffer_shader_uses_output_buffer_and_empty_node_guard() {
 
 #[test]
 fn artifact_wgsl_modules_parse_and_validate() {
-    let modules: [(&str, String); 7] = [
+    let modules: [(&str, String); 8] = [
+        ("ray.main", shaders::RAYTRACE.to_string()),
         ("ray.artifact.spheres", shaders::artifact_spheres()),
         (
-            "ray.artifact.stick_cylinders",
-            shaders::artifact_stick_cylinders(),
+            "ray.artifact.stick_capsules",
+            shaders::artifact_stick_capsules(),
         ),
         (
             "ray.artifact.line_cylinders",
@@ -268,22 +273,23 @@ fn artifact_plan_accepts_native_instance_artifacts() {
     let plan = plan::plan_artifact_primitives(&snapshot).expect("plan");
 
     assert_eq!(plan.sphere_count, 5);
-    assert_eq!(plan.cylinder_count, 18);
+    assert_eq!(plan.cylinder_count, 11);
+    assert_eq!(plan.capsule_count, 7);
     assert_eq!(plan.triangle_count, 0);
     assert_eq!(plan.sphere_reps[0].rep_slot, 0);
     assert_eq!(
         plan.sphere_reps[0].geometry_binding_size,
         5 * SPHERE_INSTANCE_STRIDE
     );
-    assert_eq!(plan.cylinder_reps[0].rep_slot, 1);
+    assert_eq!(plan.capsule_reps[0].rep_slot, 1);
     assert_eq!(
-        plan.cylinder_reps[0].geometry_binding_size,
+        plan.capsule_reps[0].geometry_binding_size,
         7 * STICK_INSTANCE_STRIDE
     );
-    assert_eq!(plan.cylinder_reps[1].rep_slot, 2);
-    assert_eq!(plan.cylinder_reps[1].radius, RAY_LINE_RADIUS);
+    assert_eq!(plan.cylinder_reps[0].rep_slot, 2);
+    assert_eq!(plan.cylinder_reps[0].radius, RAY_LINE_RADIUS);
     assert_eq!(
-        plan.cylinder_reps[1].geometry_binding_size,
+        plan.cylinder_reps[0].geometry_binding_size,
         11 * LINE_INSTANCE_STRIDE
     );
     assert_eq!(plan.primitive_count().expect("primitive count"), 23);
@@ -342,7 +348,9 @@ fn artifact_plan_skips_undersized_instance_geometry() {
     let plan = plan::plan_artifact_primitives(&snapshot).expect("plan");
 
     assert_eq!(plan.cylinder_count, 0);
+    assert_eq!(plan.capsule_count, 0);
     assert!(plan.cylinder_reps.is_empty());
+    assert!(plan.capsule_reps.is_empty());
     assert_eq!(plan.primitive_count().expect("primitive count"), 0);
 }
 

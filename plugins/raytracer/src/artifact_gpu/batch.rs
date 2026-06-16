@@ -8,8 +8,8 @@ use patinae_scene::{
 use super::dispatch::dispatch_grid_for;
 use super::resources::{buffer_entry, create_buffer, storage_layout, uniform_usage};
 use super::{
-    ArtifactCylinderParams, ArtifactPlan, ArtifactSphereParams, ArtifactTriangleParams,
-    CylinderArtifactKind,
+    ArtifactCapsuleParams, ArtifactCylinderParams, ArtifactPlan, ArtifactSphereParams,
+    ArtifactTriangleParams,
 };
 use crate::shaders;
 
@@ -118,12 +118,6 @@ pub(super) fn build_cylinders(
     if plan.cylinder_reps.is_empty() {
         return Ok(());
     }
-    let stick_shader = viewer
-        .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
-            label: Some("ray.artifact.build_stick_cylinders.shader".to_string()),
-            wgsl: shaders::artifact_stick_cylinders(),
-        })?
-        .handle;
     let line_shader = viewer
         .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
             label: Some("ray.artifact.build_line_cylinders.shader".to_string()),
@@ -146,14 +140,6 @@ pub(super) fn build_cylinders(
         .gpu_create_cached_pipeline_layout(GpuPipelineLayoutDescriptor {
             label: Some("ray.artifact.build_cylinders.pipeline_layout".to_string()),
             bind_group_layouts: vec![layout],
-        })?
-        .handle;
-    let stick_pipeline = viewer
-        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
-            label: Some("ray.artifact.build_stick_cylinders.pipeline".to_string()),
-            layout: pipeline_layout,
-            module: stick_shader,
-            entry_point: "build_cylinders".to_string(),
         })?
         .handle;
     let line_pipeline = viewer
@@ -207,10 +193,101 @@ pub(super) fn build_cylinders(
             ],
         })?;
         batch_commands.push(GpuBatchCommand::DispatchCompute {
-            pipeline: match rep.kind {
-                CylinderArtifactKind::Stick => stick_pipeline,
-                CylinderArtifactKind::Line => line_pipeline,
-            },
+            pipeline: line_pipeline,
+            bind_groups: vec![bind_group],
+            workgroups: grid.workgroups,
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn build_capsules(
+    viewer: &mut dyn ViewerLike,
+    plan: &ArtifactPlan<'_>,
+    color_lut: GpuHandle,
+    capsule_buffer: GpuHandle,
+    max_dispatch_dimension: u32,
+    batch_commands: &mut Vec<GpuBatchCommand>,
+) -> Result<(), String> {
+    if plan.capsule_reps.is_empty() {
+        return Ok(());
+    }
+    let shader = viewer
+        .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
+            label: Some("ray.artifact.build_stick_capsules.shader".to_string()),
+            wgsl: shaders::artifact_stick_capsules(),
+        })?
+        .handle;
+    let layout = viewer
+        .gpu_create_cached_bind_group_layout(GpuBindGroupLayoutDescriptor {
+            label: Some("ray.artifact.build_capsules.layout".to_string()),
+            entries: vec![
+                storage_layout(0, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(1, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(2, GpuBufferBindingType::StorageReadOnly),
+                storage_layout(3, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(4, GpuBufferBindingType::Uniform),
+            ],
+        })?
+        .handle;
+    let pipeline_layout = viewer
+        .gpu_create_cached_pipeline_layout(GpuPipelineLayoutDescriptor {
+            label: Some("ray.artifact.build_capsules.pipeline_layout".to_string()),
+            bind_group_layouts: vec![layout],
+        })?
+        .handle;
+    let pipeline = viewer
+        .gpu_create_cached_compute_pipeline(GpuComputePipelineDescriptor {
+            label: Some("ray.artifact.build_stick_capsules.pipeline".to_string()),
+            layout: pipeline_layout,
+            module: shader,
+            entry_point: "build_capsules".to_string(),
+        })?
+        .handle;
+    let params_buffer = create_buffer(
+        viewer,
+        "ray.artifact.build_capsules.params",
+        std::mem::size_of::<ArtifactCapsuleParams>() as u64,
+        uniform_usage(),
+        None,
+    )?;
+
+    for rep in &plan.capsule_reps {
+        let grid = dispatch_grid_for(rep.instance_capacity, max_dispatch_dimension)?;
+        let draw_args = rep.indirect_or_direct_args(viewer, "ray.artifact.capsule.direct_args")?;
+        let params = ArtifactCapsuleParams {
+            instance_capacity: rep.instance_capacity,
+            capsule_offset: rep.capsule_offset,
+            atom_offset: rep.rep.atom_offset,
+            rep_slot: rep.rep_slot,
+            transparency: rep.rep.transparency,
+            dispatch_width: grid.invocation_width,
+            _pad0: 0,
+            _pad1: 0,
+        };
+        batch_commands.push(GpuBatchCommand::WriteBuffer {
+            buffer: params_buffer,
+            offset: 0,
+            data: bytemuck::bytes_of(&params).to_vec(),
+        });
+        let bind_group = viewer.gpu_create_bind_group(GpuBindGroupDescriptor {
+            label: Some("ray.artifact.build_capsules.bind_group".to_string()),
+            layout,
+            entries: vec![
+                buffer_entry(0, rep.rep.geometry, 0, Some(rep.geometry_binding_size)),
+                buffer_entry(1, color_lut, 0, None),
+                buffer_entry(2, draw_args, 0, None),
+                buffer_entry(3, capsule_buffer, 0, None),
+                buffer_entry(
+                    4,
+                    params_buffer,
+                    0,
+                    Some(std::mem::size_of::<ArtifactCapsuleParams>() as u64),
+                ),
+            ],
+        })?;
+        batch_commands.push(GpuBatchCommand::DispatchCompute {
+            pipeline,
             bind_groups: vec![bind_group],
             workgroups: grid.workgroups,
         });

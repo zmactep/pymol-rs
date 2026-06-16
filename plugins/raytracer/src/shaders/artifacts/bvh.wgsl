@@ -2,6 +2,7 @@ struct BvhParams {
     primitive_count: u32,
     sphere_count: u32,
     cylinder_count: u32,
+    capsule_count: u32,
     triangle_count: u32,
     leaf_slots: u32,
     leaf_start: u32,
@@ -10,7 +11,6 @@ struct BvhParams {
     dispatch_width: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 }
 
 struct Sphere {
@@ -22,6 +22,17 @@ struct Sphere {
 }
 
 struct Cylinder {
+    start: vec3<f32>,
+    radius: f32,
+    end: vec3<f32>,
+    _pad0: f32,
+    color1: vec4<f32>,
+    color2: vec4<f32>,
+    transparency: f32,
+    _pad_a: f32, _pad_b: f32, _pad_c: f32,
+}
+
+struct Capsule {
     start: vec3<f32>,
     radius: f32,
     end: vec3<f32>,
@@ -60,10 +71,11 @@ struct PrimitiveBounds {
 
 @group(0) @binding(0) var<storage, read> spheres: array<Sphere>;
 @group(0) @binding(1) var<storage, read> cylinders: array<Cylinder>;
-@group(0) @binding(2) var<storage, read> triangles: array<Triangle>;
-@group(0) @binding(3) var<storage, read_write> bvh_nodes: array<BvhNode>;
-@group(0) @binding(4) var<storage, read_write> bvh_indices: array<u32>;
-@group(0) @binding(5) var<uniform> params: BvhParams;
+@group(0) @binding(2) var<storage, read> capsules: array<Capsule>;
+@group(0) @binding(3) var<storage, read> triangles: array<Triangle>;
+@group(0) @binding(4) var<storage, read_write> bvh_nodes: array<BvhNode>;
+@group(0) @binding(5) var<storage, read_write> bvh_indices: array<u32>;
+@group(0) @binding(6) var<uniform> params: BvhParams;
 
 const LEAF_SIZE: u32 = 4u;
 const INF: f32 = 1.0e30;
@@ -108,6 +120,23 @@ fn cylinder_bounds(index: u32) -> PrimitiveBounds {
     );
 }
 
+fn capsule_bounds(index: u32) -> PrimitiveBounds {
+    let capsule = capsules[index];
+    if capsule.radius <= 0.0 || capsule.transparency >= 1.0 {
+        return invalid_bounds();
+    }
+    if length(capsule.end - capsule.start) <= EPSILON {
+        return invalid_bounds();
+    }
+    let r = vec3<f32>(capsule.radius);
+    return PrimitiveBounds(
+        (3u << 30u) | index,
+        true,
+        min(capsule.start, capsule.end) - r,
+        max(capsule.start, capsule.end) + r,
+    );
+}
+
 fn triangle_bounds(index: u32) -> PrimitiveBounds {
     let tri = triangles[index];
     if tri.transparency >= 1.0 || tri.color.a <= 0.0 {
@@ -130,9 +159,13 @@ fn primitive_bounds(primitive_index: u32) -> PrimitiveBounds {
         return sphere_bounds(primitive_index);
     }
     let cylinder_start = params.sphere_count;
-    let triangle_start = params.sphere_count + params.cylinder_count;
-    if primitive_index < triangle_start {
+    let capsule_start = params.sphere_count + params.cylinder_count;
+    let triangle_start = capsule_start + params.capsule_count;
+    if primitive_index < capsule_start {
         return cylinder_bounds(primitive_index - cylinder_start);
+    }
+    if primitive_index < triangle_start {
+        return capsule_bounds(primitive_index - capsule_start);
     }
     if primitive_index < params.primitive_count {
         return triangle_bounds(primitive_index - triangle_start);

@@ -2,7 +2,8 @@
 //
 // This shader performs raytracing of molecular structures including:
 // - Spheres (atoms)
-// - Cylinders (bonds)
+// - Cylinders (line-like segments)
+// - Capsules (sticks)
 // - Triangles (surfaces, cartoons)
 //
 // Features:
@@ -42,8 +43,12 @@ struct Uniforms {
     fog_color: vec4<f32>,
     sphere_count: u32,
     cylinder_count: u32,
+    capsule_count: u32,
     triangle_count: u32,
     bvh_node_count: u32,
+    _pad_count_0: u32,
+    _pad_count_1: u32,
+    _pad_count_2: u32,
     ray_shadow: u32,
     ray_max_passes: u32,
     ray_trace_fog: u32,
@@ -69,6 +74,18 @@ struct Sphere {
 
 // Cylinder primitive
 struct Cylinder {
+    start: vec3<f32>,
+    radius: f32,
+    end: vec3<f32>,
+    _pad0: f32,
+    color1: vec4<f32>,
+    color2: vec4<f32>,
+    transparency: f32,
+    _pad_a: f32, _pad_b: f32, _pad_c: f32,
+}
+
+// Capsule primitive
+struct Capsule {
     start: vec3<f32>,
     radius: f32,
     end: vec3<f32>,
@@ -119,10 +136,11 @@ struct HitInfo {
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage, read> spheres: array<Sphere>;
 @group(0) @binding(2) var<storage, read> cylinders: array<Cylinder>;
-@group(0) @binding(3) var<storage, read> triangles: array<Triangle>;
-@group(0) @binding(4) var<storage, read> bvh_nodes: array<BvhNode>;
-@group(0) @binding(5) var<storage, read> bvh_indices: array<u32>;
-@group(0) @binding(6) var<storage, read_write> output_pixels: array<u32>;
+@group(0) @binding(3) var<storage, read> capsules: array<Capsule>;
+@group(0) @binding(4) var<storage, read> triangles: array<Triangle>;
+@group(0) @binding(5) var<storage, read> bvh_nodes: array<BvhNode>;
+@group(0) @binding(6) var<storage, read> bvh_indices: array<u32>;
+@group(0) @binding(7) var<storage, read_write> output_pixels: array<u32>;
 
 // Constants
 const EPSILON: f32 = 0.0001;
@@ -228,6 +246,112 @@ fn intersect_cylinder(ray: Ray, cyl: Cylinder) -> HitInfo {
     return hit;
 }
 
+fn intersect_capsule_cap(
+    ray: Ray,
+    center: vec3<f32>,
+    radius: f32,
+    color: vec4<f32>,
+    transparency: f32,
+) -> HitInfo {
+    var hit: HitInfo;
+    hit.hit = false;
+    hit.t = MAX_T;
+
+    let oc = ray.origin - center;
+    let a = dot(ray.direction, ray.direction);
+    let b = 2.0 * dot(oc, ray.direction);
+    let c = dot(oc, oc) - radius * radius;
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        return hit;
+    }
+
+    let sqrt_d = sqrt(discriminant);
+    var t = (-b - sqrt_d) / (2.0 * a);
+    if t < EPSILON {
+        t = (-b + sqrt_d) / (2.0 * a);
+    }
+    if t < EPSILON {
+        return hit;
+    }
+
+    hit.hit = true;
+    hit.t = t;
+    let hit_point = ray.origin + t * ray.direction;
+    hit.normal = normalize(hit_point - center);
+    hit.color = color;
+    hit.transparency = transparency;
+    return hit;
+}
+
+// Ray-capsule intersection
+fn intersect_capsule(ray: Ray, capsule: Capsule) -> HitInfo {
+    var closest: HitInfo;
+    closest.hit = false;
+    closest.t = MAX_T;
+
+    let axis = capsule.end - capsule.start;
+    let axis_len = length(axis);
+    if capsule.radius <= 0.0 || capsule.transparency >= 1.0 || axis_len < EPSILON {
+        return closest;
+    }
+    let axis_norm = axis / axis_len;
+
+    let oc = ray.origin - capsule.start;
+    let d_perp = ray.direction - dot(ray.direction, axis_norm) * axis_norm;
+    let o_perp = oc - dot(oc, axis_norm) * axis_norm;
+
+    let a = dot(d_perp, d_perp);
+    let b = 2.0 * dot(o_perp, d_perp);
+    let c = dot(o_perp, o_perp) - capsule.radius * capsule.radius;
+    let discriminant = b * b - 4.0 * a * c;
+
+    if a > EPSILON && discriminant >= 0.0 {
+        let sqrt_d = sqrt(discriminant);
+        var t = (-b - sqrt_d) / (2.0 * a);
+        if t < EPSILON {
+            t = (-b + sqrt_d) / (2.0 * a);
+        }
+        if t >= EPSILON {
+            let hit_point = ray.origin + t * ray.direction;
+            let height = dot(hit_point - capsule.start, axis_norm);
+            if height >= 0.0 && height <= axis_len {
+                closest.hit = true;
+                closest.t = t;
+                let closest_on_axis = capsule.start + height * axis_norm;
+                closest.normal = normalize(hit_point - closest_on_axis);
+                let t_along = height / axis_len;
+                closest.color = mix(capsule.color1, capsule.color2, t_along);
+                closest.transparency = capsule.transparency;
+            }
+        }
+    }
+
+    let cap_start = intersect_capsule_cap(
+        ray,
+        capsule.start,
+        capsule.radius,
+        capsule.color1,
+        capsule.transparency,
+    );
+    if cap_start.hit && cap_start.t < closest.t {
+        closest = cap_start;
+    }
+
+    let cap_end = intersect_capsule_cap(
+        ray,
+        capsule.end,
+        capsule.radius,
+        capsule.color2,
+        capsule.transparency,
+    );
+    if cap_end.hit && cap_end.t < closest.t {
+        closest = cap_end;
+    }
+
+    return closest;
+}
+
 // Ray-triangle intersection (Möller-Trumbore)
 fn intersect_triangle(ray: Ray, tri: Triangle) -> HitInfo {
     var hit: HitInfo;
@@ -321,6 +445,13 @@ fn trace_ray(ray: Ray) -> HitInfo {
                 closest = hit;
             }
         }
+        // Brute force capsules
+        for (var i = 0u; i < uniforms.capsule_count; i++) {
+            let hit = intersect_capsule(ray, capsules[i]);
+            if hit.hit && hit.t < closest.t {
+                closest = hit;
+            }
+        }
         // Brute force triangles
         for (var i = 0u; i < uniforms.triangle_count; i++) {
             let hit = intersect_triangle(ray, triangles[i]);
@@ -370,6 +501,8 @@ fn trace_ray(ray: Ray) -> HitInfo {
                     hit = intersect_cylinder(ray, cylinders[prim_idx]);
                 } else if prim_type == 2u && prim_idx < uniforms.triangle_count {
                     hit = intersect_triangle(ray, triangles[prim_idx]);
+                } else if prim_type == 3u && prim_idx < uniforms.capsule_count {
+                    hit = intersect_capsule(ray, capsules[prim_idx]);
                 }
 
                 if hit.hit && hit.t < closest.t {
@@ -405,6 +538,12 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
         }
         for (var i = 0u; i < uniforms.cylinder_count; i++) {
             let hit = intersect_cylinder(ray, cylinders[i]);
+            if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
+                return true;
+            }
+        }
+        for (var i = 0u; i < uniforms.capsule_count; i++) {
+            let hit = intersect_capsule(ray, capsules[i]);
             if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
                 return true;
             }
@@ -457,6 +596,8 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
                     hit = intersect_cylinder(ray, cylinders[prim_idx]);
                 } else if prim_type == 2u && prim_idx < uniforms.triangle_count {
                     hit = intersect_triangle(ray, triangles[prim_idx]);
+                } else if prim_type == 3u && prim_idx < uniforms.capsule_count {
+                    hit = intersect_capsule(ray, capsules[prim_idx]);
                 }
 
                 // Early exit on any valid shadow hit

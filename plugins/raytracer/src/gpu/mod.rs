@@ -129,9 +129,10 @@ pub fn raytrace(
     }
 
     log::debug!(
-        "Raytrace primitives: {} spheres, {} cylinders, {} triangles",
+        "Raytrace primitives: {} spheres, {} cylinders, {} capsules, {} triangles",
         primitives.spheres.len(),
         primitives.cylinders.len(),
+        primitives.capsules.len(),
         primitives.triangles.len()
     );
     if let Some((min, max)) = primitives.aabb() {
@@ -165,6 +166,7 @@ pub fn raytrace(
     let sphere_buffer = buffers::create_storage_buffer(device, "Spheres", &primitives.spheres);
     let cylinder_buffer =
         buffers::create_storage_buffer(device, "Cylinders", &primitives.cylinders);
+    let capsule_buffer = buffers::create_storage_buffer(device, "Capsules", &primitives.capsules);
     let triangle_buffer =
         buffers::create_storage_buffer(device, "Triangles", &primitives.triangles);
     let bvh_node_buffer = buffers::create_storage_buffer(device, "BVH Nodes", &bvh.nodes);
@@ -201,26 +203,30 @@ pub fn raytrace(
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: triangle_buffer.as_entire_binding(),
+                resource: capsule_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: bvh_node_buffer.as_entire_binding(),
+                resource: triangle_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: bvh_index_buffer.as_entire_binding(),
+                resource: bvh_node_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
-                resource: wgpu::BindingResource::TextureView(&render_textures.color_view),
+                resource: bvh_index_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 7,
-                resource: wgpu::BindingResource::TextureView(&render_textures.depth_view),
+                resource: wgpu::BindingResource::TextureView(&render_textures.color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 8,
+                resource: wgpu::BindingResource::TextureView(&render_textures.depth_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
                 resource: wgpu::BindingResource::TextureView(&render_textures.normal_view),
             },
         ],
