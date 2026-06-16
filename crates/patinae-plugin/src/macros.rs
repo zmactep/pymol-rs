@@ -29,6 +29,10 @@
 /// - `MySettings::init_store(&self)` → `SharedSettingStore` (populated with defaults)
 /// - `MySettings::sync_from_store(&mut self, store: &DynamicSettingStore)` — reads store into typed fields
 ///
+/// Command and panel code should usually read settings through
+/// `CommandContext::setting_*` or `SharedContext::setting_*`. The generated
+/// store helpers are for registration and plugin-owned poll state.
+///
 /// Settings are global-only by default. To make a setting object-overridable,
 /// modify the descriptor after calling `descriptors()`:
 ///

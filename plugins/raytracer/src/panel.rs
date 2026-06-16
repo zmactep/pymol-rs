@@ -1,7 +1,6 @@
 //! Declarative Patinae panel for ray tracing controls.
 
 use patinae_plugin::prelude::*;
-use patinae_settings::SettingValue;
 
 const PANEL_ID: &str = "rt_toolbar";
 const SAVE_REPLY_CONTROL_ID: &str = "save_file_selected";
@@ -128,31 +127,19 @@ impl RtPanel {
     }
 
     fn sync_from_settings(&mut self, ctx: &SharedContext<'_>) {
-        let read = |name: &str| -> Option<SettingValue> {
-            let entry = ctx.dynamic_settings?.lookup(name)?;
-            let store = entry.store.read().ok()?;
-            store.get(name).cloned()
-        };
-
         macro_rules! sync_bool {
             ($field:ident, $name:expr) => {
-                if let Some(SettingValue::Bool(v)) = read($name) {
-                    self.$field = v;
-                }
+                self.$field = ctx.setting_bool($name, self.$field);
             };
         }
         macro_rules! sync_int {
             ($field:ident, $name:expr) => {
-                if let Some(SettingValue::Int(v)) = read($name) {
-                    self.$field = v;
-                }
+                self.$field = ctx.setting_int($name, self.$field);
             };
         }
         macro_rules! sync_float {
             ($field:ident, $name:expr) => {
-                if let Some(SettingValue::Float(v)) = read($name) {
-                    self.$field = v;
-                }
+                self.$field = ctx.setting_float($name, self.$field);
             };
         }
 

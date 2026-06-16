@@ -25,31 +25,10 @@ pub(crate) struct ResolvedRaySettings {
 }
 
 pub(crate) fn read_ray_settings(
-    get_setting: impl Fn(&str) -> Option<patinae_settings::SettingValue>,
+    get_bool: impl Fn(&str, bool) -> bool,
+    get_i32: impl Fn(&str, i32) -> i32,
+    get_f32: impl Fn(&str, f32) -> f32,
 ) -> ResolvedRaySettings {
-    use patinae_settings::SettingValue;
-
-    let get_bool = |name: &str, default: bool| -> bool {
-        match get_setting(name) {
-            Some(SettingValue::Bool(b)) => b,
-            _ => default,
-        }
-    };
-
-    let get_i32 = |name: &str, default: i32| -> i32 {
-        match get_setting(name) {
-            Some(SettingValue::Int(i)) => i,
-            _ => default,
-        }
-    };
-
-    let get_f32 = |name: &str, default: f32| -> f32 {
-        match get_setting(name) {
-            Some(SettingValue::Float(f)) => f,
-            _ => default,
-        }
-    };
-
     ResolvedRaySettings {
         shadow: get_bool("ray_shadow", true),
         max_passes: get_i32("ray_max_passes", 25),

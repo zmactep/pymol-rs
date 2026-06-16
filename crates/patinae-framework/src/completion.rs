@@ -17,7 +17,9 @@
 
 use std::path::Path;
 
-use patinae_cmd::{ArgHint, CommandRegistry, CommandSource, DynamicSettingRegistry};
+use patinae_cmd::{
+    ArgHint, CommandRegistry, CommandSource, DynamicSettingRegistry, ResolvedSetting,
+};
 
 // =============================================================================
 // Rich completion item
@@ -400,10 +402,7 @@ fn complete_settings(
     if let Some(dyn_reg) = ctx.dynamic_settings {
         for name in dyn_reg.names() {
             if name.to_lowercase().starts_with(&prefix_lower) {
-                let description = dyn_reg
-                    .lookup(name)
-                    .map(|entry| entry.descriptor.setting_type.to_string())
-                    .unwrap_or_default();
+                let description = setting_type_label(name, ctx);
                 suggestions.push(CompletionItem {
                     text: name.clone(),
                     description,
@@ -426,15 +425,9 @@ fn complete_settings(
 /// legacy `definitions.rs` table is `.pse`-import compat and is not a source
 /// of runtime truth.
 fn setting_type_label(name: &str, ctx: &CompletionContext) -> String {
-    if let Some(desc) = patinae_settings::registry::lookup_by_name(name) {
-        return desc.setting_type.to_string();
-    }
-    if let Some(dyn_reg) = ctx.dynamic_settings {
-        if let Some(entry) = dyn_reg.lookup(name) {
-            return entry.descriptor.setting_type.to_string();
-        }
-    }
-    String::new()
+    ResolvedSetting::lookup(name, ctx.dynamic_settings)
+        .map(|setting| setting.setting_type().to_string())
+        .unwrap_or_default()
 }
 
 // =============================================================================
@@ -462,32 +455,15 @@ fn complete_setting_value(
         return CompletionResult::empty(prefix_start);
     };
 
-    // Typed registry is the source of truth for runtime-wired settings.
-    // The legacy `definitions.rs` table exists only for `.pse` session-file
-    // ID compatibility and is intentionally not consulted here — settings
-    // not in the typed (or dynamic) registry don't autocomplete.
-    if let Some(desc) = patinae_settings::registry::lookup_by_name(setting_name) {
+    if let Some(setting) = ResolvedSetting::lookup(setting_name, ctx.dynamic_settings) {
         return value_completion_for(
-            desc.has_value_hints(),
-            desc.hint_names().collect(),
-            desc.setting_type,
+            setting.has_value_hints(),
+            setting.hint_names(),
+            setting.setting_type(),
             prefix,
             prefix_start,
             ctx,
         );
-    }
-    if let Some(dyn_reg) = ctx.dynamic_settings {
-        if let Some(entry) = dyn_reg.lookup(setting_name) {
-            let desc = &entry.descriptor;
-            return value_completion_for(
-                desc.has_value_hints(),
-                desc.hint_names().collect(),
-                desc.setting_type,
-                prefix,
-                prefix_start,
-                ctx,
-            );
-        }
     }
 
     CompletionResult::empty(prefix_start)

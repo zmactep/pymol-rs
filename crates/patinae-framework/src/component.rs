@@ -3,10 +3,10 @@
 //! Defines the [`Component`] trait for self-contained UI panels and
 //! [`SharedContext`] for read-only access to application state.
 
-use patinae_cmd::{CommandRegistry, DynamicSettingRegistry};
+use patinae_cmd::{CommandRegistry, DynamicSettingRegistry, ResolvedSetting};
 use patinae_color::NamedPalette;
 use patinae_scene::{Camera, Movie, ObjectRegistry, SelectionManager, ViewportImage};
-use patinae_settings::Settings;
+use patinae_settings::{SettingValue, Settings};
 
 use crate::atom_stream::{AtomStreamPlan, AtomStreamRequest, AtomStreamRows};
 use crate::message::AppMessage;
@@ -42,10 +42,68 @@ pub struct SharedContext<'a> {
     pub command_names: &'a [String],
     pub command_registry: &'a CommandRegistry,
     pub setting_names: &'a [&'a str],
+    /// Dynamic settings registry for advanced host/runtime plumbing.
+    ///
+    /// Components should use [`Self::resolve_setting`], [`Self::setting_value`],
+    /// or the typed `setting_*` helpers for ordinary setting reads.
     pub dynamic_settings: Option<&'a DynamicSettingRegistry>,
 }
 
 impl<'a> SharedContext<'a> {
+    /// Resolve a built-in or dynamic setting by name.
+    ///
+    /// Built-in settings take precedence over dynamic plugin settings.
+    #[must_use]
+    pub fn resolve_setting(&self, name: &str) -> Option<ResolvedSetting> {
+        ResolvedSetting::lookup(name, self.dynamic_settings)
+    }
+
+    /// Read a setting value by name.
+    ///
+    /// This reads built-in settings first, then dynamic plugin settings.
+    /// Dynamic settings fall back to their descriptor default after `unset`.
+    #[must_use]
+    pub fn setting_value(&self, name: &str) -> Option<SettingValue> {
+        self.resolve_setting(name)
+            .map(|setting| setting.global_value_from_settings(self.settings))
+    }
+
+    /// Read a setting as a boolean.
+    ///
+    /// Returns `default` when the setting is not registered, or when neither
+    /// the current value nor the descriptor default can be converted to a
+    /// boolean.
+    #[must_use]
+    pub fn setting_bool(&self, name: &str, default: bool) -> bool {
+        self.setting_value(name)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(default)
+    }
+
+    /// Read a setting as an integer.
+    ///
+    /// Returns `default` when the setting is not registered, or when neither
+    /// the current value nor the descriptor default can be converted to an
+    /// integer.
+    #[must_use]
+    pub fn setting_int(&self, name: &str, default: i32) -> i32 {
+        self.setting_value(name)
+            .and_then(|value| value.as_int())
+            .unwrap_or(default)
+    }
+
+    /// Read a setting as a float.
+    ///
+    /// Returns `default` when the setting is not registered, or when neither
+    /// the current value nor the descriptor default can be converted to a
+    /// float.
+    #[must_use]
+    pub fn setting_float(&self, name: &str, default: f32) -> f32 {
+        self.setting_value(name)
+            .and_then(|value| value.as_float())
+            .unwrap_or(default)
+    }
+
     /// Opens a borrowed atom iterator.
     ///
     /// # Errors

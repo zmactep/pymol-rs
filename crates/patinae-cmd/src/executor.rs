@@ -147,12 +147,15 @@ impl CommandExecutor {
         &self.format_handlers
     }
 
-    /// Get a reference to the dynamic settings registry
+    /// Get the dynamic settings registry for registration and host plumbing.
+    ///
+    /// Command implementations should read settings through
+    /// [`CommandContext::setting_value`] or the typed `setting_*` helpers.
     pub fn dynamic_settings(&self) -> &DynamicSettingRegistry {
         &self.dynamic_settings
     }
 
-    /// Get a mutable reference to the dynamic settings registry
+    /// Get mutable dynamic settings for plugin registration.
     pub fn dynamic_settings_mut(&mut self) -> &mut DynamicSettingRegistry {
         &mut self.dynamic_settings
     }

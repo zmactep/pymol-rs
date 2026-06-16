@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use ahash::AHashMap;
 use patinae_mol::ObjectMolecule;
-use patinae_settings::{DssAlgorithm, DynamicSettingDescriptor, SharedSettingStore};
+use patinae_settings::{DssAlgorithm, DynamicSettingDescriptor, SettingValue, SharedSettingStore};
 use serde::{Deserialize, Serialize};
 
 use crate::history::CommandHistory;
+use crate::setting_access::ResolvedSetting;
 
 /// A script handler registered by a plugin for a specific file extension.
 ///
@@ -463,14 +464,74 @@ impl<'v, 'r, V: ViewerLike + ?Sized> CommandContext<'v, 'r, V> {
         self
     }
 
-    /// Look up a dynamic setting entry by name.
-    pub fn dynamic_setting(&self, name: &str) -> Option<&DynamicSettingEntry> {
-        self.dynamic_settings.and_then(|r| r.lookup(name))
+    /// Resolve a built-in or dynamic setting by name.
+    ///
+    /// Built-in settings take precedence over dynamic plugin settings.
+    #[must_use]
+    pub fn resolve_setting(&self, name: &str) -> Option<ResolvedSetting> {
+        ResolvedSetting::lookup(name, self.dynamic_settings)
     }
 
-    /// Get the full dynamic settings registry (if available).
+    /// Read a setting value by name.
+    ///
+    /// This reads built-in settings first, then dynamic plugin settings.
+    /// Dynamic settings fall back to their descriptor default after `unset`.
+    #[must_use]
+    pub fn setting_value(&self, name: &str) -> Option<SettingValue> {
+        self.resolve_setting(name)
+            .map(|setting| setting.global_value_lossy(self.viewer))
+    }
+
+    /// Read a setting as a boolean.
+    ///
+    /// Returns `default` when the setting is not registered, or when neither
+    /// the current value nor the descriptor default can be converted to a
+    /// boolean.
+    #[must_use]
+    pub fn setting_bool(&self, name: &str, default: bool) -> bool {
+        self.setting_value(name)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(default)
+    }
+
+    /// Read a setting as an integer.
+    ///
+    /// Returns `default` when the setting is not registered, or when neither
+    /// the current value nor the descriptor default can be converted to an
+    /// integer.
+    #[must_use]
+    pub fn setting_int(&self, name: &str, default: i32) -> i32 {
+        self.setting_value(name)
+            .and_then(|value| value.as_int())
+            .unwrap_or(default)
+    }
+
+    /// Read a setting as a float.
+    ///
+    /// Returns `default` when the setting is not registered, or when neither
+    /// the current value nor the descriptor default can be converted to a
+    /// float.
+    #[must_use]
+    pub fn setting_float(&self, name: &str, default: f32) -> f32 {
+        self.setting_value(name)
+            .and_then(|value| value.as_float())
+            .unwrap_or(default)
+    }
+
+    /// Return the dynamic settings registry for advanced runtime plumbing.
+    ///
+    /// Ordinary command implementations should use [`Self::resolve_setting`],
+    /// [`Self::setting_value`], or the typed `setting_*` helpers. This accessor
+    /// exists for host serialization and nested executors that must preserve
+    /// plugin-registered setting descriptors and shared stores.
     pub fn dynamic_settings(&self) -> Option<&DynamicSettingRegistry> {
         self.dynamic_settings
+    }
+
+    /// Clone dynamic settings for a nested command executor.
+    #[must_use]
+    pub fn clone_dynamic_settings_for_child_executor(&self) -> DynamicSettingRegistry {
+        self.dynamic_settings.cloned().unwrap_or_default()
     }
 
     /// Set the host async request sink.
@@ -1065,6 +1126,10 @@ impl CommandRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, RwLock};
+
+    use patinae_scene::{Session, SessionAdapter};
+    use patinae_settings::{registry, DynamicSettingStore, SettingType};
 
     struct TestCommand {
         name: String,
@@ -1109,5 +1174,80 @@ mod tests {
 
         let cmd = registry.get("test_alias").unwrap();
         assert_eq!(cmd.name(), "test");
+    }
+
+    #[test]
+    fn typed_setting_getters_read_builtin_dynamic_and_defaults() {
+        let mut registry = DynamicSettingRegistry::new();
+
+        register_test_setting(
+            &mut registry,
+            "plugin_enabled",
+            SettingType::Bool,
+            SettingValue::Bool(true),
+            Some(SettingValue::Bool(false)),
+        );
+        register_test_setting(
+            &mut registry,
+            "plugin_style",
+            SettingType::Int,
+            SettingValue::Int(7),
+            None,
+        );
+        register_test_setting(
+            &mut registry,
+            "plugin_scale",
+            SettingType::Float,
+            SettingValue::Float(1.5),
+            Some(SettingValue::Float(2.5)),
+        );
+
+        let mut session = Session::new();
+        registry::lookup_by_name("ambient")
+            .unwrap()
+            .set(&mut session.settings, SettingValue::Float(0.33))
+            .unwrap();
+
+        let mut needs_redraw = false;
+        let mut viewer = SessionAdapter {
+            session: &mut session,
+            render_context: None,
+            default_size: (1, 1),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+        let ctx = CommandContext::new(&mut viewer).with_dynamic_settings(&registry);
+
+        assert_eq!(ctx.setting_float("ambient", 0.0), 0.33);
+        assert!(!ctx.setting_bool("plugin_enabled", true));
+        assert_eq!(ctx.setting_int("plugin_style", 0), 7);
+        assert_eq!(ctx.setting_float("plugin_scale", 0.0), 2.5);
+        assert_eq!(ctx.setting_int("missing_setting", 42), 42);
+    }
+
+    fn register_test_setting(
+        registry: &mut DynamicSettingRegistry,
+        name: &str,
+        setting_type: SettingType,
+        default: SettingValue,
+        current: Option<SettingValue>,
+    ) {
+        let descriptor = DynamicSettingDescriptor {
+            name: name.to_string(),
+            setting_type,
+            default,
+            min: None,
+            max: None,
+            value_hints: Vec::new(),
+            side_effects: Vec::new(),
+            object_overridable: false,
+        };
+        let mut store = DynamicSettingStore::new();
+        if let Some(value) = current {
+            store.set(name, value);
+        }
+        registry
+            .register(descriptor, Arc::new(RwLock::new(store)))
+            .unwrap();
     }
 }

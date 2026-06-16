@@ -411,7 +411,7 @@ impl Command for RunCommand {
                         registry.clone(),
                         ctx.script_handlers_map().cloned().unwrap_or_default(),
                         ctx.format_handlers_map().cloned().unwrap_or_default(),
-                        ctx.dynamic_settings().cloned().unwrap_or_default(),
+                        ctx.clone_dynamic_settings_for_child_executor(),
                     )
                 } else {
                     CommandExecutor::new()

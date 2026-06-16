@@ -46,6 +46,7 @@ pub mod helpers;
 mod history;
 mod parser;
 mod script;
+mod setting_access;
 
 // Re-export main types
 pub use args::{ArgValue, ParsedCommand};
@@ -61,6 +62,7 @@ pub use executor::{CommandExecutor, CommandOutput};
 pub use history::CommandHistory;
 pub use parser::{join_continued_lines, parse_command, parse_commands};
 pub use script::ScriptEngine;
+pub use setting_access::{ResolvedSetting, SettingSource};
 
 /// Prelude for convenient imports
 pub mod prelude {
@@ -74,4 +76,5 @@ pub mod prelude {
     pub use crate::error::{CmdError, CmdResult};
     pub use crate::executor::CommandExecutor;
     pub use crate::parser::{parse_command, parse_commands};
+    pub use crate::setting_access::{ResolvedSetting, SettingSource};
 }

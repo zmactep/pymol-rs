@@ -86,12 +86,11 @@ impl Command for RayCommand {
         // Ensure representations are built (mutable borrow, released immediately)
         ctx.viewer.prepare_render();
 
-        // Read ray settings from plugin's dynamic settings
-        let ray_settings = read_ray_settings(|name| {
-            ctx.dynamic_setting(name)
-                .and_then(|e| e.store.read().ok())
-                .and_then(|s| s.get(name).cloned())
-        });
+        let ray_settings = read_ray_settings(
+            |name, default| ctx.setting_bool(name, default),
+            |name, default| ctx.setting_int(name, default),
+            |name, default| ctx.setting_float(name, default),
+        );
 
         // Determine output dimensions
         let viewport = ctx.viewer.viewport_size();

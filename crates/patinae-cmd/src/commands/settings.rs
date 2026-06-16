@@ -1,18 +1,14 @@
 //! Settings commands: set, get, unset, dss
 
 use crate::args::ParsedCommand;
-use crate::command::{
-    ArgHint, Command, CommandContext, CommandRegistry, DynamicSettingEntry, ViewerLike,
-};
+use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::command_help;
 use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
+use crate::ResolvedSetting;
 use patinae_scene::{DirtyFlags, MoleculeObject, Object};
 use patinae_select::AtomIndex;
-use patinae_settings::SettingDescriptor;
-use patinae_settings::{
-    registry, DynamicSettingDescriptor, SettingType, SettingValue, SideEffectCategory,
-};
+use patinae_settings::{SettingType, SettingValue, SideEffectCategory};
 
 /// Register settings commands
 pub fn register(registry: &mut CommandRegistry) {
@@ -20,94 +16,6 @@ pub fn register(registry: &mut CommandRegistry) {
     registry.register(GetCommand);
     registry.register(UnsetCommand);
     registry.register(SetupCcdCommand);
-}
-
-/// Parse a string value into a SettingValue based on the setting type
-fn parse_setting_value(s: &str, setting_type: SettingType) -> CmdResult<SettingValue> {
-    match setting_type {
-        SettingType::Bool => match s.to_lowercase().as_str() {
-            "1" | "on" | "true" | "yes" => Ok(SettingValue::Bool(true)),
-            "0" | "off" | "false" | "no" => Ok(SettingValue::Bool(false)),
-            _ => Err(CmdError::invalid_arg(
-                "value",
-                format!(
-                    "Invalid boolean value '{}'. Use 1/0, on/off, true/false, or yes/no",
-                    s
-                ),
-            )),
-        },
-        SettingType::Int => {
-            // Try numeric parse first
-            if let Ok(v) = s.parse::<i32>() {
-                return Ok(SettingValue::Int(v));
-            }
-            // Also accept on/off/true/false for integer settings.
-            match s.to_lowercase().as_str() {
-                "on" | "true" | "yes" => Ok(SettingValue::Int(1)),
-                "off" | "false" | "no" => Ok(SettingValue::Int(0)),
-                _ => Err(CmdError::invalid_arg(
-                    "value",
-                    format!("Invalid integer value '{}'. Expected a number or on/off", s),
-                )),
-            }
-        }
-        SettingType::Float => {
-            // Try numeric parse first
-            if let Ok(v) = s.parse::<f32>() {
-                return Ok(SettingValue::Float(v));
-            }
-            // Also accept on/off for float settings.
-            match s.to_lowercase().as_str() {
-                "on" | "true" | "yes" => Ok(SettingValue::Float(1.0)),
-                "off" | "false" | "no" => Ok(SettingValue::Float(0.0)),
-                _ => Err(CmdError::invalid_arg(
-                    "value",
-                    format!("Invalid float value '{}'. Expected a number or on/off", s),
-                )),
-            }
-        }
-        SettingType::Float3 => {
-            // Parse [x, y, z] or x,y,z format
-            let cleaned = s.trim_start_matches('[').trim_end_matches(']');
-            let parts: Vec<&str> = cleaned.split(',').map(|p| p.trim()).collect();
-            if parts.len() != 3 {
-                return Err(CmdError::invalid_arg(
-                    "value",
-                    format!(
-                        "Invalid float3 value '{}'. Expected [x, y, z] or x,y,z format",
-                        s
-                    ),
-                ));
-            }
-            let x = parts[0]
-                .parse::<f32>()
-                .map_err(|_| CmdError::invalid_arg("value", "Invalid x component"))?;
-            let y = parts[1]
-                .parse::<f32>()
-                .map_err(|_| CmdError::invalid_arg("value", "Invalid y component"))?;
-            let z = parts[2]
-                .parse::<f32>()
-                .map_err(|_| CmdError::invalid_arg("value", "Invalid z component"))?;
-            Ok(SettingValue::Float3([x, y, z]))
-        }
-        SettingType::Color => {
-            // Color can be an integer index or color name (we'll handle names later)
-            s.parse::<i32>().map(SettingValue::Color).map_err(|_| {
-                CmdError::invalid_arg(
-                    "value",
-                    format!(
-                        "Invalid color value '{}'. Expected a color index (integer)",
-                        s
-                    ),
-                )
-            })
-        }
-        SettingType::String => Ok(SettingValue::String(s.to_string())),
-        SettingType::Blank => Err(CmdError::invalid_arg(
-            "value",
-            "Cannot set a blank/unused setting",
-        )),
-    }
 }
 
 /// Resolve deprecated setting names to their canonical forms, printing a
@@ -126,38 +34,34 @@ fn resolve_legacy_setting_name<'v, 'r, 'a>(
     }
 }
 
-/// Format a SettingValue for display
-fn format_setting_value(value: &SettingValue) -> String {
-    match value {
-        SettingValue::Bool(v) => {
-            if *v {
-                "on".to_string()
-            } else {
-                "off".to_string()
-            }
-        }
-        SettingValue::Int(v) => v.to_string(),
-        SettingValue::Float(v) => format!("{:.6}", v),
-        SettingValue::Float3(v) => format!("[{:.3}, {:.3}, {:.3}]", v[0], v[1], v[2]),
-        SettingValue::Color(v) => v.to_string(),
-        SettingValue::String(v) => v.clone(),
-    }
+/// Format a setting source as an unknown-setting error.
+fn unknown_setting(name: &str) -> CmdError {
+    CmdError::invalid_arg("name", format!("Unknown setting: {}", name))
 }
 
-/// Format a setting value for display, using hint names when available
-fn format_setting_display(desc: &SettingDescriptor, value: &SettingValue) -> String {
-    if let Some(name) = desc.hint_name(value) {
-        return name.to_string();
+fn format_object_report(
+    setting: &ResolvedSetting,
+    value: &SettingValue,
+    object_name: &str,
+) -> String {
+    let raw = ResolvedSetting::format_value(value);
+    if let Some(hint_name) = setting.hint_name(value) {
+        format!(
+            "{} = {} ({}, object {})",
+            setting.name(),
+            raw,
+            hint_name,
+            object_name
+        )
+    } else {
+        format!(
+            "{} ({}) = {} (object {})",
+            setting.name(),
+            setting.setting_type(),
+            raw,
+            object_name
+        )
     }
-    format_setting_value(value)
-}
-
-/// Format a dynamic setting value for display, using hint names when available
-fn format_dynamic_display(desc: &DynamicSettingDescriptor, value: &SettingValue) -> String {
-    if let Some(name) = desc.hint_name(value) {
-        return name.to_string();
-    }
-    format_setting_value(value)
 }
 
 /// Apply side effects from a slice of categories.
@@ -361,35 +265,16 @@ impl SetCommand {
         Ok(())
     }
 
-    /// Parse a value string with per-setting overrides (shading_mode aliases, color names)
+    /// Parse a value string with per-setting overrides.
     fn parse_value<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        desc: &SettingDescriptor,
+        setting: &ResolvedSetting,
         value_str: &str,
     ) -> CmdResult<SettingValue> {
-        // Resolve named value hints for settings with named variants
-        if desc.has_value_hints() {
-            if let Some(val) = desc.resolve_hint(value_str) {
-                return Ok(val.clone());
-            }
-            if value_str.parse::<f64>().is_err() {
-                let names: Vec<_> = desc.hint_names().collect();
-                return Err(CmdError::invalid_arg(
-                    "value",
-                    format!(
-                        "Unknown value '{}' for {}. Use {}",
-                        value_str,
-                        desc.name,
-                        names.join("/")
-                    ),
-                ));
-            }
-        }
-
-        // Color type: resolve names/schemes
-        if desc.setting_type == SettingType::Color {
-            // Accept [r, g, b] float vector → convert to 0x00RRGGBB integer
+        // Built-in color settings resolve names and color schemes through the viewer.
+        if setting.built_in_descriptor().is_some() && setting.setting_type() == SettingType::Color {
+            // Accept [r, g, b] float vector and convert it to 0x00RRGGBB.
             if value_str.starts_with('[') && value_str.ends_with(']') {
                 let inner = value_str[1..value_str.len() - 1].trim();
                 let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
@@ -429,8 +314,7 @@ impl SetCommand {
             return Ok(SettingValue::Int(color_index));
         }
 
-        // Default type-based parsing
-        parse_setting_value(value_str, desc.setting_type)
+        setting.parse_value(value_str)
     }
 
     /// Apply a rep color per-atom via the dispatch table
@@ -528,26 +412,33 @@ impl SetCommand {
         Ok(total_affected)
     }
 
-    /// Execute a `set` for a built-in (static registry) setting.
-    fn execute_builtin<'v, 'r>(
+    /// Execute a `set` for a resolved setting.
+    fn execute_setting<'v, 'r>(
         &self,
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
-        desc: &SettingDescriptor,
-        name: &str,
+        setting: ResolvedSetting,
         value_str: Option<String>,
         selection: Option<&str>,
     ) -> CmdResult {
+        let name = setting.name().to_string();
+
         // Handle missing value (boolean toggle)
         let value_str = match value_str {
             Some(v) => v,
             None => {
-                if desc.setting_type == SettingType::Bool {
-                    let current = desc.get(ctx.viewer.settings()).as_bool().unwrap_or(false);
+                if setting.setting_type() == SettingType::Bool {
+                    let current = setting
+                        .global_value(ctx.viewer)
+                        .map_err(CmdError::execution)?
+                        .as_bool()
+                        .unwrap_or(false);
                     let new_value = !current;
-                    desc.set(ctx.viewer.settings_mut(), SettingValue::Bool(new_value))
-                        .map_err(|e| CmdError::execution(e.to_string()))?;
-                    self.apply_side_effects(ctx, desc, &SettingValue::Bool(new_value));
+                    let value = SettingValue::Bool(new_value);
+                    setting
+                        .set_global(ctx.viewer, value.clone())
+                        .map_err(CmdError::execution)?;
+                    apply_side_effects_from_slice(ctx, setting.side_effects(), &name, &value);
                     ctx.viewer.request_redraw();
                     if !ctx.quiet {
                         ctx.print(&format!(
@@ -564,8 +455,8 @@ impl SetCommand {
         };
 
         // For Float3 settings or color settings: collect 3 comma-separated floats
-        let (value_str, selection) = if (desc.setting_type == SettingType::Float3
-            || desc.setting_type == SettingType::Color)
+        let (value_str, selection) = if (setting.setting_type() == SettingType::Float3
+            || setting.setting_type() == SettingType::Color)
             && !value_str.starts_with('[')
             && value_str.parse::<f32>().is_ok()
         {
@@ -587,217 +478,122 @@ impl SetCommand {
             (value_str, selection)
         };
 
-        let value = self.parse_value(ctx, desc, &value_str)?;
+        let value = self.parse_value(ctx, &setting, &value_str)?;
+        setting
+            .validate_range(&value)
+            .map_err(|msg| CmdError::invalid_arg("value", msg))?;
 
-        // Per-atom rep color
-        if let Some(field_accessor) = rep_color_field(desc.name) {
-            let is_global = selection.is_none();
-            let selection_str = selection.unwrap_or("all");
-            let color_index = value
-                .as_int()
-                .ok_or_else(|| CmdError::execution("Expected color/int value"))?;
+        if let Some(desc) = setting.built_in_descriptor() {
+            // Per-atom rep color
+            if let Some(field_accessor) = rep_color_field(desc.name) {
+                let is_global = selection.is_none();
+                let selection_str = selection.unwrap_or("all");
+                let color_index = value
+                    .as_int()
+                    .ok_or_else(|| CmdError::execution("Expected color/int value"))?;
 
-            if is_global {
-                desc.set(ctx.viewer.settings_mut(), value.clone())
-                    .map_err(|e| CmdError::execution(e.to_string()))?;
-            }
-
-            let total_affected =
-                self.apply_per_atom_color(ctx, selection_str, color_index, field_accessor)?;
-            ctx.viewer.request_redraw();
-
-            if !ctx.quiet {
-                ctx.print(&format!(
-                    " Set {} = {} for {} atoms",
-                    name, value_str, total_affected
-                ));
-            }
-            return Ok(());
-        }
-
-        // Per-atom sphere_scale
-        if desc.name == "sphere_scale" {
-            if let Some(selection_str) = selection {
-                let scale_value = value
-                    .as_float()
-                    .ok_or_else(|| CmdError::execution("Expected float value for sphere_scale"))?;
+                if is_global {
+                    setting
+                        .set_global(ctx.viewer, value.clone())
+                        .map_err(CmdError::execution)?;
+                }
 
                 let total_affected =
-                    self.apply_per_atom_sphere_scale(ctx, selection_str, scale_value)?;
-                ctx.viewer.request_redraw();
-
-                if !ctx.quiet {
-                    ctx.print(&format!(
-                        " Set sphere_scale = {} for {} atoms",
-                        scale_value, total_affected
-                    ));
-                }
-                return Ok(());
-            }
-        }
-
-        // Per-atom transparency (sphere_transparency, stick_transparency,
-        // cartoon_transparency, transparency=surface). Surface uses the
-        // recolor_lut fast path (DirtyFlags::COLOR); others need a rebuild.
-        if let Some(field_accessor) = per_atom_transparency_field(desc.name) {
-            if let Some(selection_str) = selection {
-                let trans_value = value
-                    .as_float()
-                    .ok_or_else(|| CmdError::execution("Expected float value for transparency"))?;
-
-                let dirty = if desc.name == "surface_transparency" {
-                    DirtyFlags::COLOR
-                } else {
-                    DirtyFlags::REPS
-                };
-                let total_affected = self.apply_per_atom_transparency(
-                    ctx,
-                    selection_str,
-                    trans_value,
-                    field_accessor,
-                    dirty,
-                )?;
+                    self.apply_per_atom_color(ctx, selection_str, color_index, field_accessor)?;
                 ctx.viewer.request_redraw();
 
                 if !ctx.quiet {
                     ctx.print(&format!(
                         " Set {} = {} for {} atoms",
-                        name, trans_value, total_affected
+                        name, value_str, total_affected
                     ));
                 }
                 return Ok(());
             }
-        }
 
-        // Per-object override
-        if let Some(sel) = selection {
-            if desc.is_object_overridable() {
-                if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
-                    desc.set_override(mol.get_or_create_overrides(), value.clone())
-                        .map_err(|e| CmdError::execution(e.to_string()))?;
-                    apply_object_side_effects(mol, desc.side_effects, desc.name, &value);
+            // Per-atom sphere_scale
+            if desc.name == "sphere_scale" {
+                if let Some(selection_str) = selection {
+                    let scale_value = value.as_float().ok_or_else(|| {
+                        CmdError::execution("Expected float value for sphere_scale")
+                    })?;
+
+                    let total_affected =
+                        self.apply_per_atom_sphere_scale(ctx, selection_str, scale_value)?;
                     ctx.viewer.request_redraw();
-                    if !ctx.quiet {
-                        let display = format_setting_display(desc, &value);
-                        ctx.print(&format!(" {} = {} (object {})", name, display, sel));
-                    }
-                    return Ok(());
-                }
-            }
-        }
 
-        // Global set
-        desc.set(ctx.viewer.settings_mut(), value.clone())
-            .map_err(|e| CmdError::execution(e.to_string()))?;
-
-        self.apply_side_effects(ctx, desc, &value);
-        ctx.viewer.request_redraw();
-
-        if !ctx.quiet {
-            let display = format_setting_display(desc, &value);
-            ctx.print(&format!(" {} = {}", name, display));
-        }
-
-        Ok(())
-    }
-
-    /// Execute a `set` for a dynamic (plugin-registered) setting.
-    fn execute_dynamic<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        entry: &DynamicSettingEntry,
-        name: &str,
-        value_str: Option<String>,
-        selection: Option<&str>,
-    ) -> CmdResult {
-        let desc = &entry.descriptor;
-
-        // Handle missing value (boolean toggle)
-        let value_str = match value_str {
-            Some(v) => v,
-            None => {
-                if desc.setting_type == SettingType::Bool {
-                    let store = entry
-                        .store
-                        .read()
-                        .map_err(|e| CmdError::execution(e.to_string()))?;
-                    let current = store
-                        .get(name)
-                        .unwrap_or(&desc.default)
-                        .as_bool()
-                        .unwrap_or(false);
-                    drop(store);
-                    let new_value = SettingValue::Bool(!current);
-                    entry
-                        .store
-                        .write()
-                        .map_err(|e| CmdError::execution(e.to_string()))?
-                        .set(name, new_value.clone());
-                    apply_side_effects_from_slice(ctx, &desc.side_effects, name, &new_value);
-                    ctx.viewer.request_redraw();
                     if !ctx.quiet {
                         ctx.print(&format!(
-                            " {} = {}",
-                            name,
-                            if !current { "on" } else { "off" }
+                            " Set sphere_scale = {} for {} atoms",
+                            scale_value, total_affected
                         ));
                     }
                     return Ok(());
-                } else {
-                    return Err(CmdError::missing_argument("value".to_string()));
                 }
             }
-        };
 
-        // Parse value — resolve hints, then type-based parsing
-        let value = if desc.has_value_hints() {
-            if let Some(val) = desc.resolve_hint(&value_str) {
-                val.clone()
-            } else if value_str.parse::<f64>().is_err() {
-                let names: Vec<_> = desc.hint_names().collect();
-                return Err(CmdError::invalid_arg(
-                    "value",
-                    format!(
-                        "Unknown value '{}' for {}. Use {}",
-                        value_str,
-                        name,
-                        names.join("/")
-                    ),
-                ));
-            } else {
-                parse_setting_value(&value_str, desc.setting_type)?
+            // Per-atom transparency (sphere_transparency, stick_transparency,
+            // cartoon_transparency, transparency=surface). Surface uses the
+            // recolor_lut fast path (DirtyFlags::COLOR); others need a rebuild.
+            if let Some(field_accessor) = per_atom_transparency_field(desc.name) {
+                if let Some(selection_str) = selection {
+                    let trans_value = value.as_float().ok_or_else(|| {
+                        CmdError::execution("Expected float value for transparency")
+                    })?;
+
+                    let dirty = if desc.name == "surface_transparency" {
+                        DirtyFlags::COLOR
+                    } else {
+                        DirtyFlags::REPS
+                    };
+                    let total_affected = self.apply_per_atom_transparency(
+                        ctx,
+                        selection_str,
+                        trans_value,
+                        field_accessor,
+                        dirty,
+                    )?;
+                    ctx.viewer.request_redraw();
+
+                    if !ctx.quiet {
+                        ctx.print(&format!(
+                            " Set {} = {} for {} atoms",
+                            name, trans_value, total_affected
+                        ));
+                    }
+                    return Ok(());
+                }
             }
-        } else {
-            parse_setting_value(&value_str, desc.setting_type)?
-        };
 
-        // Validate min/max
-        if let (Some(min), Some(max)) = (desc.min, desc.max) {
-            if let Some(fval) = value.as_float() {
-                if fval < min || fval > max {
-                    return Err(CmdError::invalid_arg(
-                        "value",
-                        format!(
-                            "Value {} out of range [{}, {}] for {}",
-                            fval, min, max, name
-                        ),
-                    ));
+            // Built-in object override
+            if let Some(sel) = selection {
+                if desc.is_object_overridable() {
+                    if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
+                        desc.set_override(mol.get_or_create_overrides(), value.clone())
+                            .map_err(|e| CmdError::execution(e.to_string()))?;
+                        apply_object_side_effects(mol, desc.side_effects, desc.name, &value);
+                        ctx.viewer.request_redraw();
+                        if !ctx.quiet {
+                            let display = setting.format_display(&value);
+                            ctx.print(&format!(" {} = {} (object {})", name, display, sel));
+                        }
+                        return Ok(());
+                    }
                 }
             }
         }
 
-        // Per-object override
+        // Dynamic object override
         if let Some(sel) = selection {
-            if desc.object_overridable {
-                entry
-                    .store
-                    .write()
-                    .map_err(|e| CmdError::execution(e.to_string()))?
-                    .set_object(sel, name, value.clone());
-                apply_side_effects_from_slice(ctx, &desc.side_effects, name, &value);
+            if setting.is_object_overridable()
+                && setting
+                    .set_object_value(sel, value.clone())
+                    .map_err(CmdError::execution)?
+            {
+                apply_side_effects_from_slice(ctx, setting.side_effects(), &name, &value);
                 ctx.viewer.request_redraw();
                 if !ctx.quiet {
-                    let display = format_dynamic_display(desc, &value);
+                    let display = setting.format_display(&value);
                     ctx.print(&format!(" {} = {} (object {})", name, display, sel));
                 }
                 return Ok(());
@@ -805,30 +601,18 @@ impl SetCommand {
         }
 
         // Global set
-        entry
-            .store
-            .write()
-            .map_err(|e| CmdError::execution(e.to_string()))?
-            .set(name, value.clone());
-        apply_side_effects_from_slice(ctx, &desc.side_effects, name, &value);
+        setting
+            .set_global(ctx.viewer, value.clone())
+            .map_err(CmdError::execution)?;
+        apply_side_effects_from_slice(ctx, setting.side_effects(), &name, &value);
         ctx.viewer.request_redraw();
 
         if !ctx.quiet {
-            let display = format_dynamic_display(desc, &value);
+            let display = setting.format_display(&value);
             ctx.print(&format!(" {} = {}", name, display));
         }
 
         Ok(())
-    }
-
-    /// Apply side effects based on the descriptor's side_effects list
-    fn apply_side_effects<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        desc: &SettingDescriptor,
-        value: &SettingValue,
-    ) {
-        apply_side_effects_from_slice(ctx, desc.side_effects, desc.name, value);
     }
 }
 
@@ -888,20 +672,10 @@ impl Command for SetCommand {
             return self.handle_set_state(ctx, value_str);
         }
 
-        // === 3. Resolve setting descriptor ===
-        if let Some(desc) = registry::lookup_by_name(name) {
-            return self.execute_builtin(ctx, args, desc, name, value_str, selection);
-        }
-
-        // === 3b. Fall through to dynamic (plugin) settings ===
-        if let Some(entry) = ctx.dynamic_setting(name).cloned() {
-            return self.execute_dynamic(ctx, &entry, name, value_str, selection);
-        }
-
-        Err(CmdError::invalid_arg(
-            "name",
-            format!("Unknown setting: {}", name),
-        ))
+        let setting = ctx
+            .resolve_setting(name)
+            .ok_or_else(|| unknown_setting(name))?;
+        self.execute_setting(ctx, args, setting, value_str, selection)
     }
 }
 
@@ -985,9 +759,12 @@ impl Command for GetCommand {
             return Ok(());
         }
 
-        // Look up in built-in registry first
-        if let Some(desc) = registry::lookup_by_name(name) {
-            let selection = args.str_arg(1, "selection");
+        let setting = ctx
+            .resolve_setting(name)
+            .ok_or_else(|| unknown_setting(name))?;
+        let selection = args.str_arg(1, "selection");
+
+        if let Some(desc) = setting.built_in_descriptor() {
             if let Some(sel) = selection {
                 if let Some(field_reader) = rep_color_field_read(desc.name) {
                     let selection_results = evaluate_selection(ctx.viewer, sel)?;
@@ -997,7 +774,7 @@ impl Command for GetCommand {
                                 if let Some(atom) = mol.molecule().get_atom(idx) {
                                     let color_val = field_reader(&atom.repr.colors);
                                     let value = SettingValue::Int(color_val);
-                                    let display = format_setting_display(desc, &value);
+                                    let display = setting.format_display(&value);
                                     ctx.print(&format!(" {} = {} ({})", name, display, sel));
                                     return Ok(());
                                 }
@@ -1008,89 +785,29 @@ impl Command for GetCommand {
 
                 if desc.is_object_overridable() {
                     if let Some(mol) = ctx.viewer.objects().get_molecule(sel) {
-                        if let Some(overrides) = mol.overrides() {
-                            if let Some(value) = desc.get_override(overrides) {
-                                let display = format_setting_value(&value);
-                                if let Some(hint_name) = desc.hint_name(&value) {
-                                    ctx.print(&format!(
-                                        " {} = {} ({}, object {})",
-                                        name, display, hint_name, sel
-                                    ));
-                                } else {
-                                    ctx.print(&format!(
-                                        " {} ({}) = {} (object {})",
-                                        name, desc.setting_type, display, sel
-                                    ));
-                                }
-                                return Ok(());
-                            }
+                        if let Some(value) = setting.built_in_object_value(mol) {
+                            ctx.print(&format!(" {}", format_object_report(&setting, &value, sel)));
+                            return Ok(());
                         }
                     }
                 }
             }
-
-            let value = desc.get(ctx.viewer.settings());
-            if let Some(hint_name) = desc.hint_name(&value) {
-                ctx.print(&format!(
-                    " {} = {} ({})",
-                    name,
-                    format_setting_value(&value),
-                    hint_name
-                ));
-            } else {
-                ctx.print(&format!(
-                    " {} ({}) = {}",
-                    name,
-                    desc.setting_type,
-                    format_setting_value(&value)
-                ));
-            }
-            return Ok(());
         }
 
-        // Fall through to dynamic (plugin) settings
-        if let Some(entry) = ctx.dynamic_setting(name).cloned() {
-            let desc = &entry.descriptor;
-            let selection = args.str_arg(1, "selection");
-            let store = entry
-                .store
-                .read()
-                .map_err(|e| CmdError::execution(e.to_string()))?;
-
-            // Per-object override
-            if let Some(sel) = selection {
-                if desc.object_overridable {
-                    if let Some(value) = store.get_object(sel, name) {
-                        let display = format_dynamic_display(desc, value);
-                        ctx.print(&format!(
-                            " {} ({}) = {} (object {})",
-                            name, desc.setting_type, display, sel
-                        ));
-                        return Ok(());
-                    }
+        if let Some(sel) = selection {
+            if setting.is_object_overridable() {
+                if let Some(value) = setting.object_value(sel).map_err(CmdError::execution)? {
+                    ctx.print(&format!(" {}", format_object_report(&setting, &value, sel)));
+                    return Ok(());
                 }
             }
-
-            // Global value (fall back to default)
-            let value = store.get(name).unwrap_or(&desc.default);
-            let display = format_dynamic_display(desc, value);
-            if let Some(hint_name) = desc.hint_name(value) {
-                ctx.print(&format!(
-                    " {} = {} ({})",
-                    name,
-                    format_setting_value(value),
-                    hint_name
-                ));
-            } else {
-                ctx.print(&format!(" {} ({}) = {}", name, desc.setting_type, display));
-            }
-            return Ok(());
         }
 
-        Err(CmdError::invalid_arg(
-            "name",
-            format!("Unknown setting: {}", name),
-        ))
+        let value = setting
+            .global_value(ctx.viewer)
+            .map_err(CmdError::execution)?;
+        ctx.print(&format!(" {}", setting.format_report(&value)));
+        Ok(())
     }
 }
 
@@ -1141,10 +858,12 @@ impl Command for UnsetCommand {
         let resolved = resolve_legacy_setting_name(ctx, raw_name);
         let name = resolved.as_ref();
 
-        // Look up in built-in registry first
-        if let Some(desc) = registry::lookup_by_name(name) {
-            let selection = args.str_arg(1, "selection");
+        let setting = ctx
+            .resolve_setting(name)
+            .ok_or_else(|| unknown_setting(name))?;
+        let selection = args.str_arg(1, "selection");
 
+        if let Some(desc) = setting.built_in_descriptor() {
             if let Some(sel) = selection {
                 if let Some(field_accessor) = rep_color_field(desc.name) {
                     let selection_results = evaluate_selection(ctx.viewer, sel)?;
@@ -1248,69 +967,41 @@ impl Command for UnsetCommand {
                     }
                 }
             }
-
-            let default_value = desc.get(&patinae_settings::Settings::default());
-            desc.set(ctx.viewer.settings_mut(), default_value.clone())
-                .map_err(|e| CmdError::execution(e.to_string()))?;
-            apply_side_effects_from_slice(ctx, desc.side_effects, desc.name, &default_value);
-
-            ctx.viewer.request_redraw();
-
-            if !ctx.quiet {
-                ctx.print(&format!(
-                    " {} reset to default: {}",
-                    name,
-                    format_setting_value(&default_value)
-                ));
-            }
-
-            return Ok(());
         }
 
-        // Fall through to dynamic (plugin) settings
-        if let Some(entry) = ctx.dynamic_setting(name).cloned() {
-            let desc = &entry.descriptor;
-            let selection = args.str_arg(1, "selection");
-
-            if let Some(sel) = selection {
-                if desc.object_overridable {
-                    entry
-                        .store
-                        .write()
-                        .map_err(|e| CmdError::execution(e.to_string()))?
-                        .remove_object(sel, name);
-                    ctx.viewer.request_redraw();
-                    if !ctx.quiet {
-                        ctx.print(&format!(
-                            " {} reset to global default (object {})",
-                            name, sel
-                        ));
-                    }
-                    return Ok(());
+        if let Some(sel) = selection {
+            if setting.is_object_overridable()
+                && setting
+                    .unset_object_value(sel)
+                    .map_err(CmdError::execution)?
+            {
+                ctx.viewer.request_redraw();
+                if !ctx.quiet {
+                    ctx.print(&format!(
+                        " {} reset to global default (object {})",
+                        name, sel
+                    ));
                 }
+                return Ok(());
             }
-
-            // Reset global to default
-            entry
-                .store
-                .write()
-                .map_err(|e| CmdError::execution(e.to_string()))?
-                .remove(name);
-            ctx.viewer.request_redraw();
-            if !ctx.quiet {
-                ctx.print(&format!(
-                    " {} reset to default: {}",
-                    name,
-                    format_setting_value(&desc.default)
-                ));
-            }
-            return Ok(());
         }
 
-        Err(CmdError::invalid_arg(
-            "name",
-            format!("Unknown setting: {}", name),
-        ))
+        let default_value = setting
+            .unset_global(ctx.viewer)
+            .map_err(CmdError::execution)?;
+        apply_side_effects_from_slice(ctx, setting.side_effects(), name, &default_value);
+
+        ctx.viewer.request_redraw();
+
+        if !ctx.quiet {
+            ctx.print(&format!(
+                " {} reset to default: {}",
+                name,
+                setting.format_display(&default_value)
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -1405,11 +1096,13 @@ impl Command for SetupCcdCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use patinae_settings::registry;
 
     #[test]
     fn test_cartoon_smooth_loops_set_on_value_path() {
         let desc = registry::lookup_by_name("cartoon_smooth_loops").unwrap();
-        let value = parse_setting_value("on", desc.setting_type).unwrap();
+        let setting = ResolvedSetting::BuiltIn(desc);
+        let value = setting.parse_value("on").unwrap();
         let mut settings = patinae_settings::Settings::default();
 
         desc.set(&mut settings, value).unwrap();
