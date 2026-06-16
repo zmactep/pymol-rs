@@ -738,11 +738,12 @@ impl Command for BgColorCommand {
         DESCRIPTION [
             "sets the background color.",
         ]
-        REQUIRED [
-            { "color", "string", "color name (white, black, gray, etc.)" },
+        REQUIRED []
+        OPTIONAL [
+            { "color", "string", "color name (white, black, gray, etc.)", "theme default" },
         ]
-        OPTIONAL []
         EXAMPLES [
+            "bg_color",
             "bg_color white",
             "bg_color black",
             "bg_color gray",
@@ -754,6 +755,14 @@ impl Command for BgColorCommand {
         ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
         args: &ParsedCommand,
     ) -> CmdResult {
+        if args.arg_count() == 0 {
+            ctx.viewer.reset_background_color();
+            if !ctx.quiet {
+                ctx.print(" Background color reset to theme default");
+            }
+            return Ok(());
+        }
+
         // Try [r, g, b] vector first (from ArgValue::List)
         if let Some(crate::args::ArgValue::List(items)) = args.get_arg(0) {
             if items.len() == 3 {
@@ -1111,10 +1120,27 @@ impl Command for LabelCommand {
 #[cfg(test)]
 mod tests {
     use super::{hide_selected_rep, parse_rep, show_selected_rep, visibility_toggle_dirty};
+    use crate::CommandExecutor;
     use lin_alg::f32::Vec3;
+    use patinae_color::ThemedPalette;
     use patinae_mol::{Atom, Element, ObjectMolecule, RepMask};
-    use patinae_scene::{DirtyFlags, MoleculeObject};
+    use patinae_scene::{DirtyFlags, MoleculeObject, Session, SessionAdapter};
     use patinae_select::{AtomIndex, SelectionResult};
+
+    fn run_display_command(session: &mut Session, command: &str) -> bool {
+        let mut needs_redraw = false;
+        {
+            let mut adapter = SessionAdapter {
+                session,
+                render_context: None,
+                default_size: (64, 64),
+                needs_redraw: &mut needs_redraw,
+                async_fetch_fn: None,
+            };
+            CommandExecutor::new().do_(&mut adapter, command).unwrap();
+        }
+        needs_redraw
+    }
 
     fn cartoon_object() -> MoleculeObject {
         let mut mol = ObjectMolecule::new("cartoon");
@@ -1130,6 +1156,46 @@ mod tests {
     #[test]
     fn display_parse_rep_accepts_mesh() {
         assert_eq!(parse_rep("mesh"), Some(RepMask::MESH));
+    }
+
+    #[test]
+    fn bg_color_name_sets_explicit_background() {
+        let mut session = Session::new();
+
+        let needs_redraw = run_display_command(&mut session, "bg_color white");
+
+        assert!(needs_redraw);
+        assert_eq!(session.clear_color, [1.0, 1.0, 1.0]);
+        assert!(session.clear_color_set);
+    }
+
+    #[test]
+    fn bg_color_without_args_resets_to_theme_background() {
+        let mut session = Session::new();
+        session.palette = ThemedPalette::light();
+        let theme_bg = session.palette.viewport_bg.to_array();
+        run_display_command(&mut session, "bg_color white");
+        assert!(session.clear_color_set);
+
+        let needs_redraw = run_display_command(&mut session, "bg_color");
+
+        assert!(needs_redraw);
+        assert_eq!(session.clear_color, theme_bg);
+        assert!(!session.clear_color_set);
+    }
+
+    #[test]
+    fn bg_color_background_alias_without_args_resets_to_theme_background() {
+        let mut session = Session::new();
+        let theme_bg = session.palette.viewport_bg.to_array();
+        run_display_command(&mut session, "bg_color white");
+        assert!(session.clear_color_set);
+
+        let needs_redraw = run_display_command(&mut session, "background");
+
+        assert!(needs_redraw);
+        assert_eq!(session.clear_color, theme_bg);
+        assert!(!session.clear_color_set);
     }
 
     #[test]

@@ -213,6 +213,17 @@ pub trait ViewerLike {
         self.request_redraw();
     }
 
+    /// Reset the background color to the current theme.
+    fn reset_background_color(&mut self) {
+        let color = self.session().palette.viewport_bg.to_array();
+        {
+            let session = self.session_mut();
+            session.clear_color = color;
+            session.clear_color_set = false;
+        }
+        self.request_redraw();
+    }
+
     // =========================================================================
     // Named Selections — Default Implementations
     // =========================================================================
