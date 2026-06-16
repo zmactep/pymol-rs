@@ -4,6 +4,27 @@
 //! ABI. This module consumes renderer-owned artifact handles, builds the ray
 //! triangle and BVH buffers on the host GPU, and dispatches the ray shader via
 //! the safe GPU command callbacks.
+//!
+//! The generic artifact contract ends at `RenderArtifactSnapshotDescriptor`.
+//! Ray-specific logic starts here: supported `StdVertices` triangle-list
+//! representations are converted into `GpuTriangle` records, then the plugin
+//! builds a BVH and dispatches the ray shader through the portable GPU batch
+//! API.
+//!
+//! Supported input is intentionally narrow in this path. Direct triangle-list
+//! cartoon and ribbon artifacts are accepted when they provide a direct
+//! `element_count` and the shared `SceneColorLut` stride is 64 bytes. A direct
+//! triangle-list surface descriptor would follow the same path, but current
+//! renderer-generated surface parts are indirect-counted and therefore return
+//! a clear error until count/indirect support lands.
+//!
+//! Sphere, stick, line, mesh line-list, count-buffer, and indirect-draw
+//! artifacts also return clear errors until native ray kernels for those
+//! layouts are implemented.
+//!
+//! Work buffers and bind groups remain temporary command resources. Shader
+//! modules, bind-group layouts, pipeline layouts, and compute pipelines use the
+//! persistent host cache exposed by the GPU runtime.
 
 use bytemuck::{Pod, Zeroable};
 use patinae_plugin::prelude::ViewerLike;
@@ -89,6 +110,10 @@ struct DispatchGrid {
 }
 
 /// Raytrace renderer GPU artifacts through the command-runtime GPU ABI.
+///
+/// This function consumes a command-scoped renderer artifact snapshot. It
+/// validates supported layouts, records all conversion/BVH/raytrace work into
+/// one ordered GPU batch, and returns only the final RGBA readback bytes.
 pub(crate) fn raytrace_artifacts(
     viewer: &mut dyn ViewerLike,
     snapshot: &RenderArtifactSnapshotDescriptor,
@@ -264,6 +289,8 @@ fn direct_triangle_rep_slot(kind: RenderArtifactRepKind) -> Option<u32> {
     }
 }
 
+// Consumes the public `StdVertex` packing documented by render artifacts:
+// position lanes, packed normal, group id, and flags in six u32 words.
 fn build_triangles(
     viewer: &mut dyn ViewerLike,
     plan: &ArtifactPlan<'_>,

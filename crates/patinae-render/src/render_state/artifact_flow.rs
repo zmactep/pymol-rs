@@ -1,3 +1,23 @@
+//! Builds neutral renderer artifact snapshots for plugins.
+//!
+//! This layer maps renderer representation buffers into role-tagged artifact
+//! descriptors without adding plugin-specific concepts. It synchronizes the
+//! renderer first, exposes shared scene-store buffers when present, then lists
+//! visible representation buffers with enough metadata for a plugin to decide
+//! whether it understands each layout.
+//!
+//! Sphere, stick, and line representations expose their renderer instance
+//! buffers and optional GPU culling count or indirect buffers. Cartoon and
+//! ribbon expose direct `StdVertices` triangle lists. Surface exposes
+//! `StdVertices` parts with indirect draw buffers because marching-cubes output
+//! is GPU-counted. Mesh uses the same surface path but marks topology as
+//! `LineList`.
+//!
+//! Per-representation metadata is deliberately neutral: object id, rep kind,
+//! topology, atom range, material color, transparency, direct count, capacity,
+//! and optional count-source handles. Raytracing, export, analysis, or overlay
+//! plugins decide their own interpretation after checking these fields.
+
 use std::collections::HashMap;
 
 use super::state::*;
@@ -20,7 +40,9 @@ impl RenderState {
     ///
     /// The snapshot borrows buffers owned by `RenderState`. Hosts must turn
     /// these refs into command-scoped opaque handles and expire them before
-    /// the next mutable renderer operation.
+    /// the next mutable renderer operation. The returned roles and strides are
+    /// the renderer/plugin ABI; representation-specific shader bindings and
+    /// pipeline details stay private to `patinae-render`.
     pub fn render_artifact_snapshot(
         &mut self,
         input: &RenderInput<'_>,
@@ -293,6 +315,10 @@ fn push_scene_store_buffers<'a>(
     state: &'a RenderState,
     buffers: &mut Vec<RenderArtifactBufferRef<'a>>,
 ) {
+    // Scene-store buffers are shared inputs for many representations. They are
+    // listed before per-representation geometry so consumers can locate global
+    // metadata such as atom colors and object ranges without knowing draw
+    // order.
     let store = &state.scene.scene_store;
     push_optional_buffer(
         buffers,
@@ -388,6 +414,9 @@ fn push_instance_rep<'a>(
     let Some((geometry, count, indirect, capacity)) = exported else {
         return;
     };
+    // Instance representations keep renderer-native instance formats. Plugins
+    // that need triangles must either understand the instance role or reject
+    // the representation instead of assuming `StdVertex` packing.
     let geometry_index = push_buffer(
         buffers,
         geometry_role,

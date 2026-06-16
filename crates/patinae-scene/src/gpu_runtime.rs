@@ -2,10 +2,61 @@
 //!
 //! The host owns all `wgpu` objects. Plugins receive only command-scoped
 //! opaque handles and serializable descriptors.
+//!
+//! This module is the public, portable contract between plugin crates and the
+//! host runtime. Every descriptor is data-only so it can cross the plugin wire
+//! boundary without exposing Rust pointers, `wgpu::Device`, `wgpu::Queue`, or
+//! renderer internals.
+//!
+//! # Ownership And Lifetimes
+//!
+//! A `GpuHandle` is a lease, not ownership of a GPU object. Handles created by
+//! ordinary GPU calls are valid only for the command callback that received
+//! them. Handles returned by cached-create calls are still command-scoped
+//! leases; only the host-side cached object persists across callbacks.
+//!
+//! Buffers, textures, texture views, samplers, bind groups, readbacks, and
+//! renderer artifact handles are intentionally command-scoped. Cached handles
+//! are limited to expensive immutable state such as shader modules, layouts,
+//! compute pipelines, and render pipelines.
+//!
+//! # Batch Ordering
+//!
+//! `GpuSubmitBatch` commands execute in vector order inside one host-owned
+//! command encoder. A nested render pass is one ordered batch command, and the
+//! commands inside that pass execute in their own vector order before the host
+//! records the next outer batch command.
+//!
+//! Readbacks are returned in the order their `ReadBuffer` commands appear in
+//! the batch after all prior writes, dispatches, draws, and copies have
+//! completed.
+//!
+//! # Validation And Errors
+//!
+//! The host validates handle kind, generation, plugin ownership, declared usage
+//! flags, descriptor compatibility, texture copy ranges, render attachment
+//! formats, and portable v1 feature limits before calling `wgpu`. Validation
+//! failures are reported as portable error strings through the plugin API.
+//!
+//! Debug labels are for diagnostics only. Persistent cache fingerprints ignore
+//! labels and include only semantic creation fields plus the host cache layout
+//! version and device generation.
+//!
+//! # Renderer Artifacts
+//!
+//! `RenderArtifactSnapshotDescriptor` describes renderer-owned buffers without
+//! exposing renderer types. Artifact handles are command-scoped, snapshots may
+//! become stale after renderer sync or device recreation, and plugins must use
+//! `layout_version` plus role-specific stride/count metadata before consuming a
+//! buffer.
 
 use serde::{Deserialize, Serialize};
 
 /// Command-scoped opaque GPU resource handle.
+///
+/// The host resolves the numeric `id` only inside the current command runtime.
+/// `kind` and `generation` let the host reject stale handles and handles used
+/// as the wrong resource type before touching `wgpu`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GpuHandle {
     pub id: u64,
@@ -562,6 +613,11 @@ pub enum GpuCacheStatus {
 }
 
 /// Command-scoped lease for a persistent cached GPU resource.
+///
+/// A cache hit or miss changes only host-side creation cost. The returned
+/// `handle` follows the same command-scoped lifetime rules as any other
+/// `GpuHandle`, while the cached object remains host-owned for later commands
+/// from the same plugin and device generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GpuCachedHandle {
     pub handle: GpuHandle,
@@ -750,6 +806,10 @@ pub enum GpuRenderPassCommand {
 }
 
 /// One command recorded into a host-owned GPU batch.
+///
+/// The outer command vector is an ordering contract. A render pass command is
+/// recorded as one nested pass, which keeps compute, render, copy, and readback
+/// work ordered without exposing an open-ended begin/end pass stream.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GpuBatchCommand {
     /// Write bytes into a buffer before subsequent batch commands run.
@@ -806,6 +866,11 @@ pub enum GpuBatchCommand {
 }
 
 /// Ordered GPU command batch submitted by a plugin.
+///
+/// The host records all commands into a fresh command encoder, submits once,
+/// waits for completion when readbacks are requested, and returns readback
+/// payloads in command order. Batch submission never transfers ownership of a
+/// plugin handle to the plugin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuSubmitBatch {
     pub label: Option<String>,
@@ -819,6 +884,10 @@ pub struct GpuBatchResult {
 }
 
 /// Semantic role of a renderer-owned GPU buffer.
+///
+/// Roles identify layout, not ownership. Plugins must combine the role with
+/// `stride`, `element_count`, and the snapshot `layout_version` before reading
+/// from a renderer artifact buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RenderArtifactBufferRole {
     FrameUniforms,
@@ -875,6 +944,11 @@ pub struct RenderArtifactBufferDescriptor {
 }
 
 /// One displayed representation in a render artifact snapshot.
+///
+/// `element_count` is the direct draw/dispatch count when no count or indirect
+/// buffer is present. `max_element_count` is the backing capacity. If `count`
+/// or `indirect` is present, that buffer is authoritative for GPU-side culling
+/// or draw count and `element_count` may be zero.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RenderArtifactRepDescriptor {
     pub object_id: u32,
@@ -892,6 +966,10 @@ pub struct RenderArtifactRepDescriptor {
 }
 
 /// Command-scoped snapshot of renderer GPU artifacts.
+///
+/// A snapshot is a point-in-time list of renderer buffers already synchronized
+/// for drawing. Artifact handles expire with the command runtime; a later
+/// renderer sync, culling pass, or device change can make old metadata stale.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RenderArtifactSnapshotDescriptor {
     pub snapshot_id: u64,
