@@ -1,7 +1,6 @@
-use std::collections::{hash_map::DefaultHasher, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::fs::OpenOptions;
-use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -87,6 +86,12 @@ use crate::host::PluginHost;
 use crate::panic::panic_payload_to_string;
 use crate::paths::{is_plugin_library_path, PluginDiscovery};
 use crate::plugin::{LibraryHandle, LoadedPanel, LoadedPlugin};
+
+mod gpu_validation;
+mod render_artifacts;
+
+use gpu_validation::*;
+use render_artifacts::*;
 
 /// Vertices per spooled mesh chunk.
 ///
@@ -3203,14 +3208,16 @@ impl<'a> HostCommandRuntimeState<'a> {
             })
             .transpose()?;
         Ok(render_pipeline_fingerprint(
-            layout,
-            vertex_module,
-            &descriptor.vertex.entry_point,
-            &descriptor.vertex.buffers,
-            fragment,
-            descriptor.primitive,
-            descriptor.depth_stencil,
-            descriptor.multisample,
+            RenderPipelineFingerprintInput {
+                layout,
+                vertex_module,
+                vertex_entry_point: &descriptor.vertex.entry_point,
+                vertex_buffers: &descriptor.vertex.buffers,
+                fragment,
+                primitive: descriptor.primitive,
+                depth_stencil: descriptor.depth_stencil,
+                multisample: descriptor.multisample,
+            },
         ))
     }
 }
@@ -3837,222 +3844,6 @@ impl GpuPluginCache {
     }
 }
 
-fn semantic_hash<T: Hash>(value: &T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn fingerprint_for(kind: GpuHandleKind, value: impl Hash) -> GpuResourceFingerprint {
-    let mut hasher = DefaultHasher::new();
-    GPU_CACHE_LAYOUT_VERSION.hash(&mut hasher);
-    kind.hash(&mut hasher);
-    value.hash(&mut hasher);
-    GpuResourceFingerprint {
-        kind,
-        hash: hasher.finish(),
-    }
-}
-
-fn shader_module_fingerprint(descriptor: &GpuShaderModuleDescriptor) -> GpuResourceFingerprint {
-    fingerprint_for(GpuHandleKind::ShaderModule, &descriptor.wgsl)
-}
-
-fn bind_group_layout_fingerprint(
-    descriptor: &GpuBindGroupLayoutDescriptor,
-) -> GpuResourceFingerprint {
-    fingerprint_for(GpuHandleKind::BindGroupLayout, &descriptor.entries)
-}
-
-fn pipeline_layout_fingerprint(
-    bind_group_layouts: &[GpuResourceFingerprint],
-) -> GpuResourceFingerprint {
-    fingerprint_for(GpuHandleKind::PipelineLayout, bind_group_layouts)
-}
-
-fn compute_pipeline_fingerprint(
-    layout: GpuResourceFingerprint,
-    module: GpuResourceFingerprint,
-    entry_point: &str,
-) -> GpuResourceFingerprint {
-    fingerprint_for(
-        GpuHandleKind::ComputePipeline,
-        (layout, module, entry_point),
-    )
-}
-
-fn render_pipeline_fingerprint(
-    layout: GpuResourceFingerprint,
-    vertex_module: GpuResourceFingerprint,
-    vertex_entry_point: &str,
-    vertex_buffers: &[GpuVertexBufferLayout],
-    fragment: Option<(
-        GpuResourceFingerprint,
-        &str,
-        &Vec<Option<GpuColorTargetState>>,
-    )>,
-    primitive: GpuPrimitiveState,
-    depth_stencil: Option<GpuDepthStencilState>,
-    multisample: GpuMultisampleState,
-) -> GpuResourceFingerprint {
-    fingerprint_for(
-        GpuHandleKind::RenderPipeline,
-        (
-            layout,
-            vertex_module,
-            vertex_entry_point,
-            vertex_buffers,
-            fragment,
-            primitive,
-            depth_stencil,
-            multisample,
-        ),
-    )
-}
-
-fn render_pipeline_metadata(descriptor: &GpuRenderPipelineDescriptor) -> RenderPipelineMetadata {
-    RenderPipelineMetadata {
-        color_targets: descriptor
-            .fragment
-            .as_ref()
-            .map(|fragment| {
-                fragment
-                    .targets
-                    .iter()
-                    .map(|target| target.map(|target| target.format))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        depth_stencil: descriptor.depth_stencil.as_ref().map(|depth| depth.format),
-    }
-}
-
-fn validate_render_pipeline_descriptor(
-    descriptor: &GpuRenderPipelineDescriptor,
-) -> Result<(), String> {
-    if descriptor.vertex.entry_point.is_empty() {
-        return Err("GPU render pipeline vertex entry point must not be empty".to_string());
-    }
-    validate_vertex_state(&descriptor.vertex)?;
-    for layout in &descriptor.vertex.buffers {
-        validate_vertex_buffer_layout(layout)?;
-    }
-    if let Some(fragment) = &descriptor.fragment {
-        if fragment.entry_point.is_empty() {
-            return Err("GPU render pipeline fragment entry point must not be empty".to_string());
-        }
-        for target in fragment.targets.iter().flatten() {
-            validate_color_target_state(*target)?;
-        }
-    }
-    if let Some(depth) = descriptor.depth_stencil {
-        validate_depth_format(depth.format)?;
-    }
-    if descriptor.multisample.count != 1 {
-        return Err("GPU render pipeline v1 requires multisample count 1".to_string());
-    }
-    if descriptor.multisample.alpha_to_coverage_enabled {
-        return Err("GPU render pipeline v1 does not support alpha-to-coverage".to_string());
-    }
-    Ok(())
-}
-
-fn validate_vertex_state(state: &GpuVertexState) -> Result<(), String> {
-    if state.module.kind != GpuHandleKind::ShaderModule {
-        return Err("GPU render pipeline vertex module must be a shader module handle".to_string());
-    }
-    Ok(())
-}
-
-fn validate_vertex_buffer_layout(layout: &GpuVertexBufferLayout) -> Result<(), String> {
-    if layout.array_stride == 0 {
-        return Err("GPU render pipeline vertex array_stride must be non-zero".to_string());
-    }
-    if layout.array_stride % wgpu::VERTEX_ALIGNMENT != 0 {
-        return Err(format!(
-            "GPU render pipeline vertex array_stride must be aligned to {}",
-            wgpu::VERTEX_ALIGNMENT
-        ));
-    }
-    for attribute in &layout.attributes {
-        let size = gpu_vertex_format_size(attribute.format);
-        let end = attribute
-            .offset
-            .checked_add(size)
-            .ok_or_else(|| "GPU render pipeline vertex attribute range overflow".to_string())?;
-        if end > layout.array_stride {
-            return Err(format!(
-                "GPU render pipeline vertex attribute at location {} exceeds array_stride",
-                attribute.shader_location
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_color_target_state(target: GpuColorTargetState) -> Result<(), String> {
-    validate_color_format(target.format)?;
-    validate_color_write_mask(target.write_mask)
-}
-
-fn validate_color_format(format: GpuTextureFormat) -> Result<(), String> {
-    if matches!(format, GpuTextureFormat::Depth32Float) {
-        return Err("GPU render color targets cannot use depth formats".to_string());
-    }
-    Ok(())
-}
-
-fn validate_depth_format(format: GpuTextureFormat) -> Result<(), String> {
-    if format != GpuTextureFormat::Depth32Float {
-        return Err("GPU render depth targets require Depth32Float format".to_string());
-    }
-    Ok(())
-}
-
-fn validate_color_write_mask(mask: GpuColorWriteMask) -> Result<(), String> {
-    if mask.bits & !GpuColorWriteMask::ALL.bits != 0 {
-        return Err(format!("unknown GPU color write mask bits: {}", mask.bits));
-    }
-    Ok(())
-}
-
-fn bind_group_layout_has_dynamic_offsets(entries: &[GpuBindGroupLayoutEntry]) -> bool {
-    entries.iter().any(|entry| {
-        matches!(
-            entry.ty,
-            GpuBindingType::Buffer {
-                has_dynamic_offset: true,
-                ..
-            }
-        )
-    })
-}
-
-fn render_artifact_buffer_usage(role: RenderArtifactBufferRole) -> GpuBufferUsage {
-    match role {
-        RenderArtifactBufferRole::FrameUniforms => GpuBufferUsage::UNIFORM,
-        RenderArtifactBufferRole::SphereInstances
-        | RenderArtifactBufferRole::StickInstances
-        | RenderArtifactBufferRole::LineInstances
-        | RenderArtifactBufferRole::StdVertices => {
-            GpuBufferUsage::VERTEX.union(GpuBufferUsage::STORAGE)
-        }
-        RenderArtifactBufferRole::IndirectDraw => {
-            GpuBufferUsage::INDIRECT.union(GpuBufferUsage::STORAGE)
-        }
-        RenderArtifactBufferRole::InstanceCount => GpuBufferUsage::STORAGE,
-        RenderArtifactBufferRole::SceneAtoms
-        | RenderArtifactBufferRole::SceneCoords
-        | RenderArtifactBufferRole::SceneBonds
-        | RenderArtifactBufferRole::SceneColorLut
-        | RenderArtifactBufferRole::SceneMaskLut
-        | RenderArtifactBufferRole::SceneMarkerLut
-        | RenderArtifactBufferRole::SceneCsrOffsets
-        | RenderArtifactBufferRole::SceneCsrIndices
-        | RenderArtifactBufferRole::SceneObjectTable => GpuBufferUsage::STORAGE,
-    }
-}
-
 fn validate_render_color_attachment(view: &HostGpuTextureView) -> Result<(), String> {
     validate_texture_view_usage_bits(view, GpuTextureUsage::RENDER_ATTACHMENT, "color attachment")?;
     validate_color_format(view.format)
@@ -4136,7 +3927,7 @@ fn validate_indirect_buffer_range(
     command_size: u64,
 ) -> Result<(), String> {
     validate_buffer_usage_bits(usage, GpuBufferUsage::INDIRECT, "render indirect buffer")?;
-    if offset % 4 != 0 {
+    if !offset.is_multiple_of(4) {
         return Err("GPU render indirect buffer offset must be aligned to 4".to_string());
     }
     validate_buffer_range(buffer_size, offset, command_size)
@@ -5188,98 +4979,6 @@ fn validate_texture_view_usage_bits(
         ));
     }
     Ok(())
-}
-
-fn map_render_artifact_buffer_role(
-    role: patinae_render::RenderArtifactBufferRole,
-) -> RenderArtifactBufferRole {
-    match role {
-        patinae_render::RenderArtifactBufferRole::FrameUniforms => {
-            RenderArtifactBufferRole::FrameUniforms
-        }
-        patinae_render::RenderArtifactBufferRole::SceneAtoms => {
-            RenderArtifactBufferRole::SceneAtoms
-        }
-        patinae_render::RenderArtifactBufferRole::SceneCoords => {
-            RenderArtifactBufferRole::SceneCoords
-        }
-        patinae_render::RenderArtifactBufferRole::SceneBonds => {
-            RenderArtifactBufferRole::SceneBonds
-        }
-        patinae_render::RenderArtifactBufferRole::SceneColorLut => {
-            RenderArtifactBufferRole::SceneColorLut
-        }
-        patinae_render::RenderArtifactBufferRole::SceneMaskLut => {
-            RenderArtifactBufferRole::SceneMaskLut
-        }
-        patinae_render::RenderArtifactBufferRole::SceneMarkerLut => {
-            RenderArtifactBufferRole::SceneMarkerLut
-        }
-        patinae_render::RenderArtifactBufferRole::SceneCsrOffsets => {
-            RenderArtifactBufferRole::SceneCsrOffsets
-        }
-        patinae_render::RenderArtifactBufferRole::SceneCsrIndices => {
-            RenderArtifactBufferRole::SceneCsrIndices
-        }
-        patinae_render::RenderArtifactBufferRole::SceneObjectTable => {
-            RenderArtifactBufferRole::SceneObjectTable
-        }
-        patinae_render::RenderArtifactBufferRole::SphereInstances => {
-            RenderArtifactBufferRole::SphereInstances
-        }
-        patinae_render::RenderArtifactBufferRole::StickInstances => {
-            RenderArtifactBufferRole::StickInstances
-        }
-        patinae_render::RenderArtifactBufferRole::LineInstances => {
-            RenderArtifactBufferRole::LineInstances
-        }
-        patinae_render::RenderArtifactBufferRole::StdVertices => {
-            RenderArtifactBufferRole::StdVertices
-        }
-        patinae_render::RenderArtifactBufferRole::InstanceCount => {
-            RenderArtifactBufferRole::InstanceCount
-        }
-        patinae_render::RenderArtifactBufferRole::IndirectDraw => {
-            RenderArtifactBufferRole::IndirectDraw
-        }
-    }
-}
-
-fn map_render_artifact_topology(
-    topology: patinae_render::RenderArtifactPrimitiveTopology,
-) -> RenderArtifactPrimitiveTopology {
-    match topology {
-        patinae_render::RenderArtifactPrimitiveTopology::SphereInstances => {
-            RenderArtifactPrimitiveTopology::SphereInstances
-        }
-        patinae_render::RenderArtifactPrimitiveTopology::CylinderInstances => {
-            RenderArtifactPrimitiveTopology::CylinderInstances
-        }
-        patinae_render::RenderArtifactPrimitiveTopology::LineInstances => {
-            RenderArtifactPrimitiveTopology::LineInstances
-        }
-        patinae_render::RenderArtifactPrimitiveTopology::TriangleList => {
-            RenderArtifactPrimitiveTopology::TriangleList
-        }
-        patinae_render::RenderArtifactPrimitiveTopology::LineList => {
-            RenderArtifactPrimitiveTopology::LineList
-        }
-    }
-}
-
-fn map_render_artifact_rep_kind(kind: patinae_render::RepKind) -> RenderArtifactRepKind {
-    match kind {
-        patinae_render::RepKind::Sphere => RenderArtifactRepKind::Sphere,
-        patinae_render::RepKind::Stick => RenderArtifactRepKind::Stick,
-        patinae_render::RepKind::Line => RenderArtifactRepKind::Line,
-        patinae_render::RepKind::Cartoon => RenderArtifactRepKind::Cartoon,
-        patinae_render::RepKind::Ribbon => RenderArtifactRepKind::Ribbon,
-        patinae_render::RepKind::Surface => RenderArtifactRepKind::Surface,
-        patinae_render::RepKind::Mesh => RenderArtifactRepKind::Mesh,
-        patinae_render::RepKind::Dot => RenderArtifactRepKind::Dot,
-        patinae_render::RepKind::Ellipsoid => RenderArtifactRepKind::Ellipsoid,
-        _ => RenderArtifactRepKind::Other,
-    }
 }
 
 struct RuntimePayloadSpool {
@@ -6728,16 +6427,16 @@ mod loader_tests {
             )
         });
 
-        let first = render_pipeline_fingerprint(
+        let first = render_pipeline_fingerprint(RenderPipelineFingerprintInput {
             layout,
             vertex_module,
-            &descriptor.vertex.entry_point,
-            &descriptor.vertex.buffers,
+            vertex_entry_point: &descriptor.vertex.entry_point,
+            vertex_buffers: &descriptor.vertex.buffers,
             fragment,
-            descriptor.primitive,
-            descriptor.depth_stencil,
-            descriptor.multisample,
-        );
+            primitive: descriptor.primitive,
+            depth_stencil: descriptor.depth_stencil,
+            multisample: descriptor.multisample,
+        });
 
         let mut changed = descriptor.clone();
         changed.fragment.as_mut().unwrap().targets[0]
@@ -6751,16 +6450,16 @@ mod loader_tests {
                 &fragment.targets,
             )
         });
-        let second = render_pipeline_fingerprint(
+        let second = render_pipeline_fingerprint(RenderPipelineFingerprintInput {
             layout,
             vertex_module,
-            &changed.vertex.entry_point,
-            &changed.vertex.buffers,
-            changed_fragment,
-            changed.primitive,
-            changed.depth_stencil,
-            changed.multisample,
-        );
+            vertex_entry_point: &changed.vertex.entry_point,
+            vertex_buffers: &changed.vertex.buffers,
+            fragment: changed_fragment,
+            primitive: changed.primitive,
+            depth_stencil: changed.depth_stencil,
+            multisample: changed.multisample,
+        });
 
         assert_ne!(first, second);
         assert_eq!(first.kind, GpuHandleKind::RenderPipeline);

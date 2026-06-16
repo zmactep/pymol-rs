@@ -1,0 +1,753 @@
+// GPU compute shader for molecular raytracing
+//
+// This shader performs raytracing of molecular structures including:
+// - Spheres (atoms)
+// - Cylinders (bonds)
+// - Triangles (surfaces, cartoons)
+//
+// Features:
+// - BVH acceleration for efficient ray traversal
+// - Shadows
+// - Transparency with depth sorting
+// - Fog/depth cue effects
+
+// Uniform buffer
+struct Uniforms {
+    view_matrix: mat4x4<f32>,
+    proj_matrix: mat4x4<f32>,
+    view_inv_matrix: mat4x4<f32>,
+    proj_inv_matrix: mat4x4<f32>,
+    camera_pos: vec4<f32>,
+    viewport: vec4<f32>,  // width, height, 1/width, 1/height
+    // Multi-light support
+    light_dirs: array<vec4<f32>, 9>, // Up to 9 directional lights
+    light_count: i32,   // Number of active lights (1 = ambient only, 2+ = with positional)
+    spec_count: i32,    // Number of lights contributing specular (-1 = all)
+    _pad_light_0: i32,
+    _pad_light_1: i32,
+    // Lighting parameters
+    ambient: f32,
+    direct: f32,
+    reflect: f32,
+    specular: f32,
+    shininess: f32,
+    _pad_light1: f32,
+    _pad_light2: f32,
+    _pad_light3: f32,
+    bg_color: vec4<f32>,
+    fog_start: f32,
+    fog_end: f32,
+    fog_density: f32,
+    _pad0: f32,
+    fog_color: vec4<f32>,
+    sphere_count: u32,
+    cylinder_count: u32,
+    triangle_count: u32,
+    bvh_node_count: u32,
+    ray_shadow: u32,
+    ray_max_passes: u32,
+    ray_trace_fog: u32,
+    ray_transparency_shadows: u32,
+    // Ray trace mode settings
+    ray_trace_mode: u32,        // 0=normal, 1=normal+outline, 2=outline only, 3=quantized+outline
+    ray_opaque_background: u32, // 0=transparent, 1=opaque
+    transparency_mode: u32,     // 0=fast/opaque, 1=multi-layer, 2=uni-layer
+    _pad2: u32,
+    ray_trace_color: vec4<f32>, // Color for outlines
+}
+
+// Sphere primitive
+// Note: Using individual f32 for padding to match Rust struct layout
+// (vec3<f32> has 16-byte alignment in WGSL which would cause layout mismatch)
+struct Sphere {
+    center: vec3<f32>,
+    radius: f32,
+    color: vec4<f32>,
+    transparency: f32,
+    _pad_a: f32, _pad_b: f32, _pad_c: f32,
+}
+
+// Cylinder primitive
+struct Cylinder {
+    start: vec3<f32>,
+    radius: f32,
+    end: vec3<f32>,
+    _pad0: f32,
+    color1: vec4<f32>,
+    color2: vec4<f32>,
+    transparency: f32,
+    _pad_a: f32, _pad_b: f32, _pad_c: f32,
+}
+
+// Triangle primitive
+struct Triangle {
+    v0: vec3<f32>, _pad0: f32,
+    v1: vec3<f32>, _pad1: f32,
+    v2: vec3<f32>, _pad2: f32,
+    n0: vec3<f32>, _pad3: f32,
+    n1: vec3<f32>, _pad4: f32,
+    n2: vec3<f32>, _pad5: f32,
+    color: vec4<f32>,
+    transparency: f32,
+    _pad_a: f32, _pad_b: f32, _pad_c: f32,
+}
+
+// BVH node
+struct BvhNode {
+    min: vec3<f32>,
+    left_or_first: u32,
+    max: vec3<f32>,
+    count: u32,
+}
+
+// Ray structure
+struct Ray {
+    origin: vec3<f32>,
+    direction: vec3<f32>,
+}
+
+// Hit information
+struct HitInfo {
+    t: f32,
+    normal: vec3<f32>,
+    color: vec4<f32>,
+    transparency: f32,
+    hit: bool,
+}
+
+// Bindings
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var<storage, read> spheres: array<Sphere>;
+@group(0) @binding(2) var<storage, read> cylinders: array<Cylinder>;
+@group(0) @binding(3) var<storage, read> triangles: array<Triangle>;
+@group(0) @binding(4) var<storage, read> bvh_nodes: array<BvhNode>;
+@group(0) @binding(5) var<storage, read> bvh_indices: array<u32>;
+@group(0) @binding(6) var<storage, read_write> output_pixels: array<u32>;
+
+// Constants
+const EPSILON: f32 = 0.0001;
+const MAX_T: f32 = 1e30;
+const MAX_STACK_SIZE: u32 = 64u;
+
+// Ray-sphere intersection
+fn intersect_sphere(ray: Ray, sphere: Sphere) -> HitInfo {
+    var hit: HitInfo;
+    hit.hit = false;
+    hit.t = MAX_T;
+
+    let oc = ray.origin - sphere.center;
+    let a = dot(ray.direction, ray.direction);
+    let b = 2.0 * dot(oc, ray.direction);
+    let c = dot(oc, oc) - sphere.radius * sphere.radius;
+    let discriminant = b * b - 4.0 * a * c;
+
+    if discriminant < 0.0 {
+        return hit;
+    }
+
+    let sqrt_d = sqrt(discriminant);
+    var t = (-b - sqrt_d) / (2.0 * a);
+
+    if t < EPSILON {
+        t = (-b + sqrt_d) / (2.0 * a);
+    }
+
+    if t < EPSILON {
+        return hit;
+    }
+
+    hit.hit = true;
+    hit.t = t;
+    let hit_point = ray.origin + t * ray.direction;
+    hit.normal = normalize(hit_point - sphere.center);
+    hit.color = sphere.color;
+    hit.transparency = sphere.transparency;
+
+    return hit;
+}
+
+// Ray-cylinder intersection
+fn intersect_cylinder(ray: Ray, cyl: Cylinder) -> HitInfo {
+    var hit: HitInfo;
+    hit.hit = false;
+    hit.t = MAX_T;
+
+    let axis = cyl.end - cyl.start;
+    let axis_len = length(axis);
+    if axis_len < EPSILON {
+        return hit;
+    }
+    let axis_norm = axis / axis_len;
+
+    // Transform ray to cylinder-local space
+    let oc = ray.origin - cyl.start;
+    let d_perp = ray.direction - dot(ray.direction, axis_norm) * axis_norm;
+    let o_perp = oc - dot(oc, axis_norm) * axis_norm;
+
+    let a = dot(d_perp, d_perp);
+    let b = 2.0 * dot(o_perp, d_perp);
+    let c = dot(o_perp, o_perp) - cyl.radius * cyl.radius;
+
+    let discriminant = b * b - 4.0 * a * c;
+
+    if discriminant < 0.0 {
+        return hit;
+    }
+
+    let sqrt_d = sqrt(discriminant);
+    var t = (-b - sqrt_d) / (2.0 * a);
+
+    if t < EPSILON {
+        t = (-b + sqrt_d) / (2.0 * a);
+    }
+
+    if t < EPSILON {
+        return hit;
+    }
+
+    // Check if hit is within cylinder bounds
+    let hit_point = ray.origin + t * ray.direction;
+    let height = dot(hit_point - cyl.start, axis_norm);
+
+    if height < 0.0 || height > axis_len {
+        return hit;
+    }
+
+    hit.hit = true;
+    hit.t = t;
+
+    // Calculate normal (perpendicular to axis)
+    let closest_on_axis = cyl.start + height * axis_norm;
+    hit.normal = normalize(hit_point - closest_on_axis);
+
+    // Interpolate color based on position along cylinder
+    let t_along = height / axis_len;
+    hit.color = mix(cyl.color1, cyl.color2, t_along);
+    hit.transparency = cyl.transparency;
+
+    return hit;
+}
+
+// Ray-triangle intersection (Möller-Trumbore)
+fn intersect_triangle(ray: Ray, tri: Triangle) -> HitInfo {
+    var hit: HitInfo;
+    hit.hit = false;
+    hit.t = MAX_T;
+
+    let e1 = tri.v1 - tri.v0;
+    let e2 = tri.v2 - tri.v0;
+    let h = cross(ray.direction, e2);
+    let a = dot(e1, h);
+
+    if abs(a) < EPSILON {
+        return hit;
+    }
+
+    let f = 1.0 / a;
+    let s = ray.origin - tri.v0;
+    let u = f * dot(s, h);
+
+    if u < 0.0 || u > 1.0 {
+        return hit;
+    }
+
+    let q = cross(s, e1);
+    let v = f * dot(ray.direction, q);
+
+    if v < 0.0 || u + v > 1.0 {
+        return hit;
+    }
+
+    let t = f * dot(e2, q);
+
+    if t < EPSILON {
+        return hit;
+    }
+
+    hit.hit = true;
+    hit.t = t;
+
+    // Interpolate normal
+    let w = 1.0 - u - v;
+    hit.normal = normalize(w * tri.n0 + u * tri.n1 + v * tri.n2);
+    hit.color = tri.color;
+    hit.transparency = tri.transparency;
+
+    return hit;
+}
+
+// Ray-AABB intersection
+fn intersect_aabb(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> bool {
+    let inv_dir = 1.0 / ray.direction;
+
+    let t1 = (box_min - ray.origin) * inv_dir;
+    let t2 = (box_max - ray.origin) * inv_dir;
+
+    let tmin_v = min(t1, t2);
+    let tmax_v = max(t1, t2);
+
+    let tmin = max(max(tmin_v.x, tmin_v.y), tmin_v.z);
+    let tmax = min(min(tmax_v.x, tmax_v.y), tmax_v.z);
+
+    return tmax >= max(tmin, 0.0);
+}
+
+// Decode primitive index
+fn decode_index(encoded: u32) -> vec2<u32> {
+    let prim_type = encoded >> 30u;
+    let index = encoded & 0x3FFFFFFFu;
+    return vec2<u32>(prim_type, index);
+}
+
+// Trace ray through BVH
+fn trace_ray(ray: Ray) -> HitInfo {
+    var closest: HitInfo;
+    closest.hit = false;
+    closest.t = MAX_T;
+
+    // If no BVH nodes, do brute force
+    if arrayLength(&bvh_nodes) == 0u {
+        // Brute force spheres
+        for (var i = 0u; i < uniforms.sphere_count; i++) {
+            let hit = intersect_sphere(ray, spheres[i]);
+            if hit.hit && hit.t < closest.t {
+                closest = hit;
+            }
+        }
+        // Brute force cylinders
+        for (var i = 0u; i < uniforms.cylinder_count; i++) {
+            let hit = intersect_cylinder(ray, cylinders[i]);
+            if hit.hit && hit.t < closest.t {
+                closest = hit;
+            }
+        }
+        // Brute force triangles
+        for (var i = 0u; i < uniforms.triangle_count; i++) {
+            let hit = intersect_triangle(ray, triangles[i]);
+            if hit.hit && hit.t < closest.t {
+                closest = hit;
+            }
+        }
+        return closest;
+    }
+
+    // BVH traversal with stack
+    var stack: array<u32, 64>;
+    var stack_ptr = 0u;
+    stack[stack_ptr] = 0u;
+    stack_ptr++;
+
+    while stack_ptr > 0u {
+        stack_ptr--;
+        let node_idx = stack[stack_ptr];
+        let node = bvh_nodes[node_idx];
+        if node.left_or_first == 0xffffffffu && node.count == 0u {
+            continue;
+        }
+
+        // Test AABB
+        if !intersect_aabb(ray, node.min, node.max) {
+            continue;
+        }
+
+        if node.count > 0u {
+            // Leaf node - test primitives
+            let first = node.left_or_first;
+            let count = node.count;
+
+            for (var i = 0u; i < count; i++) {
+                let encoded = bvh_indices[first + i];
+                let decoded = decode_index(encoded);
+                let prim_type = decoded.x;
+                let prim_idx = decoded.y;
+
+                var hit: HitInfo;
+                hit.hit = false;
+
+                if prim_type == 0u && prim_idx < uniforms.sphere_count {
+                    hit = intersect_sphere(ray, spheres[prim_idx]);
+                } else if prim_type == 1u && prim_idx < uniforms.cylinder_count {
+                    hit = intersect_cylinder(ray, cylinders[prim_idx]);
+                } else if prim_type == 2u && prim_idx < uniforms.triangle_count {
+                    hit = intersect_triangle(ray, triangles[prim_idx]);
+                }
+
+                if hit.hit && hit.t < closest.t {
+                    closest = hit;
+                }
+            }
+        } else {
+            // Internal node - push children
+            let left = node.left_or_first;
+            let right = left + 1u;
+
+            if stack_ptr < MAX_STACK_SIZE - 1u {
+                stack[stack_ptr] = left;
+                stack_ptr++;
+                stack[stack_ptr] = right;
+                stack_ptr++;
+            }
+        }
+    }
+
+    return closest;
+}
+
+// Check shadow ray using BVH acceleration
+fn trace_shadow(ray: Ray, max_t: f32) -> bool {
+    // If no BVH nodes, do brute force (fallback for small scenes)
+    if arrayLength(&bvh_nodes) == 0u {
+        for (var i = 0u; i < uniforms.sphere_count; i++) {
+            let hit = intersect_sphere(ray, spheres[i]);
+            if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
+                return true;
+            }
+        }
+        for (var i = 0u; i < uniforms.cylinder_count; i++) {
+            let hit = intersect_cylinder(ray, cylinders[i]);
+            if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
+                return true;
+            }
+        }
+        for (var i = 0u; i < uniforms.triangle_count; i++) {
+            let hit = intersect_triangle(ray, triangles[i]);
+            if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // BVH traversal - early exit on any hit
+    var stack: array<u32, 64>;
+    var stack_ptr = 0u;
+    stack[stack_ptr] = 0u;
+    stack_ptr++;
+
+    while stack_ptr > 0u {
+        stack_ptr--;
+        let node_idx = stack[stack_ptr];
+        let node = bvh_nodes[node_idx];
+        if node.left_or_first == 0xffffffffu && node.count == 0u {
+            continue;
+        }
+
+        // Test AABB
+        if !intersect_aabb(ray, node.min, node.max) {
+            continue;
+        }
+
+        if node.count > 0u {
+            // Leaf node - test primitives
+            let first = node.left_or_first;
+            let count = node.count;
+
+            for (var i = 0u; i < count; i++) {
+                let encoded = bvh_indices[first + i];
+                let decoded = decode_index(encoded);
+                let prim_type = decoded.x;
+                let prim_idx = decoded.y;
+
+                var hit: HitInfo;
+                hit.hit = false;
+
+                if prim_type == 0u && prim_idx < uniforms.sphere_count {
+                    hit = intersect_sphere(ray, spheres[prim_idx]);
+                } else if prim_type == 1u && prim_idx < uniforms.cylinder_count {
+                    hit = intersect_cylinder(ray, cylinders[prim_idx]);
+                } else if prim_type == 2u && prim_idx < uniforms.triangle_count {
+                    hit = intersect_triangle(ray, triangles[prim_idx]);
+                }
+
+                // Early exit on any valid shadow hit
+                if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
+                    return true;
+                }
+            }
+        } else {
+            // Internal node - push children
+            let left = node.left_or_first;
+            let right = left + 1u;
+
+            if stack_ptr < MAX_STACK_SIZE - 1u {
+                stack[stack_ptr] = left;
+                stack_ptr++;
+                stack[stack_ptr] = right;
+                stack_ptr++;
+            }
+        }
+    }
+
+    return false;
+}
+
+// Shade a hit point with the classic multi-light model.
+// - Headlight (camera direction): Always active with 'direct' intensity, CASTS SHADOWS
+// - Positional lights (light, light2-light9): Use 'reflect' intensity, first casts shadows
+// - light_count controls number of positional lights (1 = none, 2+ = positional lights)
+// - spec_count controls how many lights contribute specular (-1 = all)
+fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
+    let hit_point = ray.origin + hit.t * ray.direction;
+    let normal = hit.normal;
+    let view_dir = normalize(-ray.direction);
+
+    // Ensure normal faces the viewer
+    var n = normal;
+    if dot(n, view_dir) < 0.0 {
+        n = -n;
+    }
+
+    // === FLAT LIGHTING for mode 3 with light_count = 1 ===
+    // light_count = 1 means ambient-only output with no directional lights.
+    // For mode 3 (quantized), this produces clean single-color surfaces
+    if uniforms.ray_trace_mode == 3u && uniforms.light_count == 1 {
+        // Use boosted ambient (direct is already added to ambient on CPU when light_count < 2)
+        let flat_brightness = uniforms.ambient + uniforms.direct;
+        return hit.color.rgb * min(flat_brightness, 1.0);
+    }
+
+    // Shadow bias for all shadow rays
+    let shadow_bias = max(hit.t * 0.0005, 0.05);
+
+    // === AMBIENT ===
+    var color = hit.color.rgb * uniforms.ambient;
+
+    // === HEADLIGHT (camera direction, always active) ===
+    // Light comes from camera direction - ensures front-facing surfaces are always lit
+    let headlight_ndotl = max(dot(n, view_dir), 0.0);
+
+    // Headlight shadow (trace toward viewer/camera)
+    var headlight_shadow = 1.0;
+    if uniforms.ray_shadow != 0u && headlight_ndotl > 0.001 {
+        let shadow_origin = hit_point + n * shadow_bias;
+        let shadow_ray = Ray(shadow_origin, view_dir);
+        if trace_shadow(shadow_ray, MAX_T) {
+            headlight_shadow = 0.0;
+        }
+    }
+
+    // Headlight diffuse with shadow
+    color += hit.color.rgb * headlight_ndotl * uniforms.direct * headlight_shadow;
+
+    // Headlight specular (Blinn-Phong) - view and light are same direction
+    if uniforms.specular > 0.0 && headlight_shadow > 0.5 && headlight_ndotl > 0.0 {
+        // For headlight, H = normalize(L + V) where L = V, so H = V
+        let spec = pow(headlight_ndotl, uniforms.shininess);
+        let spec_intensity = 0.5;  // specular_intensity default
+        color += vec3<f32>(1.0) * spec * uniforms.specular * spec_intensity;
+    }
+
+    // === POSITIONAL LIGHTS (when light_count >= 2) ===
+    // light_count = 1: headlight only (no positional lights)
+    // light_count = 2: headlight + 1 positional light
+    // light_count = N: headlight + N-1 positional lights
+    let num_pos_lights = max(uniforms.light_count - 1, 0);
+
+    // Resolve spec_count: -1 means all lights contribute specular
+    let effective_spec_count = select(uniforms.spec_count, num_pos_lights + 1, uniforms.spec_count < 0);
+
+    for (var i = 0; i < num_pos_lights; i++) {
+        // Light directions are in view space. Transform them into world
+        // space because raytracing works in world space. The setting stores
+        // direction from light to scene, so negate it for surface-to-light.
+        let light_view = -uniforms.light_dirs[i].xyz;
+        let light_dir = normalize((uniforms.view_inv_matrix * vec4<f32>(light_view, 0.0)).xyz);
+
+        let ndotl = max(dot(n, light_dir), 0.0);
+
+        // First positional light casts shadows
+        var shadow = 1.0;
+        if i == 0 && uniforms.ray_shadow != 0u && ndotl > 0.001 {
+            let shadow_origin = hit_point + n * shadow_bias;
+            let shadow_ray = Ray(shadow_origin, light_dir);
+            if trace_shadow(shadow_ray, MAX_T) {
+                shadow = 0.0;
+            }
+        }
+
+        // Positional lights use 'reflect' intensity
+        color += hit.color.rgb * ndotl * uniforms.reflect * shadow;
+
+        // Specular contribution from positional lights - only if within spec_count
+        // (i + 1) because headlight is index 0
+        if uniforms.specular > 0.0 && ndotl > 0.0 && shadow > 0.5 && (i + 1) < effective_spec_count {
+            let h = normalize(light_dir + view_dir);
+            let spec = pow(max(dot(n, h), 0.0), uniforms.shininess);
+            let spec_intensity = 0.5 * 0.3;  // Weaker specular for positional lights
+            color += vec3<f32>(1.0) * spec * uniforms.specular * spec_intensity;
+        }
+    }
+
+    return color;
+}
+
+// Apply fog
+fn apply_fog(color: vec3<f32>, depth: f32) -> vec3<f32> {
+    if uniforms.fog_density <= 0.0 || uniforms.ray_trace_fog == 0u {
+        return color;
+    }
+    let fog_factor = clamp((uniforms.fog_end - depth) / (uniforms.fog_end - uniforms.fog_start), 0.0, 1.0);
+    return mix(uniforms.fog_color.rgb, color, fog_factor);
+}
+
+// Generate primary ray from pixel coordinates
+fn generate_ray(pixel: vec2<f32>) -> Ray {
+    // Convert pixel to NDC (x,y: -1 to 1)
+    let ndc = vec2<f32>(
+        (pixel.x + 0.5) / uniforms.viewport.x * 2.0 - 1.0,
+        1.0 - (pixel.y + 0.5) / uniforms.viewport.y * 2.0
+    );
+
+    // Extract FOV parameters from projection matrix
+    // For perspective: proj[0][0] = 1/(aspect*tan(fov/2)), proj[1][1] = 1/tan(fov/2)
+    // So tan(fov/2) = 1/proj[1][1], and aspect-scaled x = ndc.x * aspect * tan(fov/2)
+    let tan_half_fov = 1.0 / uniforms.proj_matrix[1][1];
+    let aspect = uniforms.proj_matrix[1][1] / uniforms.proj_matrix[0][0];
+
+    // Ray direction in view space: looking down -Z, with X right and Y up
+    let ray_dir_view = normalize(vec3<f32>(
+        ndc.x * aspect * tan_half_fov,
+        ndc.y * tan_half_fov,
+        -1.0  // Looking down negative Z in view space
+    ));
+
+    // Camera is at origin in view space, transform to world space
+    let origin = (uniforms.view_inv_matrix * vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
+
+    // Transform direction to world space (w=0 for direction)
+    let direction = normalize((uniforms.view_inv_matrix * vec4<f32>(ray_dir_view, 0.0)).xyz);
+
+    return Ray(origin, direction);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let pixel = vec2<f32>(f32(global_id.x), f32(global_id.y));
+    let pixel_coord = vec2<i32>(global_id.xy);
+
+    // Bounds check
+    if pixel.x >= uniforms.viewport.x || pixel.y >= uniforms.viewport.y {
+        return;
+    }
+
+    // Generate ray
+    var current_ray = generate_ray(pixel);
+
+    var final_color = vec3<f32>(0.0, 0.0, 0.0);
+    var accumulated_alpha = 0.0;
+    var depth: f32 = 1.0;
+    var normal = vec3<f32>(0.5, 0.5, 1.0);
+    var first_hit = true;
+
+    // Determine background behavior
+    let use_transparent_bg = uniforms.ray_opaque_background == 0u;
+
+    // Transparency mode handling:
+    // Mode 0: fast/ugly - treat everything as opaque, single pass
+    // Mode 1: multi-layer - trace through and composite all transparent layers
+    // Mode 2: uni-layer - only first transparent layer contributes, then find what's behind
+
+    let max_passes = max(uniforms.ray_max_passes, 1u);
+    var transparent_layer_count = 0u;
+
+    for (var layer_idx = 0u; layer_idx < max_passes; layer_idx++) {
+        let hit = trace_ray(current_ray);
+
+        if !hit.hit {
+            // No hit - add background color weighted by remaining transparency
+            let remaining = 1.0 - accumulated_alpha;
+            if remaining > 0.001 {
+                if use_transparent_bg {
+                    // Transparent background - don't add color, leave alpha as is
+                } else {
+                    final_color += uniforms.bg_color.rgb * remaining;
+                    accumulated_alpha = 1.0;
+                }
+            }
+            break;
+        }
+
+        // Store depth and normal from first hit only
+        if first_hit {
+            // Compute proper NDC depth using the projection matrix.
+            // wgpu uses [0, 1] depth range: near → 0, far → 1.
+            // This gives edge detection sufficient resolution to find internal edges.
+            let hit_point_ws = current_ray.origin + hit.t * current_ray.direction;
+            let hit_view = uniforms.view_matrix * vec4<f32>(hit_point_ws, 1.0);
+            let hit_clip = uniforms.proj_matrix * hit_view;
+            let ndc_z = hit_clip.z / hit_clip.w; // [0, 1] in wgpu
+            depth = clamp(ndc_z, 0.001, 0.998);
+            normal = hit.normal * 0.5 + 0.5;
+            first_hit = false;
+        }
+
+        // Shade the hit point
+        var hit_color = shade(current_ray, hit);
+        hit_color = apply_fog(hit_color, hit.t);
+
+        // Check if this is a transparent surface
+        let is_transparent = hit.transparency > 0.001;
+
+        // Calculate this layer's contribution based on transparency_mode
+        var layer_alpha: f32;
+        if uniforms.transparency_mode == 0u {
+            // Mode 0: fast/ugly - ignore transparency, treat as fully opaque
+            layer_alpha = 1.0;
+        } else if uniforms.transparency_mode == 2u && is_transparent && transparent_layer_count > 0u {
+            // Mode 2: uni-layer - skip additional transparent layers (don't contribute)
+            // Continue ray to find what's behind
+            let hit_point = current_ray.origin + hit.t * current_ray.direction;
+            current_ray.origin = hit_point + current_ray.direction * EPSILON * 10.0;
+            continue;
+        } else {
+            // Mode 1: multi-layer, or first transparent layer in mode 2
+            layer_alpha = 1.0 - hit.transparency;
+        }
+
+        // Track transparent layers for mode 2
+        if is_transparent {
+            transparent_layer_count += 1u;
+        }
+
+        let remaining = 1.0 - accumulated_alpha;
+        let contribution = remaining * layer_alpha;
+
+        // Add this layer's color contribution
+        final_color += hit_color * contribution;
+        accumulated_alpha += contribution;
+
+        // If we've accumulated enough opacity, stop
+        if accumulated_alpha > 0.999 {
+            accumulated_alpha = 1.0;
+            break;
+        }
+
+        // Mode 0: always stop after first hit (treat as opaque)
+        if uniforms.transparency_mode == 0u {
+            break;
+        }
+
+        // If this surface is opaque, stop
+        if !is_transparent {
+            break;
+        }
+
+        // Continue ray from hit point (with small offset to avoid self-intersection)
+        let hit_point = current_ray.origin + hit.t * current_ray.direction;
+        current_ray.origin = hit_point + current_ray.direction * EPSILON * 10.0;
+        // Direction stays the same for transparency (no refraction)
+    }
+
+    // If we didn't hit anything and haven't filled alpha yet, add background
+    if accumulated_alpha < 0.999 && !use_transparent_bg {
+        let remaining = 1.0 - accumulated_alpha;
+        final_color += uniforms.bg_color.rgb * remaining;
+        accumulated_alpha = 1.0;
+    }
+
+    // Clamp and output color with alpha
+    final_color = clamp(final_color, vec3<f32>(0.0), vec3<f32>(1.0));
+    let output_index = global_id.y * u32(uniforms.viewport.x) + global_id.x;
+    output_pixels[output_index] = pack4x8unorm(vec4<f32>(final_color, accumulated_alpha));
+
+}

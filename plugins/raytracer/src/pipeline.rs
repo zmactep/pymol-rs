@@ -1,6 +1,7 @@
 //! Compute pipeline for raytracing
 
 use crate::error::RaytraceResult;
+use crate::shaders;
 
 /// Raytracing compute pipeline
 pub struct RaytracePipeline {
@@ -120,7 +121,7 @@ impl RaytracePipeline {
         // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Raytrace Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/raytrace.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shaders::RAYTRACE.into()),
         });
 
         // Create pipeline layout

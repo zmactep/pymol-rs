@@ -1,6 +1,7 @@
 //! Edge detection and compositing pipelines for ray trace modes 1, 2, 3
 
 use crate::error::RaytraceResult;
+use crate::shaders;
 use bytemuck::{Pod, Zeroable};
 
 /// Uniform parameters for edge detection shader
@@ -105,7 +106,7 @@ impl EdgeDetectPipeline {
         // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Edge Detect Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/edge_detect.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shaders::EDGE_DETECT.into()),
         });
 
         // Create pipeline layout
@@ -216,7 +217,7 @@ impl CompositePipeline {
         // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Composite Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/composite.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shaders::COMPOSITE.into()),
         });
 
         // Create pipeline layout

@@ -65,15 +65,19 @@ impl RenderState {
                         continue;
                     };
                     push_instance_rep(
-                        object_id,
-                        rep_kind,
-                        RenderArtifactPrimitiveTopology::SphereInstances,
-                        RenderArtifactBufferRole::SphereInstances,
-                        SphereInstance::SIZE,
-                        rep.export_instances(),
-                        object_metadata.get(&object_id).copied().unwrap_or_default(),
-                        &mut buffers,
-                        &mut reps,
+                        InstanceArtifactSource {
+                            object_id,
+                            rep_kind,
+                            topology: RenderArtifactPrimitiveTopology::SphereInstances,
+                            geometry_role: RenderArtifactBufferRole::SphereInstances,
+                            stride: SphereInstance::SIZE,
+                            exported: rep.export_instances(),
+                            metadata: object_metadata.get(&object_id).copied().unwrap_or_default(),
+                        },
+                        InstanceArtifactSink {
+                            buffers: &mut buffers,
+                            reps: &mut reps,
+                        },
                     );
                 }
                 RepKind::Stick => {
@@ -81,15 +85,19 @@ impl RenderState {
                         continue;
                     };
                     push_instance_rep(
-                        object_id,
-                        rep_kind,
-                        RenderArtifactPrimitiveTopology::CylinderInstances,
-                        RenderArtifactBufferRole::StickInstances,
-                        StickInstance::SIZE,
-                        rep.export_instances(),
-                        object_metadata.get(&object_id).copied().unwrap_or_default(),
-                        &mut buffers,
-                        &mut reps,
+                        InstanceArtifactSource {
+                            object_id,
+                            rep_kind,
+                            topology: RenderArtifactPrimitiveTopology::CylinderInstances,
+                            geometry_role: RenderArtifactBufferRole::StickInstances,
+                            stride: StickInstance::SIZE,
+                            exported: rep.export_instances(),
+                            metadata: object_metadata.get(&object_id).copied().unwrap_or_default(),
+                        },
+                        InstanceArtifactSink {
+                            buffers: &mut buffers,
+                            reps: &mut reps,
+                        },
                     );
                 }
                 RepKind::Line => {
@@ -97,15 +105,19 @@ impl RenderState {
                         continue;
                     };
                     push_instance_rep(
-                        object_id,
-                        rep_kind,
-                        RenderArtifactPrimitiveTopology::LineInstances,
-                        RenderArtifactBufferRole::LineInstances,
-                        crate::representations::line::LineInstance::SIZE,
-                        rep.export_instances(),
-                        object_metadata.get(&object_id).copied().unwrap_or_default(),
-                        &mut buffers,
-                        &mut reps,
+                        InstanceArtifactSource {
+                            object_id,
+                            rep_kind,
+                            topology: RenderArtifactPrimitiveTopology::LineInstances,
+                            geometry_role: RenderArtifactBufferRole::LineInstances,
+                            stride: crate::representations::line::LineInstance::SIZE,
+                            exported: rep.export_instances(),
+                            metadata: object_metadata.get(&object_id).copied().unwrap_or_default(),
+                        },
+                        InstanceArtifactSink {
+                            buffers: &mut buffers,
+                            reps: &mut reps,
+                        },
                     );
                 }
                 RepKind::Cartoon | RepKind::Ribbon => {
@@ -395,7 +407,7 @@ fn push_scene_store_buffers<'a>(
     );
 }
 
-fn push_instance_rep<'a>(
+struct InstanceArtifactSource<'a> {
     object_id: u32,
     rep_kind: RepKind,
     topology: RenderArtifactPrimitiveTopology,
@@ -408,25 +420,30 @@ fn push_instance_rep<'a>(
         u32,
     )>,
     metadata: ArtifactObjectMetadata,
-    buffers: &mut Vec<RenderArtifactBufferRef<'a>>,
-    reps: &mut Vec<RenderArtifactRep>,
-) {
-    let Some((geometry, count, indirect, capacity)) = exported else {
+}
+
+struct InstanceArtifactSink<'a, 'b> {
+    buffers: &'b mut Vec<RenderArtifactBufferRef<'a>>,
+    reps: &'b mut Vec<RenderArtifactRep>,
+}
+
+fn push_instance_rep<'a>(source: InstanceArtifactSource<'a>, sink: InstanceArtifactSink<'a, '_>) {
+    let Some((geometry, count, indirect, capacity)) = source.exported else {
         return;
     };
     // Instance representations keep renderer-native instance formats. Plugins
     // that need triangles must either understand the instance role or reject
     // the representation instead of assuming `StdVertex` packing.
     let geometry_index = push_buffer(
-        buffers,
-        geometry_role,
+        sink.buffers,
+        source.geometry_role,
         geometry,
-        stride,
+        source.stride,
         u64::from(capacity),
     );
     let count_buffer_index = count.map(|buffer| {
         push_buffer(
-            buffers,
+            sink.buffers,
             RenderArtifactBufferRole::InstanceCount,
             buffer,
             4,
@@ -435,26 +452,26 @@ fn push_instance_rep<'a>(
     });
     let indirect_buffer_index = indirect.map(|buffer| {
         push_buffer(
-            buffers,
+            sink.buffers,
             RenderArtifactBufferRole::IndirectDraw,
             buffer,
             16,
             1,
         )
     });
-    reps.push(RenderArtifactRep {
-        object_id,
-        rep_kind,
-        topology,
+    sink.reps.push(RenderArtifactRep {
+        object_id: source.object_id,
+        rep_kind: source.rep_kind,
+        topology: source.topology,
         geometry_buffer_index: geometry_index,
         count_buffer_index,
         indirect_buffer_index,
         element_count: 0,
         max_element_count: u64::from(capacity),
-        atom_offset: metadata.atom_offset,
-        atom_count: metadata.atom_count,
-        material_rgba: metadata.material_rgba,
-        transparency: metadata.transparency_for(rep_kind),
+        atom_offset: source.metadata.atom_offset,
+        atom_count: source.metadata.atom_count,
+        material_rgba: source.metadata.material_rgba,
+        transparency: source.metadata.transparency_for(source.rep_kind),
     });
 }
 

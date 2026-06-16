@@ -18,6 +18,7 @@ pub mod pipeline;
 pub mod primitive;
 pub mod scene;
 pub mod settings;
+mod shaders;
 // ---------------------------------------------------------------------------
 // Plugin settings
 // ---------------------------------------------------------------------------

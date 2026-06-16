@@ -1305,7 +1305,9 @@ impl CommandRuntimeClient {
         validate_wire_version(response.wire_version)?;
         Ok(response)
     }
+}
 
+impl CommandRuntimeClient {
     fn for_each_trace_geometry_chunk(
         self,
         visitor: &mut dyn FnMut(patinae_render::TraceGeometryChunk) -> Result<(), String>,
@@ -1358,7 +1360,9 @@ impl CommandRuntimeClient {
             (Err(error), Err(close_error)) => Err(format!("{error}; close failed: {close_error}")),
         }
     }
+}
 
+impl CommandRuntimeClient {
     fn open_render_artifact_snapshot(
         self,
     ) -> Result<patinae_scene::RenderArtifactSnapshotDescriptor, String> {
@@ -1382,7 +1386,9 @@ impl CommandRuntimeClient {
             _ => Err("host returned unexpected render artifact close response".to_string()),
         }
     }
+}
 
+impl CommandRuntimeClient {
     fn gpu_device_limits(self) -> Result<patinae_scene::GpuDeviceLimits, String> {
         let response = self.request(&WireCommandRuntimeRequest::GpuDeviceLimits { id: 1 })?;
         validate_runtime_response_id(&response, 1)?;
@@ -1528,7 +1534,9 @@ impl CommandRuntimeClient {
             descriptor,
         })
     }
+}
 
+impl CommandRuntimeClient {
     fn gpu_create_cached_shader_module(
         self,
         descriptor: patinae_scene::GpuShaderModuleDescriptor,
@@ -1591,7 +1599,9 @@ impl CommandRuntimeClient {
     fn gpu_drop_plugin_cache(self) -> Result<(), String> {
         self.gpu_ok_response(WireCommandRuntimeRequest::GpuDropPluginCache { id: 1 })
     }
+}
 
+impl CommandRuntimeClient {
     fn gpu_create_bind_group(
         self,
         descriptor: patinae_scene::GpuBindGroupDescriptor,
@@ -1631,7 +1641,9 @@ impl CommandRuntimeClient {
     fn gpu_drop_handles(self, handles: Vec<patinae_scene::GpuHandle>) -> Result<(), String> {
         self.gpu_ok_response(WireCommandRuntimeRequest::GpuDropHandles { id: 1, handles })
     }
+}
 
+impl CommandRuntimeClient {
     fn gpu_handle_response(
         self,
         request: WireCommandRuntimeRequest,
