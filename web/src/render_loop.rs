@@ -38,8 +38,9 @@ pub fn render_frame(
     let frame = frame_uniforms_from_session(session, (width, height), session.clear_color);
     gpu.state.uniforms = frame;
     gpu.state.ctx.upload_frame(&gpu.state.uniforms);
-    gpu.state
-        .set_clear_color(session.clear_color, session.settings.ui.opaque_background);
+    // Live viewports should show the RGB background; PNG capture keeps
+    // using `opaque_background` to decide exported alpha.
+    gpu.state.set_clear_color(session.clear_color, true);
     gpu.state
         .set_marking_width(session.settings.ui.selection_width);
     timings.uniforms_ms = elapsed_ms(t0);

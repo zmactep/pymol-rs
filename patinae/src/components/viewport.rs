@@ -137,8 +137,9 @@ impl ViewportRenderer {
         let frame = frame_uniforms_from_session(session, (width, height), session.clear_color);
         self.state.uniforms = frame;
         self.state.ctx.upload_frame(&self.state.uniforms);
-        self.state
-            .set_clear_color(session.clear_color, session.settings.ui.opaque_background);
+        // Live viewports should show the RGB background; PNG capture keeps
+        // using `opaque_background` to decide exported alpha.
+        self.state.set_clear_color(session.clear_color, true);
         self.state
             .set_marking_width(session.settings.ui.selection_width);
 
