@@ -58,6 +58,19 @@ use patinae_mol::{DirtyFlags, RepMask};
 const LARGE_CARTOON_BACKBONE_THRESHOLD: usize = 16_384;
 const LARGE_CARTOON_SEGMENT_THRESHOLD: usize = 64;
 
+fn cartoon_storage_buffer_limit(limits: wgpu::Limits) -> u64 {
+    limits
+        .max_buffer_size
+        .min(u64::from(limits.max_storage_buffer_binding_size))
+}
+
+fn oversized_cartoon_storage_buffer(
+    limit: u64,
+    buffers: &[(&'static str, u64)],
+) -> Option<(&'static str, u64)> {
+    buffers.iter().copied().find(|(_, bytes)| *bytes > limit)
+}
+
 /// Lazy-allocated GPU resources for one rebuild. Buffers are reused
 /// across rebuilds when capacity permits.
 struct CartoonResources {
@@ -332,6 +345,28 @@ mod tests {
             geometry_hash_for(&base, CartoonMode::Ribbon),
             geometry_hash_for(&changed, CartoonMode::Ribbon)
         );
+    }
+
+    #[test]
+    fn cartoon_storage_buffer_limit_uses_lower_device_limit() {
+        let limits = wgpu::Limits {
+            max_buffer_size: 2 * 1024 * 1024 * 1024,
+            max_storage_buffer_binding_size: 512 * 1024 * 1024,
+            ..wgpu::Limits::default()
+        };
+
+        assert_eq!(cartoon_storage_buffer_limit(limits), 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn oversized_cartoon_storage_buffer_reports_first_excess() {
+        let buffers = [("extrude_points", 64), ("runs", 129), ("vertices", 256)];
+
+        assert_eq!(
+            oversized_cartoon_storage_buffer(128, &buffers),
+            Some(("runs", 129))
+        );
+        assert_eq!(oversized_cartoon_storage_buffer(256, &buffers), None);
     }
 }
 
@@ -630,19 +665,26 @@ impl Representation for CartoonRep {
         };
         let total_vertices = output.total_vertices;
         let vertex_bytes = (total_vertices as u64) * 24;
-        // wgpu's `max_storage_buffer_binding_size` caps at u32::MAX
-        // (~4 GB). On 3J3Q-class assemblies the LOD-trimmed vertex
-        // buffer can still exceed it — gracefully drop cartoon for this
-        // object instead of letting bind-group creation panic. Chunked
-        // emission (multi-bind-group, multi-draw_indirect) is the real
-        // fix, tracked separately.
-        if vertex_bytes >= u32::MAX as u64 {
+        let extrude_points_bytes = (extrude_points_gpu.len() as u64) * ExtrudePointGpu::SIZE;
+        let runs_bytes = (output.runs.len() as u64) * std::mem::size_of::<RunDescriptor>() as u64;
+        let storage_buffer_limit = cartoon_storage_buffer_limit(device.limits());
+        let storage_buffers = [
+            ("extrude_points", extrude_points_bytes),
+            ("runs", runs_bytes),
+            ("vertices", vertex_bytes),
+        ];
+        // Requesting adapter-aware limits can make the per-device storage
+        // binding cap lower than high-end GPUs. Drop this rep gracefully
+        // instead of letting buffer allocation or bind-group creation panic.
+        if let Some((name, bytes)) =
+            oversized_cartoon_storage_buffer(storage_buffer_limit, &storage_buffers)
+        {
             log::warn!(
-                "patinae-render: cartoon vertex buffer ({} verts × 24 B = {:.2} GB) exceeds \
-                 wgpu's 4 GB storage-binding limit at LOD {:?} — skipping cartoon for this object. \
+                "patinae-render: cartoon {name} buffer ({:.2} GiB) exceeds device \
+                 storage-buffer limit ({:.2} GiB) at LOD {:?} - skipping cartoon for this object. \
                  Reduce structure size, switch to a coarser LOD, or wait for chunked emission.",
-                total_vertices,
-                vertex_bytes as f64 / (1u64 << 30) as f64,
+                bytes as f64 / (1u64 << 30) as f64,
+                storage_buffer_limit as f64 / (1u64 << 30) as f64,
                 input.lod,
             );
             self.resources = None;
@@ -650,8 +692,6 @@ impl Representation for CartoonRep {
             self.needs_dispatch = false;
             return;
         }
-        let extrude_points_bytes = (extrude_points_gpu.len() as u64) * ExtrudePointGpu::SIZE;
-        let runs_bytes = (output.runs.len() as u64) * std::mem::size_of::<RunDescriptor>() as u64;
 
         let need_realloc = match &self.resources {
             None => true,
