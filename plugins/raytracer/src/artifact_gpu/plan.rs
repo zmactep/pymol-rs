@@ -3,10 +3,12 @@ use patinae_scene::{
     RenderArtifactRepDescriptor, RenderArtifactRepKind, RenderArtifactSnapshotDescriptor,
 };
 
-use super::{
+use super::layout::{
+    ATOM_STRIDE, COLOR_LUT_STRIDE, LINE_INSTANCE_STRIDE, MAX_ENCODED_PRIMITIVE_INDEX,
+    RAY_LINE_RADIUS, SPHERE_INSTANCE_STRIDE, STD_VERTEX_STRIDE, STICK_INSTANCE_STRIDE,
+};
+use super::reps::{
     ArtifactPlan, CapsuleArtifactRep, CylinderArtifactRep, SphereArtifactRep, TriangleArtifactRep,
-    COLOR_LUT_STRIDE, LINE_INSTANCE_STRIDE, MAX_ENCODED_PRIMITIVE_INDEX, RAY_LINE_RADIUS,
-    SPHERE_INSTANCE_STRIDE, STD_VERTEX_STRIDE, STICK_INSTANCE_STRIDE,
 };
 
 pub(super) fn plan_artifact_primitives<'a>(
@@ -18,6 +20,13 @@ pub(super) fn plan_artifact_primitives<'a>(
         .find(|buffer| buffer.role == RenderArtifactBufferRole::SceneColorLut)
         .ok_or_else(|| "render artifact snapshot is missing SceneColorLut".to_string())?;
     validate_color_lut(color_lut)?;
+    let scene_atoms = snapshot
+        .buffers
+        .iter()
+        .find(|buffer| buffer.role == RenderArtifactBufferRole::SceneAtoms);
+    if let Some(scene_atoms) = scene_atoms {
+        validate_scene_atoms(scene_atoms)?;
+    }
 
     let mut sphere_reps = Vec::new();
     let mut cylinder_reps = Vec::new();
@@ -140,25 +149,35 @@ pub(super) fn plan_artifact_primitives<'a>(
                         rep.rep_kind
                     ));
                 }
-                let vertex_count = triangle_vertex_count_for(rep, snapshot)?;
-                if vertex_count == 0 {
+                let requested_vertex_count = triangle_vertex_count_for(rep, snapshot)?;
+                if requested_vertex_count == 0 {
                     continue;
                 }
-                if vertex_count % 3 != 0 {
+                if rep.indirect.is_none() && requested_vertex_count % 3 != 0 {
                     return Err(format!(
                         "{:?} artifact vertex count {} is not divisible by 3",
-                        rep.rep_kind, vertex_count
+                        rep.rep_kind, requested_vertex_count
                     ));
                 }
-                let vertex_count = effective_rep_geometry_elements(
+                let effective_vertex_count = effective_rep_geometry_elements(
                     snapshot,
                     rep,
                     RenderArtifactBufferRole::StdVertices,
                     STD_VERTEX_STRIDE,
-                    vertex_count,
+                    requested_vertex_count,
                     "triangle",
-                )? / 3
-                    * 3;
+                )?;
+                if rep.indirect.is_none() && effective_vertex_count % 3 != 0 {
+                    return Err(format!(
+                        "{:?} artifact vertex count {} is not divisible by 3",
+                        rep.rep_kind, effective_vertex_count
+                    ));
+                }
+                let vertex_count = if rep.indirect.is_some() {
+                    effective_vertex_count / 3 * 3
+                } else {
+                    effective_vertex_count
+                };
                 if vertex_count == 0 {
                     continue;
                 }
@@ -173,6 +192,7 @@ pub(super) fn plan_artifact_primitives<'a>(
                     vertex_count,
                     geometry_binding_size,
                     rep_slot,
+                    visibility_counter_index: None,
                 });
                 triangle_count = triangle_count
                     .checked_add(rep_triangles)
@@ -189,8 +209,15 @@ pub(super) fn plan_artifact_primitives<'a>(
         }
     }
 
+    if !triangle_reps.is_empty() && scene_atoms.is_none() {
+        return Err(
+            "render artifact snapshot is missing SceneAtoms for triangle artifacts".to_string(),
+        );
+    }
+
     Ok(ArtifactPlan {
         color_lut: color_lut.handle,
+        scene_atoms: scene_atoms.map(|buffer| buffer.handle),
         sphere_reps,
         cylinder_reps,
         capsule_reps,
@@ -213,6 +240,22 @@ fn validate_color_lut(buffer: &RenderArtifactBufferDescriptor) -> Result<(), Str
         return Err(format!(
             "SceneColorLut buffer size {} is too small for stride {}",
             buffer.size, COLOR_LUT_STRIDE
+        ));
+    }
+    Ok(())
+}
+
+fn validate_scene_atoms(buffer: &RenderArtifactBufferDescriptor) -> Result<(), String> {
+    if buffer.stride != ATOM_STRIDE {
+        return Err(format!(
+            "SceneAtoms stride {} does not match expected {}",
+            buffer.stride, ATOM_STRIDE
+        ));
+    }
+    if buffer.size < ATOM_STRIDE || buffer.element_count == 0 {
+        return Err(format!(
+            "SceneAtoms buffer size {} is too small for stride {}",
+            buffer.size, ATOM_STRIDE
         ));
     }
     Ok(())

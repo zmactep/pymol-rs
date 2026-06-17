@@ -5,11 +5,12 @@ use patinae_scene::{
     GpuShaderModuleDescriptor, GpuSubmitBatch,
 };
 
-use super::resources::{buffer_entry, create_buffer, storage_layout, storage_usage, uniform_usage};
-use super::{
-    rt_profile_enabled, DownsampleInput, DownsampleParams, RaytraceDispatchInput,
-    MAX_OUTPUT_READBACK_BYTES, WORKGROUP_SIZE,
+use super::layout::{
+    DownsampleInput, DownsampleParams, RaytraceDispatchInput, MAX_OUTPUT_READBACK_BYTES,
+    WORKGROUP_SIZE,
 };
+use super::resources::{buffer_entry, create_buffer, storage_layout, storage_usage, uniform_usage};
+use super::rt_profile_enabled;
 use crate::gpu::uniforms::RaytraceUniforms;
 use crate::shaders;
 
@@ -71,7 +72,7 @@ pub(super) fn dispatch_raytrace(
     let shader = viewer
         .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
             label: Some("ray.artifact.raytrace.shader".to_string()),
-            wgsl: shaders::ARTIFACT_RAYTRACE_OUTPUT_BUFFER.to_string(),
+            wgsl: shaders::artifact_raytrace_output_buffer(),
         })?
         .handle;
     let layout = viewer

@@ -5,8 +5,8 @@ use patinae_scene::{
 };
 
 use super::dispatch::dispatch_grid_for;
+use super::layout::{ArtifactBvhParams, BvhBuildInput, BvhShape, BVH_LEAF_SIZE};
 use super::resources::{buffer_entry, create_buffer, storage_layout, uniform_usage};
-use super::{ArtifactBvhParams, BvhBuildInput, BvhShape, BVH_LEAF_SIZE};
 use crate::shaders;
 
 pub(super) fn build_bvh(
@@ -17,7 +17,7 @@ pub(super) fn build_bvh(
     let shader = viewer
         .gpu_create_cached_shader_module(GpuShaderModuleDescriptor {
             label: Some("ray.artifact.bvh.shader".to_string()),
-            wgsl: shaders::ARTIFACT_BVH.to_string(),
+            wgsl: shaders::artifact_bvh(),
         })?
         .handle;
     let layout = viewer

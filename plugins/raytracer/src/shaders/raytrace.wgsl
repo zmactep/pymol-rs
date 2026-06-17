@@ -426,7 +426,7 @@ fn decode_index(encoded: u32) -> vec2<u32> {
 }
 
 // Trace ray through BVH
-fn trace_ray(ray: Ray) -> HitInfo {
+fn trace_ray(ray: Ray, opaque_only: bool) -> HitInfo {
     var closest: HitInfo;
     closest.hit = false;
     closest.t = MAX_T;
@@ -436,28 +436,28 @@ fn trace_ray(ray: Ray) -> HitInfo {
         // Brute force spheres
         for (var i = 0u; i < uniforms.sphere_count; i++) {
             let hit = intersect_sphere(ray, spheres[i]);
-            if hit.hit && hit.t < closest.t {
+            if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
         // Brute force cylinders
         for (var i = 0u; i < uniforms.cylinder_count; i++) {
             let hit = intersect_cylinder(ray, cylinders[i]);
-            if hit.hit && hit.t < closest.t {
+            if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
         // Brute force capsules
         for (var i = 0u; i < uniforms.capsule_count; i++) {
             let hit = intersect_capsule(ray, capsules[i]);
-            if hit.hit && hit.t < closest.t {
+            if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
         // Brute force triangles
         for (var i = 0u; i < uniforms.triangle_count; i++) {
             let hit = intersect_triangle(ray, triangles[i]);
-            if hit.hit && hit.t < closest.t {
+            if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
@@ -504,7 +504,7 @@ fn trace_ray(ray: Ray) -> HitInfo {
                     hit = intersect_capsule(ray, capsules[prim_idx]);
                 }
                 
-                if hit.hit && hit.t < closest.t {
+                if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                     closest = hit;
                 }
             }
@@ -784,11 +784,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Mode 1: multi-layer - trace through and composite all transparent layers
     // Mode 2: uni-layer - only first transparent layer contributes, then find what's behind
     
-    let max_passes = max(uniforms.ray_max_passes, 1u);
-    var transparent_layer_count = 0u;
+    var max_passes = max(uniforms.ray_max_passes, 1u);
+    if uniforms.transparency_mode == 2u {
+        max_passes = max(max_passes, 2u);
+    }
+    var opaque_only_trace = false;
     
     for (var layer_idx = 0u; layer_idx < max_passes; layer_idx++) {
-        let hit = trace_ray(current_ray);
+        let hit = trace_ray(current_ray, opaque_only_trace);
         
         if !hit.hit {
             // No hit - add background color weighted by remaining transparency
@@ -830,20 +833,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if uniforms.transparency_mode == 0u {
             // Mode 0: fast/ugly - ignore transparency, treat as fully opaque
             layer_alpha = 1.0;
-        } else if uniforms.transparency_mode == 2u && is_transparent && transparent_layer_count > 0u {
-            // Mode 2: uni-layer - skip additional transparent layers (don't contribute)
-            // Continue ray to find what's behind
-            let hit_point = current_ray.origin + hit.t * current_ray.direction;
-            current_ray.origin = hit_point + current_ray.direction * EPSILON * 10.0;
-            continue;
         } else {
             // Mode 1: multi-layer, or first transparent layer in mode 2
             layer_alpha = 1.0 - hit.transparency;
-        }
-        
-        // Track transparent layers for mode 2
-        if is_transparent {
-            transparent_layer_count += 1u;
         }
         
         let remaining = 1.0 - accumulated_alpha;
@@ -867,6 +859,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // If this surface is opaque, stop
         if !is_transparent {
             break;
+        }
+
+        if uniforms.transparency_mode == 2u {
+            opaque_only_trace = true;
         }
         
         // Continue ray from hit point (with small offset to avoid self-intersection)

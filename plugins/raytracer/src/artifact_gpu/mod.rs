@@ -22,285 +22,32 @@
 //! modules, bind-group layouts, pipeline layouts, and compute pipelines use the
 //! persistent host cache exposed by the GPU runtime.
 
-use bytemuck::{Pod, Zeroable};
 use patinae_plugin::prelude::ViewerLike;
-use patinae_scene::{GpuHandle, RenderArtifactRepDescriptor, RenderArtifactSnapshotDescriptor};
+use patinae_scene::RenderArtifactSnapshotDescriptor;
 
 use crate::bvh::BvhNode;
 use crate::gpu::RaytraceParams;
-use crate::primitive::{GpuCapsule, GpuCylinder, GpuSphere, GpuTriangle};
+use crate::primitive::{GpuCapsule, GpuCylinder, GpuSphere};
 
 mod batch;
 mod bvh;
 mod dispatch;
+mod indirect;
+mod layout;
 mod plan;
+mod reps;
 mod resources;
+mod triangles;
+mod visibility;
 
-use resources::{create_buffer, direct_draw_args_buffer, storage_bytes_for, storage_usage};
-
-const WORKGROUP_SIZE: u32 = 128;
-const BVH_LEAF_SIZE: u32 = 4;
-const EMPTY_STORAGE_BYTES: u64 = 16;
-const COLOR_LUT_STRIDE: u64 = 64;
-const SPHERE_INSTANCE_STRIDE: u64 = 32;
-const STICK_INSTANCE_STRIDE: u64 = 48;
-const LINE_INSTANCE_STRIDE: u64 = 48;
-const STD_VERTEX_STRIDE: u64 = 24;
-const MAX_OUTPUT_READBACK_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_ENCODED_PRIMITIVE_INDEX: u32 = 0x3fff_ffff;
-const RAY_LINE_RADIUS: f32 = 0.035;
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ArtifactTriangleParams {
-    vertex_capacity: u32,
-    triangle_offset: u32,
-    atom_offset: u32,
-    rep_slot: u32,
-    transparency: f32,
-    dispatch_width: u32,
-    _pad0: u32,
-    _pad1: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ArtifactSphereParams {
-    instance_capacity: u32,
-    sphere_offset: u32,
-    atom_offset: u32,
-    rep_slot: u32,
-    transparency: f32,
-    dispatch_width: u32,
-    _pad0: u32,
-    _pad1: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ArtifactCylinderParams {
-    instance_capacity: u32,
-    cylinder_offset: u32,
-    atom_offset: u32,
-    rep_slot: u32,
-    transparency: f32,
-    radius: f32,
-    dispatch_width: u32,
-    _pad0: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ArtifactCapsuleParams {
-    instance_capacity: u32,
-    capsule_offset: u32,
-    atom_offset: u32,
-    rep_slot: u32,
-    transparency: f32,
-    dispatch_width: u32,
-    _pad0: u32,
-    _pad1: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ArtifactBvhParams {
-    primitive_count: u32,
-    sphere_count: u32,
-    cylinder_count: u32,
-    capsule_count: u32,
-    triangle_count: u32,
-    leaf_slots: u32,
-    leaf_start: u32,
-    level_start: u32,
-    level_count: u32,
-    dispatch_width: u32,
-    _pad0: u32,
-    _pad1: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct DownsampleParams {
-    src_width: u32,
-    dst_width: u32,
-    dst_height: u32,
-    factor: u32,
-}
-
-struct SphereArtifactRep<'a> {
-    rep: &'a RenderArtifactRepDescriptor,
-    sphere_offset: u32,
-    instance_capacity: u32,
-    geometry_binding_size: u64,
-    rep_slot: u32,
-}
-
-impl SphereArtifactRep<'_> {
-    fn indirect_or_direct_args(
-        &self,
-        viewer: &mut dyn ViewerLike,
-        label: &str,
-    ) -> Result<GpuHandle, String> {
-        if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
-        }
-        direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
-    }
-}
-
-struct CylinderArtifactRep<'a> {
-    rep: &'a RenderArtifactRepDescriptor,
-    cylinder_offset: u32,
-    instance_capacity: u32,
-    geometry_binding_size: u64,
-    rep_slot: u32,
-    radius: f32,
-}
-
-impl CylinderArtifactRep<'_> {
-    fn indirect_or_direct_args(
-        &self,
-        viewer: &mut dyn ViewerLike,
-        label: &str,
-    ) -> Result<GpuHandle, String> {
-        if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
-        }
-        direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
-    }
-}
-
-struct CapsuleArtifactRep<'a> {
-    rep: &'a RenderArtifactRepDescriptor,
-    capsule_offset: u32,
-    instance_capacity: u32,
-    geometry_binding_size: u64,
-    rep_slot: u32,
-}
-
-impl CapsuleArtifactRep<'_> {
-    fn indirect_or_direct_args(
-        &self,
-        viewer: &mut dyn ViewerLike,
-        label: &str,
-    ) -> Result<GpuHandle, String> {
-        if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
-        }
-        direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
-    }
-}
-
-struct TriangleArtifactRep<'a> {
-    rep: &'a RenderArtifactRepDescriptor,
-    triangle_offset: u32,
-    triangle_count: u32,
-    vertex_count: u32,
-    geometry_binding_size: u64,
-    rep_slot: u32,
-}
-
-impl TriangleArtifactRep<'_> {
-    fn indirect_or_direct_args(
-        &self,
-        viewer: &mut dyn ViewerLike,
-        label: &str,
-    ) -> Result<GpuHandle, String> {
-        if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
-        }
-        direct_draw_args_buffer(viewer, label, [self.vertex_count, 1, 0, 0])
-    }
-}
-
-struct ArtifactPlan<'a> {
-    color_lut: GpuHandle,
-    sphere_reps: Vec<SphereArtifactRep<'a>>,
-    cylinder_reps: Vec<CylinderArtifactRep<'a>>,
-    capsule_reps: Vec<CapsuleArtifactRep<'a>>,
-    triangle_reps: Vec<TriangleArtifactRep<'a>>,
-    sphere_count: u32,
-    cylinder_count: u32,
-    capsule_count: u32,
-    triangle_count: u32,
-}
-
-#[derive(Clone, Copy)]
-struct PrimitiveBuffers {
-    spheres: GpuHandle,
-    cylinders: GpuHandle,
-    capsules: GpuHandle,
-    triangles: GpuHandle,
-}
-
-#[derive(Clone, Copy)]
-struct PrimitiveCounts {
-    spheres: u32,
-    cylinders: u32,
-    capsules: u32,
-    triangles: u32,
-}
-
-impl ArtifactPlan<'_> {
-    fn primitive_counts(&self) -> PrimitiveCounts {
-        PrimitiveCounts {
-            spheres: self.sphere_count,
-            cylinders: self.cylinder_count,
-            capsules: self.capsule_count,
-            triangles: self.triangle_count,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct BvhBuffers {
-    nodes: GpuHandle,
-    indices: GpuHandle,
-}
-
-struct BvhBuildInput<'a> {
-    primitives: PrimitiveBuffers,
-    bvh: BvhBuffers,
-    counts: PrimitiveCounts,
-    primitive_count: u32,
-    shape: &'a BvhShape,
-    max_dispatch_dimension: u32,
-}
-
-struct RaytraceDispatchInput<'a> {
-    params: &'a RaytraceParams,
-    primitives: PrimitiveBuffers,
-    bvh: BvhBuffers,
-    counts: PrimitiveCounts,
-    bvh_node_count: u32,
-    max_dispatch_dimension: u32,
-}
-
-struct DownsampleInput {
-    source_buffer: GpuHandle,
-    src_width: u32,
-    dst_width: u32,
-    dst_height: u32,
-    factor: u32,
-    max_dispatch_dimension: u32,
-}
-
-impl ArtifactPlan<'_> {
-    fn primitive_count(&self) -> Result<u32, String> {
-        self.sphere_count
-            .checked_add(self.cylinder_count)
-            .and_then(|count| count.checked_add(self.capsule_count))
-            .and_then(|count| count.checked_add(self.triangle_count))
-            .ok_or_else(|| "artifact primitive count overflow".to_string())
-    }
-}
-
-struct BvhShape {
-    leaf_slots: u32,
-    leaf_start: u32,
-    node_count: u32,
-}
+use layout::{
+    ArtifactTriangle, BvhBuffers, BvhBuildInput, PrimitiveBuffers, RaytraceDispatchInput,
+};
+use resources::{
+    checked_storage_buffer_size, checked_storage_bytes, create_buffer, storage_bytes_for_device,
+    storage_usage,
+};
+use triangles::{apply_visible_surface_triangle_counts, resolve_indirect_triangle_counts};
 
 /// Raytrace renderer GPU artifacts through the command-runtime GPU ABI.
 ///
@@ -318,7 +65,18 @@ pub(crate) fn raytrace_artifacts(
         );
     }
 
-    let plan = plan::plan_artifact_primitives(snapshot)?;
+    let mut plan = plan::plan_artifact_primitives(snapshot)?;
+    resolve_indirect_triangle_counts(viewer, &mut plan)?;
+    let surface_visibility = visibility::count_visible_surface_triangles(
+        viewer,
+        &plan,
+        params,
+        &snapshot.device_limits,
+        snapshot.device_limits.max_compute_workgroups_per_dimension,
+    )?;
+    if let Some(visibility) = &surface_visibility {
+        apply_visible_surface_triangle_counts(&mut plan, &visibility.counts)?;
+    }
     let primitive_count = plan.primitive_count()?;
     if primitive_count == 0 {
         return Err("GPU artifact snapshot contains no raytraceable GPU primitives".to_string());
@@ -326,31 +84,48 @@ pub(crate) fn raytrace_artifacts(
 
     let setup_start = std::time::Instant::now();
     let mut batch_commands = Vec::new();
+    let device_limits = &snapshot.device_limits;
     let sphere_buffer = create_buffer(
         viewer,
         "ray.artifact.spheres",
-        storage_bytes_for::<GpuSphere>(plan.sphere_count, "ray artifact spheres")?,
+        storage_bytes_for_device::<GpuSphere>(
+            plan.sphere_count,
+            device_limits,
+            "ray artifact spheres",
+        )?,
         storage_usage(),
         None,
     )?;
     let cylinder_buffer = create_buffer(
         viewer,
         "ray.artifact.cylinders",
-        storage_bytes_for::<GpuCylinder>(plan.cylinder_count, "ray artifact cylinders")?,
+        storage_bytes_for_device::<GpuCylinder>(
+            plan.cylinder_count,
+            device_limits,
+            "ray artifact cylinders",
+        )?,
         storage_usage(),
         None,
     )?;
     let capsule_buffer = create_buffer(
         viewer,
         "ray.artifact.capsules",
-        storage_bytes_for::<GpuCapsule>(plan.capsule_count, "ray artifact capsules")?,
+        storage_bytes_for_device::<GpuCapsule>(
+            plan.capsule_count,
+            device_limits,
+            "ray artifact capsules",
+        )?,
         storage_usage(),
         None,
     )?;
     let triangle_buffer = create_buffer(
         viewer,
         "ray.artifact.triangles",
-        storage_bytes_for::<GpuTriangle>(plan.triangle_count, "ray artifact triangles")?,
+        storage_bytes_for_device::<ArtifactTriangle>(
+            plan.triangle_count,
+            device_limits,
+            "ray artifact triangles",
+        )?,
         storage_usage(),
         None,
     )?;
@@ -391,6 +166,10 @@ pub(crate) fn raytrace_artifacts(
         &plan,
         plan.color_lut,
         primitive_buffers.triangles,
+        surface_visibility
+            .as_ref()
+            .map(|visibility| visibility.counter_buffer),
+        params,
         max_dispatch_dimension,
         &mut batch_commands,
     )?;
@@ -399,14 +178,30 @@ pub(crate) fn raytrace_artifacts(
     let bvh_node_buffer = create_buffer(
         viewer,
         "ray.artifact.bvh_nodes",
-        u64::from(bvh_shape.node_count) * std::mem::size_of::<BvhNode>() as u64,
+        checked_storage_buffer_size(
+            checked_storage_bytes(
+                u64::from(bvh_shape.node_count),
+                std::mem::size_of::<BvhNode>() as u64,
+                "ray artifact BVH nodes",
+            )?,
+            device_limits,
+            "ray artifact BVH nodes",
+        )?,
         storage_usage(),
         None,
     )?;
     let bvh_index_buffer = create_buffer(
         viewer,
         "ray.artifact.bvh_indices",
-        u64::from(primitive_count) * std::mem::size_of::<u32>() as u64,
+        checked_storage_buffer_size(
+            checked_storage_bytes(
+                u64::from(primitive_count),
+                std::mem::size_of::<u32>() as u64,
+                "ray artifact BVH indices",
+            )?,
+            device_limits,
+            "ray artifact BVH indices",
+        )?,
         storage_usage(),
         None,
     )?;

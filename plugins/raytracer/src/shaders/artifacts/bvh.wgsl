@@ -43,17 +43,7 @@ struct Capsule {
     _pad_a: f32, _pad_b: f32, _pad_c: f32,
 }
 
-struct Triangle {
-    v0: vec3<f32>, _pad0: f32,
-    v1: vec3<f32>, _pad1: f32,
-    v2: vec3<f32>, _pad2: f32,
-    n0: vec3<f32>, _pad3: f32,
-    n1: vec3<f32>, _pad4: f32,
-    n2: vec3<f32>, _pad5: f32,
-    color: vec4<f32>,
-    transparency: f32,
-    _pad_a: f32, _pad_b: f32, _pad_c: f32,
-}
+// {{INCLUDE_ARTIFACT_TRIANGLE}}
 
 struct BvhNode {
     min: vec3<f32>,
@@ -139,18 +129,21 @@ fn capsule_bounds(index: u32) -> PrimitiveBounds {
 
 fn triangle_bounds(index: u32) -> PrimitiveBounds {
     let tri = triangles[index];
-    if tri.transparency >= 1.0 || tri.color.a <= 0.0 {
+    if tri.color.a <= 0.0 {
         return invalid_bounds();
     }
-    let area_normal = cross(tri.v1 - tri.v0, tri.v2 - tri.v0);
+    let v0 = tri.v0.xyz;
+    let v1 = tri.v1.xyz;
+    let v2 = tri.v2.xyz;
+    let area_normal = cross(v1 - v0, v2 - v0);
     if length(area_normal) <= EPSILON {
         return invalid_bounds();
     }
     return PrimitiveBounds(
         (2u << 30u) | index,
         true,
-        min(tri.v0, min(tri.v1, tri.v2)),
-        max(tri.v0, max(tri.v1, tri.v2)),
+        min(v0, min(v1, v2)),
+        max(v0, max(v1, v2)),
     );
 }
 
