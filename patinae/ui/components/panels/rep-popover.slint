@@ -262,7 +262,7 @@ export component RepPopover inherits Rectangle {
     border-color: Theme.line;
 
     // Block empty-surface clicks from falling through to the dismiss backdrop.
-    TouchArea {}
+    TouchArea { }
 
     property <string> target: ObjectsState.popover-target;
     // True when the popover targets a biopolymer subchain (or object-level).
@@ -311,41 +311,63 @@ export component RepPopover inherits Rectangle {
 
                 // Lines — zigzag wireframe
                 RepToggle {
-                    rep-id: "lines"; rep-active: ObjectsState.popover-rep-lines;
-                    label: "lines"; target: root.target;
+                    rep-id: "lines";
+                    rep-active: ObjectsState.popover-rep-lines;
+                    label: "lines";
+                    target: root.target;
                     Path {
-                        width: 10px; height: 10px;
+                        width: 10px;
+                        height: 10px;
                         commands: "M 1 8 L 5 2 L 9 8";
-                        stroke: parent.tint; stroke-width: 1px;
+                        stroke: parent.tint;
+                        stroke-width: 1px;
                     }
                 }
 
                 // Sticks — thick zigzag
                 RepToggle {
-                    rep-id: "sticks"; rep-active: ObjectsState.popover-rep-sticks;
-                    label: "sticks"; target: root.target;
+                    rep-id: "sticks";
+                    rep-active: ObjectsState.popover-rep-sticks;
+                    label: "sticks";
+                    target: root.target;
                     Path {
-                        width: 10px; height: 10px;
+                        width: 10px;
+                        height: 10px;
                         commands: "M 1 8 L 5 2 L 9 8";
-                        stroke: parent.tint; stroke-width: 2.5px;
+                        stroke: parent.tint;
+                        stroke-width: 2.5px;
                     }
                 }
 
                 // Spheres — filled circle
                 RepToggle {
-                    rep-id: "spheres"; rep-active: ObjectsState.popover-rep-spheres;
-                    label: "spheres"; target: root.target;
-                    Rectangle { x: 1px; y: 1px; width: 8px; height: 8px; border-radius: 4px; background: parent.tint; }
+                    rep-id: "spheres";
+                    rep-active: ObjectsState.popover-rep-spheres;
+                    label: "spheres";
+                    target: root.target;
+                    Rectangle {
+                        x: 1px;
+                        y: 1px;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: parent.tint;
+                    }
                 }
 
                 // Cartoon — thick S-curve (helix ribbon)
                 RepToggle {
-                    rep-id: "cartoon"; rep-active: ObjectsState.popover-rep-cartoon;
-                    label: "cartoon"; target: root.target; disabled: !root.is-bio;
+                    rep-id: "cartoon";
+                    rep-active: ObjectsState.popover-rep-cartoon;
+                    label: "cartoon";
+                    target: root.target;
+                    disabled: !root.is-bio;
                     Path {
-                        width: 10px; height: 10px;
+                        width: 10px;
+                        height: 10px;
                         commands: "M 0 7 Q 2.5 0, 5 5 Q 7.5 10, 10 3";
-                        stroke: parent.tint; stroke-width: 2px;
+                        stroke: parent.tint;
+                        stroke-width: 2px;
                     }
                 }
             }
@@ -355,21 +377,29 @@ export component RepPopover inherits Rectangle {
 
                 // Ribbon — thin S-curve trace
                 RepToggle {
-                    rep-id: "ribbon"; rep-active: ObjectsState.popover-rep-ribbon;
-                    label: "ribbon"; target: root.target; disabled: !root.is-bio;
+                    rep-id: "ribbon";
+                    rep-active: ObjectsState.popover-rep-ribbon;
+                    label: "ribbon";
+                    target: root.target;
+                    disabled: !root.is-bio;
                     Path {
-                        width: 10px; height: 10px;
+                        width: 10px;
+                        height: 10px;
                         commands: "M 0 7 Q 2.5 1, 5 5 Q 7.5 9, 10 3";
-                        stroke: parent.tint; stroke-width: 1px;
+                        stroke: parent.tint;
+                        stroke-width: 1px;
                     }
                 }
 
                 // Surface — filled pentagon
                 RepToggle {
-                    rep-id: "surface"; rep-active: ObjectsState.popover-rep-surface;
-                    label: "surface"; target: root.target;
+                    rep-id: "surface";
+                    rep-active: ObjectsState.popover-rep-surface;
+                    label: "surface";
+                    target: root.target;
                     Path {
-                        width: 10px; height: 10px;
+                        width: 10px;
+                        height: 10px;
                         commands: "M 5 0.5 L 9.3 3.6 L 7.6 8.6 L 2.4 8.6 L 0.7 3.6 Z";
                         fill: parent.tint;
                     }
@@ -377,24 +407,69 @@ export component RepPopover inherits Rectangle {
 
                 // Mesh — pentagon with diagonals
                 RepToggle {
-                    rep-id: "mesh"; rep-active: ObjectsState.popover-rep-mesh;
-                    label: "mesh"; target: root.target;
+                    rep-id: "mesh";
+                    rep-active: ObjectsState.popover-rep-mesh;
+                    label: "mesh";
+                    target: root.target;
                     Path {
-                        width: 10px; height: 10px;
+                        width: 10px;
+                        height: 10px;
                         commands: "M 5 0.5 L 9.3 3.6 L 7.6 8.6 L 2.4 8.6 L 0.7 3.6 Z M 5 0.5 L 2.4 8.6 M 5 0.5 L 7.6 8.6";
-                        stroke: parent.tint; stroke-width: 0.8px;
+                        stroke: parent.tint;
+                        stroke-width: 0.8px;
                     }
                 }
 
                 // Dots — pentagon vertices
                 RepToggle {
-                    rep-id: "dots"; rep-active: ObjectsState.popover-rep-dots;
-                    label: "dots"; target: root.target;
-                    Rectangle { x: 4px;   y: -0.5px; width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
-                    Rectangle { x: 8.3px; y: 2.6px;  width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
-                    Rectangle { x: 6.6px; y: 7.6px;  width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
-                    Rectangle { x: 1.4px; y: 7.6px;  width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
-                    Rectangle { x: -0.3px; y: 2.6px; width: 2px; height: 2px; border-radius: 1px; background: parent.tint; }
+                    rep-id: "dots";
+                    rep-active: ObjectsState.popover-rep-dots;
+                    label: "dots";
+                    target: root.target;
+                    Rectangle {
+                        x: 4px;
+                        y: -0.5px;
+                        width: 2px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 8.3px;
+                        y: 2.6px;
+                        width: 2px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 6.6px;
+                        y: 7.6px;
+                        width: 2px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 1.4px;
+                        y: 7.6px;
+                        width: 2px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: -0.3px;
+                        y: 2.6px;
+                        width: 2px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: parent.tint;
+                    }
                 }
             }
         }
@@ -423,12 +498,21 @@ export component RepPopover inherits Rectangle {
                     hide-cmd: "hide sticks, " + root.target + " and (sidechain or name CA)";
                     // Y-shaped sticks
                     Path {
-                        width: 12px; height: 12px;
+                        width: 12px;
+                        height: 12px;
                         commands: "M 3.5 1 L 6 3.5 L 8.5 1 M 6 3.5 L 6 9";
-                        stroke: parent.tint; stroke-width: 1.2px;
+                        stroke: parent.tint;
+                        stroke-width: 1.2px;
                     }
                     // CA atom dot
-                    Rectangle { x: 4px; y: 9.5px; width: 4px; height: 4px; border-radius: 2px; background: parent.tint; }
+                    Rectangle {
+                        x: 4px;
+                        y: 9.5px;
+                        width: 4px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: parent.tint;
+                    }
                 }
 
                 // Backbone — zigzag chain trace
@@ -438,9 +522,11 @@ export component RepPopover inherits Rectangle {
                     show-cmd: "show sticks, " + root.target + " and backbone";
                     hide-cmd: "hide sticks, " + root.target + " and backbone";
                     Path {
-                        width: 12px; height: 12px;
+                        width: 12px;
+                        height: 12px;
                         commands: "M 0 7 L 3 3 L 6 7 L 9 3 L 12 7";
-                        stroke: parent.tint; stroke-width: 1.5px;
+                        stroke: parent.tint;
+                        stroke-width: 1.5px;
                     }
                 }
             }
@@ -456,9 +542,11 @@ export component RepPopover inherits Rectangle {
                     show-cmd: "show sticks, " + root.target + " and organic";
                     hide-cmd: "hide sticks, " + root.target + " and organic";
                     Path {
-                        width: 12px; height: 12px;
+                        width: 12px;
+                        height: 12px;
                         commands: "M 3 1 L 9 1 L 12 6 L 9 11 L 3 11 L 0 6 Z";
-                        stroke: parent.tint; stroke-width: 1px;
+                        stroke: parent.tint;
+                        stroke-width: 1px;
                     }
                 }
 
@@ -468,9 +556,32 @@ export component RepPopover inherits Rectangle {
                     preset-active: ObjectsState.popover-preset-solvent;
                     show-cmd: "show dots, " + root.target + " and solvent";
                     hide-cmd: "hide dots, " + root.target + " and solvent";
-                    Rectangle { x: 3.5px; y: 1px; width: 3px; height: 3px; border-radius: 1.5px; background: parent.tint; }
-                    Rectangle { x: 0px;   y: 7px; width: 3px; height: 3px; border-radius: 1.5px; background: parent.tint; }
-                    Rectangle { x: 7px;   y: 7px; width: 3px; height: 3px; border-radius: 1.5px; background: parent.tint; }
+                    Rectangle {
+                        x: 3.5px;
+                        y: 1px;
+                        width: 3px;
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 7px;
+                        width: 3px;
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 7px;
+                        y: 7px;
+                        width: 3px;
+                        height: 3px;
+                        border-radius: 1.5px;
+                        background: parent.tint;
+                    }
                 }
             }
 
@@ -484,9 +595,11 @@ export component RepPopover inherits Rectangle {
                     show-cmd: "show spheres, " + root.target + " and inorganic";
                     hide-cmd: "hide spheres, " + root.target + " and inorganic";
                     Path {
-                        width: 12px; height: 12px;
+                        width: 12px;
+                        height: 12px;
                         commands: "M 6 0 L 12 6 L 6 12 L 0 6 Z";
-                        stroke: parent.tint; stroke-width: 1px;
+                        stroke: parent.tint;
+                        stroke-width: 1px;
                     }
                 }
 
@@ -497,12 +610,51 @@ export component RepPopover inherits Rectangle {
                     show-cmd: "show sticks, " + root.target + " and polymer";
                     hide-cmd: "hide sticks, " + root.target + " and polymer";
                     // Connecting lines
-                    Rectangle { x: 3px; y: 5.5px; width: 3px; height: 1px; background: parent.tint; }
-                    Rectangle { x: 8px; y: 5.5px; width: 3px; height: 1px; background: parent.tint; }
+                    Rectangle {
+                        x: 3px;
+                        y: 5.5px;
+                        width: 3px;
+                        height: 1px;
+                        background: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 8px;
+                        y: 5.5px;
+                        width: 3px;
+                        height: 1px;
+                        background: parent.tint;
+                    }
                     // Three monomer circles
-                    Rectangle { x: 0px; y: 3px; width: 4px; height: 4px; border-radius: 2px; border-width: 1px; border-color: parent.tint; }
-                    Rectangle { x: 5px; y: 3px; width: 4px; height: 4px; border-radius: 2px; border-width: 1px; border-color: parent.tint; }
-                    Rectangle { x: 10px; y: 3px; width: 4px; height: 4px; border-radius: 2px; border-width: 1px; border-color: parent.tint; }
+                    Rectangle {
+                        x: 0px;
+                        y: 3px;
+                        width: 4px;
+                        height: 4px;
+                        border-radius: 2px;
+                        border-width: 1px;
+                        border-color: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 5px;
+                        y: 3px;
+                        width: 4px;
+                        height: 4px;
+                        border-radius: 2px;
+                        border-width: 1px;
+                        border-color: parent.tint;
+                    }
+
+                    Rectangle {
+                        x: 10px;
+                        y: 3px;
+                        width: 4px;
+                        height: 4px;
+                        border-radius: 2px;
+                        border-width: 1px;
+                        border-color: parent.tint;
+                    }
                 }
             }
         }
@@ -526,21 +678,24 @@ export component RepPopover inherits Rectangle {
                 target: root.target;
                 initial-value: ObjectsState.popover-transparency-sticks;
             }
+
             TransparencySlider {
                 label: "spheres";
                 setting-name: "sphere_transparency";
                 target: root.target;
                 initial-value: ObjectsState.popover-transparency-spheres;
             }
+
             TransparencySlider {
                 label: "cartoon";
                 setting-name: "cartoon_transparency";
                 target: root.target;
                 initial-value: ObjectsState.popover-transparency-cartoon;
             }
+
             TransparencySlider {
                 label: "surface";
-                setting-name: "transparency";
+                setting-name: "surface_transparency";
                 target: root.target;
                 initial-value: ObjectsState.popover-transparency-surface;
             }
