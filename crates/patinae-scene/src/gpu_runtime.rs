@@ -89,6 +89,8 @@ pub struct GpuDeviceLimits {
     pub max_compute_workgroup_size_x: u32,
     pub max_compute_workgroup_size_y: u32,
     pub max_compute_workgroup_size_z: u32,
+    pub buffer_binding_array: bool,
+    pub storage_resource_binding_array: bool,
 }
 
 /// Portable buffer usage flags understood by the plugin GPU runtime.
@@ -824,6 +826,13 @@ pub enum GpuBatchCommand {
         bind_groups: Vec<GpuHandle>,
         workgroups: [u32; 3],
     },
+    /// Dispatch one compute pipeline from a GPU-written dispatch buffer.
+    DispatchComputeIndirect {
+        pipeline: GpuHandle,
+        bind_groups: Vec<GpuHandle>,
+        indirect_buffer: GpuHandle,
+        indirect_offset: u64,
+    },
     /// Copy bytes between buffers inside the batch command encoder.
     CopyBufferToBuffer {
         source: GpuHandle,
@@ -863,17 +872,20 @@ pub enum GpuBatchCommand {
         descriptor: GpuRenderPassDescriptor,
         commands: Vec<GpuRenderPassCommand>,
     },
+    /// Set the profiling scope for subsequent batch commands.
+    SetProfileScope { name: String },
 }
 
 /// Ordered GPU command batch submitted by a plugin.
 ///
 /// The host records all commands into a fresh command encoder, submits once,
-/// waits for completion when readbacks are requested, and returns readback
-/// payloads in command order. Batch submission never transfers ownership of a
-/// plugin handle to the plugin.
+/// waits for completion when requested or when readbacks are requested, and
+/// returns readback payloads in command order. Batch submission never transfers
+/// ownership of a plugin handle to the plugin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuSubmitBatch {
     pub label: Option<String>,
+    pub wait_for_completion: bool,
     pub commands: Vec<GpuBatchCommand>,
 }
 

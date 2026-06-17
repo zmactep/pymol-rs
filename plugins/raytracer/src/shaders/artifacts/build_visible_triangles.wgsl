@@ -2,13 +2,17 @@ struct ConvertParams {
     view_matrix: mat4x4<f32>,
     proj_matrix: mat4x4<f32>,
     source_vertex_count: u32,
+    source_triangle_start: u32,
+    source_triangle_count: u32,
     triangle_offset: u32,
-    output_triangle_count: u32,
+    output_triangle_capacity: u32,
     atom_offset: u32,
     rep_slot: u32,
     transparency: f32,
     dispatch_width: u32,
     counter_index: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 // {{INCLUDE_ARTIFACT_TRIANGLE}}
@@ -19,8 +23,9 @@ struct ConvertParams {
 @group(0) @binding(1) var<storage, read> color_lut: array<ColorLutEntry>;
 @group(0) @binding(2) var<storage, read_write> triangles: array<Triangle>;
 @group(0) @binding(3) var<storage, read> scene_atoms: array<AtomGpu>;
-@group(0) @binding(4) var<storage, read_write> visible_counts: array<atomic<u32>>;
-@group(0) @binding(5) var<uniform> params: ConvertParams;
+@group(0) @binding(4) var<storage, read> draw_args: array<u32>;
+@group(0) @binding(5) var<storage, read_write> visible_counts: array<atomic<u32>>;
+@group(0) @binding(6) var<uniform> params: ConvertParams;
 
 const CLIP_EPS: f32 = 0.0001;
 
@@ -73,11 +78,17 @@ fn triangle_intersects_output(v0: vec3<f32>, v1: vec3<f32>, v2: vec3<f32>) -> bo
 @compute @workgroup_size(128)
 fn build_visible_triangles(@builtin(global_invocation_id) gid: vec3<u32>) {
     let triangle_index = gid.y * params.dispatch_width + gid.x;
-    if triangle_index >= params.source_vertex_count / 3u {
+    if triangle_index >= params.source_triangle_count {
         return;
     }
 
-    let base_vertex = triangle_index * 3u;
+    let active_vertex_count = min(draw_args[0], params.source_vertex_count) / 3u * 3u;
+    let source_triangle_index = params.source_triangle_start + triangle_index;
+    if source_triangle_index >= active_vertex_count / 3u {
+        return;
+    }
+
+    let base_vertex = source_triangle_index * 3u;
     let v0 = base_vertex;
     let v1 = base_vertex + 1u;
     let v2 = base_vertex + 2u;
@@ -90,7 +101,7 @@ fn build_visible_triangles(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     let visible_index = atomicAdd(&visible_counts[params.counter_index], 1u);
-    if visible_index >= params.output_triangle_count {
+    if visible_index >= params.output_triangle_capacity {
         return;
     }
     let out_index = params.triangle_offset + visible_index;

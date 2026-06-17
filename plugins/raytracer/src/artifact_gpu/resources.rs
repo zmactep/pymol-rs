@@ -89,6 +89,15 @@ pub(super) fn storage_usage() -> GpuBufferUsage {
     ])
 }
 
+pub(super) fn storage_indirect_usage() -> GpuBufferUsage {
+    usage(&[
+        GpuBufferUsage::STORAGE,
+        GpuBufferUsage::COPY_SRC,
+        GpuBufferUsage::COPY_DST,
+        GpuBufferUsage::INDIRECT,
+    ])
+}
+
 pub(super) fn uniform_usage() -> GpuBufferUsage {
     usage(&[GpuBufferUsage::UNIFORM, GpuBufferUsage::COPY_DST])
 }

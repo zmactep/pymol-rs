@@ -784,6 +784,15 @@ impl Command for PngCommand {
                     "PNG export not available in this build".to_string(),
                 ));
             }
+        } else if let Some((w, h)) = ctx
+            .viewer
+            .save_viewport_gpu_image(&path)
+            .map_err(|e| CmdError::execution(format!("Failed to save viewport PNG: {}", e)))?
+        {
+            if !quiet {
+                ctx.print(&format!(" ({}x{})", w, h));
+                ctx.print(&format!(" Saved viewport image to \"{}\"", path.display()));
+            }
         } else {
             // Capture rasterized screenshot
             ctx.viewer

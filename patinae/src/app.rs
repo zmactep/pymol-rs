@@ -1026,7 +1026,12 @@ impl App {
     // --- Helpers ---
 
     fn dismiss_viewport_image(&mut self) -> bool {
-        let had_image = self.kernel.session.viewport_image.take().is_some();
+        let had_cpu_image = self.kernel.session.viewport_image.take().is_some();
+        let had_gpu_image = self
+            .renderer
+            .as_mut()
+            .is_some_and(|renderer| renderer.clear_viewport_gpu_image());
+        let had_image = had_cpu_image || had_gpu_image;
         if had_image {
             self.kernel.session.clear_hover();
             self.kernel.viewport.hover_hit = None;
@@ -1213,6 +1218,14 @@ fn patinae_wgpu_configuration(
     })?;
 
     let adapter_limits = adapter.limits();
+    let adapter_features = adapter.features();
+    let binding_array_features = slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY
+        | slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY;
+    let requested_binding_array_features = adapter_features & binding_array_features;
+    let requested_timestamp_query_feature =
+        adapter_features & slint::wgpu_28::wgpu::Features::TIMESTAMP_QUERY;
+    settings.device_required_features |=
+        requested_binding_array_features | requested_timestamp_query_feature;
     let required_limits = patinae_wgpu_required_limits(&adapter_limits);
     log::info!(
         "wgpu limits: adapter max_storage_buffer_binding_size={} max_buffer_size={}; \
@@ -1221,6 +1234,14 @@ fn patinae_wgpu_configuration(
         adapter_limits.max_buffer_size,
         required_limits.max_storage_buffer_binding_size,
         required_limits.max_buffer_size,
+    );
+    log::info!(
+        "wgpu optional features: buffer_binding_array={} storage_resource_binding_array={} timestamp_query={}",
+        requested_binding_array_features
+            .contains(slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY),
+        requested_binding_array_features
+            .contains(slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY),
+        requested_timestamp_query_feature.contains(slint::wgpu_28::wgpu::Features::TIMESTAMP_QUERY),
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(

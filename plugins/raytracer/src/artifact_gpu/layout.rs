@@ -15,7 +15,6 @@ pub(super) const STD_VERTEX_STRIDE: u64 = 24;
 pub(super) const MAX_OUTPUT_READBACK_BYTES: u64 = 64 * 1024 * 1024;
 pub(super) const MAX_ENCODED_PRIMITIVE_INDEX: u32 = 0x3fff_ffff;
 pub(super) const RAY_LINE_RADIUS: f32 = 0.035;
-pub(super) const DRAW_INDIRECT_SIZE: u64 = std::mem::size_of::<[u32; 4]>() as u64;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -34,12 +33,12 @@ const _: () = assert!(std::mem::size_of::<ArtifactTriangle>() == 80);
 pub(super) struct ArtifactTriangleParams {
     pub(super) vertex_capacity: u32,
     pub(super) triangle_offset: u32,
+    pub(super) source_triangle_start: u32,
+    pub(super) output_triangle_count: u32,
     pub(super) atom_offset: u32,
     pub(super) rep_slot: u32,
     pub(super) transparency: f32,
     pub(super) dispatch_width: u32,
-    pub(super) _pad0: u32,
-    pub(super) _pad1: u32,
 }
 
 #[repr(C)]
@@ -48,13 +47,17 @@ pub(super) struct ArtifactVisibleTriangleParams {
     pub(super) view_matrix: [[f32; 4]; 4],
     pub(super) proj_matrix: [[f32; 4]; 4],
     pub(super) source_vertex_count: u32,
+    pub(super) source_triangle_start: u32,
+    pub(super) source_triangle_count: u32,
     pub(super) triangle_offset: u32,
-    pub(super) output_triangle_count: u32,
+    pub(super) output_triangle_capacity: u32,
     pub(super) atom_offset: u32,
     pub(super) rep_slot: u32,
     pub(super) transparency: f32,
     pub(super) dispatch_width: u32,
     pub(super) counter_index: u32,
+    pub(super) _pad0: u32,
+    pub(super) _pad1: u32,
 }
 
 #[repr(C)]
@@ -99,11 +102,6 @@ pub(super) struct ArtifactCapsuleParams {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct ArtifactBvhParams {
-    pub(super) primitive_count: u32,
-    pub(super) sphere_count: u32,
-    pub(super) cylinder_count: u32,
-    pub(super) capsule_count: u32,
-    pub(super) triangle_count: u32,
     pub(super) leaf_slots: u32,
     pub(super) leaf_start: u32,
     pub(super) level_start: u32,
@@ -112,6 +110,52 @@ pub(super) struct ArtifactBvhParams {
     pub(super) _pad0: u32,
     pub(super) _pad1: u32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct ArtifactPrimitiveMetadata {
+    pub(super) sphere_count: u32,
+    pub(super) cylinder_count: u32,
+    pub(super) capsule_count: u32,
+    pub(super) triangle_count: u32,
+    pub(super) primitive_count: u32,
+    pub(super) triangle_capacity: u32,
+    pub(super) visible_triangle_count: u32,
+    pub(super) overflow: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<ArtifactPrimitiveMetadata>() == 32);
+
+impl ArtifactPrimitiveMetadata {
+    pub(super) fn from_counts(counts: PrimitiveCounts) -> Result<Self, String> {
+        let primitive_count = counts.primitive_count()?;
+        Ok(Self {
+            sphere_count: counts.spheres,
+            cylinder_count: counts.cylinders,
+            capsule_count: counts.capsules,
+            triangle_count: counts.triangles,
+            primitive_count,
+            triangle_capacity: counts.triangles,
+            visible_triangle_count: 0,
+            overflow: 0,
+        })
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct FinalizeStreamingMetadataParams {
+    pub(super) direct_triangle_count: u32,
+    pub(super) visible_triangle_capacity: u32,
+    pub(super) counter_index: u32,
+    pub(super) bvh_leaf_size: u32,
+    pub(super) max_workgroups_per_dimension: u32,
+    pub(super) _pad0: u32,
+    pub(super) _pad1: u32,
+    pub(super) _pad2: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<FinalizeStreamingMetadataParams>() == 32);
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -138,6 +182,16 @@ pub(super) struct PrimitiveCounts {
     pub(super) triangles: u32,
 }
 
+impl PrimitiveCounts {
+    pub(super) fn primitive_count(self) -> Result<u32, String> {
+        self.spheres
+            .checked_add(self.cylinders)
+            .and_then(|count| count.checked_add(self.capsules))
+            .and_then(|count| count.checked_add(self.triangles))
+            .ok_or_else(|| "artifact primitive count overflow".to_string())
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct BvhBuffers {
     pub(super) nodes: GpuHandle,
@@ -147,8 +201,8 @@ pub(super) struct BvhBuffers {
 pub(super) struct BvhBuildInput<'a> {
     pub(super) primitives: PrimitiveBuffers,
     pub(super) bvh: BvhBuffers,
-    pub(super) counts: PrimitiveCounts,
-    pub(super) primitive_count: u32,
+    pub(super) metadata: GpuHandle,
+    pub(super) leaf_dispatch_args: Option<GpuHandle>,
     pub(super) shape: &'a BvhShape,
     pub(super) max_dispatch_dimension: u32,
 }
@@ -158,6 +212,7 @@ pub(super) struct RaytraceDispatchInput<'a> {
     pub(super) primitives: PrimitiveBuffers,
     pub(super) bvh: BvhBuffers,
     pub(super) counts: PrimitiveCounts,
+    pub(super) metadata: GpuHandle,
     pub(super) bvh_node_count: u32,
     pub(super) max_dispatch_dimension: u32,
 }

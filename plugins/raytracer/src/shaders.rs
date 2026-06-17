@@ -3,6 +3,7 @@
 pub(crate) const RAYTRACE: &str = include_str!("shaders/raytrace.wgsl");
 pub(crate) const EDGE_DETECT: &str = include_str!("shaders/edge_detect.wgsl");
 pub(crate) const COMPOSITE: &str = include_str!("shaders/composite.wgsl");
+pub(crate) const STANDALONE_DOWNSAMPLE: &str = include_str!("shaders/downsample_texture.wgsl");
 
 const ARTIFACT_COLOR: &str = include_str!("shaders/artifacts/color.wgsl");
 const ARTIFACT_TRIANGLE_STORAGE: &str = include_str!("shaders/artifacts/triangle_storage.wgsl");
@@ -12,10 +13,10 @@ const ARTIFACT_SPHERES: &str = include_str!("shaders/artifacts/build_spheres.wgs
 const ARTIFACT_STICK_CAPSULES: &str = include_str!("shaders/artifacts/build_stick_capsules.wgsl");
 const ARTIFACT_LINE_CYLINDERS: &str = include_str!("shaders/artifacts/build_line_cylinders.wgsl");
 const ARTIFACT_TRIANGLES: &str = include_str!("shaders/artifacts/build_triangles.wgsl");
-const ARTIFACT_COUNT_VISIBLE_TRIANGLES: &str =
-    include_str!("shaders/artifacts/count_visible_triangles.wgsl");
 const ARTIFACT_VISIBLE_TRIANGLES: &str =
     include_str!("shaders/artifacts/build_visible_triangles.wgsl");
+const ARTIFACT_FINALIZE_STREAMING_METADATA: &str =
+    include_str!("shaders/artifacts/finalize_streaming_metadata.wgsl");
 
 const ARTIFACT_BVH: &str = include_str!("shaders/artifacts/bvh.wgsl");
 const ARTIFACT_RAYTRACE_OUTPUT_BUFFER: &str =
@@ -43,12 +44,12 @@ pub(crate) fn artifact_triangles() -> String {
     expand_artifact(ARTIFACT_TRIANGLES)
 }
 
-pub(crate) fn artifact_count_visible_triangles() -> String {
-    ARTIFACT_COUNT_VISIBLE_TRIANGLES.to_string()
-}
-
 pub(crate) fn artifact_visible_triangles() -> String {
     expand_artifact(ARTIFACT_VISIBLE_TRIANGLES)
+}
+
+pub(crate) fn artifact_finalize_streaming_metadata() -> String {
+    expand_artifact(ARTIFACT_FINALIZE_STREAMING_METADATA)
 }
 
 pub(crate) fn artifact_bvh() -> String {

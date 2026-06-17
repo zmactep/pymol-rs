@@ -246,6 +246,7 @@ fn lightweight_command_output_does_not_replace_host_session() {
         actions: Vec::new(),
         session: wire::encode_session(&replacement).unwrap(),
         viewport_image: None,
+        viewport_image_changed: false,
     };
 
     {
@@ -262,6 +263,100 @@ fn lightweight_command_output_does_not_replace_host_session() {
     }
 
     assert!(session.registry.get("keep_group").is_some());
+}
+
+struct ClearCountingRenderer {
+    clears: usize,
+}
+
+impl patinae_scene::CaptureRenderer for ClearCountingRenderer {
+    fn gpu_device(&self) -> &Arc<wgpu::Device> {
+        unreachable!("test renderer does not expose a GPU device")
+    }
+
+    fn gpu_queue(&self) -> &Arc<wgpu::Queue> {
+        unreachable!("test renderer does not expose a GPU queue")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn capture_png(
+        &mut self,
+        _path: &Path,
+        _width: u32,
+        _height: u32,
+        _camera: &mut patinae_scene::Camera,
+        _registry: &mut patinae_scene::ObjectRegistry,
+        _settings: &patinae_settings::Settings,
+        _named: &patinae_scene::NamedPalette,
+        _themed: &patinae_scene::ThemedPalette,
+        _clear_color: [f32; 3],
+    ) -> Result<(), patinae_scene::ViewerError> {
+        unreachable!("test renderer does not capture PNGs")
+    }
+
+    fn clear_viewport_gpu_image(&mut self) {
+        self.clears += 1;
+    }
+}
+
+#[test]
+fn command_output_without_viewport_change_keeps_gpu_viewport_image() {
+    let mut session = Session::new();
+    let mut renderer = ClearCountingRenderer { clears: 0 };
+    let output = WireCommandOutput {
+        wire_version: RUNTIME_WIRE_VERSION,
+        result: Ok(()),
+        output: Vec::new(),
+        actions: Vec::new(),
+        session: wire::encode_session(&Session::new()).unwrap(),
+        viewport_image: None,
+        viewport_image_changed: false,
+    };
+
+    {
+        let mut needs_redraw = false;
+        let mut adapter = SessionAdapter {
+            session: &mut session,
+            render_context: Some(&mut renderer),
+            default_size: (800, 600),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+        let mut ctx = CommandContext::new(&mut adapter);
+        apply_command_output(&mut ctx, output, CommandRuntimeRequirements::NONE).unwrap();
+    }
+
+    assert_eq!(renderer.clears, 0);
+}
+
+#[test]
+fn command_output_with_viewport_clear_drops_gpu_viewport_image() {
+    let mut session = Session::new();
+    let mut renderer = ClearCountingRenderer { clears: 0 };
+    let output = WireCommandOutput {
+        wire_version: RUNTIME_WIRE_VERSION,
+        result: Ok(()),
+        output: Vec::new(),
+        actions: Vec::new(),
+        session: wire::encode_session(&Session::new()).unwrap(),
+        viewport_image: None,
+        viewport_image_changed: true,
+    };
+
+    {
+        let mut needs_redraw = false;
+        let mut adapter = SessionAdapter {
+            session: &mut session,
+            render_context: Some(&mut renderer),
+            default_size: (800, 600),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+        let mut ctx = CommandContext::new(&mut adapter);
+        apply_command_output(&mut ctx, output, CommandRuntimeRequirements::NONE).unwrap();
+    }
+
+    assert_eq!(renderer.clears, 1);
 }
 
 fn host_with_panels(panels: Vec<LoadedPanel>) -> PluginHost {
@@ -646,6 +741,7 @@ unsafe extern "C" fn fixture_command_execute(
         actions: Vec::new(),
         session: input.session,
         viewport_image: input.viewport_image,
+        viewport_image_changed: false,
     };
     fixture_send(sink, user_data, &output)
 }

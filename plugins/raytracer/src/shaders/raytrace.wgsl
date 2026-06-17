@@ -618,6 +618,11 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
     return false;
 }
 
+fn should_cast_shadow_for_hit(hit: HitInfo) -> bool {
+    return uniforms.ray_shadow != 0u &&
+        (hit.transparency <= 0.001 || uniforms.ray_transparency_shadows != 0u);
+}
+
 // Shade a hit point with the classic multi-light model.
 // - Headlight (camera direction): Always active with 'direct' intensity, CASTS SHADOWS
 // - Positional lights (light, light2-light9): Use 'reflect' intensity, first casts shadows
@@ -642,20 +647,21 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
         let flat_brightness = uniforms.ambient + uniforms.direct;
         return hit.color.rgb * min(flat_brightness, 1.0);
     }
-    
+
     // Shadow bias for all shadow rays
     let shadow_bias = max(hit.t * 0.0005, 0.05);
-    
+    let cast_shadows = should_cast_shadow_for_hit(hit);
+
     // === AMBIENT ===
     var color = hit.color.rgb * uniforms.ambient;
     
     // === HEADLIGHT (camera direction, always active) ===
     // Light comes from camera direction - ensures front-facing surfaces are always lit
     let headlight_ndotl = max(dot(n, view_dir), 0.0);
-    
+
     // Headlight shadow (trace toward viewer/camera)
     var headlight_shadow = 1.0;
-    if uniforms.ray_shadow != 0u && headlight_ndotl > 0.001 {
+    if cast_shadows && headlight_ndotl > 0.001 {
         let shadow_origin = hit_point + n * shadow_bias;
         let shadow_ray = Ray(shadow_origin, view_dir);
         if trace_shadow(shadow_ray, MAX_T) {
@@ -691,10 +697,10 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
         let light_dir = normalize((uniforms.view_inv_matrix * vec4<f32>(light_view, 0.0)).xyz);
         
         let ndotl = max(dot(n, light_dir), 0.0);
-        
+
         // First positional light casts shadows
         var shadow = 1.0;
-        if i == 0 && uniforms.ray_shadow != 0u && ndotl > 0.001 {
+        if i == 0 && cast_shadows && ndotl > 0.001 {
             let shadow_origin = hit_point + n * shadow_bias;
             let shadow_ray = Ray(shadow_origin, light_dir);
             if trace_shadow(shadow_ray, MAX_T) {

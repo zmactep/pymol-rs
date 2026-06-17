@@ -1,9 +1,4 @@
 struct BvhParams {
-    primitive_count: u32,
-    sphere_count: u32,
-    cylinder_count: u32,
-    capsule_count: u32,
-    triangle_count: u32,
     leaf_slots: u32,
     leaf_start: u32,
     level_start: u32,
@@ -11,6 +6,17 @@ struct BvhParams {
     dispatch_width: u32,
     _pad0: u32,
     _pad1: u32,
+}
+
+struct PrimitiveMetadata {
+    sphere_count: u32,
+    cylinder_count: u32,
+    capsule_count: u32,
+    triangle_count: u32,
+    primitive_count: u32,
+    triangle_capacity: u32,
+    visible_triangle_count: u32,
+    overflow: u32,
 }
 
 struct Sphere {
@@ -66,6 +72,7 @@ struct PrimitiveBounds {
 @group(0) @binding(4) var<storage, read_write> bvh_nodes: array<BvhNode>;
 @group(0) @binding(5) var<storage, read_write> bvh_indices: array<u32>;
 @group(0) @binding(6) var<uniform> params: BvhParams;
+@group(0) @binding(7) var<storage, read> metadata: PrimitiveMetadata;
 
 const LEAF_SIZE: u32 = 4u;
 const INF: f32 = 1.0e30;
@@ -148,22 +155,33 @@ fn triangle_bounds(index: u32) -> PrimitiveBounds {
 }
 
 fn primitive_bounds(primitive_index: u32) -> PrimitiveBounds {
-    if primitive_index < params.sphere_count {
+    if primitive_index < metadata.sphere_count {
         return sphere_bounds(primitive_index);
     }
-    let cylinder_start = params.sphere_count;
-    let capsule_start = params.sphere_count + params.cylinder_count;
-    let triangle_start = capsule_start + params.capsule_count;
+    let cylinder_start = metadata.sphere_count;
+    let capsule_start = metadata.sphere_count + metadata.cylinder_count;
+    let triangle_start = capsule_start + metadata.capsule_count;
     if primitive_index < capsule_start {
         return cylinder_bounds(primitive_index - cylinder_start);
     }
     if primitive_index < triangle_start {
         return capsule_bounds(primitive_index - capsule_start);
     }
-    if primitive_index < params.primitive_count {
+    if primitive_index < metadata.primitive_count {
         return triangle_bounds(primitive_index - triangle_start);
     }
     return invalid_bounds();
+}
+
+fn active_leaf_count() -> u32 {
+    return max(1u, (metadata.primitive_count + LEAF_SIZE - 1u) / LEAF_SIZE);
+}
+
+fn child_node_or_empty(node_index: u32, child_leaf_start: u32) -> BvhNode {
+    if child_leaf_start >= active_leaf_count() {
+        return empty_node();
+    }
+    return bvh_nodes[node_index];
 }
 
 @compute @workgroup_size(128)
@@ -175,7 +193,7 @@ fn build_leaves(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let node_index = params.leaf_start + leaf_id;
     let first = leaf_id * LEAF_SIZE;
-    if first >= params.primitive_count {
+    if first >= metadata.primitive_count {
         bvh_nodes[node_index] = empty_node();
         return;
     }
@@ -185,7 +203,7 @@ fn build_leaves(@builtin(global_invocation_id) gid: vec3<u32>) {
     var bmax = vec3<f32>(-INF);
     for (var i = 0u; i < LEAF_SIZE; i = i + 1u) {
         let primitive_index = first + i;
-        if primitive_index < params.primitive_count {
+        if primitive_index < metadata.primitive_count {
             let bounds = primitive_bounds(primitive_index);
             if bounds.valid {
                 bvh_indices[first + valid_count] = bounds.encoded;
@@ -212,8 +230,12 @@ fn build_internal(@builtin(global_invocation_id) gid: vec3<u32>) {
     let parent_index = parent_start + local_id;
     let left_index = params.level_start + local_id * 2u;
     let right_index = left_index + 1u;
-    let left = bvh_nodes[left_index];
-    let right = bvh_nodes[right_index];
+    let child_level_count = params.level_count * 2u;
+    let child_leaf_span = max(1u, params.leaf_slots / child_level_count);
+    let left_leaf_start = local_id * 2u * child_leaf_span;
+    let right_leaf_start = left_leaf_start + child_leaf_span;
+    let left = child_node_or_empty(left_index, left_leaf_start);
+    let right = child_node_or_empty(right_index, right_leaf_start);
     if is_empty_node(left) && is_empty_node(right) {
         bvh_nodes[parent_index] = empty_node();
         return;

@@ -31,6 +31,7 @@ pub(super) fn build_bvh(
                 storage_layout(4, GpuBufferBindingType::StorageReadWrite),
                 storage_layout(5, GpuBufferBindingType::StorageReadWrite),
                 storage_layout(6, GpuBufferBindingType::Uniform),
+                storage_layout(7, GpuBufferBindingType::StorageReadOnly),
             ],
         })?
         .handle;
@@ -79,15 +80,11 @@ pub(super) fn build_bvh(
                 0,
                 Some(std::mem::size_of::<ArtifactBvhParams>() as u64),
             ),
+            buffer_entry(7, input.metadata, 0, None),
         ],
     })?;
 
     let mut params = ArtifactBvhParams {
-        primitive_count: input.primitive_count,
-        sphere_count: input.counts.spheres,
-        cylinder_count: input.counts.cylinders,
-        capsule_count: input.counts.capsules,
-        triangle_count: input.counts.triangles,
         leaf_slots: input.shape.leaf_slots,
         leaf_start: input.shape.leaf_start,
         level_start: input.shape.leaf_start,
@@ -97,17 +94,29 @@ pub(super) fn build_bvh(
         _pad1: 0,
     };
     let leaf_grid = dispatch_grid_for(input.shape.leaf_slots, input.max_dispatch_dimension)?;
+    params.level_start = input.shape.leaf_start;
+    params.level_count = input.shape.leaf_slots;
     params.dispatch_width = leaf_grid.invocation_width;
     batch_commands.push(GpuBatchCommand::WriteBuffer {
         buffer: params_buffer,
         offset: 0,
         data: bytemuck::bytes_of(&params).to_vec(),
     });
-    batch_commands.push(GpuBatchCommand::DispatchCompute {
-        pipeline: leaf_pipeline,
-        bind_groups: vec![bind_group],
-        workgroups: leaf_grid.workgroups,
-    });
+    super::set_profile_scope(batch_commands, super::PROFILE_SCOPE_BVH_BUILD);
+    if let Some(indirect_buffer) = input.leaf_dispatch_args {
+        batch_commands.push(GpuBatchCommand::DispatchComputeIndirect {
+            pipeline: leaf_pipeline,
+            bind_groups: vec![bind_group],
+            indirect_buffer,
+            indirect_offset: 0,
+        });
+    } else {
+        batch_commands.push(GpuBatchCommand::DispatchCompute {
+            pipeline: leaf_pipeline,
+            bind_groups: vec![bind_group],
+            workgroups: leaf_grid.workgroups,
+        });
+    }
 
     let mut child_level_start = input.shape.leaf_start;
     let mut child_level_count = input.shape.leaf_slots;

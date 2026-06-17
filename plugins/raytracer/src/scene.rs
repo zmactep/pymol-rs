@@ -52,6 +52,26 @@ pub(crate) enum RaytraceSceneError {
     RenderArtifacts(String),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RaytraceSceneTarget {
+    Export,
+    Viewport,
+}
+
+pub(crate) enum RaytraceSceneOutput {
+    CpuImage {
+        data: Vec<u8>,
+        width: u32,
+        height: u32,
+        profile_lines: Vec<String>,
+    },
+    GpuViewport {
+        width: u32,
+        height: u32,
+        profile_lines: Vec<String>,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // Test/support helpers
 // ---------------------------------------------------------------------------
@@ -279,7 +299,8 @@ pub(crate) fn raytrace_scene(
     width: Option<u32>,
     height: Option<u32>,
     antialias: u32,
-) -> Result<(Vec<u8>, u32, u32), RaytraceSceneError> {
+    target: RaytraceSceneTarget,
+) -> Result<RaytraceSceneOutput, RaytraceSceneError> {
     let final_width = width.unwrap_or(1024);
     let final_height = height.unwrap_or(768);
 
@@ -312,17 +333,42 @@ pub(crate) fn raytrace_scene(
         .open_render_artifact_snapshot()
         .map_err(RaytraceSceneError::RenderArtifacts)?;
     let snapshot_id = snapshot.snapshot_id;
-    let render_result = crate::artifact_gpu::raytrace_artifacts(viewer, &snapshot, &params)
-        .map_err(RaytraceSceneError::RenderArtifacts);
+    let render_result = crate::artifact_gpu::raytrace_artifacts(
+        viewer,
+        &snapshot,
+        &params,
+        match target {
+            RaytraceSceneTarget::Export => crate::artifact_gpu::RaytraceArtifactTarget::CpuReadback,
+            RaytraceSceneTarget::Viewport => {
+                crate::artifact_gpu::RaytraceArtifactTarget::ViewportGpu
+            }
+        },
+    )
+    .map_err(RaytraceSceneError::RenderArtifacts);
     let close_result = viewer.close_render_artifact_snapshot(snapshot_id);
     if let Err(err) = close_result {
         return Err(RaytraceSceneError::RenderArtifacts(format!(
             "failed to close render artifact snapshot: {err}"
         )));
     }
-    let image_data = render_result?;
-
-    Ok((image_data, final_width, final_height))
+    match render_result? {
+        crate::artifact_gpu::RaytraceArtifactOutput::CpuImage {
+            data,
+            profile_lines,
+        } => Ok(RaytraceSceneOutput::CpuImage {
+            data,
+            width: final_width,
+            height: final_height,
+            profile_lines,
+        }),
+        crate::artifact_gpu::RaytraceArtifactOutput::ViewportGpu { profile_lines } => {
+            Ok(RaytraceSceneOutput::GpuViewport {
+                width: final_width,
+                height: final_height,
+                profile_lines,
+            })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

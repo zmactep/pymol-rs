@@ -6,11 +6,11 @@ use patinae_scene::{
 };
 
 use super::layout::{
-    DownsampleInput, DownsampleParams, RaytraceDispatchInput, MAX_OUTPUT_READBACK_BYTES,
-    WORKGROUP_SIZE,
+    ArtifactPrimitiveMetadata, DownsampleInput, DownsampleParams, RaytraceDispatchInput,
+    MAX_OUTPUT_READBACK_BYTES, WORKGROUP_SIZE,
 };
 use super::resources::{buffer_entry, create_buffer, storage_layout, storage_usage, uniform_usage};
-use super::rt_profile_enabled;
+use super::rt_profile_counts_enabled;
 use crate::gpu::uniforms::RaytraceUniforms;
 use crate::shaders;
 
@@ -20,11 +20,33 @@ pub(super) struct DispatchGrid {
     pub(super) invocation_width: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RaytraceDispatchTarget {
+    CpuReadback,
+    ViewportGpu,
+}
+
+pub(super) enum RaytraceDispatchOutput {
+    CpuImage {
+        data: Vec<u8>,
+        profile_lines: Vec<String>,
+    },
+    ViewportGpu {
+        profile_lines: Vec<String>,
+    },
+}
+
+pub(super) struct RaytraceReadbacks {
+    pub(super) metadata: Option<ArtifactPrimitiveMetadata>,
+    pub(super) pixels: Option<Vec<u8>>,
+}
+
 pub(super) fn dispatch_raytrace(
     viewer: &mut dyn ViewerLike,
     input: RaytraceDispatchInput<'_>,
     batch_commands: &mut Vec<GpuBatchCommand>,
-) -> Result<Vec<u8>, String> {
+    target: RaytraceDispatchTarget,
+) -> Result<RaytraceDispatchOutput, String> {
     let params = input.params;
     let supersample = params.antialias.max(1);
     let render_width = params
@@ -37,7 +59,7 @@ pub(super) fn dispatch_raytrace(
         .ok_or_else(|| "ray output height overflow".to_string())?;
     let render_bytes = rgba_bytes(render_width, render_height, "ray render output")?;
     let final_bytes = rgba_bytes(params.width, params.height, "ray final output")?;
-    if final_bytes > MAX_OUTPUT_READBACK_BYTES {
+    if target == RaytraceDispatchTarget::CpuReadback && final_bytes > MAX_OUTPUT_READBACK_BYTES {
         return Err(format!(
             "ray output readback {} bytes exceeds the 64 MiB command ABI limit",
             final_bytes
@@ -87,6 +109,7 @@ pub(super) fn dispatch_raytrace(
                 storage_layout(5, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(6, GpuBufferBindingType::StorageReadOnly),
                 storage_layout(7, GpuBufferBindingType::StorageReadWrite),
+                storage_layout(8, GpuBufferBindingType::StorageReadOnly),
             ],
         })?
         .handle;
@@ -121,11 +144,13 @@ pub(super) fn dispatch_raytrace(
             buffer_entry(5, input.bvh.nodes, 0, None),
             buffer_entry(6, input.bvh.indices, 0, None),
             buffer_entry(7, output_buffer, 0, None),
+            buffer_entry(8, input.metadata, 0, None),
         ],
     })?;
 
     let ray_workgroups = [render_width.div_ceil(8), render_height.div_ceil(8), 1];
     validate_workgroups(ray_workgroups, input.max_dispatch_dimension, "ray dispatch")?;
+    super::set_profile_scope(batch_commands, super::PROFILE_SCOPE_RAYTRACE);
     batch_commands.push(GpuBatchCommand::DispatchCompute {
         pipeline,
         bind_groups: vec![bind_group],
@@ -152,38 +177,150 @@ pub(super) fn dispatch_raytrace(
         (output_buffer, "none".to_string())
     };
 
-    batch_commands.push(GpuBatchCommand::ReadBuffer {
-        buffer: final_buffer,
-        offset: 0,
-        size: final_bytes,
-    });
+    let metadata_readback_enabled = rt_profile_counts_enabled();
+    if metadata_readback_enabled {
+        batch_commands.push(GpuBatchCommand::ReadBuffer {
+            buffer: input.metadata,
+            offset: 0,
+            size: std::mem::size_of::<ArtifactPrimitiveMetadata>() as u64,
+        });
+    }
+    if target == RaytraceDispatchTarget::CpuReadback {
+        batch_commands.push(GpuBatchCommand::ReadBuffer {
+            buffer: final_buffer,
+            offset: 0,
+            size: final_bytes,
+        });
+    }
 
     let batch_start = std::time::Instant::now();
+    let batch_command_count = batch_commands.len();
     let batch = GpuSubmitBatch {
         label: Some("ray.artifact.batch".to_string()),
+        wait_for_completion: target == RaytraceDispatchTarget::ViewportGpu,
         commands: std::mem::take(batch_commands),
     };
     let result = viewer.gpu_submit_batch(batch)?;
-    if rt_profile_enabled() {
-        log::info!(
-            "patinae.rt_profile plugin.gpu_batch_ms={} downsample_mode={} final_readback_bytes={}",
+    let mut profile_lines = Vec::new();
+    super::push_profile_line(
+        &mut profile_lines,
+        format!(
+            "patinae.rt_profile plugin.gpu_batch_ms={} batch_commands={} ray_workgroups={}x{} downsample_mode={} final_readback_bytes={} metadata_readback_bytes={}",
             batch_start.elapsed().as_millis(),
+            batch_command_count,
+            ray_workgroups[0],
+            ray_workgroups[1],
             downsample_mode,
-            final_bytes
+            if target == RaytraceDispatchTarget::CpuReadback { final_bytes } else { 0 },
+            if metadata_readback_enabled {
+                std::mem::size_of::<ArtifactPrimitiveMetadata>() as u64
+            } else {
+                0
+            }
+        ),
+    );
+    super::push_profile_line(
+        &mut profile_lines,
+        format!(
+            "patinae.rt_profile plugin.ray_settings ray_shadow={} ray_transparency_shadows={} ray_max_passes={} transparency_mode={} light_count={} spec_count={} ray_trace_fog={}",
+            u8::from(params.settings.ray_shadow),
+            u8::from(params.settings.ray_transparency_shadows),
+            params.settings.ray_max_passes,
+            params.settings.transparency_mode,
+            params.settings.light_count,
+            params.settings.spec_count,
+            u8::from(params.settings.ray_trace_fog),
+        ),
+    );
+
+    let readbacks = split_raytrace_readbacks(target, metadata_readback_enabled, result.readbacks)?;
+    if let Some(metadata) = readbacks.metadata {
+        super::push_profile_line(
+            &mut profile_lines,
+            format!(
+            "patinae.rt_profile plugin.gpu_metadata active_spheres={} active_cylinders={} active_capsules={} active_triangles={} visible_triangles={} active_primitive_count={} triangle_capacity={} active_triangle_capacity_pct={} visible_triangle_capacity_pct={} overflow={}",
+            metadata.sphere_count,
+            metadata.cylinder_count,
+            metadata.capsule_count,
+            metadata.triangle_count,
+            metadata.visible_triangle_count,
+            metadata.primitive_count,
+            metadata.triangle_capacity,
+            profile_percent(metadata.triangle_count, metadata.triangle_capacity),
+            profile_percent(metadata.visible_triangle_count, metadata.triangle_capacity),
+            metadata.overflow
+            ),
         );
     }
+    match target {
+        RaytraceDispatchTarget::CpuReadback => {
+            let Some(pixels) = readbacks.pixels else {
+                return Err("ray GPU export batch returned no pixel readback".to_string());
+            };
+            Ok(RaytraceDispatchOutput::CpuImage {
+                data: pixels,
+                profile_lines,
+            })
+        }
+        RaytraceDispatchTarget::ViewportGpu => {
+            viewer.set_viewport_gpu_image_from_buffer(final_buffer, params.width, params.height)?;
+            Ok(RaytraceDispatchOutput::ViewportGpu { profile_lines })
+        }
+    }
+}
 
-    let mut readbacks = result.readbacks;
-    if readbacks.len() != 1 {
+pub(super) fn split_raytrace_readbacks(
+    target: RaytraceDispatchTarget,
+    metadata_readback_enabled: bool,
+    mut readbacks: Vec<Vec<u8>>,
+) -> Result<RaytraceReadbacks, String> {
+    let expected = usize::from(metadata_readback_enabled)
+        + usize::from(target == RaytraceDispatchTarget::CpuReadback);
+    if readbacks.len() != expected {
         return Err(format!(
-            "ray GPU batch returned {} readbacks, expected 1",
+            "ray GPU batch returned {} readbacks, expected {expected}",
             readbacks.len()
         ));
     }
-    Ok(readbacks.remove(0))
+
+    let metadata = if metadata_readback_enabled {
+        Some(decode_primitive_metadata_readback(&readbacks.remove(0))?)
+    } else {
+        None
+    };
+    let pixels = if target == RaytraceDispatchTarget::CpuReadback {
+        Some(readbacks.remove(0))
+    } else {
+        None
+    };
+
+    Ok(RaytraceReadbacks { metadata, pixels })
 }
 
-fn append_downsample(
+fn profile_percent(numerator: u32, denominator: u32) -> String {
+    if denominator == 0 {
+        return "0.00".to_string();
+    }
+    format!(
+        "{:.2}",
+        f64::from(numerator) * 100.0 / f64::from(denominator)
+    )
+}
+
+pub(super) fn decode_primitive_metadata_readback(
+    bytes: &[u8],
+) -> Result<ArtifactPrimitiveMetadata, String> {
+    let expected = std::mem::size_of::<ArtifactPrimitiveMetadata>();
+    if bytes.len() != expected {
+        return Err(format!(
+            "ray GPU metadata readback returned {} bytes, expected {expected}",
+            bytes.len()
+        ));
+    }
+    Ok(bytemuck::pod_read_unaligned(bytes))
+}
+
+pub(super) fn append_downsample(
     viewer: &mut dyn ViewerLike,
     input: DownsampleInput,
     batch_commands: &mut Vec<GpuBatchCommand>,
@@ -259,6 +396,7 @@ fn append_downsample(
         input.max_dispatch_dimension,
         "ray downsample dispatch",
     )?;
+    super::set_profile_scope(batch_commands, super::PROFILE_SCOPE_DOWNSAMPLE);
     batch_commands.push(GpuBatchCommand::DispatchCompute {
         pipeline,
         bind_groups: vec![bind_group],
@@ -267,7 +405,7 @@ fn append_downsample(
     Ok(output_buffer)
 }
 
-fn rgba_bytes(width: u32, height: u32, label: &str) -> Result<u64, String> {
+pub(super) fn rgba_bytes(width: u32, height: u32, label: &str) -> Result<u64, String> {
     u64::from(width)
         .checked_mul(u64::from(height))
         .and_then(|pixels| pixels.checked_mul(4))

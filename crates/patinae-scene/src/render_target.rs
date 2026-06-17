@@ -51,6 +51,36 @@ pub trait CaptureRenderer {
         clear_color: [f32; 3],
     ) -> Result<(), ViewerError>;
 
+    /// Promote a tightly packed RGBA8 GPU buffer into a viewport texture.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this renderer does not support GPU viewport images
+    /// or if the source buffer is too small for the requested dimensions.
+    fn set_viewport_gpu_image_from_buffer(
+        &mut self,
+        _buffer: &wgpu::Buffer,
+        _buffer_size: u64,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), ViewerError> {
+        Err(ViewerError::capture_error(
+            "GPU viewport images are not supported by this renderer",
+        ))
+    }
+
+    /// Save the current GPU viewport image as PNG, if one is active.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if GPU readback or PNG encoding fails.
+    fn save_viewport_gpu_image(&mut self, _path: &Path) -> Result<Option<(u32, u32)>, ViewerError> {
+        Ok(None)
+    }
+
+    /// Clear any transient GPU viewport image owned by this renderer.
+    fn clear_viewport_gpu_image(&mut self) {}
+
     /// Export the current displayed scene as renderer-neutral geometry.
     ///
     /// # Errors

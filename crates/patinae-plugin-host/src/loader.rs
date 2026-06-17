@@ -113,9 +113,220 @@ type SharedGpuPluginCache = Arc<Mutex<GpuPluginCache>>;
 const GPU_CACHE_LAYOUT_VERSION: u32 = 1;
 const DRAW_INDIRECT_SIZE: u64 = 16;
 const DRAW_INDEXED_INDIRECT_SIZE: u64 = 20;
+const DISPATCH_INDIRECT_SIZE: u64 = 12;
 
 fn rt_profile_enabled() -> bool {
     std::env::var_os("PATINAE_RT_PROFILE").is_some()
+}
+
+fn rt_profile_stages_enabled() -> bool {
+    rt_profile_enabled() && std::env::var_os("PATINAE_RT_PROFILE_STAGES").is_some()
+}
+
+#[derive(Debug, Clone)]
+struct GpuStageTimestamp {
+    scope: String,
+    begin_index: u32,
+    end_index: u32,
+}
+
+struct GpuStageProfile {
+    unavailable: Option<&'static str>,
+    query_set: Option<wgpu::QuerySet>,
+    resolve_buffer: Option<wgpu::Buffer>,
+    readback_buffer: Option<wgpu::Buffer>,
+    timestamp_period_ns: f32,
+    next_query_index: u32,
+    timestamps: Vec<GpuStageTimestamp>,
+    current_scope: String,
+}
+
+impl GpuStageProfile {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, commands: &[GpuBatchCommand]) -> Self {
+        if !rt_profile_stages_enabled() {
+            return Self::inactive();
+        }
+        if !device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            return Self::unavailable("timestamp_query_missing");
+        }
+        let dispatch_count = commands
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    GpuBatchCommand::DispatchCompute { .. }
+                        | GpuBatchCommand::DispatchComputeIndirect { .. }
+                )
+            })
+            .count();
+        if dispatch_count == 0 {
+            return Self::unavailable("no_compute_dispatches");
+        }
+        let Some(query_count) = dispatch_count
+            .checked_mul(2)
+            .and_then(|count| u32::try_from(count).ok())
+        else {
+            return Self::unavailable("too_many_compute_dispatches");
+        };
+        let size = u64::from(query_count) * std::mem::size_of::<u64>() as u64;
+        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("patinae.plugin.gpu.batch.stage_timestamps"),
+            ty: wgpu::QueryType::Timestamp,
+            count: query_count,
+        });
+        let resolve_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("patinae.plugin.gpu.batch.stage_timestamp_resolve"),
+            size,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("patinae.plugin.gpu.batch.stage_timestamp_readback"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        Self {
+            unavailable: None,
+            query_set: Some(query_set),
+            resolve_buffer: Some(resolve_buffer),
+            readback_buffer: Some(readback_buffer),
+            timestamp_period_ns: queue.get_timestamp_period(),
+            next_query_index: 0,
+            timestamps: Vec::with_capacity(dispatch_count),
+            current_scope: "unscoped".to_string(),
+        }
+    }
+
+    fn inactive() -> Self {
+        Self {
+            unavailable: None,
+            query_set: None,
+            resolve_buffer: None,
+            readback_buffer: None,
+            timestamp_period_ns: 0.0,
+            next_query_index: 0,
+            timestamps: Vec::new(),
+            current_scope: "unscoped".to_string(),
+        }
+    }
+
+    fn unavailable(reason: &'static str) -> Self {
+        let mut profile = Self::inactive();
+        profile.unavailable = Some(reason);
+        profile
+    }
+
+    fn set_scope(&mut self, name: String) {
+        self.current_scope = name;
+    }
+
+    fn timestamp_writes(&mut self) -> Option<wgpu::ComputePassTimestampWrites<'_>> {
+        let query_set = self.query_set.as_ref()?;
+        let begin_index = self.next_query_index;
+        let end_index = begin_index.checked_add(1)?;
+        self.next_query_index = end_index.checked_add(1)?;
+        self.timestamps.push(GpuStageTimestamp {
+            scope: self.current_scope.clone(),
+            begin_index,
+            end_index,
+        });
+        Some(wgpu::ComputePassTimestampWrites {
+            query_set,
+            beginning_of_pass_write_index: Some(begin_index),
+            end_of_pass_write_index: Some(end_index),
+        })
+    }
+
+    fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
+        let (Some(query_set), Some(resolve_buffer), Some(readback_buffer)) = (
+            self.query_set.as_ref(),
+            self.resolve_buffer.as_ref(),
+            self.readback_buffer.as_ref(),
+        ) else {
+            return;
+        };
+        if self.next_query_index == 0 {
+            return;
+        }
+        let size = u64::from(self.next_query_index) * std::mem::size_of::<u64>() as u64;
+        encoder.resolve_query_set(query_set, 0..self.next_query_index, resolve_buffer, 0);
+        encoder.copy_buffer_to_buffer(resolve_buffer, 0, readback_buffer, 0, size);
+    }
+
+    fn readback_bytes(&self) -> u64 {
+        if self.query_set.is_none() {
+            return 0;
+        }
+        u64::from(self.next_query_index) * std::mem::size_of::<u64>() as u64
+    }
+
+    fn log_after_submit(&self, device: &wgpu::Device) -> Result<u64, String> {
+        if !rt_profile_stages_enabled() {
+            return Ok(0);
+        }
+        if let Some(reason) = self.unavailable {
+            log::info!("patinae.rt_profile host.gpu_stage_ms unavailable={reason}");
+            return Ok(0);
+        }
+        let Some(readback_buffer) = self.readback_buffer.as_ref() else {
+            return Ok(0);
+        };
+        let readback_bytes = self.readback_bytes();
+        if readback_bytes == 0 {
+            log::info!("patinae.rt_profile host.gpu_stage_ms unavailable=no_timestamp_records");
+            return Ok(0);
+        }
+        let bytes = map_readback_buffer(device, readback_buffer.clone(), readback_bytes)?;
+        let ticks = decode_timestamp_ticks(&bytes);
+        let by_scope =
+            aggregate_stage_timestamp_ms(&ticks, &self.timestamps, self.timestamp_period_ns);
+        let stage = |name: &str| by_scope.get(name).copied().unwrap_or(0.0);
+        log::info!(
+            "patinae.rt_profile host.gpu_stage_ms primitive_build={:.3} surface_compact={:.3} metadata_finalize={:.3} bvh_build={:.3} raytrace={:.3} downsample={:.3} unscoped={:.3} dispatches={} timestamp_readback_bytes={}",
+            stage("primitive_build"),
+            stage("surface_compact"),
+            stage("metadata_finalize"),
+            stage("bvh_build"),
+            stage("raytrace"),
+            stage("downsample"),
+            stage("unscoped"),
+            self.timestamps.len(),
+            readback_bytes
+        );
+        Ok(readback_bytes)
+    }
+}
+
+fn decode_timestamp_ticks(bytes: &[u8]) -> Vec<u64> {
+    bytes
+        .chunks_exact(std::mem::size_of::<u64>())
+        .map(|chunk| {
+            let mut value = [0_u8; std::mem::size_of::<u64>()];
+            value.copy_from_slice(chunk);
+            u64::from_ne_bytes(value)
+        })
+        .collect()
+}
+
+fn aggregate_stage_timestamp_ms(
+    ticks: &[u64],
+    timestamps: &[GpuStageTimestamp],
+    timestamp_period_ns: f32,
+) -> HashMap<String, f64> {
+    let mut by_scope = HashMap::<String, f64>::new();
+    for timestamp in timestamps {
+        let Some(begin) = ticks.get(timestamp.begin_index as usize) else {
+            continue;
+        };
+        let Some(end) = ticks.get(timestamp.end_index as usize) else {
+            continue;
+        };
+        let elapsed_ticks = end.saturating_sub(*begin);
+        let elapsed_ms = (elapsed_ticks as f64) * f64::from(timestamp_period_ns) / 1_000_000.0;
+        *by_scope.entry(timestamp.scope.clone()).or_insert(0.0) += elapsed_ms;
+    }
+    by_scope
 }
 
 static HOST_CALLBACKS: HostCallbacks = HostCallbacks {
@@ -1766,6 +1977,15 @@ impl<'a> HostCommandRuntimeState<'a> {
                 let result = self.gpu_submit_batch(batch);
                 Self::response(id, result)
             }
+            WireCommandRuntimeRequest::SetViewportGpuImageFromBuffer {
+                id,
+                buffer,
+                width,
+                height,
+            } => {
+                let result = self.set_viewport_gpu_image_from_buffer(buffer, width, height);
+                Self::response(id, result)
+            }
             WireCommandRuntimeRequest::GpuDropHandles { id, handles } => {
                 let result = self.gpu_drop_handles(&handles);
                 Self::response(id, result)
@@ -2367,9 +2587,9 @@ impl<'a> HostCommandRuntimeState<'a> {
             cache.insert(key, GpuCachedObject::ShaderModule(module.clone()));
             (module, GpuCacheStatus::Miss)
         };
+        cache.record_profile_event(status, start.elapsed().as_millis());
         drop(cache);
         let handle = self.gpu_handles.insert_shader_module(module, fingerprint);
-        log_gpu_cache_event("shader_module", status, start.elapsed().as_millis());
         Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
             handle,
             status,
@@ -2407,11 +2627,11 @@ impl<'a> HostCommandRuntimeState<'a> {
             cache.insert(key, GpuCachedObject::BindGroupLayout(layout.clone()));
             (layout, GpuCacheStatus::Miss)
         };
+        cache.record_profile_event(status, start.elapsed().as_millis());
         drop(cache);
         let handle =
             self.gpu_handles
                 .insert_bind_group_layout(layout, fingerprint, descriptor.entries);
-        log_gpu_cache_event("bind_group_layout", status, start.elapsed().as_millis());
         Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
             handle,
             status,
@@ -2451,9 +2671,9 @@ impl<'a> HostCommandRuntimeState<'a> {
             cache.insert(key, GpuCachedObject::PipelineLayout(layout.clone()));
             (layout, GpuCacheStatus::Miss)
         };
+        cache.record_profile_event(status, start.elapsed().as_millis());
         drop(cache);
         let handle = self.gpu_handles.insert_pipeline_layout(layout, fingerprint);
-        log_gpu_cache_event("pipeline_layout", status, start.elapsed().as_millis());
         Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
             handle,
             status,
@@ -2493,11 +2713,11 @@ impl<'a> HostCommandRuntimeState<'a> {
             cache.insert(key, GpuCachedObject::ComputePipeline(pipeline.clone()));
             (pipeline, GpuCacheStatus::Miss)
         };
+        cache.record_profile_event(status, start.elapsed().as_millis());
         drop(cache);
         let handle = self
             .gpu_handles
             .insert_compute_pipeline(pipeline, fingerprint);
-        log_gpu_cache_event("compute_pipeline", status, start.elapsed().as_millis());
         Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
             handle,
             status,
@@ -2527,13 +2747,13 @@ impl<'a> HostCommandRuntimeState<'a> {
             cache.insert(key, GpuCachedObject::RenderPipeline(pipeline.clone()));
             (pipeline, GpuCacheStatus::Miss)
         };
+        cache.record_profile_event(status, start.elapsed().as_millis());
         drop(cache);
         let handle = self.gpu_handles.insert_render_pipeline(
             pipeline,
             render_pipeline_metadata(&descriptor),
             fingerprint,
         );
-        log_gpu_cache_event("render_pipeline", status, start.elapsed().as_millis());
         Ok(WireCommandRuntimeValue::GpuCachedHandle(GpuCachedHandle {
             handle,
             status,
@@ -2658,9 +2878,13 @@ impl<'a> HostCommandRuntimeState<'a> {
         });
         let mut readbacks = Vec::new();
         let mut upload_staging = Vec::new();
+        let mut stage_profile = GpuStageProfile::new(device, queue, &batch.commands);
 
         for command in batch.commands {
             match command {
+                GpuBatchCommand::SetProfileScope { name } => {
+                    stage_profile.set_scope(name);
+                }
                 GpuBatchCommand::WriteBuffer {
                     buffer,
                     offset,
@@ -2696,15 +2920,45 @@ impl<'a> HostCommandRuntimeState<'a> {
                         .iter()
                         .map(|handle| self.gpu_handles.bind_group(*handle))
                         .collect::<Result<Vec<_>, _>>()?;
+                    let timestamp_writes = stage_profile.timestamp_writes();
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("patinae.plugin.gpu.batch.compute"),
-                        timestamp_writes: None,
+                        timestamp_writes,
                     });
                     pass.set_pipeline(pipeline);
                     for (index, bind_group) in bind_groups.iter().enumerate() {
                         pass.set_bind_group(index as u32, Some(&bind_group.bind_group), &[]);
                     }
                     pass.dispatch_workgroups(workgroups[0], workgroups[1], workgroups[2]);
+                }
+                GpuBatchCommand::DispatchComputeIndirect {
+                    pipeline,
+                    bind_groups,
+                    indirect_buffer,
+                    indirect_offset,
+                } => {
+                    let indirect_buffer = self.gpu_handles.buffer(indirect_buffer)?;
+                    validate_indirect_buffer(
+                        indirect_buffer,
+                        indirect_offset,
+                        DISPATCH_INDIRECT_SIZE,
+                        "compute indirect buffer",
+                    )?;
+                    let pipeline = self.gpu_handles.compute_pipeline(pipeline)?;
+                    let bind_groups = bind_groups
+                        .iter()
+                        .map(|handle| self.gpu_handles.bind_group(*handle))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let timestamp_writes = stage_profile.timestamp_writes();
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("patinae.plugin.gpu.batch.compute_indirect"),
+                        timestamp_writes,
+                    });
+                    pass.set_pipeline(pipeline);
+                    for (index, bind_group) in bind_groups.iter().enumerate() {
+                        pass.set_bind_group(index as u32, Some(&bind_group.bind_group), &[]);
+                    }
+                    pass.dispatch_workgroups_indirect(&indirect_buffer.buffer, indirect_offset);
                 }
                 GpuBatchCommand::CopyBufferToBuffer {
                     source,
@@ -2837,23 +3091,43 @@ impl<'a> HostCommandRuntimeState<'a> {
                 }
             }
         }
+        stage_profile.resolve(&mut encoder);
 
+        let wait_for_completion = batch.wait_for_completion;
         let record_ms = record_start.elapsed().as_millis();
         let submit_start = std::time::Instant::now();
-        queue.submit(std::iter::once(encoder.finish()));
-        let submit_wait_ms = submit_start.elapsed().as_millis();
+        let submission_index = queue.submit(std::iter::once(encoder.finish()));
+        let submit_ms = submit_start.elapsed().as_millis();
+        let completion_wait_start = std::time::Instant::now();
+        if wait_for_completion {
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(submission_index),
+                    timeout: None,
+                })
+                .map_err(|error| format!("device poll failed: {error:?}"))?;
+        }
+        let completion_wait_ms = completion_wait_start.elapsed().as_millis();
         let read_start = std::time::Instant::now();
         let mut bytes = Vec::with_capacity(readbacks.len());
         for (buffer, size) in readbacks {
             bytes.push(map_readback_buffer(device, buffer, size)?);
         }
+        let stage_profile_readback_bytes = stage_profile.log_after_submit(device)?;
         if rt_profile_enabled() {
+            let cache_profile = self.take_gpu_cache_profile()?;
             log::info!(
-                "patinae.rt_profile host.batch_record_ms={} host.batch_submit_wait_ms={} host.batch_readback_ms={} readbacks={}",
+                "patinae.rt_profile host.batch_record_ms={} host.batch_submit_ms={} host.batch_completion_wait_ms={} host.batch_readback_ms={} readbacks={} stage_profile_readback_bytes={} cache_hits={} cache_misses={} cache_entries={} cache_lazy_create_ms={}",
                 record_ms,
-                submit_wait_ms,
+                submit_ms,
+                completion_wait_ms,
                 read_start.elapsed().as_millis(),
-                bytes.len()
+                bytes.len(),
+                stage_profile_readback_bytes,
+                cache_profile.hits,
+                cache_profile.misses,
+                cache_profile.entries,
+                cache_profile.lazy_create_ms
             );
         }
         Ok(WireCommandRuntimeValue::GpuBatchResult(GpuBatchResult {
@@ -2872,10 +3146,30 @@ impl<'a> HostCommandRuntimeState<'a> {
         Ok(WireCommandRuntimeValue::GpuOk)
     }
 
+    fn set_viewport_gpu_image_from_buffer(
+        &mut self,
+        buffer: GpuHandle,
+        width: u32,
+        height: u32,
+    ) -> Result<WireCommandRuntimeValue, String> {
+        self.ensure_requirement(CommandRuntimeRequirements::GPU_COMMANDS)?;
+        let source = self.gpu_handles.buffer(buffer)?;
+        let buffer = source.buffer.clone();
+        let buffer_size = source.size;
+        self.viewer
+            .set_viewport_gpu_image_from_wgpu_buffer(&buffer, buffer_size, width, height)?;
+        self.viewer.request_redraw();
+        Ok(WireCommandRuntimeValue::GpuOk)
+    }
+
     fn lock_gpu_cache(&self) -> Result<std::sync::MutexGuard<'_, GpuPluginCache>, String> {
         self.gpu_cache
             .lock()
             .map_err(|_| "GPU plugin cache was poisoned".to_string())
+    }
+
+    fn take_gpu_cache_profile(&self) -> Result<GpuCacheProfileDelta, String> {
+        Ok(self.lock_gpu_cache()?.take_profile_delta())
     }
 
     fn create_render_pipeline(
@@ -3113,14 +3407,24 @@ impl<'a> HostCommandRuntimeState<'a> {
                 GpuRenderPassCommand::DrawIndirect { buffer, offset } => {
                     state.ensure_pipeline_set()?;
                     let buffer = self.gpu_handles.buffer(buffer)?;
-                    validate_indirect_buffer(buffer, offset, DRAW_INDIRECT_SIZE)?;
+                    validate_indirect_buffer(
+                        buffer,
+                        offset,
+                        DRAW_INDIRECT_SIZE,
+                        "render indirect buffer",
+                    )?;
                     pass.draw_indirect(&buffer.buffer, offset);
                 }
                 GpuRenderPassCommand::DrawIndexedIndirect { buffer, offset } => {
                     state.ensure_pipeline_set()?;
                     state.ensure_index_buffer_set()?;
                     let buffer = self.gpu_handles.buffer(buffer)?;
-                    validate_indirect_buffer(buffer, offset, DRAW_INDEXED_INDIRECT_SIZE)?;
+                    validate_indirect_buffer(
+                        buffer,
+                        offset,
+                        DRAW_INDEXED_INDIRECT_SIZE,
+                        "render indirect buffer",
+                    )?;
                     pass.draw_indexed_indirect(&buffer.buffer, offset);
                 }
             }
@@ -3762,12 +4066,23 @@ struct GpuCacheEntry {
     object: GpuCachedObject,
 }
 
+#[derive(Clone, Copy, Default)]
+struct GpuCacheProfileDelta {
+    hits: u64,
+    misses: u64,
+    entries: u64,
+    lazy_create_ms: u128,
+}
+
 struct GpuPluginCache {
     plugin_id_hash: u64,
     device_identity: Option<usize>,
     device_generation: u64,
     hits: u64,
     misses: u64,
+    profile_hits: u64,
+    profile_misses: u64,
+    profile_lazy_create_ms: u128,
     entries: HashMap<GpuCacheKey, GpuCacheEntry>,
 }
 
@@ -3779,6 +4094,9 @@ impl GpuPluginCache {
             device_generation: 0,
             hits: 0,
             misses: 0,
+            profile_hits: 0,
+            profile_misses: 0,
+            profile_lazy_create_ms: 0,
             entries: HashMap::new(),
         }
     }
@@ -3822,6 +4140,31 @@ impl GpuPluginCache {
         self.misses = self.misses.saturating_add(1);
     }
 
+    fn record_profile_event(&mut self, status: GpuCacheStatus, elapsed_ms: u128) {
+        match status {
+            GpuCacheStatus::Hit => {
+                self.profile_hits = self.profile_hits.saturating_add(1);
+            }
+            GpuCacheStatus::Miss => {
+                self.profile_misses = self.profile_misses.saturating_add(1);
+            }
+        }
+        self.profile_lazy_create_ms = self.profile_lazy_create_ms.saturating_add(elapsed_ms);
+    }
+
+    fn take_profile_delta(&mut self) -> GpuCacheProfileDelta {
+        let delta = GpuCacheProfileDelta {
+            hits: self.profile_hits,
+            misses: self.profile_misses,
+            entries: self.entries.len() as u64,
+            lazy_create_ms: self.profile_lazy_create_ms,
+        };
+        self.profile_hits = 0;
+        self.profile_misses = 0;
+        self.profile_lazy_create_ms = 0;
+        delta
+    }
+
     fn stats(&self) -> GpuCacheStats {
         GpuCacheStats {
             hits: self.hits,
@@ -3832,6 +4175,9 @@ impl GpuPluginCache {
 
     fn clear(&mut self) {
         self.entries.clear();
+        self.profile_hits = 0;
+        self.profile_misses = 0;
+        self.profile_lazy_create_ms = 0;
     }
 
     fn ensure_device_identity(&mut self, identity: usize) -> u64 {
@@ -3916,8 +4262,9 @@ fn validate_indirect_buffer(
     buffer: &HostGpuBuffer,
     offset: u64,
     command_size: u64,
+    context: &str,
 ) -> Result<(), String> {
-    validate_indirect_buffer_range(buffer.usage, buffer.size, offset, command_size)
+    validate_indirect_buffer_range(buffer.usage, buffer.size, offset, command_size, context)
 }
 
 fn validate_indirect_buffer_range(
@@ -3925,10 +4272,11 @@ fn validate_indirect_buffer_range(
     buffer_size: u64,
     offset: u64,
     command_size: u64,
+    context: &str,
 ) -> Result<(), String> {
-    validate_buffer_usage_bits(usage, GpuBufferUsage::INDIRECT, "render indirect buffer")?;
+    validate_buffer_usage_bits(usage, GpuBufferUsage::INDIRECT, context)?;
     if !offset.is_multiple_of(4) {
-        return Err("GPU render indirect buffer offset must be aligned to 4".to_string());
+        return Err(format!("GPU {context} offset must be aligned to 4"));
     }
     validate_buffer_range(buffer_size, offset, command_size)
 }
@@ -3974,22 +4322,12 @@ fn checked_draw_range(label: &str, start: u32, count: u32) -> Result<u32, String
         .ok_or_else(|| format!("GPU render {label} range overflow"))
 }
 
-fn log_gpu_cache_event(resource: &str, status: GpuCacheStatus, elapsed_ms: u128) {
-    if rt_profile_enabled() {
-        log::info!(
-            "patinae.rt_profile host.gpu_cache resource={} status={:?} lazy_create_ms={}",
-            resource,
-            status,
-            elapsed_ms
-        );
-    }
-}
-
 fn gpu_device_limits_from_viewer(viewer: &dyn ViewerLike) -> Result<GpuDeviceLimits, String> {
     let device = viewer
         .gpu_device()
         .ok_or_else(|| "GPU command runtime requires an active device".to_string())?;
     let limits = device.limits();
+    let features = device.features();
     Ok(GpuDeviceLimits {
         max_buffer_size: limits.max_buffer_size,
         max_storage_buffer_binding_size: u64::from(limits.max_storage_buffer_binding_size),
@@ -3998,6 +4336,9 @@ fn gpu_device_limits_from_viewer(viewer: &dyn ViewerLike) -> Result<GpuDeviceLim
         max_compute_workgroup_size_x: limits.max_compute_workgroup_size_x,
         max_compute_workgroup_size_y: limits.max_compute_workgroup_size_y,
         max_compute_workgroup_size_z: limits.max_compute_workgroup_size_z,
+        buffer_binding_array: features.contains(wgpu::Features::BUFFER_BINDING_ARRAY),
+        storage_resource_binding_array: features
+            .contains(wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY),
     })
 }
 
@@ -5229,7 +5570,9 @@ pub(crate) fn apply_command_output<V: ViewerLike + ?Sized>(
         let session = wire::decode_session(&output.session).map_err(CmdError::execution)?;
         ctx.viewer.replace_session(session);
     }
-    ctx.viewer.set_viewport_image(output.viewport_image);
+    if output.viewport_image_changed {
+        ctx.viewer.set_viewport_image(output.viewport_image);
+    }
     for message in output.output {
         apply_output_message(ctx, message);
     }
@@ -6192,6 +6535,7 @@ mod loader_tests {
             id: 10,
             batch: GpuSubmitBatch {
                 label: Some("test.batch".to_string()),
+                wait_for_completion: false,
                 commands: vec![GpuBatchCommand::ReadBuffer {
                     buffer: GpuHandle {
                         id: 1,
@@ -6206,6 +6550,50 @@ mod loader_tests {
 
         assert_eq!(response.id, 10);
         assert!(response.result.is_err());
+    }
+
+    #[test]
+    fn gpu_stage_timestamp_ticks_decode_native_u64_values() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&7_u64.to_ne_bytes());
+        bytes.extend_from_slice(&11_u64.to_ne_bytes());
+
+        assert_eq!(decode_timestamp_ticks(&bytes), vec![7, 11]);
+        assert_eq!(decode_timestamp_ticks(&bytes[..15]), vec![7]);
+    }
+
+    #[test]
+    fn gpu_stage_timestamps_aggregate_by_scope() {
+        let ticks = [100_u64, 160, 200, 260, 300, 280];
+        let timestamps = [
+            GpuStageTimestamp {
+                scope: "surface_compact".to_string(),
+                begin_index: 0,
+                end_index: 1,
+            },
+            GpuStageTimestamp {
+                scope: "surface_compact".to_string(),
+                begin_index: 2,
+                end_index: 3,
+            },
+            GpuStageTimestamp {
+                scope: "raytrace".to_string(),
+                begin_index: 4,
+                end_index: 5,
+            },
+            GpuStageTimestamp {
+                scope: "missing".to_string(),
+                begin_index: 6,
+                end_index: 7,
+            },
+        ];
+
+        let by_scope = aggregate_stage_timestamp_ms(&ticks, &timestamps, 1_000.0);
+
+        let surface_compact = by_scope.get("surface_compact").copied().unwrap();
+        assert!((surface_compact - 0.12).abs() < f64::EPSILON);
+        assert_eq!(by_scope.get("raytrace").copied(), Some(0.0));
+        assert!(!by_scope.contains_key("missing"));
     }
 
     #[test]
@@ -6251,6 +6639,14 @@ mod loader_tests {
         let stats = plugin_a.stats();
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.misses, 1);
+
+        plugin_a.record_profile_event(GpuCacheStatus::Hit, 3);
+        plugin_a.record_profile_event(GpuCacheStatus::Miss, 5);
+        let delta = plugin_a.take_profile_delta();
+        assert_eq!(delta.hits, 1);
+        assert_eq!(delta.misses, 1);
+        assert_eq!(delta.lazy_create_ms, 8);
+        assert_eq!(plugin_a.take_profile_delta().hits, 0);
     }
 
     #[test]
@@ -6507,8 +6903,22 @@ mod loader_tests {
         assert!(validate_buffer_slice(64, 16, Some(16)).is_ok());
         assert!(validate_buffer_slice(64, 16, Some(0)).is_err());
 
-        assert!(validate_indirect_buffer_range(GpuBufferUsage::INDIRECT, 64, 4, 16).is_ok());
-        let err = validate_indirect_buffer_range(GpuBufferUsage::INDIRECT, 64, 2, 16).unwrap_err();
+        assert!(validate_indirect_buffer_range(
+            GpuBufferUsage::INDIRECT,
+            64,
+            4,
+            16,
+            "render indirect buffer",
+        )
+        .is_ok());
+        let err = validate_indirect_buffer_range(
+            GpuBufferUsage::INDIRECT,
+            64,
+            2,
+            16,
+            "render indirect buffer",
+        )
+        .unwrap_err();
         assert!(err.contains("aligned to 4"));
     }
 

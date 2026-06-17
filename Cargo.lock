@@ -4089,6 +4089,7 @@ dependencies = [
  "patinae-select",
  "patinae-settings",
  "pollster",
+ "raytracer-plugin",
  "wgpu",
 ]
 

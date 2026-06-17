@@ -317,6 +317,35 @@ pub trait ViewerLike {
         Err("Screenshot capture not supported by this viewer".to_string())
     }
 
+    /// Display a command-scoped GPU RGBA8 buffer as the viewport image.
+    fn set_viewport_gpu_image_from_buffer(
+        &mut self,
+        _buffer: crate::GpuHandle,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), String> {
+        Err("GPU viewport images are not supported by this viewer".to_string())
+    }
+
+    /// Display a native GPU RGBA8 buffer as the viewport image.
+    fn set_viewport_gpu_image_from_wgpu_buffer(
+        &mut self,
+        _buffer: &wgpu::Buffer,
+        _buffer_size: u64,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), String> {
+        Err("GPU viewport images are not supported by this viewer".to_string())
+    }
+
+    /// Save the current GPU viewport image as PNG, if one exists.
+    fn save_viewport_gpu_image(&mut self, _path: &Path) -> Result<Option<(u32, u32)>, String> {
+        Ok(None)
+    }
+
+    /// Clear any transient GPU viewport image.
+    fn clear_viewport_gpu_image(&mut self) {}
+
     /// Export the current displayed scene as renderer-neutral geometry.
     #[cfg(feature = "render-bridge")]
     fn export_displayed_geometry(

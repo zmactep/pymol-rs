@@ -80,7 +80,7 @@ pub use session_adapter::SessionAdapter;
 pub use view::ViewManager;
 pub use viewer_trait::{ViewerLike, ViewportImage};
 // Re-export types from dependencies that are part of the public API
-pub use patinae_color::NamedPalette;
+pub use patinae_color::{NamedPalette, ThemedPalette};
 
 /// Re-export commonly used types for convenience
 pub mod prelude {

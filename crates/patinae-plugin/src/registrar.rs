@@ -753,6 +753,7 @@ unsafe extern "C" fn plugin_command_execute(
             actions,
             session: wire::encode_session(viewer.session())?,
             viewport_image: viewer.viewport_image_ref().cloned(),
+            viewport_image_changed: viewer.viewport_image_changed,
         };
         send_output(sink, sink_user_data, &output)
     })
@@ -1638,6 +1639,20 @@ impl CommandRuntimeClient {
         }
     }
 
+    fn set_viewport_gpu_image_from_buffer(
+        self,
+        buffer: patinae_scene::GpuHandle,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        self.gpu_ok_response(WireCommandRuntimeRequest::SetViewportGpuImageFromBuffer {
+            id: 1,
+            buffer,
+            width,
+            height,
+        })
+    }
+
     fn gpu_drop_handles(self, handles: Vec<patinae_scene::GpuHandle>) -> Result<(), String> {
         self.gpu_ok_response(WireCommandRuntimeRequest::GpuDropHandles { id: 1, handles })
     }
@@ -1739,6 +1754,7 @@ struct RuntimeViewer {
     displayed_geometry_spool: Option<crate::wire::WireDisplayedGeometrySpool>,
     command_runtime: Option<CommandRuntimeClient>,
     redraw_requested: bool,
+    viewport_image_changed: bool,
 }
 
 impl RuntimeViewer {
@@ -1760,6 +1776,7 @@ impl RuntimeViewer {
             displayed_geometry_spool,
             command_runtime,
             redraw_requested: false,
+            viewport_image_changed: false,
         })
     }
 }
@@ -1804,6 +1821,7 @@ impl ViewerLike for RuntimeViewer {
     fn replace_session(&mut self, session: patinae_scene::Session) {
         self.session = session;
         self.redraw_requested = true;
+        self.viewport_image_changed = true;
     }
 
     fn scene_store(&mut self, key: &str, storemask: u32) {
@@ -1895,6 +1913,7 @@ impl ViewerLike for RuntimeViewer {
     fn set_viewport_image_internal(&mut self, image: Option<patinae_scene::ViewportImage>) {
         self.session.viewport_image = image;
         self.redraw_requested = true;
+        self.viewport_image_changed = true;
     }
 
     fn viewport_size(&self) -> (u32, u32) {
@@ -2172,6 +2191,20 @@ impl ViewerLike for RuntimeViewer {
             .gpu_submit_batch(batch)
     }
 
+    fn set_viewport_gpu_image_from_buffer(
+        &mut self,
+        buffer: patinae_scene::GpuHandle,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        self.command_runtime
+            .ok_or_else(|| "host command runtime is not available".to_string())?
+            .set_viewport_gpu_image_from_buffer(buffer, width, height)?;
+        self.session.viewport_image = None;
+        self.redraw_requested = true;
+        Ok(())
+    }
+
     fn gpu_drop_handles(&mut self, handles: Vec<patinae_scene::GpuHandle>) -> Result<(), String> {
         self.command_runtime
             .ok_or_else(|| "host command runtime is not available".to_string())?
@@ -2227,6 +2260,7 @@ impl RuntimeShared {
                 displayed_geometry_spool: None,
                 command_runtime: None,
                 redraw_requested: false,
+                viewport_image_changed: false,
             },
             command_registry: CommandRegistry::new(),
             command_names: input.command_names,

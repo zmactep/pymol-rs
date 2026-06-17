@@ -23,13 +23,48 @@ use patinae_scene::bridge::{
     frame_uniforms_from_camera, frame_uniforms_from_session, resolve_pick, resolve_setting_color,
     visit_render_scene, CachedRenderScene, ResolvedSceneColors, ResolvedSceneMarkers,
 };
+use wgpu::util::DeviceExt;
 
 const VIEWPORT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const LARGE_LOD_HOVER_PICK_INTERVAL: Duration = Duration::from_millis(33);
+const RAY_BUFFER_TO_TEXTURE_WGSL: &str = r#"
+struct Params {
+    width: u32,
+    height: u32,
+    _pad0: u32,
+    _pad1: u32,
+}
+
+@group(0) @binding(0) var<storage, read> pixels: array<u32>;
+@group(0) @binding(1) var out_image: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= params.width || gid.y >= params.height {
+        return;
+    }
+    let index = gid.y * params.width + gid.x;
+    let packed = pixels[index];
+    let rgba = vec4<f32>(
+        f32(packed & 0xffu),
+        f32((packed >> 8u) & 0xffu),
+        f32((packed >> 16u) & 0xffu),
+        f32((packed >> 24u) & 0xffu),
+    ) / 255.0;
+    textureStore(out_image, vec2<i32>(i32(gid.x), i32(gid.y)), rgba);
+}
+"#;
 
 pub struct AdapterInfo {
     pub device_name: String,
     pub backend: String,
+}
+
+struct ViewportGpuImage {
+    texture: wgpu::Texture,
+    width: u32,
+    height: u32,
 }
 
 /// GPU viewport that renders a [`Session`] to an offscreen wgpu texture.
@@ -50,6 +85,8 @@ pub struct ViewportRenderer {
     /// our write on Slint's read fence, capping fps independent of CPU.
     color_textures: Vec<wgpu::Texture>,
     color_textures_next: usize,
+    /// Transient renderer-owned ray output texture for viewport `ray`.
+    viewport_gpu_image: Option<ViewportGpuImage>,
 }
 
 impl ViewportRenderer {
@@ -66,6 +103,7 @@ impl ViewportRenderer {
             last_hover_submit: None,
             color_textures: Vec::new(),
             color_textures_next: 0,
+            viewport_gpu_image: None,
         }
     }
 
@@ -112,6 +150,15 @@ impl ViewportRenderer {
         width: u32,
         height: u32,
     ) -> Option<slint::Image> {
+        if let Some(image) = self.viewport_gpu_image.as_ref() {
+            return match slint::Image::try_from(image.texture.clone()) {
+                Ok(image) => Some(image),
+                Err(e) => {
+                    log::error!("Failed to import GPU viewport image: {:?}", e);
+                    None
+                }
+            };
+        }
         let texture = self.render_frame(session, width, height);
         match slint::Image::try_from(texture) {
             Ok(image) => Some(image),
@@ -120,6 +167,10 @@ impl ViewportRenderer {
                 None
             }
         }
+    }
+
+    pub fn clear_viewport_gpu_image(&mut self) -> bool {
+        self.viewport_gpu_image.take().is_some()
     }
 
     fn render_frame(&mut self, session: &mut Session, width: u32, height: u32) -> wgpu::Texture {
@@ -243,10 +294,9 @@ impl ViewportRenderer {
         self.state.render(&color_view, &mut encoder);
 
         // PATINAE_GPU_SYNC=1: force device.poll(Wait) after submit and
-        // measure real GPU wall-clock per frame. Slint's wgpu device is
-        // created without TIMESTAMP_QUERY, so per-pass timing is gone —
-        // this is the only way to see whether GPU work alone busts the
-        // vsync budget on big assemblies.
+        // measure real GPU wall-clock per frame. This remains a useful
+        // end-to-end check even when timestamp queries are available for
+        // finer per-pass diagnostics.
         let gpu_sync = std::env::var("PATINAE_GPU_SYNC")
             .ok()
             .map(|v| v == "1")
@@ -425,6 +475,195 @@ impl CaptureRenderer for ViewportRenderer {
         Ok(())
     }
 
+    fn set_viewport_gpu_image_from_buffer(
+        &mut self,
+        buffer: &wgpu::Buffer,
+        buffer_size: u64,
+        width: u32,
+        height: u32,
+    ) -> Result<(), ViewerError> {
+        let bytes = required_rgba_bytes(width, height).map_err(ViewerError::capture_error)?;
+        if buffer_size < bytes {
+            return Err(ViewerError::capture_error(format!(
+                "ray output buffer is {buffer_size} bytes, expected at least {bytes}"
+            )));
+        }
+
+        let texture = self
+            .state
+            .ctx
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("patinae.ray.viewport"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: VIEWPORT_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::STORAGE_BINDING
+                    // Slint's WGPU texture import requires render-attachment usage.
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shader = self
+            .state
+            .ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("patinae.ray.buffer_to_texture.shader"),
+                source: wgpu::ShaderSource::Wgsl(RAY_BUFFER_TO_TEXTURE_WGSL.into()),
+            });
+        let bind_group_layout =
+            self.state
+                .ctx
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("patinae.ray.buffer_to_texture.layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::StorageTexture {
+                                access: wgpu::StorageTextureAccess::WriteOnly,
+                                format: VIEWPORT_FORMAT,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let pipeline_layout =
+            self.state
+                .ctx
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("patinae.ray.buffer_to_texture.pipeline_layout"),
+                    bind_group_layouts: &[&bind_group_layout],
+                    immediate_size: 0,
+                });
+        let pipeline =
+            self.state
+                .ctx
+                .device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("patinae.ray.buffer_to_texture.pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader,
+                    entry_point: Some("main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    cache: None,
+                });
+        let params_buffer =
+            self.state
+                .ctx
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("patinae.ray.buffer_to_texture.params"),
+                    contents: &viewport_copy_params(width, height),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+        let bind_group = self
+            .state
+            .ctx
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("patinae.ray.buffer_to_texture.bind_group"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        let mut encoder =
+            self.state
+                .ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("patinae.ray.buffer_to_texture.encoder"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("patinae.ray.buffer_to_texture.pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, Some(&bind_group), &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+        self.state
+            .ctx
+            .queue
+            .submit(std::iter::once(encoder.finish()));
+        self.viewport_gpu_image = Some(ViewportGpuImage {
+            texture,
+            width,
+            height,
+        });
+        Ok(())
+    }
+
+    fn save_viewport_gpu_image(&mut self, path: &Path) -> Result<Option<(u32, u32)>, ViewerError> {
+        let Some(image) = self.viewport_gpu_image.as_ref() else {
+            return Ok(None);
+        };
+        let rgba = read_texture_rgba(
+            &self.state.ctx.device,
+            &self.state.ctx.queue,
+            &image.texture,
+            image.width,
+            image.height,
+        )
+        .map_err(ViewerError::capture_error)?;
+        let buffer = image::RgbaImage::from_raw(image.width, image.height, rgba)
+            .ok_or_else(|| ViewerError::capture_error("RgbaImage::from_raw size mismatch"))?;
+        buffer
+            .save_with_format(path, image::ImageFormat::Png)
+            .map_err(|error| ViewerError::capture_error(format!("PNG encode failed: {error}")))?;
+        Ok(Some((image.width, image.height)))
+    }
+
+    fn clear_viewport_gpu_image(&mut self) {
+        self.viewport_gpu_image = None;
+    }
+
     fn export_displayed_geometry(
         &mut self,
         _camera: &mut Camera,
@@ -561,6 +800,99 @@ impl CaptureRenderer for ViewportRenderer {
         self.last_viewport_size = None;
         Ok(())
     }
+}
+
+fn required_rgba_bytes(width: u32, height: u32) -> Result<u64, String> {
+    if width == 0 || height == 0 {
+        return Err("ray viewport image dimensions must be non-zero".to_string());
+    }
+    u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "ray viewport image size overflow".to_string())
+}
+
+fn viewport_copy_params(width: u32, height: u32) -> [u8; 16] {
+    let mut bytes = [0_u8; 16];
+    bytes[0..4].copy_from_slice(&width.to_ne_bytes());
+    bytes[4..8].copy_from_slice(&height.to_ne_bytes());
+    bytes
+}
+
+fn read_texture_rgba(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, String> {
+    let unpadded_bpr = width
+        .checked_mul(4)
+        .ok_or_else(|| "GPU viewport image row size overflow".to_string())?;
+    let aligned_bpr = unpadded_bpr.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let staging_size = u64::from(aligned_bpr)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| "GPU viewport readback buffer size overflow".to_string())?;
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("patinae.ray.viewport.readback"),
+        size: staging_size.max(4),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("patinae.ray.viewport.readback.encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &staging,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(aligned_bpr),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })
+        .map_err(|error| format!("device poll failed: {error:?}"))?;
+    rx.recv()
+        .map_err(|_| "staging buffer map channel closed".to_string())?
+        .map_err(|error| format!("buffer map failed: {error:?}"))?;
+
+    let mapped = slice.get_mapped_range();
+    let mut tightly_packed = Vec::with_capacity((unpadded_bpr * height) as usize);
+    for row in 0..height as usize {
+        let start = row * aligned_bpr as usize;
+        let end = start + unpadded_bpr as usize;
+        tightly_packed.extend_from_slice(&mapped[start..end]);
+    }
+    drop(mapped);
+    staging.unmap();
+
+    Ok(tightly_packed)
 }
 
 fn effective_fxaa(settings: &Settings) -> bool {

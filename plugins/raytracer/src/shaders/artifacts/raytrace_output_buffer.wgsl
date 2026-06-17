@@ -61,6 +61,17 @@ struct Uniforms {
     ray_trace_color: vec4<f32>, // Color for outlines
 }
 
+struct PrimitiveMetadata {
+    sphere_count: u32,
+    cylinder_count: u32,
+    capsule_count: u32,
+    triangle_count: u32,
+    primitive_count: u32,
+    triangle_capacity: u32,
+    visible_triangle_count: u32,
+    overflow: u32,
+}
+
 // Sphere primitive
 // Note: Using individual f32 for padding to match Rust struct layout
 // (vec3<f32> has 16-byte alignment in WGSL which would cause layout mismatch)
@@ -131,6 +142,7 @@ struct HitInfo {
 @group(0) @binding(5) var<storage, read> bvh_nodes: array<BvhNode>;
 @group(0) @binding(6) var<storage, read> bvh_indices: array<u32>;
 @group(0) @binding(7) var<storage, read_write> output_pixels: array<u32>;
+@group(0) @binding(8) var<storage, read> metadata: PrimitiveMetadata;
 
 // Constants
 const EPSILON: f32 = 0.0001;
@@ -451,28 +463,28 @@ fn trace_ray(ray: Ray, opaque_only: bool) -> HitInfo {
     // If no BVH nodes, do brute force
     if arrayLength(&bvh_nodes) == 0u {
         // Brute force spheres
-        for (var i = 0u; i < uniforms.sphere_count; i++) {
+        for (var i = 0u; i < metadata.sphere_count; i++) {
             let hit = intersect_sphere(ray, spheres[i]);
             if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
         // Brute force cylinders
-        for (var i = 0u; i < uniforms.cylinder_count; i++) {
+        for (var i = 0u; i < metadata.cylinder_count; i++) {
             let hit = intersect_cylinder(ray, cylinders[i]);
             if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
         // Brute force capsules
-        for (var i = 0u; i < uniforms.capsule_count; i++) {
+        for (var i = 0u; i < metadata.capsule_count; i++) {
             let hit = intersect_capsule(ray, capsules[i]);
             if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
             }
         }
         // Brute force triangles
-        for (var i = 0u; i < uniforms.triangle_count; i++) {
+        for (var i = 0u; i < metadata.triangle_count; i++) {
             let hit = intersect_triangle(ray, triangles[i]);
             if hit.hit && (!opaque_only || hit.transparency <= 0.001) && hit.t < closest.t {
                 closest = hit;
@@ -514,13 +526,13 @@ fn trace_ray(ray: Ray, opaque_only: bool) -> HitInfo {
                 var hit: HitInfo;
                 hit.hit = false;
 
-                if prim_type == 0u && prim_idx < uniforms.sphere_count {
+                if prim_type == 0u && prim_idx < metadata.sphere_count {
                     hit = intersect_sphere(ray, spheres[prim_idx]);
-                } else if prim_type == 1u && prim_idx < uniforms.cylinder_count {
+                } else if prim_type == 1u && prim_idx < metadata.cylinder_count {
                     hit = intersect_cylinder(ray, cylinders[prim_idx]);
-                } else if prim_type == 2u && prim_idx < uniforms.triangle_count {
+                } else if prim_type == 2u && prim_idx < metadata.triangle_count {
                     hit = intersect_triangle(ray, triangles[prim_idx]);
-                } else if prim_type == 3u && prim_idx < uniforms.capsule_count {
+                } else if prim_type == 3u && prim_idx < metadata.capsule_count {
                     hit = intersect_capsule(ray, capsules[prim_idx]);
                 }
 
@@ -549,25 +561,25 @@ fn trace_ray(ray: Ray, opaque_only: bool) -> HitInfo {
 fn trace_shadow(ray: Ray, max_t: f32) -> bool {
     // If no BVH nodes, do brute force (fallback for small scenes)
     if arrayLength(&bvh_nodes) == 0u {
-        for (var i = 0u; i < uniforms.sphere_count; i++) {
+        for (var i = 0u; i < metadata.sphere_count; i++) {
             let hit = intersect_sphere(ray, spheres[i]);
             if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
                 return true;
             }
         }
-        for (var i = 0u; i < uniforms.cylinder_count; i++) {
+        for (var i = 0u; i < metadata.cylinder_count; i++) {
             let hit = intersect_cylinder(ray, cylinders[i]);
             if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
                 return true;
             }
         }
-        for (var i = 0u; i < uniforms.capsule_count; i++) {
+        for (var i = 0u; i < metadata.capsule_count; i++) {
             let hit = intersect_capsule(ray, capsules[i]);
             if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
                 return true;
             }
         }
-        for (var i = 0u; i < uniforms.triangle_count; i++) {
+        for (var i = 0u; i < metadata.triangle_count; i++) {
             let hit = intersect_triangle(ray, triangles[i]);
             if hit.hit && hit.t > EPSILON && hit.t < max_t && hit.transparency < 0.5 {
                 return true;
@@ -609,13 +621,13 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
                 var hit: HitInfo;
                 hit.hit = false;
 
-                if prim_type == 0u && prim_idx < uniforms.sphere_count {
+                if prim_type == 0u && prim_idx < metadata.sphere_count {
                     hit = intersect_sphere(ray, spheres[prim_idx]);
-                } else if prim_type == 1u && prim_idx < uniforms.cylinder_count {
+                } else if prim_type == 1u && prim_idx < metadata.cylinder_count {
                     hit = intersect_cylinder(ray, cylinders[prim_idx]);
-                } else if prim_type == 2u && prim_idx < uniforms.triangle_count {
+                } else if prim_type == 2u && prim_idx < metadata.triangle_count {
                     hit = intersect_triangle(ray, triangles[prim_idx]);
-                } else if prim_type == 3u && prim_idx < uniforms.capsule_count {
+                } else if prim_type == 3u && prim_idx < metadata.capsule_count {
                     hit = intersect_capsule(ray, capsules[prim_idx]);
                 }
 
@@ -639,6 +651,11 @@ fn trace_shadow(ray: Ray, max_t: f32) -> bool {
     }
 
     return false;
+}
+
+fn should_cast_shadow_for_hit(hit: HitInfo) -> bool {
+    return uniforms.ray_shadow != 0u &&
+        (hit.transparency <= 0.001 || uniforms.ray_transparency_shadows != 0u);
 }
 
 // Shade a hit point with the classic multi-light model.
@@ -668,6 +685,7 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
 
     // Shadow bias for all shadow rays
     let shadow_bias = max(hit.t * 0.0005, 0.05);
+    let cast_shadows = should_cast_shadow_for_hit(hit);
 
     // === AMBIENT ===
     var color = hit.color.rgb * uniforms.ambient;
@@ -678,7 +696,7 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
 
     // Headlight shadow (trace toward viewer/camera)
     var headlight_shadow = 1.0;
-    if uniforms.ray_shadow != 0u && headlight_ndotl > 0.001 {
+    if cast_shadows && headlight_ndotl > 0.001 {
         let shadow_origin = hit_point + n * shadow_bias;
         let shadow_ray = Ray(shadow_origin, view_dir);
         if trace_shadow(shadow_ray, MAX_T) {
@@ -717,7 +735,7 @@ fn shade(ray: Ray, hit: HitInfo) -> vec3<f32> {
 
         // First positional light casts shadows
         var shadow = 1.0;
-        if i == 0 && uniforms.ray_shadow != 0u && ndotl > 0.001 {
+        if i == 0 && cast_shadows && ndotl > 0.001 {
             let shadow_origin = hit_point + n * shadow_bias;
             let shadow_ray = Ray(shadow_origin, light_dir);
             if trace_shadow(shadow_ray, MAX_T) {

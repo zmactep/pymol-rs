@@ -71,6 +71,34 @@ prints `FrameStats`: CPU sync/record/total timings plus per-pass GPU timings.
 Negative GPU pass values mean the pass did not run in that frame, and missing
 histograms usually mean the adapter does not expose timestamp queries.
 
+## Raytrace Procedure Benchmarks
+
+`raytrace_procedure` measures the raytracer's standalone GPU procedure with a
+stage-level profile: CPU BVH build, main raytrace pipeline creation, primitive
+and BVH uploads, output texture allocation, command recording, queue submit,
+readback wait, and CPU downsample for antialiasing.
+
+```sh
+BENCH_RT_SCENE=surface_2k BENCH_RT_W=512 BENCH_RT_H=512 cargo bench -p patinae-bench --bench raytrace_procedure
+BENCH_RT_SCENE=surface_8k BENCH_RT_W=1024 BENCH_RT_H=1024 BENCH_RT_AA=2 cargo bench -p patinae-bench --bench raytrace_procedure
+```
+
+Environment knobs:
+
+- `BENCH_RT_SCENE`: `surface_512`, `surface_2k`, `surface_8k`,
+  `surface_32k`, or `mixed_4k`.
+- `BENCH_RT_W` / `BENCH_RT_H`: final output dimensions.
+- `BENCH_RT_AA`: antialiasing factor passed to `RaytraceParams`.
+- `BENCH_RT_SHADOWS`: set to `1` to include shadow rays.
+- `BENCH_RT_MODE`: standalone edge/composite mode; keep `0` when comparing
+  with the renderer-artifact command path, which currently supports normal mode.
+- `BENCH_RT_TRANSPARENCY_MODE`: transparency mode uniform for shader sweeps.
+
+For the live `ray` command's renderer-artifact path, set `PATINAE_RT_PROFILE=1`.
+The plugin logs planning, indirect-count readback, surface-visibility counting,
+temporary command-resource setup, BVH command setup, batch command count,
+dispatch grid, batch/readback time, and total artifact-path time.
+
 ## Web Perf Harness
 
 The local web harness lives at `web/examples/perf.html`. Keep local copies of

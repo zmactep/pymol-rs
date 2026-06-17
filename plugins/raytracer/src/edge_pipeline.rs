@@ -54,10 +54,102 @@ impl Default for CompositeParams {
     }
 }
 
+/// Uniform parameters for standalone texture downsampling.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct DownsampleParams {
+    pub src_width: u32,
+    pub dst_width: u32,
+    pub dst_height: u32,
+    pub factor: u32,
+}
+
 /// Edge detection pipeline (Pass 2)
 pub struct EdgeDetectPipeline {
     bind_group_layout: wgpu::BindGroupLayout,
     compute_pipeline: wgpu::ComputePipeline,
+}
+
+/// Texture downsample pipeline for standalone antialiasing.
+pub struct DownsamplePipeline {
+    bind_group_layout: wgpu::BindGroupLayout,
+    compute_pipeline: wgpu::ComputePipeline,
+}
+
+impl DownsamplePipeline {
+    /// Create the standalone texture downsample pipeline.
+    pub fn new(device: &wgpu::Device) -> RaytraceResult<Self> {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Standalone Downsample Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Standalone Downsample Shader"),
+            source: wgpu::ShaderSource::Wgsl(shaders::STANDALONE_DOWNSAMPLE.into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Standalone Downsample Pipeline Layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            immediate_size: 0,
+        });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Standalone Downsample Compute Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        Ok(Self {
+            bind_group_layout,
+            compute_pipeline,
+        })
+    }
+
+    /// Get the bind group layout.
+    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.bind_group_layout
+    }
+
+    /// Get the compute pipeline.
+    pub fn compute_pipeline(&self) -> &wgpu::ComputePipeline {
+        &self.compute_pipeline
+    }
 }
 
 impl EdgeDetectPipeline {

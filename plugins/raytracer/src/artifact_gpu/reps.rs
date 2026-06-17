@@ -1,8 +1,12 @@
 use patinae_plugin::prelude::ViewerLike;
-use patinae_scene::{GpuHandle, RenderArtifactRepDescriptor, RenderArtifactRepKind};
+use patinae_scene::{
+    GpuBatchCommand, GpuHandle, RenderArtifactRepDescriptor, RenderArtifactRepKind,
+};
 
 use super::layout::PrimitiveCounts;
-use super::resources::direct_draw_args_buffer;
+use super::resources::{create_buffer, direct_draw_args_buffer, storage_usage};
+
+const DRAW_ARGS_BYTES: u64 = std::mem::size_of::<[u32; 4]>() as u64;
 
 pub(super) struct SphereArtifactRep<'a> {
     pub(super) rep: &'a RenderArtifactRepDescriptor,
@@ -17,9 +21,10 @@ impl SphereArtifactRep<'_> {
         &self,
         viewer: &mut dyn ViewerLike,
         label: &str,
+        batch_commands: &mut Vec<GpuBatchCommand>,
     ) -> Result<GpuHandle, String> {
         if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
+            return shader_draw_args_buffer(viewer, label, indirect, batch_commands);
         }
         direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
     }
@@ -39,9 +44,10 @@ impl CylinderArtifactRep<'_> {
         &self,
         viewer: &mut dyn ViewerLike,
         label: &str,
+        batch_commands: &mut Vec<GpuBatchCommand>,
     ) -> Result<GpuHandle, String> {
         if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
+            return shader_draw_args_buffer(viewer, label, indirect, batch_commands);
         }
         direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
     }
@@ -60,9 +66,10 @@ impl CapsuleArtifactRep<'_> {
         &self,
         viewer: &mut dyn ViewerLike,
         label: &str,
+        batch_commands: &mut Vec<GpuBatchCommand>,
     ) -> Result<GpuHandle, String> {
         if let Some(indirect) = self.rep.indirect {
-            return Ok(indirect);
+            return shader_draw_args_buffer(viewer, label, indirect, batch_commands);
         }
         direct_draw_args_buffer(viewer, label, [0, self.instance_capacity, 0, 0])
     }
@@ -79,6 +86,18 @@ pub(super) struct TriangleArtifactRep<'a> {
 }
 
 impl TriangleArtifactRep<'_> {
+    pub(super) fn indirect_or_direct_args(
+        &self,
+        viewer: &mut dyn ViewerLike,
+        label: &str,
+        batch_commands: &mut Vec<GpuBatchCommand>,
+    ) -> Result<GpuHandle, String> {
+        if let Some(indirect) = self.rep.indirect {
+            return shader_draw_args_buffer(viewer, label, indirect, batch_commands);
+        }
+        direct_draw_args_buffer(viewer, label, [self.vertex_count, 1, 0, 0])
+    }
+
     pub(super) fn uses_surface_visibility_culling(&self) -> bool {
         self.rep.rep_kind == RenderArtifactRepKind::Surface
     }
@@ -86,6 +105,31 @@ impl TriangleArtifactRep<'_> {
     pub(super) fn source_triangle_count(&self) -> u32 {
         self.vertex_count / 3
     }
+}
+
+fn shader_draw_args_buffer(
+    viewer: &mut dyn ViewerLike,
+    label: &str,
+    indirect: GpuHandle,
+    batch_commands: &mut Vec<GpuBatchCommand>,
+) -> Result<GpuHandle, String> {
+    let shader_args = create_buffer(viewer, label, DRAW_ARGS_BYTES, storage_usage(), None)?;
+    append_shader_draw_args_copy(indirect, shader_args, batch_commands);
+    Ok(shader_args)
+}
+
+fn append_shader_draw_args_copy(
+    indirect: GpuHandle,
+    shader_args: GpuHandle,
+    batch_commands: &mut Vec<GpuBatchCommand>,
+) {
+    batch_commands.push(GpuBatchCommand::CopyBufferToBuffer {
+        source: indirect,
+        source_offset: 0,
+        destination: shader_args,
+        destination_offset: 0,
+        size: DRAW_ARGS_BYTES,
+    });
 }
 
 pub(super) struct ArtifactPlan<'a> {
@@ -117,5 +161,39 @@ impl ArtifactPlan<'_> {
             .and_then(|count| count.checked_add(self.capsule_count))
             .and_then(|count| count.checked_add(self.triangle_count))
             .ok_or_else(|| "artifact primitive count overflow".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use patinae_scene::GpuHandleKind;
+
+    #[test]
+    fn indirect_draw_args_copy_is_recorded_for_shader_buffer() {
+        let indirect = GpuHandle {
+            id: 99,
+            kind: GpuHandleKind::Buffer,
+            generation: 1,
+        };
+        let shader_args = GpuHandle {
+            id: 7,
+            kind: GpuHandleKind::Buffer,
+            generation: 1,
+        };
+        let mut commands = Vec::new();
+
+        append_shader_draw_args_copy(indirect, shader_args, &mut commands);
+
+        assert!(matches!(
+            commands.as_slice(),
+            [GpuBatchCommand::CopyBufferToBuffer {
+                source,
+                source_offset: 0,
+                destination,
+                destination_offset: 0,
+                size: DRAW_ARGS_BYTES,
+            }] if *source == indirect && *destination == shader_args
+        ));
     }
 }

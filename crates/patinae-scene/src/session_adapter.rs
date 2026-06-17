@@ -107,6 +107,9 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
     }
     fn set_viewport_image_internal(&mut self, image: Option<ViewportImage>) {
         self.session.viewport_image = image;
+        if let Some(render_context) = self.render_context.as_deref_mut() {
+            render_context.clear_viewport_gpu_image();
+        }
     }
 
     fn request_redraw(&mut self) {
@@ -177,6 +180,40 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
                 self.session.clear_color,
             )
             .map_err(|e| e.to_string())
+    }
+
+    fn set_viewport_gpu_image_from_wgpu_buffer(
+        &mut self,
+        buffer: &wgpu::Buffer,
+        buffer_size: u64,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        let target = self
+            .render_context
+            .as_deref_mut()
+            .ok_or_else(|| "No render context available".to_string())?;
+        target
+            .set_viewport_gpu_image_from_buffer(buffer, buffer_size, width, height)
+            .map_err(|e| e.to_string())?;
+        self.session.viewport_image = None;
+        *self.needs_redraw = true;
+        Ok(())
+    }
+
+    fn save_viewport_gpu_image(&mut self, path: &Path) -> Result<Option<(u32, u32)>, String> {
+        let Some(target) = self.render_context.as_deref_mut() else {
+            return Ok(None);
+        };
+        target
+            .save_viewport_gpu_image(path)
+            .map_err(|e| e.to_string())
+    }
+
+    fn clear_viewport_gpu_image(&mut self) {
+        if let Some(render_context) = self.render_context.as_deref_mut() {
+            render_context.clear_viewport_gpu_image();
+        }
     }
 
     #[cfg(feature = "render-bridge")]

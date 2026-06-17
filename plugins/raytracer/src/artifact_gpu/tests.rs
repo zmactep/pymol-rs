@@ -1,17 +1,16 @@
-use super::indirect::{active_triangle_vertex_count, decode_draw_indirect_args};
 use super::layout::{
-    ArtifactTriangle, ArtifactVisibleTriangleParams, ATOM_STRIDE, COLOR_LUT_STRIDE,
-    EMPTY_STORAGE_BYTES, LINE_INSTANCE_STRIDE, RAY_LINE_RADIUS, SPHERE_INSTANCE_STRIDE,
-    STD_VERTEX_STRIDE, STICK_INSTANCE_STRIDE, WORKGROUP_SIZE,
+    ArtifactPrimitiveMetadata, ArtifactTriangle, ArtifactVisibleTriangleParams, ATOM_STRIDE,
+    COLOR_LUT_STRIDE, EMPTY_STORAGE_BYTES, LINE_INSTANCE_STRIDE, RAY_LINE_RADIUS,
+    SPHERE_INSTANCE_STRIDE, STD_VERTEX_STRIDE, STICK_INSTANCE_STRIDE, WORKGROUP_SIZE,
 };
 use super::resources::{checked_storage_buffer_size, storage_bytes_for_device};
 use super::*;
 use crate::primitive::GpuTriangle;
 use crate::shaders;
 use patinae_scene::{
-    GpuHandle, GpuHandleKind, RenderArtifactBufferDescriptor, RenderArtifactBufferRole,
-    RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor, RenderArtifactRepKind,
-    RenderArtifactSnapshotDescriptor,
+    GpuBufferUsage, GpuHandle, GpuHandleKind, RenderArtifactBufferDescriptor,
+    RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
+    RenderArtifactRepKind, RenderArtifactSnapshotDescriptor,
 };
 
 fn handle(id: u64) -> GpuHandle {
@@ -97,6 +96,23 @@ fn artifact_triangle_layout_is_compact() {
 }
 
 #[test]
+fn finalize_streaming_metadata_params_layout_matches_wgsl() {
+    assert_eq!(
+        std::mem::size_of::<super::layout::FinalizeStreamingMetadataParams>(),
+        32
+    );
+}
+
+#[test]
+fn storage_indirect_usage_includes_indirect_for_gpu_written_dispatch_args() {
+    let usage = resources::storage_indirect_usage();
+
+    assert!(usage.contains(GpuBufferUsage::STORAGE));
+    assert!(usage.contains(GpuBufferUsage::INDIRECT));
+    assert!(usage.contains(GpuBufferUsage::COPY_DST));
+}
+
+#[test]
 fn artifact_triangle_storage_fits_reported_3j3q_visible_count() {
     let limits = patinae_scene::GpuDeviceLimits {
         max_buffer_size: 4_294_967_296,
@@ -106,6 +122,8 @@ fn artifact_triangle_storage_fits_reported_3j3q_visible_count() {
         max_compute_workgroup_size_x: 256,
         max_compute_workgroup_size_y: 1,
         max_compute_workgroup_size_z: 1,
+        buffer_binding_array: false,
+        storage_resource_binding_array: false,
     };
     let visible_triangles = 25_174_294;
 
@@ -129,27 +147,6 @@ fn artifact_triangle_storage_fits_reported_3j3q_visible_count() {
 }
 
 #[test]
-fn indirect_triangle_active_vertex_count_uses_draw_count_not_capacity() {
-    assert_eq!(active_triangle_vertex_count(300, 4_000_000), 300);
-    assert_eq!(active_triangle_vertex_count(302, 4_000_000), 300);
-    assert_eq!(
-        active_triangle_vertex_count(4_000_000, 4_000_000),
-        3_999_999
-    );
-    assert_eq!(active_triangle_vertex_count(9, 5), 3);
-}
-
-#[test]
-fn draw_indirect_args_decode_as_little_endian_u32_lanes() {
-    let bytes = [0x78, 0x56, 0x34, 0x12, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0];
-
-    let args =
-        decode_draw_indirect_args(&bytes, RenderArtifactRepKind::Surface).expect("draw args");
-
-    assert_eq!(args, [0x1234_5678, 2, 3, 4]);
-}
-
-#[test]
 fn storage_buffer_size_check_uses_storage_binding_limit() {
     let limits = patinae_scene::GpuDeviceLimits {
         max_buffer_size: 1024,
@@ -159,6 +156,8 @@ fn storage_buffer_size_check_uses_storage_binding_limit() {
         max_compute_workgroup_size_x: 256,
         max_compute_workgroup_size_y: 1,
         max_compute_workgroup_size_z: 1,
+        buffer_binding_array: false,
+        storage_resource_binding_array: false,
     };
 
     assert!(checked_storage_buffer_size(512, &limits, "test storage").is_ok());
@@ -167,23 +166,281 @@ fn storage_buffer_size_check_uses_storage_binding_limit() {
     assert!(err.contains("test storage buffer size 513 exceeds GPU storage buffer limit 512"));
 }
 
+#[test]
+fn planner_selects_streaming_fallback_for_reported_3j3q_surface_capacity() {
+    let source_triangles = 143_029_960_u64;
+    let source_vertices = source_triangles * 3;
+    let limits = patinae_scene::GpuDeviceLimits {
+        max_buffer_size: 4_294_967_296,
+        max_storage_buffer_binding_size: 2_147_483_647,
+        max_compute_workgroups_per_dimension: 65_535,
+        max_compute_invocations_per_workgroup: 256,
+        max_compute_workgroup_size_x: 256,
+        max_compute_workgroup_size_y: 1,
+        max_compute_workgroup_size_z: 1,
+        buffer_binding_array: false,
+        storage_resource_binding_array: false,
+    };
+    let snapshot = RenderArtifactSnapshotDescriptor {
+        snapshot_id: 1,
+        layout_version: 2,
+        scene_generation: 7,
+        scene_bounds_min: [0.0, 0.0, 0.0],
+        scene_bounds_max: [1.0, 1.0, 1.0],
+        cull_pass_initialized: true,
+        device_limits: limits,
+        buffers: vec![
+            RenderArtifactBufferDescriptor {
+                handle: handle(10),
+                role: RenderArtifactBufferRole::SceneColorLut,
+                size: 64,
+                stride: COLOR_LUT_STRIDE,
+                element_count: 1,
+            },
+            scene_atoms_descriptor(90, 16),
+            RenderArtifactBufferDescriptor {
+                handle: handle(11),
+                role: RenderArtifactBufferRole::StdVertices,
+                size: source_vertices * STD_VERTEX_STRIDE,
+                stride: STD_VERTEX_STRIDE,
+                element_count: source_vertices,
+            },
+        ],
+        reps: vec![RenderArtifactRepDescriptor {
+            object_id: 1,
+            rep_kind: RenderArtifactRepKind::Surface,
+            topology: RenderArtifactPrimitiveTopology::TriangleList,
+            geometry: handle(11),
+            count: None,
+            indirect: Some(handle(12)),
+            element_count: 0,
+            max_element_count: source_vertices,
+            atom_offset: 5,
+            atom_count: 8,
+            material_rgba: [0.5, 0.5, 0.5, 1.0],
+            transparency: 0.5,
+        }],
+    };
+    let mut plan = plan::plan_artifact_primitives(&snapshot).expect("plan");
+    triangles::prepare_triangle_gpu_metadata(&mut plan).expect("surface metadata");
+
+    assert_eq!(plan.triangle_count, source_triangles as u32);
+    assert_eq!(
+        streaming::choose_artifact_ray_plan(&plan, &limits),
+        streaming::ArtifactRayPlan::StreamingFallback
+    );
+    let shape = streaming::choose_streaming_chunk_shape(
+        &plan,
+        &limits,
+        limits.max_compute_workgroups_per_dimension,
+    )
+    .expect("streaming chunk shape");
+
+    assert!(shape.triangle_capacity < plan.triangle_count);
+    assert!(
+        u64::from(shape.triangle_capacity) * std::mem::size_of::<ArtifactTriangle>() as u64
+            <= limits.max_storage_buffer_binding_size
+    );
+}
+
+#[test]
+fn streaming_chunk_uses_storage_limit_not_largest_source_rep() {
+    let direct_triangles = 64_u64;
+    let surface_triangles = 64_u64;
+    let limits = patinae_scene::GpuDeviceLimits {
+        max_buffer_size: 4_294_967_296,
+        max_storage_buffer_binding_size: 2_147_483_647,
+        max_compute_workgroups_per_dimension: 65_535,
+        max_compute_invocations_per_workgroup: 256,
+        max_compute_workgroup_size_x: 256,
+        max_compute_workgroup_size_y: 1,
+        max_compute_workgroup_size_z: 1,
+        buffer_binding_array: false,
+        storage_resource_binding_array: false,
+    };
+    let snapshot = RenderArtifactSnapshotDescriptor {
+        snapshot_id: 1,
+        layout_version: 2,
+        scene_generation: 7,
+        scene_bounds_min: [0.0, 0.0, 0.0],
+        scene_bounds_max: [1.0, 1.0, 1.0],
+        cull_pass_initialized: true,
+        device_limits: limits,
+        buffers: vec![
+            RenderArtifactBufferDescriptor {
+                handle: handle(10),
+                role: RenderArtifactBufferRole::SceneColorLut,
+                size: 64,
+                stride: COLOR_LUT_STRIDE,
+                element_count: 1,
+            },
+            scene_atoms_descriptor(90, 16),
+            RenderArtifactBufferDescriptor {
+                handle: handle(11),
+                role: RenderArtifactBufferRole::StdVertices,
+                size: direct_triangles * 3 * STD_VERTEX_STRIDE,
+                stride: STD_VERTEX_STRIDE,
+                element_count: direct_triangles * 3,
+            },
+            RenderArtifactBufferDescriptor {
+                handle: handle(12),
+                role: RenderArtifactBufferRole::StdVertices,
+                size: surface_triangles * 3 * STD_VERTEX_STRIDE,
+                stride: STD_VERTEX_STRIDE,
+                element_count: surface_triangles * 3,
+            },
+        ],
+        reps: vec![
+            RenderArtifactRepDescriptor {
+                object_id: 1,
+                rep_kind: RenderArtifactRepKind::Cartoon,
+                topology: RenderArtifactPrimitiveTopology::TriangleList,
+                geometry: handle(11),
+                count: None,
+                indirect: None,
+                element_count: direct_triangles * 3,
+                max_element_count: direct_triangles * 3,
+                atom_offset: 5,
+                atom_count: 8,
+                material_rgba: [0.5, 0.5, 0.5, 1.0],
+                transparency: 0.0,
+            },
+            RenderArtifactRepDescriptor {
+                object_id: 1,
+                rep_kind: RenderArtifactRepKind::Surface,
+                topology: RenderArtifactPrimitiveTopology::TriangleList,
+                geometry: handle(12),
+                count: None,
+                indirect: Some(handle(13)),
+                element_count: 0,
+                max_element_count: surface_triangles * 3,
+                atom_offset: 5,
+                atom_count: 8,
+                material_rgba: [0.5, 0.5, 0.5, 1.0],
+                transparency: 0.5,
+            },
+        ],
+    };
+    let mut plan = plan::plan_artifact_primitives(&snapshot).expect("plan");
+    triangles::prepare_triangle_gpu_metadata(&mut plan).expect("surface metadata");
+
+    let shape = streaming::choose_streaming_chunk_shape(
+        &plan,
+        &limits,
+        limits.max_compute_workgroups_per_dimension,
+    )
+    .expect("streaming chunk shape");
+    let budget =
+        streaming::streaming_triangle_budget(&plan, shape.triangle_capacity).expect("budget");
+
+    assert!(shape.triangle_capacity > direct_triangles as u32);
+    assert!(budget.include_direct_triangles);
+    assert!(budget.visible_triangle_capacity > 0);
+}
+
+#[test]
+fn streaming_budget_reserves_surface_capacity_when_direct_fills_chunk() {
+    let direct_triangles = 64_u64;
+    let surface_triangles = 64_u64;
+    let limits = patinae_scene::GpuDeviceLimits {
+        max_buffer_size: 4_294_967_296,
+        max_storage_buffer_binding_size: 2_147_483_647,
+        max_compute_workgroups_per_dimension: 65_535,
+        max_compute_invocations_per_workgroup: 256,
+        max_compute_workgroup_size_x: 256,
+        max_compute_workgroup_size_y: 1,
+        max_compute_workgroup_size_z: 1,
+        buffer_binding_array: false,
+        storage_resource_binding_array: false,
+    };
+    let snapshot = RenderArtifactSnapshotDescriptor {
+        snapshot_id: 1,
+        layout_version: 2,
+        scene_generation: 7,
+        scene_bounds_min: [0.0, 0.0, 0.0],
+        scene_bounds_max: [1.0, 1.0, 1.0],
+        cull_pass_initialized: true,
+        device_limits: limits,
+        buffers: vec![
+            RenderArtifactBufferDescriptor {
+                handle: handle(10),
+                role: RenderArtifactBufferRole::SceneColorLut,
+                size: 64,
+                stride: COLOR_LUT_STRIDE,
+                element_count: 1,
+            },
+            scene_atoms_descriptor(90, 16),
+            RenderArtifactBufferDescriptor {
+                handle: handle(11),
+                role: RenderArtifactBufferRole::StdVertices,
+                size: direct_triangles * 3 * STD_VERTEX_STRIDE,
+                stride: STD_VERTEX_STRIDE,
+                element_count: direct_triangles * 3,
+            },
+            RenderArtifactBufferDescriptor {
+                handle: handle(12),
+                role: RenderArtifactBufferRole::StdVertices,
+                size: surface_triangles * 3 * STD_VERTEX_STRIDE,
+                stride: STD_VERTEX_STRIDE,
+                element_count: surface_triangles * 3,
+            },
+        ],
+        reps: vec![
+            RenderArtifactRepDescriptor {
+                object_id: 1,
+                rep_kind: RenderArtifactRepKind::Cartoon,
+                topology: RenderArtifactPrimitiveTopology::TriangleList,
+                geometry: handle(11),
+                count: None,
+                indirect: None,
+                element_count: direct_triangles * 3,
+                max_element_count: direct_triangles * 3,
+                atom_offset: 5,
+                atom_count: 8,
+                material_rgba: [0.5, 0.5, 0.5, 1.0],
+                transparency: 0.0,
+            },
+            RenderArtifactRepDescriptor {
+                object_id: 1,
+                rep_kind: RenderArtifactRepKind::Surface,
+                topology: RenderArtifactPrimitiveTopology::TriangleList,
+                geometry: handle(12),
+                count: None,
+                indirect: Some(handle(13)),
+                element_count: 0,
+                max_element_count: surface_triangles * 3,
+                atom_offset: 5,
+                atom_count: 8,
+                material_rgba: [0.5, 0.5, 0.5, 1.0],
+                transparency: 0.5,
+            },
+        ],
+    };
+    let mut plan = plan::plan_artifact_primitives(&snapshot).expect("plan");
+    triangles::prepare_triangle_gpu_metadata(&mut plan).expect("surface metadata");
+
+    let budget = streaming::streaming_triangle_budget(&plan, direct_triangles as u32)
+        .expect("surface-first budget");
+
+    assert!(!budget.include_direct_triangles);
+    assert_eq!(budget.direct_triangle_count, 0);
+    assert_eq!(
+        budget.skipped_direct_triangle_count,
+        direct_triangles as u32
+    );
+    assert_eq!(budget.visible_triangle_capacity, direct_triangles as u32);
+}
+
 // Visibility and indirect draw helpers.
 
 #[test]
 fn visible_triangle_params_uniform_layout_matches_wgsl() {
-    assert_eq!(std::mem::size_of::<ArtifactVisibleTriangleParams>(), 160);
+    assert_eq!(std::mem::size_of::<ArtifactVisibleTriangleParams>(), 176);
 }
 
 #[test]
-fn visible_triangle_counts_decode_as_little_endian_u32_lanes() {
-    let bytes = [7, 0, 0, 0, 0x78, 0x56, 0x34, 0x12];
-
-    let counts = visibility::decode_visible_triangle_counts(&bytes, 2).expect("counts");
-
-    assert_eq!(counts, vec![7, 0x1234_5678]);
-    assert!(visibility::decode_visible_triangle_counts(&bytes[..4], 2)
-        .unwrap_err()
-        .contains("returned 4 bytes, expected 8"));
+fn primitive_metadata_storage_layout_matches_wgsl() {
+    assert_eq!(std::mem::size_of::<ArtifactPrimitiveMetadata>(), 32);
 }
 
 // WGSL expansion and validation.
@@ -203,14 +460,120 @@ fn raytrace_output_buffer_shader_uses_output_buffer_and_empty_node_guard() {
 }
 
 #[test]
-fn artifact_triangle_shader_uses_resolved_vertex_count_without_indirect_draw_args() {
+fn artifact_triangle_shader_uses_gpu_draw_args_without_cpu_decode() {
     let shader = shaders::artifact_triangles();
 
-    assert_shader_lacks(&shader, "draw_args");
-    assert_shader_has(&shader, "params.vertex_capacity / 3u");
+    assert_shader_has(&shader, "draw_args");
+    assert_shader_has(&shader, "min(draw_args[0], params.vertex_capacity)");
+    assert_shader_has(&shader, "params.source_triangle_start");
     assert_shader_has(&shader, "scene_atoms");
     assert_shader_has(&shader, "atom.alpha_pack_b");
     assert_shader_has(&shader, "normal_oct: vec4<u32>");
+}
+
+#[test]
+fn artifact_visible_triangle_shader_uses_gpu_draw_args_and_cursor() {
+    let shader = shaders::artifact_visible_triangles();
+
+    assert_shader_has(&shader, "draw_args");
+    assert_shader_has(&shader, "min(draw_args[0], params.source_vertex_count)");
+    assert_shader_has(&shader, "triangle_index >= params.source_triangle_count");
+    assert_shader_has(&shader, "params.source_triangle_start");
+    assert_shader_has(
+        &shader,
+        "atomicAdd(&visible_counts[params.counter_index], 1u)",
+    );
+    assert_shader_has(&shader, "visible_index >= params.output_triangle_capacity");
+}
+
+#[test]
+fn artifact_metadata_finalize_shader_caps_visible_count_and_marks_overflow() {
+    let shader = shaders::artifact_finalize_streaming_metadata();
+
+    assert_shader_has(&shader, "atomicLoad(&visible_counts[params.counter_index])");
+    assert_shader_has(
+        &shader,
+        "min(visible_count, params.visible_triangle_capacity)",
+    );
+    assert_shader_has(&shader, "metadata.primitive_count");
+    assert_shader_has(&shader, "metadata.overflow");
+    assert_shader_has(&shader, "leaf_dispatch_args[0]");
+    assert_shader_has(&shader, "workgroups_for_items(metadata.primitive_count)");
+}
+
+#[test]
+fn primitive_metadata_readback_decodes_layout() {
+    let metadata = ArtifactPrimitiveMetadata {
+        sphere_count: 1,
+        cylinder_count: 2,
+        capsule_count: 3,
+        triangle_count: 4,
+        primitive_count: 10,
+        triangle_capacity: 12,
+        visible_triangle_count: 4,
+        overflow: 0,
+    };
+
+    let decoded = dispatch::decode_primitive_metadata_readback(bytemuck::bytes_of(&metadata))
+        .expect("metadata readback");
+
+    assert_eq!(decoded.sphere_count, 1);
+    assert_eq!(decoded.primitive_count, 10);
+    assert_eq!(decoded.visible_triangle_count, 4);
+}
+
+#[test]
+fn raytrace_readback_split_preserves_export_pixels_after_debug_metadata() {
+    let metadata = ArtifactPrimitiveMetadata {
+        sphere_count: 1,
+        cylinder_count: 0,
+        capsule_count: 0,
+        triangle_count: 7,
+        primitive_count: 8,
+        triangle_capacity: 16,
+        visible_triangle_count: 7,
+        overflow: 1,
+    };
+    let pixels = vec![9_u8; 16];
+
+    let readbacks = dispatch::split_raytrace_readbacks(
+        dispatch::RaytraceDispatchTarget::CpuReadback,
+        true,
+        vec![bytemuck::bytes_of(&metadata).to_vec(), pixels.clone()],
+    )
+    .expect("split readbacks");
+
+    let decoded = readbacks.metadata.expect("metadata");
+    assert_eq!(decoded.triangle_count, 7);
+    assert_eq!(decoded.overflow, 1);
+    assert_eq!(readbacks.pixels.expect("pixels"), pixels);
+}
+
+#[test]
+fn raytrace_viewport_readback_split_allows_zero_default_readbacks() {
+    let readbacks = dispatch::split_raytrace_readbacks(
+        dispatch::RaytraceDispatchTarget::ViewportGpu,
+        false,
+        Vec::new(),
+    )
+    .expect("split readbacks");
+
+    assert!(readbacks.metadata.is_none());
+    assert!(readbacks.pixels.is_none());
+}
+
+#[test]
+fn artifact_bvh_and_raytrace_shaders_read_gpu_primitive_metadata() {
+    let bvh = shaders::artifact_bvh();
+    let raytrace = shaders::artifact_raytrace_output_buffer();
+
+    assert_shader_has(&bvh, "var<storage, read> metadata: PrimitiveMetadata");
+    assert_shader_has(&bvh, "metadata.primitive_count");
+    assert_shader_has(&bvh, "fn active_leaf_count");
+    assert_shader_has(&bvh, "fn child_node_or_empty");
+    assert_shader_has(&bvh, "child_leaf_start >= active_leaf_count()");
+    assert_shader_has(&raytrace, "var<storage, read> metadata: PrimitiveMetadata");
+    assert_shader_has(&raytrace, "prim_idx < metadata.triangle_count");
 }
 
 #[test]
@@ -225,9 +588,32 @@ fn artifact_raytrace_shader_decodes_compact_triangle_normals() {
 }
 
 #[test]
+fn raytrace_shaders_gate_transparent_hit_shadows() {
+    let artifact = shaders::artifact_raytrace_output_buffer();
+    for shader in [shaders::RAYTRACE, artifact.as_str()] {
+        assert_shader_has(
+            shader,
+            "fn should_cast_shadow_for_hit(hit: HitInfo) -> bool",
+        );
+        assert_shader_has(shader, "uniforms.ray_transparency_shadows != 0u");
+        assert_shader_has(shader, "let cast_shadows = should_cast_shadow_for_hit(hit)");
+        assert_shader_has(shader, "if cast_shadows && headlight_ndotl > 0.001");
+        assert_shader_has(shader, "if i == 0 && cast_shadows && ndotl > 0.001");
+        assert_shader_lacks(
+            shader,
+            "if uniforms.ray_shadow != 0u && headlight_ndotl > 0.001",
+        );
+    }
+}
+
+#[test]
 fn artifact_wgsl_modules_parse_and_validate() {
-    let modules: [(&str, String); 10] = [
+    let modules: [(&str, String); 11] = [
         ("ray.main", shaders::RAYTRACE.to_string()),
+        (
+            "ray.standalone.downsample",
+            shaders::STANDALONE_DOWNSAMPLE.to_string(),
+        ),
         ("ray.artifact.spheres", shaders::artifact_spheres()),
         (
             "ray.artifact.stick_capsules",
@@ -239,12 +625,12 @@ fn artifact_wgsl_modules_parse_and_validate() {
         ),
         ("ray.artifact.triangles", shaders::artifact_triangles()),
         (
-            "ray.artifact.count_visible_triangles",
-            shaders::artifact_count_visible_triangles(),
-        ),
-        (
             "ray.artifact.visible_triangles",
             shaders::artifact_visible_triangles(),
+        ),
+        (
+            "ray.artifact.finalize_streaming_metadata",
+            shaders::artifact_finalize_streaming_metadata(),
         ),
         ("ray.artifact.bvh", shaders::artifact_bvh()),
         (
@@ -306,6 +692,8 @@ fn artifact_plan_uses_scene_color_lut_and_cartoon_slot() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![
             RenderArtifactBufferDescriptor {
@@ -366,6 +754,8 @@ fn artifact_plan_accepts_native_instance_artifacts() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![
             RenderArtifactBufferDescriptor {
@@ -485,6 +875,8 @@ fn artifact_plan_skips_undersized_instance_geometry() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![
             RenderArtifactBufferDescriptor {
@@ -545,6 +937,8 @@ fn artifact_plan_accepts_indirect_surface_capacity() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![
             RenderArtifactBufferDescriptor {
@@ -594,7 +988,7 @@ fn artifact_plan_accepts_indirect_surface_capacity() {
 // Surface visibility planning.
 
 #[test]
-fn surface_visibility_counts_compact_triangle_offsets() {
+fn surface_visibility_assigns_gpu_cursor_metadata_without_compacting_cpu_offsets() {
     let snapshot = RenderArtifactSnapshotDescriptor {
         snapshot_id: 1,
         layout_version: 2,
@@ -610,6 +1004,8 @@ fn surface_visibility_counts_compact_triangle_offsets() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![
             RenderArtifactBufferDescriptor {
@@ -668,15 +1064,17 @@ fn surface_visibility_counts_compact_triangle_offsets() {
     };
     let mut plan = plan::plan_artifact_primitives(&snapshot).expect("plan");
 
-    apply_visible_surface_triangle_counts(&mut plan, &[1]).expect("visibility counts");
+    let surface_rep_count =
+        triangles::prepare_triangle_gpu_metadata(&mut plan).expect("surface metadata");
 
-    assert_eq!(plan.triangle_count, 3);
+    assert_eq!(surface_rep_count, 1);
+    assert_eq!(plan.triangle_count, 5);
     assert_eq!(plan.triangle_reps.len(), 2);
     assert_eq!(plan.triangle_reps[0].triangle_offset, 0);
     assert_eq!(plan.triangle_reps[0].triangle_count, 2);
     assert_eq!(plan.triangle_reps[0].visibility_counter_index, None);
     assert_eq!(plan.triangle_reps[1].triangle_offset, 2);
-    assert_eq!(plan.triangle_reps[1].triangle_count, 1);
+    assert_eq!(plan.triangle_reps[1].triangle_count, 3);
     assert_eq!(plan.triangle_reps[1].source_triangle_count(), 3);
     assert_eq!(plan.triangle_reps[1].visibility_counter_index, Some(0));
     assert_eq!(
@@ -704,6 +1102,8 @@ fn artifact_plan_rejects_direct_triangle_count_not_divisible_by_three() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![
             RenderArtifactBufferDescriptor {
@@ -762,6 +1162,8 @@ fn artifact_plan_rejects_uninitialized_cull_counts() {
             max_compute_workgroup_size_x: 256,
             max_compute_workgroup_size_y: 1,
             max_compute_workgroup_size_z: 1,
+            buffer_binding_array: false,
+            storage_resource_binding_array: false,
         },
         buffers: vec![RenderArtifactBufferDescriptor {
             handle: handle(10),

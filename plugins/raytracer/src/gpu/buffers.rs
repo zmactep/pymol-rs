@@ -5,6 +5,48 @@ use wgpu::util::DeviceExt;
 use crate::error::{RaytraceError, RaytraceResult};
 use crate::primitive::Primitives;
 
+/// Readback buffer layout for tightly extracted RGBA rows.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ReadbackLayout {
+    pub padded_bytes_per_row: u32,
+    pub buffer_size: u64,
+}
+
+impl ReadbackLayout {
+    /// Create a texture-copy compatible readback layout.
+    pub fn new(width: u32, height: u32) -> Self {
+        let bytes_per_pixel = 4u32;
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+        let buffer_size = u64::from(padded_bytes_per_row) * u64::from(height);
+        Self {
+            padded_bytes_per_row,
+            buffer_size,
+        }
+    }
+}
+
+/// Persistent MAP_READ target for final raytrace pixels.
+pub(crate) struct ReadbackBuffer {
+    pub buffer: wgpu::Buffer,
+    pub layout: ReadbackLayout,
+}
+
+impl ReadbackBuffer {
+    /// Create a readback buffer for the final output size.
+    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let layout = ReadbackLayout::new(width, height);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Raytrace Readback"),
+            size: layout.buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        Self { buffer, layout }
+    }
+}
+
 /// Check that primitive buffers don't exceed GPU limits.
 pub(crate) fn validate_buffer_sizes(
     device: &wgpu::Device,
@@ -90,28 +132,14 @@ pub(crate) fn create_storage_buffer<T: bytemuck::Pod + bytemuck::Zeroable>(
     }
 }
 
-/// Record a texture-to-buffer copy on an encoder and return the readback buffer
-/// along with row alignment info needed for pixel extraction.
-pub(crate) fn record_texture_copy(
-    device: &wgpu::Device,
+/// Record a texture-to-buffer copy into a reusable readback buffer.
+pub(crate) fn record_texture_copy_to_buffer(
     encoder: &mut wgpu::CommandEncoder,
     output_texture: &wgpu::Texture,
+    readback_buffer: &ReadbackBuffer,
     width: u32,
     height: u32,
-) -> (wgpu::Buffer, u32) {
-    let bytes_per_pixel = 4u32;
-    let unpadded_bytes_per_row = width * bytes_per_pixel;
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
-    let buffer_size = (padded_bytes_per_row * height) as u64;
-
-    let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Raytrace Readback"),
-        size: buffer_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
+) {
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: output_texture,
@@ -120,10 +148,10 @@ pub(crate) fn record_texture_copy(
             aspect: wgpu::TextureAspect::All,
         },
         wgpu::TexelCopyBufferInfo {
-            buffer: &readback_buffer,
+            buffer: &readback_buffer.buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(padded_bytes_per_row),
+                bytes_per_row: Some(readback_buffer.layout.padded_bytes_per_row),
                 rows_per_image: Some(height),
             },
         },
@@ -133,8 +161,6 @@ pub(crate) fn record_texture_copy(
             depth_or_array_layers: 1,
         },
     );
-
-    (readback_buffer, padded_bytes_per_row)
 }
 
 /// Map and read pixels from a readback buffer (call after queue submission).

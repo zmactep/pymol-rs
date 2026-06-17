@@ -3,9 +3,8 @@
 //! Provides the `ray` command (perform raytracing).
 
 use patinae_plugin::prelude::*;
-use patinae_scene::ViewportImage;
 
-use crate::scene::raytrace_scene;
+use crate::scene::{raytrace_scene, RaytraceSceneOutput, RaytraceSceneTarget};
 use crate::settings::read_ray_settings;
 
 // ---------------------------------------------------------------------------
@@ -77,6 +76,7 @@ impl Command for RayCommand {
                 .unwrap_or_else(|| ctx.viewer.settings().ui.antialias as i64) as u32;
 
         let filename = args.get_str(3).or_else(|| args.get_named_str("filename"));
+        let export_mode = filename.is_some();
 
         let quiet = args
             .get_bool(4)
@@ -100,60 +100,95 @@ impl Command for RayCommand {
         let start = Instant::now();
 
         // Perform raytracing (handles borrow-checker dance internally)
-        let (image_data, w, h) = raytrace_scene(
+        let output = raytrace_scene(
             ctx.viewer,
             &ray_settings,
             Some(final_width),
             Some(final_height),
             antialias,
+            if export_mode {
+                RaytraceSceneTarget::Export
+            } else {
+                RaytraceSceneTarget::Viewport
+            },
         )
         .map_err(|e| CmdError::execution(format!("Ray tracing failed: {e}")))?;
 
         let elapsed = start.elapsed();
 
-        if let Some(path) = filename {
-            let path = expand_path(path);
-            let path = if path.extension().map(|e| e.to_ascii_lowercase()) != Some("png".into()) {
-                path.with_extension("png")
-            } else {
-                path.to_path_buf()
-            };
+        match (filename, output) {
+            (
+                Some(path),
+                RaytraceSceneOutput::CpuImage {
+                    data: image_data,
+                    width: w,
+                    height: h,
+                    profile_lines,
+                },
+            ) => {
+                let path = expand_path(path);
+                let path = if path.extension().map(|e| e.to_ascii_lowercase()) != Some("png".into())
+                {
+                    path.with_extension("png")
+                } else {
+                    path.to_path_buf()
+                };
 
-            image::save_buffer(&path, &image_data, w, h, image::ColorType::Rgba8)
-                .map_err(|e| CmdError::execution(format!("Failed to save PNG: {e}")))?;
+                image::save_buffer(&path, &image_data, w, h, image::ColorType::Rgba8)
+                    .map_err(|e| CmdError::execution(format!("Failed to save PNG: {e}")))?;
 
-            if !quiet {
-                ctx.print(&format!(
-                    " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
-                    elapsed.as_secs() / 3600,
-                    (elapsed.as_secs() % 3600) / 60,
-                    elapsed.as_secs() % 60,
-                    elapsed.subsec_millis() / 10,
-                    w,
-                    h
-                ));
-                ctx.print(&format!(" Saved \"{}\"", path.display()));
+                if !quiet {
+                    for line in &profile_lines {
+                        ctx.print(line);
+                    }
+                    ctx.print(&format!(
+                        " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
+                        elapsed.as_secs() / 3600,
+                        (elapsed.as_secs() % 3600) / 60,
+                        elapsed.as_secs() % 60,
+                        elapsed.subsec_millis() / 10,
+                        w,
+                        h
+                    ));
+                    ctx.print(&format!(" Saved \"{}\"", path.display()));
+                }
             }
-        } else {
-            ctx.viewer.set_viewport_image(Some(ViewportImage {
-                data: image_data,
-                width: w,
-                height: h,
-            }));
-
-            if !quiet {
-                ctx.print(&format!(
-                    " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
-                    elapsed.as_secs() / 3600,
-                    (elapsed.as_secs() % 3600) / 60,
-                    elapsed.as_secs() % 60,
-                    elapsed.subsec_millis() / 10,
-                    w,
-                    h
+            (
+                None,
+                RaytraceSceneOutput::GpuViewport {
+                    width: w,
+                    height: h,
+                    profile_lines,
+                },
+            ) => {
+                ctx.viewer.request_redraw();
+                if !quiet {
+                    for line in &profile_lines {
+                        ctx.print(line);
+                    }
+                    ctx.print(&format!(
+                        " Ray: render time {:02}:{:02}:{:02}.{:02}  ({}x{})",
+                        elapsed.as_secs() / 3600,
+                        (elapsed.as_secs() % 3600) / 60,
+                        elapsed.as_secs() % 60,
+                        elapsed.subsec_millis() / 10,
+                        w,
+                        h
+                    ));
+                    ctx.print(
+                        " Ray trace complete. Use 'png filename' to save, or interact to dismiss.",
+                    );
+                }
+            }
+            (Some(_), RaytraceSceneOutput::GpuViewport { .. }) => {
+                return Err(CmdError::execution(
+                    "ray export unexpectedly produced a GPU viewport result".to_string(),
                 ));
-                ctx.print(
-                    " Ray trace complete. Use 'png filename' to save, or interact to dismiss.",
-                );
+            }
+            (None, RaytraceSceneOutput::CpuImage { .. }) => {
+                return Err(CmdError::execution(
+                    "viewport ray unexpectedly produced CPU image data".to_string(),
+                ));
             }
         }
 

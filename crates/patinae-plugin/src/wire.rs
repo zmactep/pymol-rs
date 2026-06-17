@@ -33,7 +33,7 @@ use patinae_settings::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Runtime wire version for MessagePack DTOs.
-pub const RUNTIME_WIRE_VERSION: u32 = 8;
+pub const RUNTIME_WIRE_VERSION: u32 = 12;
 
 /// Maximum MessagePack payload copied across the runtime ABI.
 pub const MAX_WIRE_PAYLOAD_LEN: usize = 64 * 1024 * 1024;
@@ -697,6 +697,17 @@ pub enum WireCommandRuntimeRequest {
         id: u64,
         batch: GpuSubmitBatch,
     },
+    /// Promote a command-scoped GPU RGBA8 buffer to the native viewport.
+    SetViewportGpuImageFromBuffer {
+        /// Correlation id.
+        id: u64,
+        /// Source buffer handle.
+        buffer: GpuHandle,
+        /// Image width in pixels.
+        width: u32,
+        /// Image height in pixels.
+        height: u32,
+    },
     /// Drop host-owned GPU handles before command end.
     GpuDropHandles {
         /// Correlation id.
@@ -769,6 +780,8 @@ pub struct WireCommandOutput {
     pub session: Vec<u8>,
     /// Viewport image set by the plugin, if any.
     pub viewport_image: Option<ViewportImage>,
+    /// Whether `viewport_image` should be applied to the host CPU viewport slot.
+    pub viewport_image_changed: bool,
 }
 
 /// Shared host state input for panel and poll callbacks.
@@ -1121,6 +1134,8 @@ mod tests {
                 max_compute_workgroup_size_x: 256,
                 max_compute_workgroup_size_y: 256,
                 max_compute_workgroup_size_z: 64,
+                buffer_binding_array: true,
+                storage_resource_binding_array: true,
             },
             buffers: vec![RenderArtifactBufferDescriptor {
                 handle,
@@ -1229,6 +1244,29 @@ mod tests {
                 height: 4,
                 depth_or_array_layers: 1,
             },
+        };
+        let decoded: GpuBatchCommand = decode(&encode(&command).unwrap()).unwrap();
+        assert_eq!(decoded, command);
+
+        let command = GpuBatchCommand::DispatchComputeIndirect {
+            pipeline: GpuHandle {
+                id: 8,
+                kind: GpuHandleKind::ComputePipeline,
+                generation: 1,
+            },
+            bind_groups: vec![GpuHandle {
+                id: 9,
+                kind: GpuHandleKind::BindGroup,
+                generation: 1,
+            }],
+            indirect_buffer: buffer,
+            indirect_offset: 12,
+        };
+        let decoded: GpuBatchCommand = decode(&encode(&command).unwrap()).unwrap();
+        assert_eq!(decoded, command);
+
+        let command = GpuBatchCommand::SetProfileScope {
+            name: "surface_compact".to_string(),
         };
         let decoded: GpuBatchCommand = decode(&encode(&command).unwrap()).unwrap();
         assert_eq!(decoded, command);

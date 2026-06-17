@@ -16,6 +16,7 @@ patinae-color = { workspace = true }
 patinae-scene = { workspace = true, default-features = false }
 patinae-settings = { workspace = true }
 patinae-render = { workspace = true, features = ["stats"] }
+raytracer-plugin = { path = "../plugins/raytracer" }
 wgpu = { workspace = true }
 pollster = "0.4"
 flate2 = { workspace = true }
@@ -28,6 +29,10 @@ harness = false
 
 [[bench]]
 name = "render_loop"
+harness = false
+
+[[bench]]
+name = "raytrace_procedure"
 harness = false
 
 [lints]
