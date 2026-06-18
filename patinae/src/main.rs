@@ -2,6 +2,7 @@ mod app;
 mod bridges;
 mod clipboard;
 mod components;
+mod display_recovery;
 mod fetch;
 #[cfg(target_os = "macos")]
 mod macos;
