@@ -173,6 +173,12 @@ impl ViewportRenderer {
         self.viewport_gpu_image.take().is_some()
     }
 
+    pub(crate) fn invalidate_live_textures(&mut self) {
+        self.last_viewport_size = None;
+        self.color_textures.clear();
+        self.color_textures_next = 0;
+    }
+
     fn render_frame(&mut self, session: &mut Session, width: u32, height: u32) -> wgpu::Texture {
         // Resize state's internal targets if the viewport changed.
         let resized = self.last_viewport_size != Some((width, height));

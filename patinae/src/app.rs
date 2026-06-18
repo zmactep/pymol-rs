@@ -46,12 +46,44 @@ const TRANSIENT_NOTIFICATION_SECS: u64 = 2;
 const BYTES_PER_GIB: u64 = 1024 * 1024 * 1024;
 const PATINAE_DESIRED_MAX_BUFFER_SIZE: u64 = 4 * BYTES_PER_GIB;
 const PATINAE_DESIRED_MAX_STORAGE_BUFFER_BINDING_SIZE: u32 = (2 * BYTES_PER_GIB - 1) as u32;
+// A few direct redraws give macOS display-link / monitor transitions time to
+// re-enter the normal continuous render loop after clamshell or scale changes.
+const DISPLAY_RECOVERY_REDRAW_FRAMES: u8 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartupAction {
     Warning(String),
     RunPatinaerc(PathBuf),
     RouteArgvFile(PathBuf),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DisplayRecovery {
+    live_textures_invalid: bool,
+    redraw_frames_remaining: u8,
+}
+
+impl DisplayRecovery {
+    fn mark_transition(&mut self) {
+        self.live_textures_invalid = true;
+        self.redraw_frames_remaining = self
+            .redraw_frames_remaining
+            .max(DISPLAY_RECOVERY_REDRAW_FRAMES);
+    }
+
+    fn take_live_texture_invalidation(&mut self) -> bool {
+        let invalid = self.live_textures_invalid;
+        self.live_textures_invalid = false;
+        invalid
+    }
+
+    fn consume_redraw_request(&mut self) -> bool {
+        if self.redraw_frames_remaining == 0 {
+            return false;
+        }
+        self.redraw_frames_remaining -= 1;
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +108,7 @@ pub struct App {
     viewport: ViewportBridge,
     platform: PlatformBridge,
     prev_theme: ThemeMode,
+    display_recovery: Rc<Cell<DisplayRecovery>>,
     /// Shared accumulator for trackpad pinch-zoom gestures (macOS).
     /// Written by `on_winit_window_event`, consumed in `render_frame`.
     pub(crate) pinch_accumulator: Rc<Cell<f64>>,
@@ -168,6 +201,7 @@ impl App {
             viewport: ViewportBridge::new(800, 500),
             platform: PlatformBridge::new(),
             prev_theme: ThemeMode::Dark,
+            display_recovery: Rc::new(Cell::new(DisplayRecovery::default())),
             pinch_accumulator: Rc::new(Cell::new(0.0)),
             winit_modifiers: Rc::new(Cell::new((false, false, false, false))),
             window_focus_lost: Rc::new(Cell::new(false)),
@@ -198,6 +232,7 @@ impl App {
         self.viewport.resize(vw, vh);
         self.kernel.resize(vw, vh);
         self.renderer = Some(renderer);
+        self.mark_display_transition();
 
         if let Some(info) = info {
             log::info!("GPU: {} ({})", info.device_name, info.backend);
@@ -212,6 +247,26 @@ impl App {
     pub fn teardown_renderer(&mut self) {
         log::info!("Rendering teardown — dropping viewport");
         self.renderer = None;
+    }
+
+    fn mark_display_transition(&self) {
+        let mut recovery = self.display_recovery.get();
+        recovery.mark_transition();
+        self.display_recovery.set(recovery);
+    }
+
+    fn take_live_texture_invalidation(&self) -> bool {
+        let mut recovery = self.display_recovery.get();
+        let invalid = recovery.take_live_texture_invalidation();
+        self.display_recovery.set(recovery);
+        invalid
+    }
+
+    fn consume_display_recovery_redraw(&self) -> bool {
+        let mut recovery = self.display_recovery.get();
+        let should_redraw = recovery.consume_redraw_request();
+        self.display_recovery.set(recovery);
+        should_redraw
     }
 
     pub(crate) fn submit_repl_command(&mut self, cmd: String, app: &AppWindow) {
@@ -327,6 +382,11 @@ impl App {
         // Resize + Input + Theme + Platform
         self.viewport.resize(vw, vh);
         self.kernel.resize(vw, vh);
+        if self.take_live_texture_invalidation() {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.invalidate_live_textures();
+            }
+        }
         // Reset all input on window focus loss (OS may swallow mouse-up events)
         if self.window_focus_lost.get() {
             self.kernel.viewport.input.reset();
@@ -520,6 +580,9 @@ impl App {
 
         self.capture_pending_recent_thumbnail(app);
         self.run_startup_actions(app, (vw, vh));
+        if self.consume_display_recovery_redraw() {
+            request_display_recovery_redraw(app.window());
+        }
     }
 
     fn poll_plugins(&mut self, viewport_size: (u32, u32)) {
@@ -1043,12 +1106,13 @@ impl App {
         let ws = app.window().size();
         let sf = app.window().scale_factor();
         let layout = app.global::<LayoutState>();
-        let sidebar = SIDEBAR_WIDTH_LP * sf;
-        let right = layout.get_effective_right_dock_width() * sf;
-        let bottom = layout.get_effective_bottom_dock_height() * sf;
-        let vw = (ws.width as f32 - sidebar - right).max(1.0) as u32;
-        let vh = (ws.height as f32 - bottom).max(1.0) as u32;
-        (vw, vh)
+        viewport_size_from_parts(
+            ws.width,
+            ws.height,
+            sf,
+            layout.get_effective_right_dock_width(),
+            layout.get_effective_bottom_dock_height(),
+        )
     }
 
     fn pointer_snapshot(
@@ -1127,6 +1191,110 @@ impl App {
             && point_logical.0 < pill_x + REPL_PILL_WIDTH_LP
             && point_logical.1 >= pill_y
             && point_logical.1 < pill_y + REPL_PILL_HEIGHT_LP
+    }
+}
+
+fn viewport_size_from_parts(
+    window_width_px: u32,
+    window_height_px: u32,
+    scale_factor: f32,
+    right_dock_width_lp: f32,
+    bottom_dock_height_lp: f32,
+) -> (u32, u32) {
+    let scale_factor = scale_factor.max(0.0);
+    let sidebar = SIDEBAR_WIDTH_LP * scale_factor;
+    let right = right_dock_width_lp * scale_factor;
+    let bottom = bottom_dock_height_lp * scale_factor;
+    let width = (window_width_px as f32 - sidebar - right).max(1.0) as u32;
+    let height = (window_height_px as f32 - bottom).max(1.0) as u32;
+    (width, height)
+}
+
+fn window_event_diagnostics_enabled() -> bool {
+    std::env::var("PATINAE_WINDOW_EVENTS")
+        .ok()
+        .is_some_and(|value| value == "1")
+}
+
+fn request_display_recovery_redraw(slint_window: &slint::Window) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    slint_window.request_redraw();
+    let _ = slint_window.with_winit_window(|winit_window| {
+        winit_window.request_redraw();
+    });
+}
+
+fn mark_display_transition_and_redraw(
+    recovery: &Cell<DisplayRecovery>,
+    slint_window: &slint::Window,
+) {
+    let mut state = recovery.get();
+    state.mark_transition();
+    recovery.set(state);
+    request_display_recovery_redraw(slint_window);
+}
+
+fn log_window_event(slint_window: &slint::Window, event: &str, detail: std::fmt::Arguments<'_>) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    if !window_event_diagnostics_enabled() {
+        return;
+    }
+
+    let slint_size = slint_window.size();
+    let slint_scale = slint_window.scale_factor();
+    let winit_info = slint_window.with_winit_window(|winit_window| {
+        let size = winit_window.inner_size();
+        let monitor = winit_window.current_monitor();
+        let monitor_name = monitor
+            .as_ref()
+            .and_then(|monitor| monitor.name())
+            .unwrap_or_else(|| "unknown".to_string());
+        let refresh_millihertz = monitor.and_then(|monitor| monitor.refresh_rate_millihertz());
+        (
+            size.width,
+            size.height,
+            winit_window.scale_factor(),
+            monitor_name,
+            refresh_millihertz,
+        )
+    });
+
+    if let Some((winit_width, winit_height, winit_scale, monitor_name, refresh_millihertz)) =
+        winit_info
+    {
+        log::info!(
+            "window event {event}: {detail}; slint_size={}x{} slint_scale={:.3} \
+             winit_inner={}x{} winit_scale={:.3} monitor={} refresh_millihertz={:?}",
+            slint_size.width,
+            slint_size.height,
+            slint_scale,
+            winit_width,
+            winit_height,
+            winit_scale,
+            monitor_name,
+            refresh_millihertz,
+        );
+    } else {
+        log::info!(
+            "window event {event}: {detail}; slint_size={}x{} slint_scale={:.3} winit=unavailable",
+            slint_size.width,
+            slint_size.height,
+            slint_scale,
+        );
+    }
+}
+
+fn log_selected_gpu(info: &slint::wgpu_28::wgpu::AdapterInfo) {
+    if window_event_diagnostics_enabled() {
+        log::info!(
+            "selected GPU: {} ({:?}) vendor={} device={}",
+            info.name,
+            info.backend,
+            info.vendor,
+            info.device,
+        );
     }
 }
 
@@ -1219,6 +1387,8 @@ fn patinae_wgpu_configuration(
 
     let adapter_limits = adapter.limits();
     let adapter_features = adapter.features();
+    let adapter_info = adapter.get_info();
+    log_selected_gpu(&adapter_info);
     let binding_array_features = slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY
         | slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY;
     let requested_binding_array_features = adapter_features & binding_array_features;
@@ -1312,6 +1482,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         #[cfg(target_os = "macos")]
         let pinch_accum = app.borrow().pinch_accumulator.clone();
+        let display_recovery = app.borrow().display_recovery.clone();
         let winit_mods = app.borrow().winit_modifiers.clone();
         let focus_lost = app.borrow().window_focus_lost.clone();
         let cursor = app.borrow().cursor_pos.clone();
@@ -1361,6 +1532,32 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     WindowEvent::DroppedFile(path) => {
                         app_for_drop.borrow_mut().route_dropped_file(path);
                         slint_window.request_redraw();
+                    }
+                    WindowEvent::Resized(size) => {
+                        log_window_event(
+                            slint_window,
+                            "resized",
+                            format_args!("size={}x{}", size.width, size.height),
+                        );
+                        mark_display_transition_and_redraw(&display_recovery, slint_window);
+                    }
+                    WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                        log_window_event(
+                            slint_window,
+                            "scale-factor-changed",
+                            format_args!("scale_factor={scale_factor:.3}"),
+                        );
+                        mark_display_transition_and_redraw(&display_recovery, slint_window);
+                    }
+                    WindowEvent::Occluded(occluded) => {
+                        log_window_event(
+                            slint_window,
+                            "occluded",
+                            format_args!("occluded={occluded}"),
+                        );
+                        if !occluded {
+                            mark_display_transition_and_redraw(&display_recovery, slint_window);
+                        }
                     }
                     WindowEvent::ModifiersChanged(modifiers) => {
                         let state = modifiers.state();
@@ -1421,7 +1618,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
+                    WindowEvent::Focused(true) => {
+                        log_window_event(slint_window, "focused", format_args!("focused=true"));
+                        mark_display_transition_and_redraw(&display_recovery, slint_window);
+                    }
                     WindowEvent::Focused(false) => {
+                        log_window_event(slint_window, "focused", format_args!("focused=false"));
                         winit_mods.set((false, false, false, false));
                         buttons.set((false, false, false));
                         cursor_known.set(false);
@@ -1489,6 +1691,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             slint::RenderingState::RenderingSetup => {
                 if let Some(w) = window_weak.upgrade() {
                     app_rc.borrow_mut().setup_renderer(api, &w);
+                    log_window_event(w.window(), "rendering-setup", format_args!("wgpu-ready"));
+                    request_display_recovery_redraw(w.window());
                 }
             }
             slint::RenderingState::BeforeRendering => {
@@ -1838,6 +2042,59 @@ mod tests {
         assert_eq!(required.max_texture_dimension_1d, 16_384);
         assert_eq!(required.max_texture_dimension_2d, 32_768);
         assert_eq!(required.max_texture_dimension_3d, 2_048);
+    }
+
+    #[test]
+    fn display_recovery_coalesces_repeated_transitions() {
+        let mut recovery = DisplayRecovery::default();
+
+        recovery.mark_transition();
+        recovery.mark_transition();
+
+        assert!(recovery.take_live_texture_invalidation());
+        assert!(!recovery.take_live_texture_invalidation());
+        let mut redraws = 0;
+        while recovery.consume_redraw_request() {
+            redraws += 1;
+        }
+        assert_eq!(redraws, DISPLAY_RECOVERY_REDRAW_FRAMES);
+        assert!(!recovery.consume_redraw_request());
+    }
+
+    #[test]
+    fn display_recovery_refreshes_redraw_burst_on_new_transition() {
+        let mut recovery = DisplayRecovery::default();
+
+        recovery.mark_transition();
+        assert!(recovery.consume_redraw_request());
+        recovery.mark_transition();
+
+        let mut redraws = 0;
+        while recovery.consume_redraw_request() {
+            redraws += 1;
+        }
+        assert_eq!(redraws, DISPLAY_RECOVERY_REDRAW_FRAMES);
+    }
+
+    #[test]
+    fn viewport_size_subtracts_logical_panels_at_current_scale() {
+        assert_eq!(
+            viewport_size_from_parts(1000, 600, 1.0, 200.0, 100.0),
+            (752, 500)
+        );
+        assert_eq!(
+            viewport_size_from_parts(1500, 900, 1.5, 200.0, 100.0),
+            (1128, 750)
+        );
+        assert_eq!(
+            viewport_size_from_parts(2000, 1200, 2.0, 200.0, 100.0),
+            (1504, 1000)
+        );
+    }
+
+    #[test]
+    fn viewport_size_clamps_to_one_physical_pixel() {
+        assert_eq!(viewport_size_from_parts(10, 10, 2.0, 200.0, 100.0), (1, 1));
     }
 
     #[test]

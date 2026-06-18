@@ -50,103 +50,6 @@ fn parse_rep(name: &str) -> Option<RepMask> {
     }
 }
 
-fn visibility_toggle_dirty(rep: RepMask) -> DirtyFlags {
-    if matches!(
-        rep,
-        RepMask::SURFACE | RepMask::MESH | RepMask::CARTOON | RepMask::RIBBON
-    ) {
-        DirtyFlags::VISIBILITY
-    } else {
-        DirtyFlags::REPS
-    }
-}
-
-fn show_selected_rep(
-    mol_obj: &mut patinae_scene::MoleculeObject,
-    selected: &patinae_select::SelectionResult,
-    rep: RepMask,
-) {
-    let selected_all_atoms = selected.count() == mol_obj.molecule().atom_count();
-    if rep.can_toggle_with_draw_mask()
-        && selected_all_atoms
-        && mol_obj.visible_reps().is_visible(rep)
-        && !mol_obj.draw_reps().is_visible(rep)
-        && mol_obj.can_restore_draw_mask(rep)
-    {
-        let mut draw_reps = mol_obj.draw_reps();
-        draw_reps.set_visible(rep);
-        mol_obj.set_draw_reps(draw_reps);
-        return;
-    }
-
-    let dirty = visibility_toggle_dirty(rep);
-    {
-        let mol_mut = mol_obj.molecule_mut_with_dirty(dirty);
-        for idx in selected.indices() {
-            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                atom.repr.visible_reps.set_visible(rep);
-            }
-        }
-    }
-    let state = mol_obj.state_mut();
-    state.visible_reps.set_visible(rep);
-    state.draw_reps.set_visible(rep);
-    state.clear_draw_mask_restorable(rep);
-}
-
-fn hide_selected_rep(
-    mol_obj: &mut patinae_scene::MoleculeObject,
-    selected: &patinae_select::SelectionResult,
-    rep: RepMask,
-) {
-    let selected_all_atoms = selected.count() == mol_obj.molecule().atom_count();
-    if rep.can_toggle_with_draw_mask() && selected_all_atoms {
-        let mut draw_reps = mol_obj.draw_reps();
-        draw_reps.set_hidden(rep);
-        mol_obj.set_draw_reps(draw_reps);
-        mol_obj.state_mut().mark_draw_mask_restorable(rep);
-        return;
-    }
-
-    let dirty = visibility_toggle_dirty(rep);
-    {
-        let mol_mut = mol_obj.molecule_mut_with_dirty(dirty);
-        for idx in selected.indices() {
-            if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                if rep == RepMask::ALL {
-                    atom.repr.visible_reps = RepMask::NONE;
-                } else {
-                    atom.repr.visible_reps.set_hidden(rep);
-                }
-            }
-        }
-    }
-
-    if selected_all_atoms {
-        if rep == RepMask::ALL {
-            let state = mol_obj.state_mut();
-            state.visible_reps = RepMask::NONE;
-            state.draw_reps = RepMask::NONE;
-            state.clear_draw_mask_restorable(RepMask::ALL);
-        } else {
-            let state = mol_obj.state_mut();
-            state.visible_reps.set_hidden(rep);
-            state.draw_reps.set_hidden(rep);
-            state.clear_draw_mask_restorable(rep);
-        }
-        return;
-    }
-
-    let mut union = RepMask::NONE;
-    for atom in mol_obj.molecule().atoms() {
-        union = union.union(atom.repr.visible_reps);
-    }
-    let state = mol_obj.state_mut();
-    state.visible_reps = union;
-    state.draw_reps = state.draw_reps.intersection(union);
-    state.clear_draw_mask_restorable(rep);
-}
-
 // ============================================================================
 // show command
 // ============================================================================
@@ -207,7 +110,7 @@ impl Command for ShowCommand {
             selection,
             DirtyFlags::empty(),
             |mol_obj, selected| {
-                show_selected_rep(mol_obj, selected, rep);
+                mol_obj.show_rep_for_selection(selected, rep);
             },
         )?;
 
@@ -286,7 +189,7 @@ impl Command for HideCommand {
             selection,
             DirtyFlags::empty(),
             |mol_obj, selected| {
-                hide_selected_rep(mol_obj, selected, rep);
+                mol_obj.hide_rep_for_selection(selected, rep);
             },
         )?;
 
@@ -366,25 +269,9 @@ impl Command for ShowAsCommand {
         let total_affected = for_each_selected_molecule_mut(
             ctx.viewer,
             selection,
-            DirtyFlags::REPS,
+            DirtyFlags::empty(),
             |mol_obj, selected| {
-                let selected_all_atoms = selected.count() == mol_obj.molecule().atom_count();
-                let mol_mut = mol_obj.molecule_mut_with_dirty(DirtyFlags::REPS);
-                for idx in selected.indices() {
-                    if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                        atom.repr.visible_reps = RepMask::NONE;
-                        atom.repr.visible_reps.set_visible(rep);
-                    }
-                }
-                let state = mol_obj.state_mut();
-                if selected_all_atoms {
-                    state.visible_reps = rep;
-                    state.draw_reps = rep;
-                } else {
-                    state.visible_reps.set_visible(rep);
-                    state.draw_reps.set_visible(rep);
-                }
-                state.clear_draw_mask_restorable(RepMask::ALL);
+                mol_obj.show_as_rep_for_selection(selected, rep);
             },
         )?;
 
@@ -1127,12 +1014,12 @@ impl Command for LabelCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{hide_selected_rep, parse_rep, show_selected_rep, visibility_toggle_dirty};
+    use super::parse_rep;
     use crate::CommandExecutor;
     use lin_alg::f32::Vec3;
     use patinae_color::ThemedPalette;
     use patinae_mol::{Atom, Element, ObjectMolecule, RepMask};
-    use patinae_scene::{DirtyFlags, MoleculeObject, Object, Session, SessionAdapter};
+    use patinae_scene::{MoleculeObject, Session, SessionAdapter};
     use patinae_select::{AtomIndex, SelectionResult};
 
     fn run_display_command(session: &mut Session, command: &str) -> bool {
@@ -1150,8 +1037,8 @@ mod tests {
         needs_redraw
     }
 
-    fn cartoon_object() -> MoleculeObject {
-        let mut mol = ObjectMolecule::new("cartoon");
+    fn cartoon_object_named(name: &str) -> MoleculeObject {
+        let mut mol = ObjectMolecule::new(name);
         mol.add_atom(Atom::new("CA", Element::Carbon));
         mol.add_atom(Atom::new("CB", Element::Carbon));
         mol.add_coord_set(patinae_mol::CoordSet::from_vec3(&[
@@ -1159,6 +1046,16 @@ mod tests {
             Vec3::new(1.0, 0.0, 0.0),
         ]));
         MoleculeObject::new(mol)
+    }
+
+    fn prepare_partial_cartoon_then_full_hide(obj: &mut MoleculeObject) {
+        let all_atoms = SelectionResult::all(obj.molecule().atom_count());
+        obj.hide_rep_for_selection(&all_atoms, RepMask::CARTOON);
+        let one_atom =
+            SelectionResult::from_indices(obj.molecule().atom_count(), [AtomIndex(0)].into_iter());
+        obj.show_rep_for_selection(&one_atom, RepMask::CARTOON);
+        obj.hide_rep_for_selection(&all_atoms, RepMask::CARTOON);
+        obj.clear_dirty();
     }
 
     #[test]
@@ -1207,151 +1104,37 @@ mod tests {
     }
 
     #[test]
-    fn visibility_gated_reps_use_visibility_dirty() {
-        for rep in [
-            RepMask::SURFACE,
-            RepMask::MESH,
-            RepMask::CARTOON,
-            RepMask::RIBBON,
-        ] {
-            assert_eq!(visibility_toggle_dirty(rep), DirtyFlags::VISIBILITY);
-        }
-    }
+    fn show_cartoon_command_matches_helper_after_invalid_draw_mask_restore() {
+        let mut helper_obj = cartoon_object_named("obj");
+        prepare_partial_cartoon_then_full_hide(&mut helper_obj);
+        let all_atoms = SelectionResult::all(helper_obj.molecule().atom_count());
+        helper_obj.show_rep_for_selection(&all_atoms, RepMask::CARTOON);
 
-    #[test]
-    fn rebuild_gated_reps_still_use_reps_dirty() {
-        for rep in [
-            RepMask::SPHERES,
-            RepMask::STICKS,
-            RepMask::LINES,
-            RepMask::DOTS,
-            RepMask::LABELS,
-            RepMask::ALL,
-        ] {
-            assert_eq!(visibility_toggle_dirty(rep), DirtyFlags::REPS);
-        }
-    }
+        let mut command_obj = cartoon_object_named("obj");
+        prepare_partial_cartoon_then_full_hide(&mut command_obj);
+        let mut session = Session::new();
+        session.registry.add(command_obj);
 
-    #[test]
-    fn whole_object_cartoon_hide_uses_draw_mask_dirty() {
-        let mut obj = cartoon_object();
-        let selected = SelectionResult::all(obj.molecule().atom_count());
-        obj.clear_dirty();
+        assert!(run_display_command(&mut session, "show cartoon, obj"));
+        let command_obj = session.registry.get_molecule("obj").unwrap();
 
-        hide_selected_rep(&mut obj, &selected, RepMask::CARTOON);
-
-        assert_eq!(obj.dirty_flags(), DirtyFlags::DRAW_MASK);
-        assert!(obj.visible_reps().is_visible(RepMask::CARTOON));
-        assert!(!obj.draw_reps().is_visible(RepMask::CARTOON));
-        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
-        assert!(obj
+        assert_eq!(command_obj.dirty_flags(), helper_obj.dirty_flags());
+        assert_eq!(command_obj.visible_reps(), helper_obj.visible_reps());
+        assert_eq!(command_obj.draw_reps(), helper_obj.draw_reps());
+        assert_eq!(
+            command_obj.draw_mask_restorable_reps(),
+            helper_obj.draw_mask_restorable_reps()
+        );
+        let helper_atom_reps: Vec<_> = helper_obj
             .molecule()
             .atoms()
-            .all(|atom| atom.repr.visible_reps.is_visible(RepMask::CARTOON)));
-    }
-
-    #[test]
-    fn selection_cartoon_hide_keeps_per_atom_visibility_path() {
-        let mut obj = cartoon_object();
-        let selected =
-            SelectionResult::from_indices(obj.molecule().atom_count(), [AtomIndex(0)].into_iter());
-        obj.clear_dirty();
-
-        hide_selected_rep(&mut obj, &selected, RepMask::CARTOON);
-
-        assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
-        assert!(!obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
-        assert!(!obj
-            .molecule()
-            .get_atom(patinae_mol::AtomIndex(0))
-            .unwrap()
-            .repr
-            .visible_reps
-            .is_visible(RepMask::CARTOON));
-        assert!(obj
-            .molecule()
-            .get_atom(patinae_mol::AtomIndex(1))
-            .unwrap()
-            .repr
-            .visible_reps
-            .is_visible(RepMask::CARTOON));
-        assert!(obj.draw_reps().is_visible(RepMask::CARTOON));
-    }
-
-    #[test]
-    fn whole_object_cartoon_show_reuses_materialized_atom_bits() {
-        let mut obj = cartoon_object();
-        let selected = SelectionResult::all(obj.molecule().atom_count());
-        hide_selected_rep(&mut obj, &selected, RepMask::CARTOON);
-        obj.clear_dirty();
-
-        show_selected_rep(&mut obj, &selected, RepMask::CARTOON);
-
-        assert_eq!(obj.dirty_flags(), DirtyFlags::DRAW_MASK);
-        assert!(obj.draw_reps().is_visible(RepMask::CARTOON));
-        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
-    }
-
-    #[test]
-    fn whole_object_cartoon_show_restores_atom_bits_when_draw_is_already_active() {
-        let mut obj = cartoon_object();
-        let one_atom =
-            SelectionResult::from_indices(obj.molecule().atom_count(), [AtomIndex(0)].into_iter());
-        hide_selected_rep(&mut obj, &one_atom, RepMask::CARTOON);
-        obj.clear_dirty();
-        let all_atoms = SelectionResult::all(obj.molecule().atom_count());
-
-        show_selected_rep(&mut obj, &all_atoms, RepMask::CARTOON);
-
-        assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
-        assert!(obj
+            .map(|atom| atom.repr.visible_reps)
+            .collect();
+        let command_atom_reps: Vec<_> = command_obj
             .molecule()
             .atoms()
-            .all(|atom| atom.repr.visible_reps.is_visible(RepMask::CARTOON)));
-    }
-
-    #[test]
-    fn whole_object_cartoon_show_materializes_when_restore_flag_is_missing() {
-        let mut obj = cartoon_object();
-        {
-            let state = obj.state_mut();
-            state.visible_reps.set_visible(RepMask::CARTOON);
-            state.draw_reps.set_hidden(RepMask::CARTOON);
-            state.clear_draw_mask_restorable(RepMask::CARTOON);
-        }
-        obj.molecule_mut()
-            .get_atom_mut(patinae_mol::AtomIndex(1))
-            .unwrap()
-            .repr
-            .visible_reps
-            .set_hidden(RepMask::CARTOON);
-        obj.clear_dirty();
-        let all_atoms = SelectionResult::all(obj.molecule().atom_count());
-
-        show_selected_rep(&mut obj, &all_atoms, RepMask::CARTOON);
-
-        assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
-        assert!(obj.draw_reps().is_visible(RepMask::CARTOON));
-        assert!(!obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
-        assert!(obj
-            .molecule()
-            .atoms()
-            .all(|atom| atom.repr.visible_reps.is_visible(RepMask::CARTOON)));
-    }
-
-    #[test]
-    fn partial_cartoon_mutation_clears_draw_mask_restore_flag() {
-        let mut obj = cartoon_object();
-        let all_atoms = SelectionResult::all(obj.molecule().atom_count());
-        hide_selected_rep(&mut obj, &all_atoms, RepMask::CARTOON);
-        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
-        obj.clear_dirty();
-        let one_atom =
-            SelectionResult::from_indices(obj.molecule().atom_count(), [AtomIndex(0)].into_iter());
-
-        hide_selected_rep(&mut obj, &one_atom, RepMask::CARTOON);
-
-        assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
-        assert!(!obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
+            .map(|atom| atom.repr.visible_reps)
+            .collect();
+        assert_eq!(command_atom_reps, helper_atom_reps);
     }
 }

@@ -2,8 +2,8 @@
 //!
 //! ## Architecture
 //!
-//!   1. CPU `extract_backbone_for` extracts CA + initial CA→O orientation
-//!      from the molecule (per `BackboneAtom`).
+//!   1. CPU `extract_backbone_for` extracts retained polymer backbone samples
+//!      and initial orientation from the molecule (per `BackboneAtom`).
 //!   2. CPU `tessellation::process_segment` runs the orient pipeline
 //!      (round_helix → refine_normals → flatten_sheets) +
 //!      `cartoon_generate_sample` + run classification → outputs
@@ -53,7 +53,7 @@ use crate::representations::cartoon::tessellation::{
     ExtrudePoint, GeomSettings, PipelineOutput, PipelineSettings, RunDescriptor,
 };
 use crate::representations::{BuildCtx, Representation};
-use patinae_mol::{DirtyFlags, RepMask};
+use patinae_mol::DirtyFlags;
 
 const LARGE_CARTOON_BACKBONE_THRESHOLD: usize = 16_384;
 const LARGE_CARTOON_SEGMENT_THRESHOLD: usize = 64;
@@ -94,21 +94,16 @@ struct BuildSignature {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartoonMode {
-    /// SS-aware profiles. Reads `RepMask::CARTOON`, `settings.cartoon.*`.
+    /// SS-aware profiles. Reads cartoon visibility in WGSL and
+    /// `settings.cartoon.*`.
     Cartoon,
-    /// Uniform circular tube. Reads `RepMask::RIBBON`, `settings.ribbon.*`.
-    /// Forces `GeomSettings.uniform_tube = true` so every pair becomes
-    /// CartoonType::Loop.
+    /// Uniform circular tube. Reads ribbon visibility in WGSL and
+    /// `settings.ribbon.*`. Forces `GeomSettings.uniform_tube = true` so every
+    /// pair becomes CartoonType::Loop.
     Ribbon,
 }
 
 impl CartoonMode {
-    fn rep_mask(self) -> RepMask {
-        match self {
-            CartoonMode::Cartoon => RepMask::CARTOON,
-            CartoonMode::Ribbon => RepMask::RIBBON,
-        }
-    }
     fn rep_kind(self) -> RepKind {
         match self {
             CartoonMode::Cartoon => RepKind::Cartoon,
@@ -602,12 +597,7 @@ impl Representation for CartoonRep {
         }
 
         let gap_cutoff = s.cartoon.gap_cutoff;
-        let bb = extract_backbone_for(
-            input.molecule,
-            input.coord_set,
-            gap_cutoff,
-            self.mode.rep_mask(),
-        );
+        let bb = extract_backbone_for(input.molecule, input.coord_set, gap_cutoff);
         if bb.len() < 2 {
             self.resources = None;
             self.last_build = None;

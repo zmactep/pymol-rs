@@ -1,12 +1,14 @@
 //! CPU backbone extraction for the cartoon representation.
 //!
-//! Walks `chains() → polymer_subchains() → residues()`, keeps only protein
-//! residues with a CA atom that is visible under `RepMask::CARTOON`, and emits
-//! one [`BackboneAtom`] per residue. Chain breaks (resv jumps larger than
-//! `gap_cutoff` or transitions into a new polymer subchain) are flagged on the
-//! *trailing* atom (`SEG_END`) and on the *leading* atom of the next run
-//! (`SEG_START`). The compute chain reads these flags to clamp the smoothing
-//! / sampling stencils so that disjoint segments do not pull on each other.
+//! Walks `chains() → polymer_subchains() → residues()`, keeps eligible
+//! protein/nucleic residues with a backbone reference atom, and emits one
+//! [`BackboneAtom`] per residue. Per-atom representation bits are intentionally
+//! ignored here; the WGSL visibility gate decides whether retained geometry is
+//! drawn. Chain breaks (resv jumps larger than `gap_cutoff` or transitions into
+//! a new polymer subchain) are flagged on the *trailing* atom (`SEG_END`) and on
+//! the *leading* atom of the next run (`SEG_START`). The compute chain reads
+//! these flags to clamp the smoothing / sampling stencils so that disjoint
+//! segments do not pull on each other.
 //!
 //! Both protein (Cα) and nucleic acid (P / C3' / C1') polymers are
 //! extracted. Per-residue reference atom + orientation are picked by
@@ -23,7 +25,7 @@
 //! still runs and gives a stable frame for the nucleic tube.
 
 use bytemuck::{Pod, Zeroable};
-use patinae_mol::{AtomIndex, CoordSet, ObjectMolecule, RepMask, ResidueView, SecondaryStructure};
+use patinae_mol::{AtomIndex, CoordSet, ObjectMolecule, ResidueView, SecondaryStructure};
 
 /// `BackboneAtom.flags` bit layout. Low 4 bits hold `SecondaryStructure`
 /// (`SecondaryStructure as u8 & 0xF`), upper bits hold segment markers.
@@ -61,7 +63,7 @@ impl BackboneAtom {
 
 const _: () = assert!(std::mem::size_of::<BackboneAtom>() == 32);
 
-/// Extract one [`BackboneAtom`] per visible protein CA, walking polymer
+/// Extract one [`BackboneAtom`] per eligible polymer residue, walking polymer
 /// subchains and marking chain breaks.
 ///
 /// A `(resv_next - resv_prev).abs() > gap_cutoff` jump within the same
@@ -71,17 +73,16 @@ pub fn extract_backbone(
     coord_set: &CoordSet,
     gap_cutoff: i32,
 ) -> Vec<BackboneAtom> {
-    extract_backbone_for(molecule, coord_set, gap_cutoff, RepMask::CARTOON)
+    extract_backbone_for(molecule, coord_set, gap_cutoff)
 }
 
-/// Variant of [`extract_backbone`] that filters CAs by an arbitrary `rep_mask`
-/// instead of the cartoon mask. Ribbon needs this — it shares the same
-/// extraction logic but the per-atom visibility flag lives in `RepMask::RIBBON`.
+/// Variant of [`extract_backbone`] used by both cartoon and ribbon. It builds
+/// the same retained backbone superset for both modes; per-mode visibility is
+/// handled by the scene atom LUT in WGSL.
 pub fn extract_backbone_for(
     molecule: &ObjectMolecule,
     coord_set: &CoordSet,
     gap_cutoff: i32,
-    rep_mask: RepMask,
 ) -> Vec<BackboneAtom> {
     let mut out: Vec<BackboneAtom> = Vec::new();
 
@@ -96,7 +97,7 @@ pub fn extract_backbone_for(
             for residue in subchain.residues() {
                 // PolymerSubchain iterator narrows to biopolymer residues;
                 // sample_residue dispatches protein vs nucleic.
-                let sample = match sample_residue(&residue, coord_set, rep_mask) {
+                let sample = match sample_residue(&residue, coord_set) {
                     Some(s) => s,
                     None => continue,
                 };
@@ -966,18 +967,10 @@ struct ResidueSample {
 }
 
 /// Pick the reference atom + orientation seed for one biopolymer
-/// residue. Returns `None` for residues lacking the required backbone
-/// atom or with the cartoon rep mask cleared on the reference atom.
-fn sample_residue(
-    residue: &ResidueView<'_>,
-    coord_set: &CoordSet,
-    rep_mask: RepMask,
-) -> Option<ResidueSample> {
+/// residue. Returns `None` for residues lacking the required backbone atom.
+fn sample_residue(residue: &ResidueView<'_>, coord_set: &CoordSet) -> Option<ResidueSample> {
     if residue.is_protein() {
         let (idx, atom) = residue.ca()?;
-        if !atom.repr.visible_reps.is_visible(rep_mask) {
-            return None;
-        }
         let position = coord_set.get_atom_coord(idx)?;
         let orientation = orientation_for_protein(residue, coord_set, position);
         let ss = (atom.ss_type as u8) as u32 & flags::SS_MASK;
@@ -991,13 +984,10 @@ fn sample_residue(
     if residue.is_nucleic() {
         // Reference atom for nucleic backbone: P, with fallbacks to C3'
         // and C1' so terminal residues and atypical PDBs still emit a sample.
-        let (idx, atom) = residue
+        let (idx, _atom) = residue
             .find_by_name("P")
             .or_else(|| residue.find_by_name("C3'"))
             .or_else(|| residue.find_by_name("C1'"))?;
-        if !atom.repr.visible_reps.is_visible(rep_mask) {
-            return None;
-        }
         let position = coord_set.get_atom_coord(idx)?;
         let orientation = orientation_for_nucleic(residue, coord_set, position);
         // Force NucleicRibbon SS — `cartoon_type_for` maps it to
@@ -1116,7 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_one_atom_per_visible_ca() {
+    fn extracts_one_atom_per_eligible_ca() {
         let mol = make_protein("p", "A", 1, 5, true);
         let coord = mol.current_coord_set().expect("coord set").clone();
         let bb = extract_backbone(&mol, &coord, 10);
@@ -1124,11 +1114,11 @@ mod tests {
     }
 
     #[test]
-    fn skips_invisible_residues() {
+    fn extracts_hidden_rep_residues_for_retained_geometry() {
         let mol = make_protein("p", "A", 1, 3, false);
         let coord = mol.current_coord_set().expect("coord set").clone();
         let bb = extract_backbone(&mol, &coord, 10);
-        assert!(bb.is_empty());
+        assert_eq!(bb.len(), 3);
     }
 
     #[test]
@@ -1291,7 +1281,7 @@ mod tests {
         let coord = mol.current_coord_set().expect("coord set").clone();
         let bb = extract_backbone(&mol, &coord, 10);
 
-        assert_eq!(bb.len(), 25, "one BackboneAtom per visible CA");
+        assert_eq!(bb.len(), 25, "one BackboneAtom per eligible residue");
 
         for (i, atom) in bb.iter().enumerate() {
             // (a) SS preserved
