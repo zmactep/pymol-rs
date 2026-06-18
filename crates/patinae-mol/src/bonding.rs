@@ -4,6 +4,7 @@
 //! using a spatial hash grid and protein-specific bond order assignment.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use lin_alg::f32::Vec3;
 
@@ -20,6 +21,277 @@ use crate::spatial::SpatialGrid;
 ///
 /// 0.45 Angstroms works well with Cordero 2008 covalent radii.
 pub const DEFAULT_BOND_TOLERANCE: f32 = 0.45;
+
+#[derive(Clone, Copy)]
+struct ProteinTemplateBond {
+    atom1: &'static str,
+    atom2: &'static str,
+    order: BondOrder,
+}
+
+macro_rules! aa_bonds {
+    ($(($atom1:literal, $atom2:literal, $order:ident)),+ $(,)?) => {
+        &[
+            $(ProteinTemplateBond {
+                atom1: $atom1,
+                atom2: $atom2,
+                order: BondOrder::$order,
+            }),+
+        ]
+    };
+}
+
+static ALA_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+];
+
+static ARG_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD", Single),
+    ("CD", "NE", Single),
+    ("NE", "CZ", Single),
+    ("CZ", "NH1", Double),
+    ("CZ", "NH2", Single),
+];
+
+static ASN_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "OD1", Double),
+    ("CG", "ND2", Single),
+];
+
+static ASP_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "OD1", Double),
+    ("CG", "OD2", Single),
+];
+
+static CYS_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "SG", Single),
+];
+
+static GLN_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD", Single),
+    ("CD", "OE1", Double),
+    ("CD", "NE2", Single),
+];
+
+static GLU_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD", Single),
+    ("CD", "OE1", Double),
+    ("CD", "OE2", Single),
+];
+
+static GLY_BONDS: &[ProteinTemplateBond] =
+    aa_bonds![("N", "CA", Single), ("CA", "C", Single), ("C", "O", Double),];
+
+static HIS_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "ND1", Single),
+    ("ND1", "CE1", Double),
+    ("CE1", "NE2", Single),
+    ("NE2", "CD2", Double),
+    ("CD2", "CG", Single),
+];
+
+static ILE_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG1", Single),
+    ("CG1", "CD1", Single),
+    ("CB", "CG2", Single),
+];
+
+static LEU_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD1", Single),
+    ("CG", "CD2", Single),
+];
+
+static LYS_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD", Single),
+    ("CD", "CE", Single),
+    ("CE", "NZ", Single),
+];
+
+static MET_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "SD", Single),
+    ("SD", "CE", Single),
+];
+
+static PHE_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD1", Double),
+    ("CD1", "CE1", Single),
+    ("CE1", "CZ", Double),
+    ("CZ", "CE2", Single),
+    ("CE2", "CD2", Double),
+    ("CD2", "CG", Single),
+];
+
+static PRO_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD", Single),
+    ("CD", "N", Single),
+];
+
+static SER_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "OG", Single),
+];
+
+static THR_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "OG1", Single),
+    ("CB", "CG2", Single),
+];
+
+static TRP_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD1", Double),
+    ("CD1", "NE1", Single),
+    ("NE1", "CE2", Single),
+    ("CE2", "CD2", Single),
+    ("CD2", "CG", Single),
+    ("CD2", "CE3", Double),
+    ("CE3", "CZ3", Single),
+    ("CZ3", "CH2", Double),
+    ("CH2", "CZ2", Single),
+    ("CZ2", "CE2", Double),
+];
+
+static TYR_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG", Single),
+    ("CG", "CD1", Double),
+    ("CD1", "CE1", Single),
+    ("CE1", "CZ", Double),
+    ("CZ", "CE2", Single),
+    ("CE2", "CD2", Double),
+    ("CD2", "CG", Single),
+    ("CZ", "OH", Single),
+];
+
+static VAL_BONDS: &[ProteinTemplateBond] = aa_bonds![
+    ("N", "CA", Single),
+    ("CA", "C", Single),
+    ("C", "O", Double),
+    ("CA", "CB", Single),
+    ("CB", "CG1", Single),
+    ("CB", "CG2", Single),
+];
+
+fn amino_acid_template(resn: &str) -> Option<&'static [ProteinTemplateBond]> {
+    match resn {
+        "ALA" => Some(ALA_BONDS),
+        "ARG" => Some(ARG_BONDS),
+        "ASN" => Some(ASN_BONDS),
+        "ASP" => Some(ASP_BONDS),
+        "CYS" => Some(CYS_BONDS),
+        "GLN" => Some(GLN_BONDS),
+        "GLU" => Some(GLU_BONDS),
+        "GLY" => Some(GLY_BONDS),
+        "HIS" => Some(HIS_BONDS),
+        "ILE" => Some(ILE_BONDS),
+        "LEU" => Some(LEU_BONDS),
+        "LYS" => Some(LYS_BONDS),
+        "MET" => Some(MET_BONDS),
+        "PHE" => Some(PHE_BONDS),
+        "PRO" => Some(PRO_BONDS),
+        "SER" => Some(SER_BONDS),
+        "THR" => Some(THR_BONDS),
+        "TRP" => Some(TRP_BONDS),
+        "TYR" => Some(TYR_BONDS),
+        "VAL" => Some(VAL_BONDS),
+        _ => None,
+    }
+}
+
+fn push_bond(mol: &mut ObjectMolecule, a1: AtomIndex, a2: AtomIndex, order: BondOrder) {
+    let bond = Bond::new(a1, a2, order);
+    let bond_index = BondIndex(mol.bonds.len() as u32);
+    mol.bonds.push(bond);
+    mol.atom_bonds[a1.as_usize()].push(bond_index);
+    mol.atom_bonds[a2.as_usize()].push(bond_index);
+    mol.atoms[a1.as_usize()].state.bonded = true;
+    mol.atoms[a2.as_usize()].state.bonded = true;
+}
+
+fn push_bond_if_absent(mol: &mut ObjectMolecule, a1: AtomIndex, a2: AtomIndex, order: BondOrder) {
+    if mol.find_bond(a1, a2).is_none() {
+        push_bond(mol, a1, a2, order);
+    }
+}
 
 // ============================================================================
 // Protein Double Bond Lookup Table
@@ -75,6 +347,89 @@ fn get_protein_bond_order(resn: &str, name1: &str, name2: &str) -> BondOrder {
     }
 
     BondOrder::Single
+}
+
+/// Apply canonical amino-acid intra-residue templates.
+fn apply_amino_acid_template_bonds(mol: &mut ObjectMolecule, template_ids: &mut [u32]) {
+    let residue_info: Vec<(String, Range<usize>)> = mol
+        .residues()
+        .filter(|r| {
+            let is_hetatm = r.atoms.first().is_some_and(|a| a.state.hetatm);
+            !is_hetatm && amino_acid_template(&r.key.resn).is_some()
+        })
+        .map(|r| (r.key.resn.clone(), r.atom_range.clone()))
+        .collect();
+
+    let mut next_template_id = 1u32;
+    for (resn, atom_range) in residue_info {
+        let Some(template) = amino_acid_template(&resn) else {
+            continue;
+        };
+
+        let mut alt_labels: Vec<char> = atom_range
+            .clone()
+            .map(|idx| mol.atoms[idx].alt)
+            .filter(|&c| c != ' ')
+            .collect();
+        alt_labels.sort_unstable();
+        alt_labels.dedup();
+
+        if alt_labels.is_empty() {
+            alt_labels.push(' ');
+        }
+
+        let template_id = next_template_id;
+        let mut applied = false;
+        for &alt in &alt_labels {
+            let Some(bond_pairs) =
+                collect_amino_acid_template_pairs(mol, &atom_range, alt, template)
+            else {
+                continue;
+            };
+
+            for &(a1, a2, order) in &bond_pairs {
+                push_bond_if_absent(mol, a1, a2, order);
+                template_ids[a1.as_usize()] = template_id;
+                template_ids[a2.as_usize()] = template_id;
+            }
+            applied = true;
+        }
+
+        if applied {
+            next_template_id += 1;
+        }
+    }
+}
+
+fn collect_amino_acid_template_pairs(
+    mol: &ObjectMolecule,
+    atom_range: &Range<usize>,
+    alt: char,
+    template: &[ProteinTemplateBond],
+) -> Option<Vec<(AtomIndex, AtomIndex, BondOrder)>> {
+    let mut bond_pairs = Vec::with_capacity(template.len());
+    for bond in template {
+        let a1 = compatible_atom_index(mol, atom_range, alt, bond.atom1)?;
+        let a2 = compatible_atom_index(mol, atom_range, alt, bond.atom2)?;
+        bond_pairs.push((AtomIndex(a1 as u32), AtomIndex(a2 as u32), bond.order));
+    }
+    Some(bond_pairs)
+}
+
+fn compatible_atom_index(
+    mol: &ObjectMolecule,
+    atom_range: &Range<usize>,
+    alt: char,
+    name: &str,
+) -> Option<usize> {
+    atom_range.clone().find(|&idx| {
+        let atom = &mol.atoms[idx];
+        &*atom.name == name && (atom.alt == ' ' || atom.alt == alt)
+    })
+}
+
+fn needs_distance_probe(template_id: u32, atom_name: &str) -> bool {
+    template_id == 0 || matches!(atom_name, "N" | "C" | "SG")
 }
 
 /// Apply CCD template bonds for known HETATM residues.
@@ -145,13 +500,7 @@ fn apply_ccd_template_bonds(mol: &mut ObjectMolecule, ccd_bonded: &mut [bool]) {
                 .collect();
 
             for (a1, a2, order) in bond_pairs {
-                let bond = Bond::new(a1, a2, order);
-                let bond_index = BondIndex(mol.bonds.len() as u32);
-                mol.bonds.push(bond);
-                mol.atom_bonds[a1.as_usize()].push(bond_index);
-                mol.atom_bonds[a2.as_usize()].push(bond_index);
-                mol.atoms[a1.as_usize()].state.bonded = true;
-                mol.atoms[a2.as_usize()].state.bonded = true;
+                push_bond(mol, a1, a2, order);
             }
 
             residue_bonded = true;
@@ -186,12 +535,18 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
         return;
     }
 
+    let mut amino_acid_template_ids = vec![0u32; n_atoms];
+    apply_amino_acid_template_bonds(mol, &mut amino_acid_template_ids);
+
     // CCD template bonds for known HETATM residues. This must run before
     // borrowing coord_set because it mutates the molecule.
-    let mut ccd_bonded = vec![false; n_atoms];
-    if ccd::is_loaded() {
+    let ccd_bonded = if ccd::is_loaded() {
+        let mut ccd_bonded = vec![false; n_atoms];
         apply_ccd_template_bonds(mol, &mut ccd_bonded);
-    }
+        Some(ccd_bonded)
+    } else {
+        None
+    };
 
     // Distance-based bonds for remaining atoms.
     let coord_set = &mol.coord_sets[state];
@@ -199,6 +554,8 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
     struct AtomData {
         coord: Vec3,
         cov: f32,
+        template_id: u32,
+        distance_probe: bool,
     }
 
     let atom_data: Vec<AtomData> = (0..n_atoms)
@@ -207,9 +564,12 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
                 .get_atom_coord(AtomIndex(i as u32))
                 .unwrap_or(Vec3::new(0.0, 0.0, 0.0));
             let atom = &mol.atoms[i];
+            let template_id = amino_acid_template_ids[i];
             AtomData {
                 coord,
                 cov: atom.cov_radius(),
+                template_id,
+                distance_probe: needs_distance_probe(template_id, &atom.name),
             }
         })
         .collect();
@@ -222,19 +582,30 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
         grid.insert(ad.coord, i);
     }
 
-    let mut new_bonds: Vec<(AtomIndex, AtomIndex)> = Vec::new();
+    let mut new_bonds: Vec<(AtomIndex, AtomIndex)> = Vec::with_capacity(n_atoms);
     let mut neighbors = Vec::new();
 
     for i in 0..n_atoms {
         let a1 = &atom_data[i];
+        if !a1.distance_probe {
+            continue;
+        }
+
         grid.query_neighbors(a1.coord, &mut neighbors);
 
         for &j in &neighbors {
-            if j <= i {
+            if j == i {
                 continue;
             }
 
             let a2 = &atom_data[j];
+            if a2.distance_probe && j < i {
+                continue;
+            }
+
+            if a1.template_id != 0 && a1.template_id == a2.template_id {
+                continue;
+            }
 
             let dx = a1.coord.x - a2.coord.x;
             let dy = a1.coord.y - a2.coord.y;
@@ -266,7 +637,10 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
                     continue;
                 }
                 // Skip intra-residue bonds for CCD-handled residues
-                if ccd_bonded[i] && ccd_bonded[j] && atoms_same_residue(atom_i, atom_j) {
+                let ccd_pair_bonded = ccd_bonded
+                    .as_ref()
+                    .is_some_and(|bonded| bonded[i] && bonded[j]);
+                if ccd_pair_bonded && atoms_same_residue(atom_i, atom_j) {
                     continue;
                 }
                 new_bonds.push((AtomIndex(i as u32), AtomIndex(j as u32)));
@@ -275,13 +649,7 @@ pub(crate) fn generate_bonds_for_state(mol: &mut ObjectMolecule, tolerance: f32,
     }
 
     for (a1, a2) in new_bonds {
-        let bond = Bond::new(a1, a2, BondOrder::Single);
-        let bond_index = BondIndex(mol.bonds.len() as u32);
-        mol.bonds.push(bond);
-        mol.atom_bonds[a1.as_usize()].push(bond_index);
-        mol.atom_bonds[a2.as_usize()].push(bond_index);
-        mol.atoms[a1.as_usize()].state.bonded = true;
-        mol.atoms[a2.as_usize()].state.bonded = true;
+        push_bond(mol, a1, a2, BondOrder::Single);
     }
 }
 
@@ -324,8 +692,154 @@ mod tests {
     use crate::coordset::CoordSet;
     use crate::element::Element;
     use crate::molecule::ObjectMolecule;
-    use crate::Atom;
+    use crate::{Atom, AtomResidue};
     use lin_alg::f32::Vec3;
+    use std::sync::Arc;
+
+    fn residue_atom(name: &str, element: Element, resn: &str, alt: char) -> Atom {
+        let mut atom = Atom::new(name, element);
+        atom.alt = alt;
+        atom.residue = Arc::new(AtomResidue::from_parts("A", resn, 1, ' ', ""));
+        atom
+    }
+
+    fn add_residue_atoms(
+        mol: &mut ObjectMolecule,
+        resn: &str,
+        atoms: &[(&str, Element, char, Vec3)],
+    ) {
+        let mut positions = Vec::with_capacity(atoms.len());
+        for &(name, element, alt, pos) in atoms {
+            mol.add_atom(residue_atom(name, element, resn, alt));
+            positions.push(pos);
+        }
+        mol.add_coord_set(CoordSet::from_vec3(&positions));
+    }
+
+    fn atom_index(mol: &ObjectMolecule, name: &str, alt: char) -> AtomIndex {
+        mol.atoms_indexed()
+            .find(|(_, atom)| &*atom.name == name && atom.alt == alt)
+            .map(|(idx, _)| idx)
+            .unwrap_or_else(|| panic!("missing atom {name}/{alt}"))
+    }
+
+    fn bond_order(mol: &ObjectMolecule, atom1: &str, atom2: &str) -> BondOrder {
+        let a1 = atom_index(mol, atom1, ' ');
+        let a2 = atom_index(mol, atom2, ' ');
+        let bond_idx = mol
+            .find_bond(a1, a2)
+            .unwrap_or_else(|| panic!("missing bond {atom1}-{atom2}"));
+        mol.get_bond(bond_idx).expect("bond index is valid").order
+    }
+
+    fn count_bonds_between(mol: &ObjectMolecule, a1: AtomIndex, a2: AtomIndex) -> usize {
+        mol.bonds().filter(|bond| bond.connects(a1, a2)).count()
+    }
+
+    #[test]
+    fn test_amino_acid_template_creates_exact_heavy_topology() {
+        let mut mol = ObjectMolecule::new("ala");
+        let origin = Vec3::new(0.0, 0.0, 0.0);
+        add_residue_atoms(
+            &mut mol,
+            "ALA",
+            &[
+                ("N", Element::Nitrogen, ' ', origin),
+                ("CA", Element::Carbon, ' ', origin),
+                ("C", Element::Carbon, ' ', origin),
+                ("O", Element::Oxygen, ' ', origin),
+                ("CB", Element::Carbon, ' ', origin),
+            ],
+        );
+
+        mol.generate_bonds(DEFAULT_BOND_TOLERANCE);
+
+        assert_eq!(mol.bond_count(), 4);
+        assert_eq!(bond_order(&mol, "C", "O"), BondOrder::Double);
+        assert!(
+            mol.find_bond(atom_index(&mol, "N", ' '), atom_index(&mol, "C", ' '))
+                .is_none(),
+            "template-handled heavy atoms should not get extra distance bonds"
+        );
+    }
+
+    #[test]
+    fn test_incomplete_amino_acid_residue_uses_distance_fallback() {
+        let mut mol = ObjectMolecule::new("ala_incomplete");
+        add_residue_atoms(
+            &mut mol,
+            "ALA",
+            &[
+                ("N", Element::Nitrogen, ' ', Vec3::new(0.0, 0.0, 0.0)),
+                ("CA", Element::Carbon, ' ', Vec3::new(1.45, 0.0, 0.0)),
+                ("C", Element::Carbon, ' ', Vec3::new(2.90, 0.0, 0.0)),
+                ("O", Element::Oxygen, ' ', Vec3::new(4.13, 0.0, 0.0)),
+            ],
+        );
+
+        mol.generate_bonds(DEFAULT_BOND_TOLERANCE);
+
+        assert_eq!(mol.bond_count(), 3);
+        assert_eq!(
+            bond_order(&mol, "C", "O"),
+            BondOrder::Single,
+            "incomplete residues should not receive template bond orders"
+        );
+    }
+
+    #[test]
+    fn test_hydrogen_and_oxt_stay_distance_based() {
+        let mut mol = ObjectMolecule::new("ala_terminal");
+        add_residue_atoms(
+            &mut mol,
+            "ALA",
+            &[
+                ("N", Element::Nitrogen, ' ', Vec3::new(0.0, 0.0, 0.0)),
+                ("CA", Element::Carbon, ' ', Vec3::new(1.45, 0.0, 0.0)),
+                ("C", Element::Carbon, ' ', Vec3::new(2.90, 0.0, 0.0)),
+                ("O", Element::Oxygen, ' ', Vec3::new(3.50, 1.10, 0.0)),
+                ("CB", Element::Carbon, ' ', Vec3::new(1.45, 1.54, 0.0)),
+                ("H", Element::Hydrogen, ' ', Vec3::new(-0.90, 0.0, 0.0)),
+                ("OXT", Element::Oxygen, ' ', Vec3::new(3.50, -1.10, 0.0)),
+            ],
+        );
+
+        mol.generate_bonds(DEFAULT_BOND_TOLERANCE);
+
+        assert_eq!(mol.bond_count(), 6);
+        assert!(mol
+            .find_bond(atom_index(&mol, "N", ' '), atom_index(&mol, "H", ' '))
+            .is_some());
+        assert!(mol
+            .find_bond(atom_index(&mol, "C", ' '), atom_index(&mol, "OXT", ' '))
+            .is_some());
+    }
+
+    #[test]
+    fn test_amino_acid_template_altlocs_do_not_duplicate_blank_bonds() {
+        let mut mol = ObjectMolecule::new("ala_altloc");
+        let origin = Vec3::new(0.0, 0.0, 0.0);
+        add_residue_atoms(
+            &mut mol,
+            "ALA",
+            &[
+                ("N", Element::Nitrogen, ' ', origin),
+                ("CA", Element::Carbon, 'A', origin),
+                ("CA", Element::Carbon, 'B', origin),
+                ("C", Element::Carbon, ' ', origin),
+                ("O", Element::Oxygen, ' ', origin),
+                ("CB", Element::Carbon, 'A', origin),
+                ("CB", Element::Carbon, 'B', origin),
+            ],
+        );
+
+        mol.generate_bonds(DEFAULT_BOND_TOLERANCE);
+
+        let c_idx = atom_index(&mol, "C", ' ');
+        let o_idx = atom_index(&mol, "O", ' ');
+        assert_eq!(mol.bond_count(), 7);
+        assert_eq!(count_bonds_between(&mol, c_idx, o_idx), 1);
+    }
 
     /// Fe–N coordination bond (~2.0 Å) must be detected with covalent radii.
     /// Fe(cov=1.32) + N(cov=0.71) + 0.45 = 2.48 Å threshold → 2.0 Å bond detected.

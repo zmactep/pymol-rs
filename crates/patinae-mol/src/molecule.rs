@@ -398,6 +398,21 @@ impl ObjectMolecule {
         self.invalidate_subchain_partition();
     }
 
+    /// Remove all bonds from the molecule.
+    ///
+    /// Clears the bond list, atom-to-bond lookup table, and per-atom bonded
+    /// flags while keeping atoms, residues, and coordinates intact.
+    pub fn clear_bonds(&mut self) {
+        self.bonds.clear();
+        for ab in &mut self.atom_bonds {
+            ab.clear();
+        }
+        for atom in &mut self.atoms {
+            atom.state.bonded = false;
+        }
+        self.invalidate_subchain_partition();
+    }
+
     /// Assign bond orders for known protein residues based on atom names
     ///
     /// This function uses PDB atom name conventions to assign bond orders for
@@ -413,13 +428,7 @@ impl ObjectMolecule {
     /// This is used after loading CCD templates to replace distance-based bonds
     /// with template-based bonds for known HETATM residues.
     pub fn rebond(&mut self, tolerance: f32) {
-        self.bonds.clear();
-        for ab in &mut self.atom_bonds {
-            ab.clear();
-        }
-        for atom in &mut self.atoms {
-            atom.state.bonded = false;
-        }
+        self.clear_bonds();
         self.generate_bonds(tolerance);
         self.assign_known_residue_bond_orders();
         self.invalidate_subchain_partition();
@@ -1009,6 +1018,19 @@ mod tests {
 
         // No bond between H1 and H2
         assert!(mol.find_bond(AtomIndex(1), AtomIndex(2)).is_none());
+    }
+
+    #[test]
+    fn test_clear_bonds() {
+        let mut mol = create_water();
+
+        mol.clear_bonds();
+
+        assert_eq!(mol.bond_count(), 0);
+        assert!(mol.atom_bond_indices(AtomIndex(0)).is_empty());
+        assert!(mol.atom_bond_indices(AtomIndex(1)).is_empty());
+        assert!(mol.atom_bond_indices(AtomIndex(2)).is_empty());
+        assert!(mol.atoms().all(|atom| !atom.state.bonded));
     }
 
     #[test]

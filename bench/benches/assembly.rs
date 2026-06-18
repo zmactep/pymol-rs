@@ -11,6 +11,7 @@ use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion
 
 use patinae_algos::{Dssp, PyMolDss};
 use patinae_mol::dss::assign_secondary_structure;
+use patinae_mol::DEFAULT_BOND_TOLERANCE;
 use patinae_select::{evaluate, parse, EvalContext};
 
 use common::{ColorResolverOwned, MOLECULE, RAW_TEXT};
@@ -64,7 +65,37 @@ fn cif_loading(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// Group 2: DSS (Secondary Structure Assignment)
+// Group 2: Bond Generation
+// ---------------------------------------------------------------------------
+
+fn bond_generation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bond_generation");
+    group.sample_size(10);
+    group.warm_up_time(Duration::from_secs(2));
+    group.measurement_time(Duration::from_secs(15));
+
+    let _ = &*MOLECULE;
+
+    group.bench_function("generate_bonds", |b| {
+        b.iter_batched(
+            || {
+                let mut mol = MOLECULE.clone();
+                mol.clear_bonds();
+                mol
+            },
+            |mut mol| {
+                mol.generate_bonds(DEFAULT_BOND_TOLERANCE);
+                black_box(mol.bond_count());
+            },
+            BatchSize::LargeInput,
+        );
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Group 3: DSS (Secondary Structure Assignment)
 // ---------------------------------------------------------------------------
 
 fn dss_bench(c: &mut Criterion) {
@@ -104,7 +135,7 @@ fn dss_bench(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
-// Group 3: Selection Evaluation
+// Group 4: Selection Evaluation
 // ---------------------------------------------------------------------------
 
 fn selection_bench(c: &mut Criterion) {
@@ -141,7 +172,7 @@ fn selection_bench(c: &mut Criterion) {
     group.finish();
 }
 
-// Group 4: Color Resolution
+// Group 5: Color Resolution
 // ---------------------------------------------------------------------------
 
 fn color_bench(c: &mut Criterion) {
@@ -181,7 +212,7 @@ criterion_group! {
 criterion_group! {
     name = compute_benches;
     config = Criterion::default();
-    targets = dss_bench, selection_bench, color_bench
+    targets = bond_generation, dss_bench, selection_bench, color_bench
 }
 
 criterion_main!(io_benches, compute_benches);

@@ -29,6 +29,7 @@ BENCH_FILE="$TEST_STRUCTURES_DIR/7KP3-assembly1.cif.gz" cargo bench -p patinae-b
 Useful groups:
 
 - `cif_loading`: decompression, tokenization, full parse, and disk load.
+- `bond_generation`: distance-based bond generation on a parsed molecule.
 - `dss`: PyMOL-style and DSSP-style secondary-structure assignment.
 - `selection`: common selection expressions against the loaded molecule.
 - `color_resolution`: per-atom color lookup throughput.
