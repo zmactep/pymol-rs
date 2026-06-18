@@ -33,6 +33,8 @@
 //! let result = select(&mol, "byres (backbone around 4 of organic)")?;
 //! ```
 
+use std::borrow::Cow;
+
 // Module declarations
 mod ast;
 mod context;
@@ -130,6 +132,87 @@ pub fn evaluate(expr: &SelectionExpr, ctx: &EvalContext) -> Result<SelectionResu
     eval::evaluate(expr, ctx)
 }
 
+/// Formats a string as an exact selector value.
+///
+/// Generated selection expressions use this for string-valued selectors such as
+/// `model`, `chain`, `segi`, `resn`, and `name`. Values that can be represented
+/// as a single exact unquoted pattern are left unchanged; empty or syntactically
+/// special values are double-quoted and escaped.
+///
+/// # Examples
+///
+/// ```
+/// use patinae_select::format_exact_selector_value;
+///
+/// assert_eq!(format_exact_selector_value("A").as_ref(), "A");
+/// assert_eq!(format_exact_selector_value("").as_ref(), "\"\"");
+/// ```
+#[must_use]
+pub fn format_exact_selector_value(value: &str) -> Cow<'_, str> {
+    if is_unquoted_exact_selector_value(value) {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(quote_exact_selector_value(value))
+    }
+}
+
+fn quote_exact_selector_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn is_unquoted_exact_selector_value(value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    if first.is_alphabetic() || first == '_' {
+        return chars.all(is_ident_char);
+    }
+
+    if first.is_ascii_digit() {
+        return is_unquoted_digit_selector_value(value);
+    }
+
+    false
+}
+
+fn is_unquoted_digit_selector_value(value: &str) -> bool {
+    let rest = value.trim_start_matches(|ch: char| ch.is_ascii_digit());
+    if rest.is_empty() {
+        return true;
+    }
+
+    let mut chars = rest.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    (first.is_alphabetic() || first == '\'')
+        && chars.all(|ch| ch.is_alphanumeric() || ch == '_' || ch == '\'')
+}
+
+fn is_ident_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_' || ch == '.' || ch == '\''
+}
+
 /// Build a `select sele, ...` command that adds to, removes from,
 /// or creates the `sele` selection.
 ///
@@ -151,7 +234,7 @@ pub mod prelude {
     pub use crate::error::{ParseError, SelectError, SelectResult};
     pub use crate::pattern::{Pattern, ResiSpec};
     pub use crate::result::SelectionResult;
-    pub use crate::{evaluate, parse, select, select_atoms};
+    pub use crate::{evaluate, format_exact_selector_value, parse, select, select_atoms};
 }
 
 #[cfg(test)]
@@ -168,5 +251,26 @@ mod tests {
     fn test_parse_name() {
         let expr = parse("name CA").unwrap();
         assert!(matches!(expr, SelectionExpr::Name(_)));
+    }
+
+    #[test]
+    fn format_exact_selector_value_leaves_simple_values_unquoted() {
+        assert_eq!(format_exact_selector_value("A").as_ref(), "A");
+        assert_eq!(format_exact_selector_value("1abc").as_ref(), "1abc");
+        assert_eq!(format_exact_selector_value("10").as_ref(), "10");
+    }
+
+    #[test]
+    fn format_exact_selector_value_quotes_empty_and_special_values() {
+        assert_eq!(format_exact_selector_value("").as_ref(), "\"\"");
+        assert_eq!(
+            format_exact_selector_value("chain A").as_ref(),
+            "\"chain A\""
+        );
+        assert_eq!(format_exact_selector_value("A+B").as_ref(), "\"A+B\"");
+        assert_eq!(
+            format_exact_selector_value("A\"B\\C").as_ref(),
+            "\"A\\\"B\\\\C\""
+        );
     }
 }

@@ -9,6 +9,7 @@
 use patinae_color::{Color, ColorIndex, NamedPalette, ThemedPalette};
 use patinae_mol::{Atom, SubchainKind, SubchainView};
 use patinae_scene::{MapDisplayMode, Object, ObjectRegistry};
+use patinae_select::format_exact_selector_value;
 
 use crate::model::sequence::compress_resi_list;
 
@@ -405,7 +406,8 @@ fn build_selector_clause(sub: &SubchainView<'_>, total_entries: usize, chain_cou
     if total_entries <= 1 {
         return String::new();
     }
-    let chain_clause = format!("chain {}", sub.chain_id());
+    let chain_id = format_exact_selector_value(sub.chain_id());
+    let chain_clause = format!("chain {chain_id}");
     if chain_count <= 1 {
         return chain_clause;
     }
@@ -811,6 +813,17 @@ mod tests {
         // Entries are sorted (chain_id, min_atom_index): A first, E second.
         assert_eq!(clause_for(&mol, 0), "chain A");
         assert_eq!(clause_for(&mol, 1), "chain E");
+    }
+
+    #[test]
+    fn selector_clause_blank_chain_is_quoted() {
+        let mut b = MoleculeBuilder::new("m");
+        b = b.add_atom(poly_atom("", "ALA", 1, "CA"), Vec3::new(0.0, 0.0, 0.0));
+        b = b.add_atom(poly_atom("A", "ALA", 1, "CA"), Vec3::new(1.0, 0.0, 0.0));
+        let mol = b.build();
+
+        assert_eq!(clause_for(&mol, 0), "chain \"\"");
+        assert_eq!(clause_for(&mol, 1), "chain A");
     }
 
     #[test]

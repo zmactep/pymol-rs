@@ -592,6 +592,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_atom_record_blank_chain_id() {
+        let line =
+            "ATOM      1  N   THR     4      18.962 -15.255   3.000  1.00 20.00           N  ";
+        let record = parse_atom_record(line).unwrap();
+
+        assert_eq!(record.resn, "THR");
+        assert_eq!(record.chain, "");
+        assert_eq!(record.resv, 4);
+    }
+
+    #[test]
     fn test_parse_hetatm_record() {
         let line =
             "HETATM    1  O   HOH A   1       1.000   2.000   3.000  1.00 20.00           O  ";
@@ -624,6 +635,21 @@ END
 
         assert_eq!(mol.atom_count(), 4);
         assert_eq!(mol.state_count(), 1);
+    }
+
+    #[test]
+    fn test_read_pdb_preserves_blank_chain_id() {
+        let pdb = r#"ATOM      1  N   THR     4      18.962 -15.255   3.000  1.00 20.00           N
+ATOM      2  CA  THR     4      18.185 -14.856   3.000  1.00 20.00           C
+END
+"#;
+
+        let mut reader = PdbReader::new(pdb.as_bytes());
+        let mol = reader.read().unwrap();
+
+        assert_eq!(mol.atom_count(), 2);
+        assert_eq!(mol.atoms_slice()[0].residue.chain, "");
+        assert_eq!(mol.atoms_slice()[1].residue.chain, "");
     }
 
     /// Regression test: multi-model PDB files were previously returning

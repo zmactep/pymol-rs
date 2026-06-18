@@ -4,9 +4,9 @@
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while, take_while1},
+    bytes::complete::{escaped_transform, is_not, tag, take_while, take_while1},
     character::complete::{char, digit1, multispace0},
-    combinator::{eof, opt, recognize, value},
+    combinator::{eof, map, opt, recognize, value},
     sequence::{delimited, pair, preceded, tuple},
     IResult,
 };
@@ -240,11 +240,52 @@ fn digit_ident(input: &str) -> LexResult<'_, Token> {
 
 /// Parse a quoted string
 fn quoted_string(input: &str) -> LexResult<'_, Token> {
-    let (input, s) = alt((
-        delimited(char('"'), take_while(|c| c != '"'), char('"')),
-        delimited(char('\''), take_while(|c| c != '\''), char('\'')),
-    ))(input)?;
-    Ok((input, Token::QuotedString(s.to_string())))
+    alt((
+        map(
+            delimited(char('"'), double_quoted_content, char('"')),
+            Token::QuotedString,
+        ),
+        map(
+            delimited(char('\''), single_quoted_content, char('\'')),
+            Token::QuotedString,
+        ),
+    ))(input)
+}
+
+fn double_quoted_content(input: &str) -> LexResult<'_, String> {
+    map(
+        opt(escaped_transform(
+            is_not("\\\""),
+            '\\',
+            alt((
+                value("\\", tag("\\")),
+                value("\"", tag("\"")),
+                value("'", tag("'")),
+                value("\n", tag("n")),
+                value("\r", tag("r")),
+                value("\t", tag("t")),
+            )),
+        )),
+        Option::unwrap_or_default,
+    )(input)
+}
+
+fn single_quoted_content(input: &str) -> LexResult<'_, String> {
+    map(
+        opt(escaped_transform(
+            is_not("\\'"),
+            '\\',
+            alt((
+                value("\\", tag("\\")),
+                value("\"", tag("\"")),
+                value("'", tag("'")),
+                value("\n", tag("n")),
+                value("\r", tag("r")),
+                value("\t", tag("t")),
+            )),
+        )),
+        Option::unwrap_or_default,
+    )(input)
 }
 
 /// Parse end of input
@@ -562,6 +603,32 @@ mod tests {
             vec![
                 Token::Ident("name".to_string()),
                 Token::QuotedString("C A".to_string()),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_empty_quoted() {
+        let tokens = tokenize("chain \"\"").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("chain".to_string()),
+                Token::QuotedString(String::new()),
+                Token::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tokenize_quoted_with_escapes() {
+        let tokens = tokenize(r#"chain "A\"B\\C""#).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("chain".to_string()),
+                Token::QuotedString("A\"B\\C".to_string()),
                 Token::Eof
             ]
         );

@@ -1098,6 +1098,12 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_empty_chain_pattern() {
+        let expr = parse_selection("chain \"\"").unwrap();
+        assert!(matches!(expr, SelectionExpr::Chain(Pattern::Exact(ref s)) if s.is_empty()));
+    }
+
+    #[test]
     fn test_parse_name_wildcard() {
         let expr = parse_selection("name C*").unwrap();
         assert!(matches!(expr, SelectionExpr::Name(Pattern::Wildcard(ref s)) if s == "C*"));

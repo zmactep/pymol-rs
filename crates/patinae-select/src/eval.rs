@@ -1231,6 +1231,40 @@ mod tests {
         mol
     }
 
+    fn create_blank_and_named_chain_molecule() -> ObjectMolecule {
+        let mut mol = ObjectMolecule::new("test");
+
+        let blank_chain = Arc::new(AtomResidue::from_parts("", "THR", 4, ' ', ""));
+        let named_chain = Arc::new(AtomResidue::from_parts("A", "THR", 4, ' ', ""));
+
+        for (name, residue, elem) in [
+            ("N", blank_chain.clone(), Element::Nitrogen),
+            ("CA", blank_chain.clone(), Element::Carbon),
+            ("N", named_chain.clone(), Element::Nitrogen),
+            ("CA", named_chain.clone(), Element::Carbon),
+        ] {
+            let mut atom = Atom::new(name, elem);
+            atom.residue = residue;
+            mol.add_atom(atom);
+        }
+
+        mol
+    }
+
+    #[test]
+    fn test_chain_empty_string_selects_only_blank_chain() {
+        let mol = create_blank_and_named_chain_molecule();
+        let ctx = EvalContext::single(&mol);
+
+        let expr = crate::parse("chain \"\" and resi 4").unwrap();
+        let result = evaluate(&expr, &ctx).unwrap();
+        assert_eq!(result.count(), 2);
+        assert!(result.contains(AtomIndex(0)));
+        assert!(result.contains(AtomIndex(1)));
+        assert!(!result.contains(AtomIndex(2)));
+        assert!(!result.contains(AtomIndex(3)));
+    }
+
     #[test]
     fn test_chain_selection_case_sensitive_by_default() {
         let mol = create_mixed_case_chain_molecule();

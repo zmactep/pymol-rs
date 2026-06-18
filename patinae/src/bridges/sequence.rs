@@ -11,7 +11,7 @@ use patinae_framework::model::sequence::{
     chain_to_fasta, collect_all_sequences, compress_resi_list, ResidueKind, ResidueRef, SeqChain,
     SequenceColorContext, SequenceModel,
 };
-use patinae_select::build_sele_command;
+use patinae_select::{build_sele_command, format_exact_selector_value};
 
 use crate::{AppWindow, SeqChainRow, SequenceState, Theme as ThemeGlobal};
 
@@ -653,10 +653,10 @@ impl SequenceBridge {
             .iter()
             .map(|r| r.resv)
             .collect();
+        let object_name = format_exact_selector_value(&slot.object_name);
+        let chain_id = format_exact_selector_value(&slot.chain.chain_id);
         let expr = format!(
-            "model {} and chain {} and resi {}",
-            slot.object_name,
-            slot.chain.chain_id,
+            "model {object_name} and chain {chain_id} and resi {}",
             compress_resi_list(&resv_values)
         );
         build_sele_command(&expr, exclude, has_sele)
@@ -1031,6 +1031,37 @@ fn resolve_chain_rgb(chain_id: &str, palette: &ThemedPalette) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use patinae_framework::model::sequence::SeqResidue;
+
+    fn test_residue(resv: i32) -> SeqResidue {
+        SeqResidue {
+            chain: String::new(),
+            resn: "THR".to_string(),
+            resv,
+            display_char: 'T',
+            display_label: "T".to_string(),
+            char_width: 1,
+            atom_range: 0..1,
+            named_color: [0, 0, 0],
+            viewer_color: [0, 0, 0],
+            kind: ResidueKind::AminoAcidCanonical,
+        }
+    }
+
+    fn test_slot(chain_id: &str, residues: Vec<SeqResidue>) -> ChainSlot {
+        ChainSlot {
+            object_name: "test".to_string(),
+            chain: SeqChain {
+                chain_id: chain_id.to_string(),
+                residues,
+            },
+            cell_widths: Vec::new(),
+            cell_prefix: Vec::new(),
+            strip_w_phys: 0,
+            strip_h_phys: 0,
+            chain_rgb: [0, 0, 0],
+        }
+    }
 
     #[test]
     fn viewer_color_toggle_and_invalidate_mark_cache_dirty() {
@@ -1044,5 +1075,16 @@ mod tests {
         bridge.cache_dirty = false;
         bridge.invalidate();
         assert!(bridge.cache_dirty);
+    }
+
+    #[test]
+    fn build_drag_command_quotes_blank_chain() {
+        let mut bridge = SequenceBridge::new();
+        bridge
+            .slots
+            .push(test_slot("", vec![test_residue(4), test_residue(5)]));
+
+        let cmd = bridge.build_drag_command(0, 0, 1, false, false).unwrap();
+        assert_eq!(cmd, "select sele, model test and chain \"\" and resi 4-5");
     }
 }

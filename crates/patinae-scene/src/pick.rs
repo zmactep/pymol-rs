@@ -8,7 +8,7 @@
 
 use lin_alg::f32::Vec3;
 use patinae_mol::{AtomIndex, ObjectMolecule};
-use patinae_select::SelectionResult;
+use patinae_select::{format_exact_selector_value, SelectionResult};
 
 use crate::object::ObjectType;
 
@@ -126,7 +126,7 @@ pub fn pick_expression_for_hit(
     mode: i32,
     molecule: &ObjectMolecule,
 ) -> Option<String> {
-    let obj = &hit.object_name;
+    let obj = format_exact_selector_value(&hit.object_name);
 
     // Object mode: just the model name
     if mode == 4 {
@@ -142,18 +142,22 @@ pub fn pick_expression_for_hit(
         5 => Some(format!("bymolecule (model {obj} and index {idx})")),
         1 => {
             let resi = format_resi(atom.residue.key.resv, atom.residue.key.inscode);
-            Some(format!(
-                "model {obj} and chain {} and resi {resi}",
-                atom.residue.key.chain
-            ))
+            let chain = format_exact_selector_value(&atom.residue.key.chain);
+            Some(format!("model {obj} and chain {chain} and resi {resi}"))
         }
-        2 => Some(format!("model {obj} and chain {}", atom.residue.key.chain)),
-        3 => Some(format!("model {obj} and segi {}", atom.residue.segi)),
+        2 => {
+            let chain = format_exact_selector_value(&atom.residue.key.chain);
+            Some(format!("model {obj} and chain {chain}"))
+        }
+        3 => {
+            let segi = format_exact_selector_value(&atom.residue.segi);
+            Some(format!("model {obj} and segi {segi}"))
+        }
         6 => {
             let resi = format_resi(atom.residue.key.resv, atom.residue.key.inscode);
+            let chain = format_exact_selector_value(&atom.residue.key.chain);
             Some(format!(
-                "model {obj} and chain {} and resi {resi} and name CA",
-                atom.residue.key.chain
+                "model {obj} and chain {chain} and resi {resi} and name CA"
             ))
         }
         _ => None,
@@ -248,6 +252,53 @@ mod tests {
             position: Vec3::new(0.0, 0.0, 0.0),
             distance: 1.0,
         }
+    }
+
+    fn blank_chain_molecule() -> ObjectMolecule {
+        use patinae_mol::{AtomBuilder, Element, MoleculeBuilder};
+
+        MoleculeBuilder::new("test")
+            .add_atom(
+                AtomBuilder::new()
+                    .name("N")
+                    .element(Element::Nitrogen)
+                    .chain("")
+                    .resn("THR")
+                    .resv(4)
+                    .build(),
+                Vec3::new(0.0, 0.0, 0.0),
+            )
+            .add_atom(
+                AtomBuilder::new()
+                    .name("CA")
+                    .element(Element::Carbon)
+                    .chain("")
+                    .resn("THR")
+                    .resv(4)
+                    .build(),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+            .add_atom(
+                AtomBuilder::new()
+                    .name("N")
+                    .element(Element::Nitrogen)
+                    .chain("A")
+                    .resn("THR")
+                    .resv(4)
+                    .build(),
+                Vec3::new(2.0, 0.0, 0.0),
+            )
+            .add_atom(
+                AtomBuilder::new()
+                    .name("CA")
+                    .element(Element::Carbon)
+                    .chain("A")
+                    .resn("THR")
+                    .resv(4)
+                    .build(),
+                Vec3::new(3.0, 0.0, 0.0),
+            )
+            .build()
     }
 
     #[test]
@@ -383,6 +434,47 @@ mod tests {
         let hit = make_hit(0); // atom 0 = N in ALA 1, chain A
         let expr = pick_expression_for_hit(&hit, 6, &mol).unwrap();
         assert_eq!(expr, "model test and chain A and resi 1 and name CA");
+    }
+
+    #[test]
+    fn test_pick_expr_residue_mode_blank_chain() {
+        let mol = blank_chain_molecule();
+        let hit = make_hit(0);
+        let expr = pick_expression_for_hit(&hit, 1, &mol).unwrap();
+        assert_eq!(expr, "model test and chain \"\" and resi 4");
+
+        let sel = patinae_select::select(&mol, &expr).unwrap();
+        assert_eq!(sel.count(), 2);
+        assert!(sel.contains_index(0));
+        assert!(sel.contains_index(1));
+        assert!(!sel.contains_index(2));
+        assert!(!sel.contains_index(3));
+    }
+
+    #[test]
+    fn test_pick_expr_chain_mode_blank_chain() {
+        let mol = blank_chain_molecule();
+        let hit = make_hit(0);
+        let expr = pick_expression_for_hit(&hit, 2, &mol).unwrap();
+        assert_eq!(expr, "model test and chain \"\"");
+
+        let sel = patinae_select::select(&mol, &expr).unwrap();
+        assert_eq!(sel.count(), 2);
+        assert!(sel.contains_index(0));
+        assert!(sel.contains_index(1));
+    }
+
+    #[test]
+    fn test_pick_expr_calpha_mode_blank_chain() {
+        let mol = blank_chain_molecule();
+        let hit = make_hit(0);
+        let expr = pick_expression_for_hit(&hit, 6, &mol).unwrap();
+        assert_eq!(expr, "model test and chain \"\" and resi 4 and name CA");
+
+        let sel = patinae_select::select(&mol, &expr).unwrap();
+        assert_eq!(sel.count(), 1);
+        assert!(sel.contains_index(1));
+        assert!(!sel.contains_index(3));
     }
 
     #[test]
