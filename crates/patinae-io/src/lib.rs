@@ -61,6 +61,7 @@ pub mod compress;
 pub mod detect;
 pub mod error;
 pub mod gro;
+mod logical_models;
 pub mod mol2;
 pub mod pdb;
 pub mod sdf;
@@ -124,40 +125,40 @@ pub fn read_file_format_with_bond_tolerance(
     format: FileFormat,
     bond_tolerance: f32,
 ) -> IoResult<ObjectMolecule> {
-    match format {
-        FileFormat::Pdb => pdb::read_pdb_with_bond_tolerance(path, bond_tolerance),
-        FileFormat::Sdf => sdf::read_sdf(path).and_then(first_molecule),
-        FileFormat::Mol2 => mol2::read_mol2(path).and_then(first_molecule),
-        FileFormat::Xyz => xyz::read_xyz(path),
-        FileFormat::Cif => cif::read_cif_with_bond_tolerance(path, bond_tolerance),
-        FileFormat::Bcif => bcif::read_bcif_with_bond_tolerance(path, bond_tolerance),
-        FileFormat::Gro => gro::read_gro_with_bond_tolerance(path, bond_tolerance),
-        FileFormat::Xtc | FileFormat::Trr => Err(IoError::unsupported(
-            "Trajectory-only format; use load_traj instead".to_string(),
-        )),
-        FileFormat::Ccp4 => Err(IoError::unsupported(
-            "CCP4 is a map format; use ccp4::read_ccp4 instead".to_string(),
-        )),
-        FileFormat::Unknown => Err(IoError::unknown_format(path.to_string_lossy().into_owned())),
-    }
+    read_all_format_with_bond_tolerance(path, format, bond_tolerance).and_then(first_molecule)
 }
 
-/// Read all molecules from a file (for multi-molecule formats like SDF)
+/// Read all molecules from a file, auto-detecting the format.
 pub fn read_all(path: &Path) -> IoResult<Vec<ObjectMolecule>> {
-    let format = detect::detect_from_path(path);
-    read_all_format(path, format)
+    read_all_with_bond_tolerance(path, patinae_mol::DEFAULT_BOND_TOLERANCE)
 }
 
-/// Read all molecules from a file with a specific format
+pub fn read_all_with_bond_tolerance(
+    path: &Path,
+    bond_tolerance: f32,
+) -> IoResult<Vec<ObjectMolecule>> {
+    let format = detect::detect_from_path(path);
+    read_all_format_with_bond_tolerance(path, format, bond_tolerance)
+}
+
+/// Read all molecules from a file with a specific format.
 pub fn read_all_format(path: &Path, format: FileFormat) -> IoResult<Vec<ObjectMolecule>> {
+    read_all_format_with_bond_tolerance(path, format, patinae_mol::DEFAULT_BOND_TOLERANCE)
+}
+
+pub fn read_all_format_with_bond_tolerance(
+    path: &Path,
+    format: FileFormat,
+    bond_tolerance: f32,
+) -> IoResult<Vec<ObjectMolecule>> {
     match format {
-        FileFormat::Pdb => pdb::read_pdb(path).map(|m| vec![m]),
+        FileFormat::Pdb => pdb::read_all_pdb_with_bond_tolerance(path, bond_tolerance),
         FileFormat::Sdf => sdf::read_sdf(path),
         FileFormat::Mol2 => mol2::read_mol2(path),
         FileFormat::Xyz => xyz::read_xyz(path).map(|m| vec![m]),
-        FileFormat::Cif => cif::read_cif(path).map(|m| vec![m]),
-        FileFormat::Bcif => bcif::read_bcif(path).map(|m| vec![m]),
-        FileFormat::Gro => gro::read_gro(path).map(|m| vec![m]),
+        FileFormat::Cif => cif::read_all_cif_with_bond_tolerance(path, bond_tolerance),
+        FileFormat::Bcif => bcif::read_all_bcif_with_bond_tolerance(path, bond_tolerance),
+        FileFormat::Gro => gro::read_gro_with_bond_tolerance(path, bond_tolerance).map(|m| vec![m]),
         FileFormat::Xtc | FileFormat::Trr => Err(IoError::unsupported(
             "Trajectory-only format; use load_traj instead".to_string(),
         )),
@@ -249,7 +250,39 @@ pub fn parse_str(content: &str, format: FileFormat) -> IoResult<ObjectMolecule> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bcif::test_support::{atom_row, atom_site_block, encode_bcif_file};
+    use lin_alg::f32::Vec3;
+    use patinae_mol::{Atom, CoordSet, Element};
     use tempfile::tempdir;
+
+    fn single_atom_molecule(name: &str, x: f32) -> ObjectMolecule {
+        let mut mol = ObjectMolecule::new(name);
+        mol.add_atom(Atom::new("C", Element::Carbon));
+        mol.add_coord_set(CoordSet::from_vec3(&[Vec3::new(x, 0.0, 0.0)]));
+        mol
+    }
+
+    fn write_sdf_fixture(path: &Path, molecules: &[ObjectMolecule]) {
+        let mut output = Vec::new();
+        {
+            let mut writer = sdf::SdfWriter::new(&mut output);
+            writer
+                .write_all(molecules)
+                .expect("SDF fixture should be writable");
+        }
+        std::fs::write(path, output).expect("SDF fixture should be written to disk");
+    }
+
+    fn write_mol2_fixture(path: &Path, molecules: &[ObjectMolecule]) {
+        let mut output = Vec::new();
+        {
+            let mut writer = mol2::Mol2Writer::new(&mut output);
+            writer
+                .write_all(molecules)
+                .expect("MOL2 fixture should be writable");
+        }
+        std::fs::write(path, output).expect("MOL2 fixture should be written to disk");
+    }
 
     #[test]
     fn test_format_detection() {
@@ -377,6 +410,28 @@ mod tests {
     }
 
     #[test]
+    fn read_all_with_bond_tolerance_empty_sdf_returns_empty_file() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("empty.sdf");
+        std::fs::write(&path, "").expect("empty SDF fixture should be writable");
+
+        let result = read_all_with_bond_tolerance(&path, 0.1);
+
+        assert!(matches!(result, Err(err) if err.is_empty_file()));
+    }
+
+    #[test]
+    fn read_file_format_with_bond_tolerance_empty_sdf_returns_empty_file() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("empty.sdf");
+        std::fs::write(&path, "").expect("empty SDF fixture should be writable");
+
+        let result = read_file_format_with_bond_tolerance(&path, FileFormat::Sdf, 0.1);
+
+        assert!(matches!(result, Err(err) if err.is_empty_file()));
+    }
+
+    #[test]
     fn read_all_format_empty_mol2_returns_empty_file() {
         let dir = tempdir().expect("temporary directory should be created");
         let path = dir.path().join("empty.mol2");
@@ -385,5 +440,165 @@ mod tests {
         let result = read_all_format(&path, FileFormat::Mol2);
 
         assert!(matches!(result, Err(err) if err.is_empty_file()));
+    }
+
+    #[test]
+    fn read_all_format_with_bond_tolerance_empty_mol2_returns_empty_file() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("empty.mol2");
+        std::fs::write(&path, "").expect("empty MOL2 fixture should be writable");
+
+        let result = read_all_format_with_bond_tolerance(&path, FileFormat::Mol2, 0.1);
+
+        assert!(matches!(result, Err(err) if err.is_empty_file()));
+    }
+
+    #[test]
+    fn read_all_format_with_bond_tolerance_sdf_returns_all_records() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("molecules.sdf");
+        let molecules = [
+            single_atom_molecule("first", 0.0),
+            single_atom_molecule("second", 1.0),
+        ];
+        write_sdf_fixture(&path, &molecules);
+
+        let parsed = read_all_format_with_bond_tolerance(&path, FileFormat::Sdf, 0.1)
+            .expect("multi-record SDF should parse");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].name, "first");
+        assert_eq!(parsed[1].name, "second");
+    }
+
+    #[test]
+    fn read_all_format_with_bond_tolerance_mol2_returns_all_records() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("molecules.mol2");
+        let molecules = [
+            single_atom_molecule("first", 0.0),
+            single_atom_molecule("second", 1.0),
+        ];
+        write_mol2_fixture(&path, &molecules);
+
+        let parsed = read_all_format_with_bond_tolerance(&path, FileFormat::Mol2, 0.1)
+            .expect("multi-record MOL2 should parse");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].name, "first");
+        assert_eq!(parsed[1].name, "second");
+    }
+
+    #[test]
+    fn read_file_format_with_bond_tolerance_sdf_returns_first_record() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("molecules.sdf");
+        let molecules = [
+            single_atom_molecule("first", 0.0),
+            single_atom_molecule("second", 1.0),
+        ];
+        write_sdf_fixture(&path, &molecules);
+
+        let parsed = read_file_format_with_bond_tolerance(&path, FileFormat::Sdf, 0.1)
+            .expect("multi-record SDF should parse");
+
+        assert_eq!(parsed.name, "first");
+    }
+
+    #[test]
+    fn read_file_format_with_bond_tolerance_mol2_returns_first_record() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("molecules.mol2");
+        let molecules = [
+            single_atom_molecule("first", 0.0),
+            single_atom_molecule("second", 1.0),
+        ];
+        write_mol2_fixture(&path, &molecules);
+
+        let parsed = read_file_format_with_bond_tolerance(&path, FileFormat::Mol2, 0.1)
+            .expect("multi-record MOL2 should parse");
+
+        assert_eq!(parsed.name, "first");
+    }
+
+    #[test]
+    fn read_all_format_with_bond_tolerance_pdb_returns_logical_molecules() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("models.pdb");
+        let pdb = r#"MODEL        1
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.000   0.000   0.000  1.00 20.00           C
+ENDMDL
+MODEL        2
+ATOM      1  N   GLY A   1       0.500   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  GLY A   1       1.500   0.000   0.000  1.00 20.00           C
+ENDMDL
+"#;
+        std::fs::write(&path, pdb).expect("PDB fixture should be writable");
+
+        let parsed = read_all_format_with_bond_tolerance(&path, FileFormat::Pdb, 0.1)
+            .expect("PDB fixture should parse");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].atoms_slice()[0].residue.resn, "ALA");
+        assert_eq!(parsed[1].atoms_slice()[0].residue.resn, "GLY");
+    }
+
+    #[test]
+    fn read_all_format_with_bond_tolerance_cif_returns_logical_molecules() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("blocks.cif");
+        let cif = r#"data_FIRST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 C C LIG A 1 0.0 0.0 0.0
+data_SECOND
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 N N LIG B 1 1.0 0.0 0.0
+"#;
+        std::fs::write(&path, cif).expect("CIF fixture should be writable");
+
+        let parsed = read_all_format_with_bond_tolerance(&path, FileFormat::Cif, 0.1)
+            .expect("CIF fixture should parse");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].name, "FIRST");
+        assert_eq!(parsed[1].name, "SECOND");
+    }
+
+    #[test]
+    fn read_all_format_with_bond_tolerance_bcif_returns_logical_molecules() {
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("blocks.bcif");
+        let blocks = vec![
+            atom_site_block("FIRST", &[atom_row(1, "C", "LIG", "A", 0.0, 1)]),
+            atom_site_block("SECOND", &[atom_row(1, "N", "LIG", "B", 1.0, 1)]),
+        ];
+        let bytes = encode_bcif_file(&blocks);
+        std::fs::write(&path, bytes).expect("bCIF fixture should be writable");
+
+        let parsed = read_all_format_with_bond_tolerance(&path, FileFormat::Bcif, 0.1)
+            .expect("bCIF fixture should parse");
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].name, "FIRST");
+        assert_eq!(parsed[1].name, "SECOND");
     }
 }

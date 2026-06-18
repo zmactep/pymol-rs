@@ -2,15 +2,15 @@
 //!
 //! Parses BinaryCIF format files into ObjectMolecule.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
-use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use patinae_mol::{Atom, AtomResidue, CoordSet, Element, ObjectMolecule, SecondaryStructure};
+use patinae_mol::{Element, ObjectMolecule, SecondaryStructure};
 
 use crate::cif::common::{apply_secondary_structure, SecondaryStructureRange, SsCategory};
 use crate::error::{IoError, IoResult};
+use crate::logical_models::{build_molecules, ParsedAtom, ParsedModel};
 use crate::traits::MoleculeReader;
 
 use super::decode::{decode_column, decode_mask, ColumnMask, DecodedColumn};
@@ -36,25 +36,30 @@ impl<R: Read> BcifReader<R> {
     }
 
     fn parse(&mut self) -> IoResult<ObjectMolecule> {
+        self.parse_all()?
+            .into_iter()
+            .next()
+            .ok_or(IoError::empty_file())
+    }
+
+    fn parse_all(&mut self) -> IoResult<Vec<ObjectMolecule>> {
         let mut bytes = Vec::new();
         self.reader.read_to_end(&mut bytes).map_err(IoError::io)?;
 
         let file: BcifFile = rmp_serde::from_slice(&bytes)
             .map_err(|e| IoError::parse_msg(format!("MessagePack error: {}", e)))?;
 
-        let block = file
-            .data_blocks
-            .into_iter()
-            .next()
-            .ok_or(IoError::empty_file())?;
-
-        parse_data_block(block, self.bond_tolerance)
+        parse_bcif_file(file, self.bond_tolerance)
     }
 }
 
 impl<R: Read> MoleculeReader for BcifReader<R> {
     fn read(&mut self) -> IoResult<ObjectMolecule> {
         self.parse()
+    }
+
+    fn read_all(&mut self) -> IoResult<Vec<ObjectMolecule>> {
+        self.parse_all()
     }
 }
 
@@ -118,51 +123,104 @@ impl CategoryColumns {
     }
 }
 
-fn parse_data_block(block: BcifDataBlock, bond_tolerance: f32) -> IoResult<ObjectMolecule> {
-    let mut mol = ObjectMolecule::new(&block.header);
+fn parse_bcif_file(file: BcifFile, bond_tolerance: f32) -> IoResult<Vec<ObjectMolecule>> {
+    let mut molecules = Vec::new();
+    for block in file.data_blocks {
+        molecules.extend(parse_data_block(block, bond_tolerance)?);
+    }
+
+    if molecules.is_empty() {
+        Err(IoError::empty_file())
+    } else {
+        Ok(molecules)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CellInfo {
+    a: f32,
+    b: f32,
+    c: f32,
+    alpha: f32,
+    beta: f32,
+    gamma: f32,
+}
+
+impl Default for CellInfo {
+    fn default() -> Self {
+        Self {
+            a: 1.0,
+            b: 1.0,
+            c: 1.0,
+            alpha: 90.0,
+            beta: 90.0,
+            gamma: 90.0,
+        }
+    }
+}
+
+impl CellInfo {
+    fn has_non_default_lengths(&self) -> bool {
+        (self.a - 1.0).abs() > 0.001 || (self.b - 1.0).abs() > 0.001 || (self.c - 1.0).abs() > 0.001
+    }
+
+    fn apply_to(self, mol: &mut ObjectMolecule, space_group: Option<&str>) {
+        if self.has_non_default_lengths() {
+            use patinae_mol::Symmetry;
+            mol.symmetry = Some(Symmetry::new(
+                space_group.unwrap_or("P 1"),
+                [self.a, self.b, self.c],
+                [self.alpha, self.beta, self.gamma],
+            ));
+        }
+    }
+}
+
+fn parse_data_block(block: BcifDataBlock, bond_tolerance: f32) -> IoResult<Vec<ObjectMolecule>> {
+    let mut models: BTreeMap<i32, ParsedModel> = BTreeMap::new();
     let mut ss_ranges: Vec<SecondaryStructureRange> = Vec::new();
     let mut space_group: Option<String> = None;
+    let mut cell = CellInfo::default();
+    let mut title = String::new();
 
     for category in &block.categories {
         match category.name.as_str() {
-            "_atom_site" => parse_atom_site(category, &mut mol)?,
-            "_cell" => parse_cell(category, &mut mol)?,
+            "_atom_site" => parse_atom_site(category, &mut models)?,
+            "_cell" => parse_cell(category, &mut cell)?,
             "_symmetry" => parse_symmetry_category(category, &mut space_group)?,
             "_struct_conf" => parse_ss(category, SsCategory::StructConf, &mut ss_ranges)?,
             "_struct_sheet_range" => {
                 parse_ss(category, SsCategory::StructSheetRange, &mut ss_ranges)?;
             }
-            "_entry" => parse_entry(category, &mut mol)?,
+            "_entry" => parse_entry(category, &mut title)?,
             _ => {}
         }
     }
 
-    // Apply space group from _symmetry category
-    if let Some(sg) = space_group {
-        if let Some(ref mut sym) = mol.symmetry {
-            sym.space_group = sg;
-        }
+    if models.is_empty() {
+        return Ok(Vec::new());
     }
 
-    if mol.atom_count() == 0 {
-        return Err(IoError::empty_file());
+    let models = models.into_values().collect();
+    let mut molecules = build_molecules(&block.header, &title, models)?;
+
+    for mol in &mut molecules {
+        cell.apply_to(mol, space_group.as_deref());
+        apply_secondary_structure(mol, &ss_ranges);
+        mol.classify_atoms();
+        mol.generate_bonds(bond_tolerance);
+        mol.assign_known_residue_bond_orders();
     }
 
-    apply_secondary_structure(&mut mol, &ss_ranges);
-    mol.classify_atoms();
-    mol.generate_bonds(bond_tolerance);
-    mol.assign_known_residue_bond_orders();
-
-    Ok(mol)
+    Ok(molecules)
 }
 
-fn parse_atom_site(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResult<()> {
+fn parse_atom_site(
+    category: &BcifCategory,
+    models: &mut BTreeMap<i32, ParsedModel>,
+) -> IoResult<()> {
     let row_count = category.row_count as usize;
     let cols = CategoryColumns::decode(category)?;
-
-    let mut coords: Vec<Vec3> = Vec::with_capacity(row_count);
-    let mut models: HashMap<i32, Vec<Vec3>> = HashMap::new();
-    let mut residue_cache: HashMap<(String, String, i32, char), Arc<AtomResidue>> = HashMap::new();
 
     for i in 0..row_count {
         // Element
@@ -177,8 +235,6 @@ fn parse_atom_site(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResul
             .str_at("auth_atom_id", i)
             .or_else(|| cols.str_at("label_atom_id", i))
             .unwrap_or("X");
-
-        let mut atom = Atom::new(atom_name, element);
 
         // Residue info
         let resn = cols
@@ -204,44 +260,32 @@ fn parse_atom_site(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResul
         // Strip hyphens from chain IDs so assembly chains like "A-2"
         // become "A2", which is valid in the selection language.
         let chain_id = chain.replace('-', "");
-        let cache_key = (chain_id, resn.to_string(), resv, inscode);
-        atom.residue = residue_cache
-            .entry(cache_key)
-            .or_insert_with(|| {
-                let chain_id = chain.replace('-', "");
-                Arc::new(AtomResidue::from_parts(
-                    chain_id,
-                    resn.to_string(),
-                    resv,
-                    inscode,
-                    "",
-                ))
-            })
-            .clone();
 
         // Alt loc
-        atom.alt = cols
+        let alt = cols
             .str_at("label_alt_id", i)
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
         // B-factor
-        atom.b_factor = cols.float_at("B_iso_or_equiv", i).unwrap_or(0.0);
+        let b_factor = cols.float_at("B_iso_or_equiv", i).unwrap_or(0.0);
 
         // Occupancy
-        atom.occupancy = cols.float_at("occupancy", i).unwrap_or(1.0);
+        let occupancy = cols.float_at("occupancy", i).unwrap_or(1.0);
 
         // HETATM flag
-        atom.state.hetatm = cols
+        let hetatm = cols
             .str_at("group_PDB", i)
             .map(|s| s == "HETATM")
             .unwrap_or(false);
 
         // Formal charge
-        atom.formal_charge = cols.int_at("pdbx_formal_charge", i).unwrap_or(0) as i8;
+        let formal_charge = cols
+            .int_at("pdbx_formal_charge", i)
+            .map(|charge| charge as i8);
 
         // Serial number
-        atom.id = cols.int_at("id", i).unwrap_or(0);
+        let serial = cols.int_at("id", i);
 
         // Coordinates
         let x = cols.float_at("Cartn_x", i).unwrap_or(0.0);
@@ -251,39 +295,31 @@ fn parse_atom_site(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResul
         // Model number
         let model_num = cols.int_at("pdbx_PDB_model_num", i).unwrap_or(1);
 
-        if model_num == 1 {
-            mol.add_atom(atom);
-            coords.push(Vec3::new(x, y, z));
-        } else {
-            models
-                .entry(model_num)
-                .or_default()
-                .push(Vec3::new(x, y, z));
-        }
-    }
-
-    // Add primary coordinate set
-    if !coords.is_empty() {
-        let coord_set = CoordSet::from_vec3(&coords);
-        mol.add_coord_set(coord_set);
-    }
-
-    // Add additional models as coordinate sets
-    let mut model_nums: Vec<i32> = models.keys().copied().collect();
-    model_nums.sort();
-    for model_num in model_nums {
-        if let Some(model_coords) = models.get(&model_num) {
-            if model_coords.len() == mol.atom_count() {
-                let coord_set = CoordSet::from_vec3(model_coords);
-                mol.add_coord_set(coord_set);
-            }
-        }
+        let model = models
+            .entry(model_num)
+            .or_insert_with(|| ParsedModel::new(model_num));
+        model.atoms.push(ParsedAtom {
+            name: atom_name.to_string(),
+            element,
+            chain: chain_id,
+            resn: resn.to_string(),
+            resv,
+            icode: inscode,
+            alt,
+            hetatm,
+            serial,
+            formal_charge,
+            occupancy,
+            b_factor,
+            segi: String::new(),
+        });
+        model.coords.push(Vec3::new(x, y, z));
     }
 
     Ok(())
 }
 
-fn parse_cell(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResult<()> {
+fn parse_cell(category: &BcifCategory, cell: &mut CellInfo) -> IoResult<()> {
     let cols = CategoryColumns::decode_selected(
         category,
         &[
@@ -296,17 +332,12 @@ fn parse_cell(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResult<()>
         ],
     )?;
 
-    let a = cols.float_at("length_a", 0).unwrap_or(1.0);
-    let b = cols.float_at("length_b", 0).unwrap_or(1.0);
-    let c = cols.float_at("length_c", 0).unwrap_or(1.0);
-    let alpha = cols.float_at("angle_alpha", 0).unwrap_or(90.0);
-    let beta = cols.float_at("angle_beta", 0).unwrap_or(90.0);
-    let gamma = cols.float_at("angle_gamma", 0).unwrap_or(90.0);
-
-    if (a - 1.0).abs() > 0.001 || (b - 1.0).abs() > 0.001 || (c - 1.0).abs() > 0.001 {
-        use patinae_mol::Symmetry;
-        mol.symmetry = Some(Symmetry::new("P 1", [a, b, c], [alpha, beta, gamma]));
-    }
+    cell.a = cols.float_at("length_a", 0).unwrap_or(1.0);
+    cell.b = cols.float_at("length_b", 0).unwrap_or(1.0);
+    cell.c = cols.float_at("length_c", 0).unwrap_or(1.0);
+    cell.alpha = cols.float_at("angle_alpha", 0).unwrap_or(90.0);
+    cell.beta = cols.float_at("angle_beta", 0).unwrap_or(90.0);
+    cell.gamma = cols.float_at("angle_gamma", 0).unwrap_or(90.0);
 
     Ok(())
 }
@@ -415,11 +446,11 @@ fn parse_symmetry_category(
     Ok(())
 }
 
-fn parse_entry(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResult<()> {
+fn parse_entry(category: &BcifCategory, title: &mut String) -> IoResult<()> {
     let cols = CategoryColumns::decode_selected(category, &["id"])?;
     if let Some(id) = cols.str_at("id", 0) {
-        if mol.title.is_empty() {
-            mol.title = id.to_string();
+        if title.is_empty() {
+            *title = id.to_string();
         }
     }
     Ok(())
@@ -428,6 +459,7 @@ fn parse_entry(category: &BcifCategory, mol: &mut ObjectMolecule) -> IoResult<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bcif::test_support::{atom_row, atom_site_block, bcif_file, encode_bcif_file};
     use std::collections::HashMap;
 
     /// Verify that CategoryColumns::str_at filters out empty strings,
@@ -481,5 +513,70 @@ mod tests {
         assert_eq!(cols.str_at("label_seq_id", 1), Some("2"));
         // Masked entry returns None (mask takes priority)
         assert_eq!(cols.str_at("label_seq_id", 2), None);
+    }
+
+    #[test]
+    fn parse_file_reads_multiple_data_blocks() {
+        let first = atom_site_block("FIRST", &[atom_row(1, "C", "LIG", "A", 0.0, 1)]);
+        let second = atom_site_block("SECOND", &[atom_row(1, "N", "LIG", "B", 1.0, 1)]);
+
+        let molecules = parse_bcif_file(bcif_file(vec![first, second]), 0.1).unwrap();
+
+        assert_eq!(molecules.len(), 2);
+        assert_eq!(molecules[0].name, "FIRST");
+        assert_eq!(molecules[1].name, "SECOND");
+    }
+
+    #[test]
+    fn parse_block_groups_same_topology_models_as_states() {
+        let rows = [
+            atom_row(1, "N", "ALA", "A", 0.0, 1),
+            atom_row(2, "CA", "ALA", "A", 1.0, 1),
+            atom_row(1, "N", "ALA", "A", 0.5, 2),
+            atom_row(2, "CA", "ALA", "A", 1.5, 2),
+        ];
+        let block = atom_site_block("TEST", &rows);
+
+        let molecules = parse_data_block(block, 0.1).unwrap();
+
+        assert_eq!(molecules.len(), 1);
+        assert_eq!(molecules[0].atom_count(), 2);
+        assert_eq!(molecules[0].state_count(), 2);
+    }
+
+    #[test]
+    fn parse_block_splits_incompatible_models() {
+        let rows = [
+            atom_row(1, "N", "ALA", "A", 0.0, 1),
+            atom_row(2, "CA", "ALA", "A", 1.0, 1),
+            atom_row(1, "N", "GLY", "A", 0.5, 2),
+            atom_row(2, "CA", "GLY", "A", 1.5, 2),
+        ];
+        let block = atom_site_block("TEST", &rows);
+
+        let molecules = parse_data_block(block, 0.1).unwrap();
+
+        assert_eq!(molecules.len(), 2);
+        assert_eq!(molecules[0].name, "TEST_model_1");
+        assert_eq!(molecules[1].name, "TEST_model_2");
+        assert_eq!(molecules[0].atoms_slice()[0].residue.resn, "ALA");
+        assert_eq!(molecules[1].atoms_slice()[0].residue.resn, "GLY");
+    }
+
+    #[test]
+    fn read_bcif_bytes_returns_first_logical_molecule() {
+        let rows = [
+            atom_row(1, "N", "ALA", "A", 0.0, 1),
+            atom_row(2, "CA", "ALA", "A", 1.0, 1),
+            atom_row(1, "N", "ALA", "B", 0.5, 2),
+        ];
+        let blocks = vec![atom_site_block("TEST", &rows)];
+        let bytes = encode_bcif_file(&blocks);
+
+        let molecule = crate::bcif::read_bcif_bytes_with_bond_tolerance(&bytes, 0.1).unwrap();
+
+        assert_eq!(molecule.atom_count(), 2);
+        assert_eq!(molecule.state_count(), 1);
+        assert_eq!(molecule.atoms_slice()[0].residue.chain, "A");
     }
 }

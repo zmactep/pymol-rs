@@ -29,6 +29,15 @@ pub fn read_cif_with_bond_tolerance(path: &Path, bond_tolerance: f32) -> IoResul
     reader.read()
 }
 
+pub(crate) fn read_all_cif_with_bond_tolerance(
+    path: &Path,
+    bond_tolerance: f32,
+) -> IoResult<Vec<ObjectMolecule>> {
+    let file = crate::compress::open_file(path)?;
+    let mut reader = CifReader::new(file).with_bond_tolerance(bond_tolerance);
+    reader.read_all()
+}
+
 /// Read an mmCIF file from a string
 pub fn read_cif_str(content: &str) -> IoResult<ObjectMolecule> {
     let mut reader =

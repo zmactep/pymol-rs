@@ -7,7 +7,7 @@ use patinae_algos::surface::Grid3D;
 use patinae_io::FileFormat;
 use patinae_mol::dss::{assign_secondary_structure, assigner_for};
 use patinae_mol::ObjectMolecule;
-use patinae_scene::{MapData, MapObject, MoleculeObject};
+use patinae_scene::{MapData, MapObject, MoleculeObject, ObjectRegistry};
 
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
@@ -135,22 +135,7 @@ impl Command for LoadCommand {
         let object_name = args
             .str_arg(1, "object")
             .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                let p = Path::new(filename);
-                let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("obj");
-                // Strip double extension for .gz files (e.g. "1AOI.cif.gz" → "1AOI")
-                let name = if p.extension().and_then(|s| s.to_str()) == Some("gz") {
-                    Path::new(stem)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(stem)
-                } else {
-                    stem
-                };
-                // Replace hyphens with underscores so object names are
-                // valid in the selection language (e.g. "7KP3-assembly1" → "7KP3_assembly1")
-                name.replace('-', "_")
-            });
+            .unwrap_or_else(|| default_load_object_name(Path::new(filename), "obj"));
 
         // Get state (optional, 0 = append)
         let state = args.int_arg_or(2, "state", 0);
@@ -276,9 +261,9 @@ impl Command for LoadCommand {
         }
 
         // Load molecular file
-        let mut mol = if builtin_format != FileFormat::Unknown {
+        let mut molecules = if builtin_format != FileFormat::Unknown {
             // Built-in format
-            patinae_io::read_file_format_with_bond_tolerance(
+            patinae_io::read_all_format_with_bond_tolerance(
                 &path,
                 builtin_format,
                 ctx.viewer.settings().behavior.bonding_vdw_cutoff,
@@ -295,11 +280,7 @@ impl Command for LoadCommand {
             let file =
                 std::fs::File::open(&path).map_err(|e| CmdError::file_format(e.to_string()))?;
             let buf_reader: Box<dyn std::io::Read> = Box::new(std::io::BufReader::new(file));
-            let molecules = (reader_fn)(buf_reader).map_err(CmdError::file_format)?;
-            molecules
-                .into_iter()
-                .next()
-                .ok_or_else(|| CmdError::file_format("No molecules in file".to_string()))?
+            (reader_fn)(buf_reader).map_err(CmdError::file_format)?
         } else {
             return Err(CmdError::execution(format!(
                 "Unknown file format: .{} (no built-in or plugin handler found)",
@@ -307,27 +288,96 @@ impl Command for LoadCommand {
             )));
         };
 
+        if molecules.is_empty() {
+            return Err(CmdError::file_format("No molecules in file".to_string()));
+        }
+
         // Apply DSS (Define Secondary Structure) if auto_dss is enabled
         // This recalculates secondary structure based on backbone geometry
         let behavior = &ctx.viewer.settings().behavior;
         if behavior.auto_dss {
-            apply_dss(&mut mol, behavior.dss_algorithm);
+            for mol in &mut molecules {
+                apply_dss(mol, behavior.dss_algorithm);
+            }
         }
 
-        // Create molecule object and add to viewer
-        let mol_obj = MoleculeObject::with_name(mol, &object_name);
-        ctx.viewer.objects_mut().add(mol_obj);
+        let mut inserted_names = Vec::with_capacity(molecules.len());
+        for (index, mol) in molecules.into_iter().enumerate() {
+            let name = if index == 0 {
+                object_name.clone()
+            } else {
+                derive_extra_object_name(&object_name, index + 1, ctx.viewer.objects())
+            };
+            let mol_obj = MoleculeObject::with_name(mol, &name);
+            ctx.viewer.objects_mut().add(mol_obj);
+            inserted_names.push(name);
+        }
 
         if !quiet {
-            ctx.print(&format!(" Loaded \"{}\" as \"{}\"", filename, object_name));
+            print_loaded_molecules_message(ctx, filename, &inserted_names);
         }
 
         // Zoom to loaded molecule (preserves rotation)
-        ctx.viewer.zoom_on(&object_name, 0.0);
+        ctx.viewer.zoom_on(&inserted_names[0], 0.0);
         ctx.viewer.update_movie_state_count();
         record_loaded_file(ctx, &path);
 
         Ok(())
+    }
+}
+
+fn default_load_object_name(path: &Path, fallback: &str) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(fallback);
+    let name = if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("gz"))
+    {
+        Path::new(stem)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or(stem)
+    } else {
+        stem
+    };
+    sanitize_load_object_name(name)
+}
+
+fn sanitize_load_object_name(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+fn derive_extra_object_name(base: &str, index: usize, registry: &ObjectRegistry) -> String {
+    let mut suffix = index;
+    loop {
+        let candidate = format!("{base}_{suffix}");
+        if !registry.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn print_loaded_molecules_message(
+    ctx: &mut CommandContext<'_, '_, dyn ViewerLike + '_>,
+    filename: &str,
+    object_names: &[String],
+) {
+    if object_names.len() == 1 {
+        ctx.print(&format!(
+            " Loaded \"{}\" as \"{}\"",
+            filename, object_names[0]
+        ));
+    } else {
+        ctx.print(&format!(
+            " Loaded \"{}\" as {} objects: {}",
+            filename,
+            object_names.len(),
+            object_names.join(", ")
+        ));
     }
 }
 
@@ -346,6 +396,301 @@ fn recent_file_path(path: &Path) -> PathBuf {
     env::current_dir()
         .map(|cwd| cwd.join(path))
         .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod load_tests {
+    use std::fs;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use lin_alg::f32::Vec3;
+    use patinae_mol::{Atom, AtomIndex, CoordSet, Element, ObjectMolecule};
+    use patinae_scene::{MoleculeObject, Session, SessionAdapter};
+
+    use crate::{CommandAction, CommandExecutor, CommandOutput, FormatHandler, MessageKind};
+
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after Unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "patinae_cmd_load_{name}_{}_{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("temporary directory should be created");
+        dir
+    }
+
+    fn single_atom_molecule(name: &str, x: f32) -> ObjectMolecule {
+        let mut mol = ObjectMolecule::new(name);
+        mol.add_atom(Atom::new("C", Element::Carbon));
+        mol.add_coord_set(CoordSet::from_vec3(&[Vec3::new(x, 0.0, 0.0)]));
+        mol
+    }
+
+    fn write_multi_molecule_fixture(path: &Path, format: FileFormat) {
+        let molecules = [
+            single_atom_molecule("first", 0.0),
+            single_atom_molecule("second", 1.0),
+            single_atom_molecule("third", 2.0),
+        ];
+        patinae_io::write_all_format(path, &molecules, format)
+            .expect("multi-molecule fixture should be writable");
+    }
+
+    fn write_gzipped_cif(path: &Path) {
+        let cif = r#"data_ONE
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 C C LIG A 1 0.0 0.0 0.0
+"#;
+        let file = fs::File::create(path).expect("gzipped CIF fixture should be created");
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder
+            .write_all(cif.as_bytes())
+            .expect("CIF payload should be written");
+        encoder.finish().expect("gzip stream should finish");
+    }
+
+    fn run_command(
+        session: &mut Session,
+        executor: &mut CommandExecutor,
+        command: &str,
+    ) -> CommandOutput {
+        let mut needs_redraw = false;
+        let mut adapter = SessionAdapter {
+            session,
+            render_context: None,
+            default_size: (64, 64),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+
+        executor
+            .do_with_options(&mut adapter, command, false)
+            .expect("load command should succeed")
+    }
+
+    fn object_names(session: &Session) -> Vec<String> {
+        session
+            .registry
+            .names()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    }
+
+    fn assert_recent_file_recorded_once(output: &CommandOutput) {
+        let recent_file_actions = output
+            .actions
+            .iter()
+            .filter(|action| matches!(action, CommandAction::RecordRecentFile { .. }))
+            .count();
+        assert_eq!(recent_file_actions, 1);
+    }
+
+    #[test]
+    fn load_multi_sdf_creates_derived_objects_and_summary() {
+        let dir = temp_dir("multi_sdf");
+        let path = dir.join("ligands.sdf");
+        write_multi_molecule_fixture(&path, FileFormat::Sdf);
+
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        let command = format!("load {}", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(
+            object_names(&session),
+            ["ligands", "ligands_2", "ligands_3"]
+        );
+        assert_eq!(output.messages.len(), 1);
+        assert_eq!(output.messages[0].kind, MessageKind::Info);
+        assert_eq!(
+            output.messages[0].text,
+            format!(
+                " Loaded \"{}\" as 3 objects: ligands, ligands_2, ligands_3",
+                path.display()
+            )
+        );
+        assert_recent_file_recorded_once(&output);
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn load_multi_mol2_creates_multiple_objects() {
+        let dir = temp_dir("multi_mol2");
+        let path = dir.join("ligands.mol2");
+        write_multi_molecule_fixture(&path, FileFormat::Mol2);
+
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        let command = format!("load {}", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(
+            object_names(&session),
+            ["ligands", "ligands_2", "ligands_3"]
+        );
+        assert_recent_file_recorded_once(&output);
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn load_multi_sdf_uses_explicit_name_for_first_object() {
+        let dir = temp_dir("explicit_name");
+        let path = dir.join("ligands.sdf");
+        write_multi_molecule_fixture(&path, FileFormat::Sdf);
+
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        let command = format!("load {}, object=foo", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(object_names(&session), ["foo", "foo_2", "foo_3"]);
+        assert_eq!(
+            output.messages[0].text,
+            format!(
+                " Loaded \"{}\" as 3 objects: foo, foo_2, foo_3",
+                path.display()
+            )
+        );
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn load_replaces_first_object_and_keeps_existing_extra_name() {
+        let dir = temp_dir("replacement");
+        let path = dir.join("ligands.sdf");
+        let molecules = [
+            single_atom_molecule("new_first", 1.0),
+            single_atom_molecule("new_second", 2.0),
+        ];
+        patinae_io::write_all_format(&path, &molecules, FileFormat::Sdf)
+            .expect("SDF fixture should be writable");
+
+        let mut session = Session::new();
+        session.registry.add(MoleculeObject::with_name(
+            single_atom_molecule("old_first", 8.0),
+            "foo",
+        ));
+        session.registry.add(MoleculeObject::with_name(
+            single_atom_molecule("old_second", 9.0),
+            "foo_2",
+        ));
+
+        let mut executor = CommandExecutor::new();
+        let command = format!("load {}, object=foo", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(object_names(&session), ["foo_2", "foo", "foo_3"]);
+        let foo = session.registry.get_molecule("foo").unwrap().molecule();
+        let foo_2 = session.registry.get_molecule("foo_2").unwrap().molecule();
+        let foo_3 = session.registry.get_molecule("foo_3").unwrap().molecule();
+        assert_eq!(foo.get_coord(AtomIndex::new(0), 0).unwrap().x, 1.0);
+        assert_eq!(foo_2.get_coord(AtomIndex::new(0), 0).unwrap().x, 9.0);
+        assert_eq!(foo_3.get_coord(AtomIndex::new(0), 0).unwrap().x, 2.0);
+        assert_eq!(
+            output.messages[0].text,
+            format!(" Loaded \"{}\" as 2 objects: foo, foo_3", path.display())
+        );
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn load_plugin_format_consumes_all_returned_molecules() {
+        let dir = temp_dir("plugin");
+        let path = dir.join("structure.foo");
+        fs::write(&path, b"plugin fixture").expect("plugin fixture should be written");
+
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        executor.register_format_handler(FormatHandler {
+            name: "Foo".to_string(),
+            extensions: vec!["foo".to_string()],
+            reader: Some(Arc::new(|_| {
+                Ok(vec![
+                    single_atom_molecule("plugin_first", 0.0),
+                    single_atom_molecule("plugin_second", 1.0),
+                ])
+            })),
+            writer: None,
+        });
+
+        let command = format!("load {}", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(object_names(&session), ["structure", "structure_2"]);
+        assert_eq!(
+            output.messages[0].text,
+            format!(
+                " Loaded \"{}\" as 2 objects: structure, structure_2",
+                path.display()
+            )
+        );
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn load_cif_gz_default_name_strips_double_extension_and_sanitizes_hyphens() {
+        let dir = temp_dir("cif_gz");
+        let path = dir.join("my-name.cif.gz");
+        write_gzipped_cif(&path);
+
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        let command = format!("load {}", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(object_names(&session), ["my_name"]);
+        assert_eq!(
+            output.messages[0].text,
+            format!(" Loaded \"{}\" as \"my_name\"", path.display())
+        );
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn load_quiet_argument_suppresses_info_messages() {
+        let dir = temp_dir("quiet");
+        let path = dir.join("ligands.sdf");
+        write_multi_molecule_fixture(&path, FileFormat::Sdf);
+
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        let command = format!("load {}, quiet=1", path.display());
+        let output = run_command(&mut session, &mut executor, &command);
+
+        assert_eq!(
+            object_names(&session),
+            ["ligands", "ligands_2", "ligands_3"]
+        );
+        assert!(output.messages.is_empty());
+        assert_recent_file_recorded_once(&output);
+
+        fs::remove_dir_all(&dir).expect("temporary directory should be removed");
+    }
 }
 
 // ============================================================================

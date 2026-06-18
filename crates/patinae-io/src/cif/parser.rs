@@ -2,14 +2,14 @@
 //!
 //! Parses macromolecular CIF format files.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{BufReader, Read};
-use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use patinae_mol::{Atom, AtomResidue, CoordSet, Element, ObjectMolecule};
+use patinae_mol::{Element, ObjectMolecule};
 
 use crate::error::{IoError, IoResult};
+use crate::logical_models::{build_molecules, ParsedAtom, ParsedModel};
 use crate::traits::MoleculeReader;
 
 use super::common::{
@@ -40,6 +40,68 @@ struct AtomSiteColumns {
     cartn_y: Option<usize>,
     cartn_z: Option<usize>,
     pdbx_pdb_model_num: Option<usize>,
+}
+
+struct CifBlockData {
+    name: String,
+    title: String,
+    models: BTreeMap<i32, ParsedModel>,
+    cell: CellInfo,
+    ss_ranges: Vec<SecondaryStructureRange>,
+    space_group: Option<String>,
+}
+
+impl CifBlockData {
+    fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            title: String::new(),
+            models: BTreeMap::new(),
+            cell: CellInfo::default(),
+            ss_ranges: Vec::new(),
+            space_group: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CellInfo {
+    a: f32,
+    b: f32,
+    c: f32,
+    alpha: f32,
+    beta: f32,
+    gamma: f32,
+}
+
+impl Default for CellInfo {
+    fn default() -> Self {
+        Self {
+            a: 1.0,
+            b: 1.0,
+            c: 1.0,
+            alpha: 90.0,
+            beta: 90.0,
+            gamma: 90.0,
+        }
+    }
+}
+
+impl CellInfo {
+    fn has_non_default_lengths(&self) -> bool {
+        (self.a - 1.0).abs() > 0.001 || (self.b - 1.0).abs() > 0.001 || (self.c - 1.0).abs() > 0.001
+    }
+
+    fn apply_to(self, mol: &mut ObjectMolecule, space_group: Option<&str>) {
+        if self.has_non_default_lengths() {
+            use patinae_mol::Symmetry;
+            mol.symmetry = Some(Symmetry::new(
+                space_group.unwrap_or("P 1"),
+                [self.a, self.b, self.c],
+                [self.alpha, self.beta, self.gamma],
+            ));
+        }
+    }
 }
 
 impl AtomSiteColumns {
@@ -106,8 +168,17 @@ impl<R: Read> CifReader<R> {
         // Tokenize
         let tokens = tokenize(&content);
 
-        // Parse tokens
         parse_cif_tokens(&tokens, self.bond_tolerance)
+    }
+
+    fn parse_all(&mut self) -> IoResult<Vec<ObjectMolecule>> {
+        let mut content = String::new();
+        self.reader
+            .read_to_string(&mut content)
+            .map_err(IoError::io)?;
+
+        let tokens = tokenize(&content);
+        parse_cif_tokens_all(&tokens, self.bond_tolerance)
     }
 }
 
@@ -115,105 +186,121 @@ impl<R: Read> MoleculeReader for CifReader<R> {
     fn read(&mut self) -> IoResult<ObjectMolecule> {
         self.parse()
     }
+
+    fn read_all(&mut self) -> IoResult<Vec<ObjectMolecule>> {
+        self.parse_all()
+    }
 }
 
 /// Parse CIF tokens into a molecule
 fn parse_cif_tokens(tokens: &[Token], bond_tolerance: f32) -> IoResult<ObjectMolecule> {
-    let mut mol = ObjectMolecule::new("");
-    let mut pos = 0;
-    let mut ss_ranges: Vec<SecondaryStructureRange> = Vec::new();
-    let mut space_group: Option<String> = None;
+    parse_cif_tokens_all(tokens, bond_tolerance)?
+        .into_iter()
+        .next()
+        .ok_or(IoError::empty_file())
+}
 
-    // Find data block name
+fn parse_cif_tokens_all(tokens: &[Token], bond_tolerance: f32) -> IoResult<Vec<ObjectMolecule>> {
+    let mut pos = 0;
+    let mut molecules = Vec::new();
+
     while pos < tokens.len() {
         match &tokens[pos] {
             Token::DataBlock(name) => {
-                mol.name = name.to_string();
-                pos += 1;
-                break;
-            }
-            Token::Eof => return Err(IoError::empty_file()),
-            _ => pos += 1,
-        }
-    }
-
-    // Parse data items and loops
-    while pos < tokens.len() {
-        match &tokens[pos] {
-            Token::Loop => {
-                pos += 1;
-                pos = parse_loop(tokens, pos, &mut mol, &mut ss_ranges)?;
-            }
-            Token::DataName(name) if name.starts_with("_cell.") => {
-                pos = parse_cell(tokens, pos, &mut mol)?;
-            }
-            Token::DataName(name) if name.starts_with("_symmetry.") => {
-                pos = parse_symmetry(tokens, pos, &mut space_group);
-            }
-            Token::DataName(name) if name.starts_with("_entry.") => {
-                pos += 1;
-                if let Some(token) = tokens.get(pos) {
-                    if let Some(val) = token.as_str() {
-                        if mol.title.is_empty()
-                            && !matches!(token, Token::DataBlock(_) | Token::DataName(_))
-                        {
-                            mol.title = val.to_string();
-                        }
-                    }
-                    pos += 1;
+                let block_start = pos + 1;
+                let mut block_end = block_start;
+                while block_end < tokens.len()
+                    && !matches!(&tokens[block_end], Token::DataBlock(_) | Token::Eof)
+                {
+                    block_end += 1;
                 }
-            }
-            // Handle single-item secondary structure format (when not in a loop)
-            Token::DataName(name) if name.starts_with("_struct_conf.") => {
-                pos = parse_ss_single(tokens, pos, SsCategory::StructConf, &mut ss_ranges);
-            }
-            Token::DataName(name) if name.starts_with("_struct_sheet_range.") => {
-                pos = parse_ss_single(tokens, pos, SsCategory::StructSheetRange, &mut ss_ranges);
-            }
-            Token::DataBlock(_) => {
-                // New data block - stop parsing this one
-                break;
+                molecules.extend(parse_cif_block(
+                    name,
+                    &tokens[block_start..block_end],
+                    bond_tolerance,
+                )?);
+                pos = block_end;
             }
             Token::Eof => break,
             _ => pos += 1,
         }
     }
 
-    // Apply space group from _symmetry category if available
-    if let Some(sg) = space_group {
-        if let Some(ref mut sym) = mol.symmetry {
-            sym.space_group = sg;
+    if molecules.is_empty() {
+        Err(IoError::empty_file())
+    } else {
+        Ok(molecules)
+    }
+}
+
+fn parse_cif_block(
+    name: &str,
+    tokens: &[Token],
+    bond_tolerance: f32,
+) -> IoResult<Vec<ObjectMolecule>> {
+    let mut block = CifBlockData::new(name);
+    let mut pos = 0;
+
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::Loop => {
+                pos += 1;
+                pos = parse_loop(tokens, pos, &mut block)?;
+            }
+            Token::DataName(name) if name.starts_with("_cell.") => {
+                pos = parse_cell(tokens, pos, &mut block.cell);
+            }
+            Token::DataName(name) if name.starts_with("_symmetry.") => {
+                pos = parse_symmetry(tokens, pos, &mut block.space_group);
+            }
+            Token::DataName(name) if name.starts_with("_entry.") => {
+                pos = parse_entry(tokens, pos, &mut block.title);
+            }
+            // Handle single-item secondary structure format (when not in a loop)
+            Token::DataName(name) if name.starts_with("_struct_conf.") => {
+                pos = parse_ss_single(tokens, pos, SsCategory::StructConf, &mut block.ss_ranges);
+            }
+            Token::DataName(name) if name.starts_with("_struct_sheet_range.") => {
+                pos = parse_ss_single(
+                    tokens,
+                    pos,
+                    SsCategory::StructSheetRange,
+                    &mut block.ss_ranges,
+                );
+            }
+            Token::Eof => break,
+            _ => pos += 1,
         }
     }
 
-    if mol.atom_count() == 0 {
-        return Err(IoError::empty_file());
+    if block.models.is_empty() {
+        return Ok(Vec::new());
     }
 
-    // Apply secondary structure annotations
-    apply_secondary_structure(&mut mol, &ss_ranges);
+    let models = block.models.into_values().collect();
+    let mut molecules = build_molecules(&block.name, &block.title, models)?;
 
-    // Classify atoms (protein, nucleic, solvent, etc.)
-    // This is needed for cartoon representation to work
-    mol.classify_atoms();
+    for mol in &mut molecules {
+        block.cell.apply_to(mol, block.space_group.as_deref());
+        apply_secondary_structure(mol, &block.ss_ranges);
 
-    // Generate covalent bonds from distances
-    // CIF files typically don't include explicit bond information
-    mol.generate_bonds(bond_tolerance);
+        // Classify atoms (protein, nucleic, solvent, etc.)
+        // This is needed for cartoon representation to work
+        mol.classify_atoms();
 
-    // Assign bond orders for known protein residues using atom name templates
-    mol.assign_known_residue_bond_orders();
+        // Generate covalent bonds from distances
+        // CIF files typically don't include explicit bond information
+        mol.generate_bonds(bond_tolerance);
 
-    Ok(mol)
+        // Assign bond orders for known protein residues using atom name templates
+        mol.assign_known_residue_bond_orders();
+    }
+
+    Ok(molecules)
 }
 
 /// Parse a loop_ construct
-fn parse_loop(
-    tokens: &[Token],
-    mut pos: usize,
-    mol: &mut ObjectMolecule,
-    ss_ranges: &mut Vec<SecondaryStructureRange>,
-) -> IoResult<usize> {
+fn parse_loop(tokens: &[Token], mut pos: usize, block: &mut CifBlockData) -> IoResult<usize> {
     // Collect column names
     let mut columns: Vec<&str> = Vec::new();
     while pos < tokens.len() {
@@ -238,16 +325,22 @@ fn parse_loop(
         .any(|c| c.starts_with("_struct_sheet_range."));
 
     if is_atom_site {
-        pos = parse_atom_site_loop(tokens, pos, &columns, mol)?;
+        pos = parse_atom_site_loop(tokens, pos, &columns, &mut block.models)?;
     } else if is_struct_conf {
-        pos = parse_ss_loop(tokens, pos, &columns, SsCategory::StructConf, ss_ranges)?;
+        pos = parse_ss_loop(
+            tokens,
+            pos,
+            &columns,
+            SsCategory::StructConf,
+            &mut block.ss_ranges,
+        )?;
     } else if is_struct_sheet {
         pos = parse_ss_loop(
             tokens,
             pos,
             &columns,
             SsCategory::StructSheetRange,
-            ss_ranges,
+            &mut block.ss_ranges,
         )?;
     } else {
         // Skip other loops
@@ -277,18 +370,12 @@ fn parse_atom_site_loop(
     tokens: &[Token],
     mut pos: usize,
     columns: &[&str],
-    mol: &mut ObjectMolecule,
+    models: &mut BTreeMap<i32, ParsedModel>,
 ) -> IoResult<usize> {
     // Pre-resolve column indices — O(1) lookups per field instead of HashMap
     let cols = AtomSiteColumns::from_columns(columns);
 
     let n_cols = columns.len();
-    let mut coords: Vec<Vec3> = Vec::new();
-    let mut models: HashMap<i32, Vec<Vec3>> = HashMap::new();
-
-    // Cache for sharing AtomResidue instances — keyed by borrowed (&str, &str, i32, char)
-    // to avoid allocating Strings for cache lookups (only allocate on cache miss)
-    let mut residue_cache: HashMap<(&str, &str, i32, char), Arc<AtomResidue>> = HashMap::new();
 
     // Row buffer — allocated once and reused for every atom (zero-copy borrows)
     let mut row: Vec<Option<&str>> = vec![None; n_cols];
@@ -354,9 +441,6 @@ fn parse_atom_site_loop(
             .or_else(|| col!(cols.label_atom_id))
             .unwrap_or("X");
 
-        let mut atom = Atom::new(atom_name, element);
-
-        // Residue info — zero-copy borrows; only allocate on cache miss
         let resn_str = col!(cols.auth_comp_id)
             .or_else(|| col!(cols.label_comp_id))
             .unwrap_or("");
@@ -374,49 +458,22 @@ fn parse_atom_site_loop(
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
-        // Create or reuse shared AtomResidue — borrowed key avoids String allocation on cache hit
-        let cache_key = (chain_str, resn_str, resv, inscode);
-        atom.residue = residue_cache
-            .entry(cache_key)
-            .or_insert_with(|| {
-                // Strip hyphens from chain IDs so assembly chains like "A-2"
-                // become "A2", which is valid in the selection language.
-                let chain_id = chain_str.replace('-', "");
-                Arc::new(AtomResidue::from_parts(
-                    chain_id,
-                    resn_str.to_string(),
-                    resv,
-                    inscode,
-                    "",
-                ))
-            })
-            .clone();
-
-        // Alt loc
-        atom.alt = col!(cols.label_alt_id)
+        let alt = col!(cols.label_alt_id)
             .and_then(|s| s.chars().next())
             .unwrap_or(' ');
 
-        // B-factor
-        atom.b_factor = col!(cols.b_iso_or_equiv)
+        let b_factor = col!(cols.b_iso_or_equiv)
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
 
-        // Occupancy
-        atom.occupancy = col!(cols.occupancy)
+        let occupancy = col!(cols.occupancy)
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.0);
 
-        // HETATM flag
-        atom.state.hetatm = col!(cols.group_pdb).map(|s| s == "HETATM").unwrap_or(false);
+        let hetatm = col!(cols.group_pdb).map(|s| s == "HETATM").unwrap_or(false);
 
-        // Formal charge
-        atom.formal_charge = col!(cols.pdbx_formal_charge)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-
-        // Serial number
-        atom.id = col!(cols.id).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let formal_charge = col!(cols.pdbx_formal_charge).and_then(|s| s.parse().ok());
+        let serial = col!(cols.id).and_then(|s| s.parse().ok());
 
         // Coordinates
         let x: f32 = col!(cols.cartn_x)
@@ -434,48 +491,32 @@ fn parse_atom_site_loop(
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
 
-        // Add atom (only for first model, subsequent models add coordinates only)
-        if model_num == 1 {
-            mol.add_atom(atom);
-            coords.push(Vec3::new(x, y, z));
-        } else {
-            models
-                .entry(model_num)
-                .or_default()
-                .push(Vec3::new(x, y, z));
-        }
-    }
-
-    // Add primary coordinate set
-    if !coords.is_empty() {
-        let coord_set = CoordSet::from_vec3(&coords);
-        mol.add_coord_set(coord_set);
-    }
-
-    // Add additional models as coordinate sets
-    let mut model_nums: Vec<i32> = models.keys().copied().collect();
-    model_nums.sort();
-    for model_num in model_nums {
-        if let Some(model_coords) = models.get(&model_num) {
-            if model_coords.len() == mol.atom_count() {
-                let coord_set = CoordSet::from_vec3(model_coords);
-                mol.add_coord_set(coord_set);
-            }
-        }
+        let model = models
+            .entry(model_num)
+            .or_insert_with(|| ParsedModel::new(model_num));
+        model.atoms.push(ParsedAtom {
+            name: atom_name.to_string(),
+            element,
+            chain: chain_str.replace('-', ""),
+            resn: resn_str.to_string(),
+            resv,
+            icode: inscode,
+            alt,
+            hetatm,
+            serial,
+            formal_charge,
+            occupancy,
+            b_factor,
+            segi: String::new(),
+        });
+        model.coords.push(Vec3::new(x, y, z));
     }
 
     Ok(pos)
 }
 
 /// Parse _cell data items
-fn parse_cell(tokens: &[Token], mut pos: usize, mol: &mut ObjectMolecule) -> IoResult<usize> {
-    let mut a = 1.0f32;
-    let mut b = 1.0f32;
-    let mut c = 1.0f32;
-    let mut alpha = 90.0f32;
-    let mut beta = 90.0f32;
-    let mut gamma = 90.0f32;
-
+fn parse_cell(tokens: &[Token], mut pos: usize, cell: &mut CellInfo) -> usize {
     while pos < tokens.len() {
         match &tokens[pos] {
             Token::DataName(name) if name.starts_with("_cell.") => {
@@ -484,29 +525,23 @@ fn parse_cell(tokens: &[Token], mut pos: usize, mol: &mut ObjectMolecule) -> IoR
                 if let Some(token) = tokens.get(pos) {
                     if let Some(val) = token_value_str(token) {
                         match field {
-                            "length_a" => a = val.parse().unwrap_or(1.0),
-                            "length_b" => b = val.parse().unwrap_or(1.0),
-                            "length_c" => c = val.parse().unwrap_or(1.0),
-                            "angle_alpha" => alpha = val.parse().unwrap_or(90.0),
-                            "angle_beta" => beta = val.parse().unwrap_or(90.0),
-                            "angle_gamma" => gamma = val.parse().unwrap_or(90.0),
+                            "length_a" => cell.a = val.parse().unwrap_or(1.0),
+                            "length_b" => cell.b = val.parse().unwrap_or(1.0),
+                            "length_c" => cell.c = val.parse().unwrap_or(1.0),
+                            "angle_alpha" => cell.alpha = val.parse().unwrap_or(90.0),
+                            "angle_beta" => cell.beta = val.parse().unwrap_or(90.0),
+                            "angle_gamma" => cell.gamma = val.parse().unwrap_or(90.0),
                             _ => {}
                         }
-                        pos += 1;
                     }
+                    pos += 1;
                 }
             }
             _ => break,
         }
     }
 
-    // Only set symmetry if we have non-default values
-    if (a - 1.0).abs() > 0.001 || (b - 1.0).abs() > 0.001 || (c - 1.0).abs() > 0.001 {
-        use patinae_mol::Symmetry;
-        mol.symmetry = Some(Symmetry::new("P 1", [a, b, c], [alpha, beta, gamma]));
-    }
-
-    Ok(pos)
+    pos
 }
 
 /// Parse _symmetry data items (space group name)
@@ -519,12 +554,32 @@ fn parse_symmetry(tokens: &[Token], mut pos: usize, space_group: &mut Option<Str
                 if let Some(token) = tokens.get(pos) {
                     if let Some(val) = token_value_str(token) {
                         if field == "space_group_name_H-M"
-                            || field == "space_group_name_Hall" && space_group.is_none()
+                            || (field == "space_group_name_Hall" && space_group.is_none())
                         {
                             let sg = val.trim().to_string();
                             if !sg.is_empty() && sg != "?" {
                                 *space_group = Some(sg);
                             }
+                        }
+                    }
+                    pos += 1;
+                }
+            }
+            _ => break,
+        }
+    }
+    pos
+}
+
+fn parse_entry(tokens: &[Token], mut pos: usize, title: &mut String) -> usize {
+    while pos < tokens.len() {
+        match &tokens[pos] {
+            Token::DataName(name) if name.starts_with("_entry.") => {
+                pos += 1;
+                if let Some(token) = tokens.get(pos) {
+                    if title.is_empty() {
+                        if let Some(val) = token_value_str(token) {
+                            *title = val.to_string();
                         }
                     }
                     pos += 1;
@@ -918,5 +973,125 @@ HELX_P HELX_P1 A 1 A 2
                 atom.residue.resv
             );
         }
+    }
+
+    #[test]
+    fn read_all_parses_multiple_data_blocks() {
+        let cif_data = r#"data_FIRST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 C C LIG A 1 0.0 0.0 0.0
+data_SECOND
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+1 N N LIG B 1 1.0 0.0 0.0
+"#;
+
+        let mut reader = CifReader::new(cif_data.as_bytes());
+        let molecules = reader.read_all().unwrap();
+
+        assert_eq!(molecules.len(), 2);
+        assert_eq!(molecules[0].name, "FIRST");
+        assert_eq!(molecules[1].name, "SECOND");
+    }
+
+    #[test]
+    fn read_all_groups_same_topology_models_as_states() {
+        let cif_data = r#"data_TEST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.pdbx_PDB_model_num
+1 N N ALA A 1 0.0 0.0 0.0 1
+2 C CA ALA A 1 1.0 0.0 0.0 1
+1 N N ALA A 1 0.5 0.0 0.0 2
+2 C CA ALA A 1 1.5 0.0 0.0 2
+"#;
+
+        let mut reader = CifReader::new(cif_data.as_bytes());
+        let molecules = reader.read_all().unwrap();
+
+        assert_eq!(molecules.len(), 1);
+        assert_eq!(molecules[0].atom_count(), 2);
+        assert_eq!(molecules[0].state_count(), 2);
+    }
+
+    #[test]
+    fn read_all_splits_incompatible_models() {
+        let cif_data = r#"data_TEST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.pdbx_PDB_model_num
+1 N N ALA A 1 0.0 0.0 0.0 1
+2 C CA ALA A 1 1.0 0.0 0.0 1
+1 N N GLY A 1 0.5 0.0 0.0 2
+2 C CA GLY A 1 1.5 0.0 0.0 2
+"#;
+
+        let mut reader = CifReader::new(cif_data.as_bytes());
+        let molecules = reader.read_all().unwrap();
+
+        assert_eq!(molecules.len(), 2);
+        assert_eq!(molecules[0].name, "TEST_model_1");
+        assert_eq!(molecules[1].name, "TEST_model_2");
+        assert_eq!(molecules[0].atoms_slice()[0].residue.resn, "ALA");
+        assert_eq!(molecules[1].atoms_slice()[0].residue.resn, "GLY");
+    }
+
+    #[test]
+    fn read_cif_str_returns_first_logical_molecule() {
+        let cif_data = r#"data_TEST
+loop_
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.pdbx_PDB_model_num
+1 N N ALA A 1 0.0 0.0 0.0 1
+2 C CA ALA A 1 1.0 0.0 0.0 1
+1 N N ALA B 1 0.5 0.0 0.0 2
+"#;
+
+        let molecule = crate::cif::read_cif_str(cif_data).unwrap();
+
+        assert_eq!(molecule.atom_count(), 2);
+        assert_eq!(molecule.state_count(), 1);
+        assert_eq!(molecule.atoms_slice()[0].residue.chain, "A");
     }
 }

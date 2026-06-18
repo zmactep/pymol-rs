@@ -4,14 +4,12 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
-use std::sync::Arc;
 
 use lin_alg::f32::Vec3;
-use patinae_mol::{
-    Atom, AtomIndex, AtomResidue, BondOrder, CoordSet, ObjectMolecule, SecondaryStructure,
-};
+use patinae_mol::{AtomIndex, BondOrder, ObjectMolecule, SecondaryStructure};
 
 use crate::error::{IoError, IoResult};
+use crate::logical_models::{build_molecules, ParsedAtom, ParsedModel};
 use crate::pdb::hybrid36::hy36decode;
 use crate::traits::MoleculeReader;
 
@@ -52,18 +50,23 @@ impl<R: Read> PdbReader<R> {
         }
     }
 
-    /// Parse the PDB file
     fn parse(&mut self) -> IoResult<ObjectMolecule> {
-        let mut atoms: Vec<AtomRecord> = Vec::new();
-        let mut coords: Vec<Vec3> = Vec::new();
+        self.parse_all()?
+            .into_iter()
+            .next()
+            .ok_or(IoError::empty_file())
+    }
+
+    /// Parse the PDB file into one or more logical molecules.
+    fn parse_all(&mut self) -> IoResult<Vec<ObjectMolecule>> {
+        let mut models: Vec<ParsedModel> = Vec::new();
+        let mut current_model: Option<ParsedModel> = None;
         let mut conects: Vec<ConectRecord> = Vec::new();
         let mut cryst1: Option<Cryst1Record> = None;
         let mut helices: Vec<HelixRecord> = Vec::new();
         let mut sheets: Vec<SheetRecord> = Vec::new();
         let mut title = String::new();
-        let mut current_model = 0;
-        let mut models: Vec<(Vec<AtomRecord>, Vec<Vec3>)> = Vec::new();
-        let mut in_model = false;
+        let mut next_model_number = 1;
 
         while let Some(line) = self.read_line()? {
             let line = line.trim_end();
@@ -80,16 +83,10 @@ impl<R: Read> PdbReader<R> {
                 "ATOM  " | "HETATM" => {
                     if let Some(record) = parse_atom_record(line) {
                         let coord = Vec3::new(record.x, record.y, record.z);
-                        if in_model && current_model > 1 {
-                            // Multi-model: store coordinates for models 2+ as extra coord sets
-                            if let Some((_, model_coords)) = models.last_mut() {
-                                model_coords.push(coord);
-                            }
-                        } else {
-                            // Model 1 (or no MODEL records) — primary atom topology
-                            atoms.push(record);
-                            coords.push(coord);
-                        }
+                        let model = current_model
+                            .get_or_insert_with(|| ParsedModel::new(next_model_number));
+                        model.atoms.push(parsed_atom_from_record(&record));
+                        model.coords.push(coord);
                     }
                 }
                 "CONECT" => {
@@ -111,21 +108,22 @@ impl<R: Read> PdbReader<R> {
                     title.push_str(line[10..].trim());
                 }
                 "MODEL " => {
-                    in_model = true;
-                    current_model += 1;
-                    if current_model > 1 {
-                        // Start collecting coordinates for new model
-                        models.push((Vec::new(), Vec::new()));
-                    }
+                    flush_model(&mut current_model, &mut models);
+                    let parsed_number = line
+                        .get(6..)
+                        .and_then(|s| s.trim().parse::<i32>().ok())
+                        .unwrap_or(next_model_number);
+                    next_model_number = parsed_number.saturating_add(1);
+                    current_model = Some(ParsedModel::new(parsed_number));
                 }
                 "ENDMDL" => {
-                    // Model ended, coordinates for next model will be collected separately
+                    flush_model(&mut current_model, &mut models);
                 }
                 "TER   " | "TER" => {
                     // Chain termination - we handle this implicitly via chain changes
                 }
                 "END   " | "END" => {
-                    // End of file
+                    flush_model(&mut current_model, &mut models);
                     break;
                 }
                 _ => {
@@ -134,81 +132,32 @@ impl<R: Read> PdbReader<R> {
             }
         }
 
-        // Build the molecule
-        self.build_molecule(
-            atoms, coords, models, conects, cryst1, helices, sheets, title,
-        )
+        flush_model(&mut current_model, &mut models);
+
+        let mut molecules = build_molecules("", &title, models)?;
+        for mol in &mut molecules {
+            self.apply_annotations(mol, &conects, cryst1.as_ref(), &helices, &sheets);
+        }
+        Ok(molecules)
     }
 
-    /// Build ObjectMolecule from parsed data
-    #[allow(clippy::too_many_arguments)]
-    fn build_molecule(
+    fn apply_annotations(
         &self,
-        atom_records: Vec<AtomRecord>,
-        coords: Vec<Vec3>,
-        models: Vec<(Vec<AtomRecord>, Vec<Vec3>)>,
-        conects: Vec<ConectRecord>,
-        cryst1: Option<Cryst1Record>,
-        helices: Vec<HelixRecord>,
-        sheets: Vec<SheetRecord>,
-        title: String,
-    ) -> IoResult<ObjectMolecule> {
-        if atom_records.is_empty() {
-            return Err(IoError::empty_file());
-        }
-
-        let mut mol = ObjectMolecule::with_capacity("", atom_records.len(), 0);
-        mol.title = title;
-
-        // Map from PDB serial number to atom index
+        mol: &mut ObjectMolecule,
+        conects: &[ConectRecord],
+        cryst1: Option<&Cryst1Record>,
+        helices: &[HelixRecord],
+        sheets: &[SheetRecord],
+    ) {
         let mut serial_to_index: HashMap<i32, AtomIndex> = HashMap::new();
-
-        // Cache for sharing AtomResidue instances among atoms of the same residue
-        let mut residue_cache: HashMap<AtomResidue, Arc<AtomResidue>> = HashMap::new();
-
-        // Add atoms
-        for record in &atom_records {
-            let element = record.get_element();
-            let mut atom = Atom::new(&record.name, element);
-
-            // Create or reuse shared AtomResidue
-            let residue_data = AtomResidue::from_parts(
-                record.chain.clone(),
-                record.resn.clone(),
-                record.resv,
-                record.icode,
-                record.segi.clone(),
-            );
-            atom.residue = residue_cache
-                .entry(residue_data.clone())
-                .or_insert_with(|| Arc::new(residue_data))
-                .clone();
-
-            atom.alt = record.alt_loc;
-            atom.b_factor = record.b_factor;
-            atom.occupancy = record.occupancy;
-            atom.state.hetatm = record.hetatm;
-            atom.formal_charge = record.get_formal_charge();
-            atom.id = record.serial;
-
-            let idx = mol.add_atom(atom);
-            serial_to_index.insert(record.serial, idx);
-        }
-
-        // Add primary coordinate set
-        let coord_set = CoordSet::from_vec3(&coords);
-        mol.add_coord_set(coord_set);
-
-        // Add additional models as coordinate sets
-        for (_, model_coords) in models {
-            if model_coords.len() == atom_records.len() {
-                let coord_set = CoordSet::from_vec3(&model_coords);
-                mol.add_coord_set(coord_set);
+        for (idx, atom) in mol.atoms_indexed() {
+            if atom.id != 0 {
+                serial_to_index.insert(atom.id, idx);
             }
         }
 
         // Add bonds from CONECT records
-        for conect in &conects {
+        for conect in conects {
             if let Some(&atom1_idx) = serial_to_index.get(&conect.atom) {
                 for &bonded_serial in &conect.bonded {
                     if let Some(&atom2_idx) = serial_to_index.get(&bonded_serial) {
@@ -222,13 +171,13 @@ impl<R: Read> PdbReader<R> {
         }
 
         // Apply secondary structure annotations
-        apply_secondary_structure(&mut mol, &helices, &sheets);
+        apply_secondary_structure(mol, helices, sheets);
 
         // Apply crystallographic symmetry
         if let Some(cryst) = cryst1 {
             use patinae_mol::Symmetry;
             mol.symmetry = Some(Symmetry::new(
-                cryst.space_group,
+                cryst.space_group.clone(),
                 [cryst.a, cryst.b, cryst.c],
                 [cryst.alpha, cryst.beta, cryst.gamma],
             ));
@@ -244,14 +193,42 @@ impl<R: Read> PdbReader<R> {
 
         // Assign bond orders for known protein residues using atom name templates
         mol.assign_known_residue_bond_orders();
-
-        Ok(mol)
     }
 }
 
 impl<R: Read> MoleculeReader for PdbReader<R> {
     fn read(&mut self) -> IoResult<ObjectMolecule> {
         self.parse()
+    }
+
+    fn read_all(&mut self) -> IoResult<Vec<ObjectMolecule>> {
+        self.parse_all()
+    }
+}
+
+fn flush_model(current_model: &mut Option<ParsedModel>, models: &mut Vec<ParsedModel>) {
+    if let Some(model) = current_model.take() {
+        if !model.atoms.is_empty() {
+            models.push(model);
+        }
+    }
+}
+
+fn parsed_atom_from_record(record: &AtomRecord) -> ParsedAtom {
+    ParsedAtom {
+        name: record.name.clone(),
+        element: record.get_element(),
+        chain: record.chain.clone(),
+        resn: record.resn.clone(),
+        resv: record.resv,
+        icode: record.icode,
+        alt: record.alt_loc,
+        hetatm: record.hetatm,
+        serial: Some(record.serial),
+        formal_charge: (!record.charge.trim().is_empty()).then(|| record.get_formal_charge()),
+        occupancy: record.occupancy,
+        b_factor: record.b_factor,
+        segi: record.segi.clone(),
     }
 }
 
@@ -691,5 +668,82 @@ ENDMDL
             .get_coord(patinae_mol::AtomIndex::from(0usize), 2)
             .unwrap();
         assert!((coord2.x - 0.200).abs() < 0.001);
+    }
+
+    #[test]
+    fn read_all_groups_same_topology_models_as_states() {
+        let pdb = r#"MODEL        1
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.000   0.000   0.000  1.00 20.00           C
+ENDMDL
+MODEL        2
+ATOM      1  N   ALA A   1       0.500   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.500   0.000   0.000  1.00 20.00           C
+ENDMDL
+"#;
+
+        let mut reader = PdbReader::new(pdb.as_bytes());
+        let molecules = reader.read_all().unwrap();
+
+        assert_eq!(molecules.len(), 1);
+        assert_eq!(molecules[0].atom_count(), 2);
+        assert_eq!(molecules[0].state_count(), 2);
+    }
+
+    #[test]
+    fn read_all_splits_models_with_different_atom_counts() {
+        let pdb = r#"MODEL        1
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.000   0.000   0.000  1.00 20.00           C
+ENDMDL
+MODEL        2
+ATOM      1  N   ALA A   1       0.500   0.000   0.000  1.00 20.00           N
+ENDMDL
+"#;
+
+        let mut reader = PdbReader::new(pdb.as_bytes());
+        let molecules = reader.read_all().unwrap();
+
+        assert_eq!(molecules.len(), 2);
+        assert_eq!(molecules[0].atom_count(), 2);
+        assert_eq!(molecules[1].atom_count(), 1);
+    }
+
+    #[test]
+    fn read_all_splits_models_with_changed_atom_identity() {
+        let pdb = r#"MODEL        1
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.000   0.000   0.000  1.00 20.00           C
+ENDMDL
+MODEL        2
+ATOM      1  N   GLY A   1       0.500   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  GLY A   1       1.500   0.000   0.000  1.00 20.00           C
+ENDMDL
+"#;
+
+        let mut reader = PdbReader::new(pdb.as_bytes());
+        let molecules = reader.read_all().unwrap();
+
+        assert_eq!(molecules.len(), 2);
+        assert_eq!(molecules[0].atoms_slice()[0].residue.resn, "ALA");
+        assert_eq!(molecules[1].atoms_slice()[0].residue.resn, "GLY");
+    }
+
+    #[test]
+    fn read_pdb_str_returns_first_logical_molecule() {
+        let pdb = r#"MODEL        1
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.000   0.000   0.000  1.00 20.00           C
+ENDMDL
+MODEL        2
+ATOM      1  N   ALA B   1       0.500   0.000   0.000  1.00 20.00           N
+ENDMDL
+"#;
+
+        let molecule = crate::pdb::read_pdb_str(pdb).unwrap();
+
+        assert_eq!(molecule.atom_count(), 2);
+        assert_eq!(molecule.state_count(), 1);
+        assert_eq!(molecule.atoms_slice()[0].residue.chain, "A");
     }
 }

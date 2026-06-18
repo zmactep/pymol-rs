@@ -5,6 +5,8 @@
 
 mod decode;
 mod parser;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub(crate) mod types;
 
 pub use parser::BcifReader;
@@ -26,6 +28,15 @@ pub fn read_bcif_with_bond_tolerance(path: &Path, bond_tolerance: f32) -> IoResu
     let file = crate::compress::open_file(path)?;
     let mut reader = BcifReader::new(file).with_bond_tolerance(bond_tolerance);
     reader.read()
+}
+
+pub(crate) fn read_all_bcif_with_bond_tolerance(
+    path: &Path,
+    bond_tolerance: f32,
+) -> IoResult<Vec<ObjectMolecule>> {
+    let file = crate::compress::open_file(path)?;
+    let mut reader = BcifReader::new(file).with_bond_tolerance(bond_tolerance);
+    reader.read_all()
 }
 
 /// Read a bCIF file from raw bytes
