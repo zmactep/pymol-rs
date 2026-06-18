@@ -74,6 +74,9 @@ pub struct SceneObjectData {
     /// Object-level draw mask.
     #[serde(default)]
     pub draw_reps: Option<RepMask>,
+    /// Draw-mask reps that may be restored without per-atom rewrites.
+    #[serde(default)]
+    pub draw_mask_restorable_reps: Option<RepMask>,
     /// Current state index
     pub current_state: usize,
     /// Per-atom data (indexed parallel to molecule atoms)
@@ -171,6 +174,7 @@ impl Scene {
                     color: state.color,
                     visible_reps: state.visible_reps,
                     draw_reps: Some(state.draw_reps),
+                    draw_mask_restorable_reps: Some(state.draw_mask_restorable_reps),
                     current_state: obj.current_state(),
                     per_atom_data,
                 };
@@ -243,6 +247,10 @@ impl Scene {
                 if self.storemask.contains(SceneStoreMask::REP) {
                     state.visible_reps = obj_data.visible_reps;
                     state.draw_reps = obj_data.draw_reps.unwrap_or(obj_data.visible_reps);
+                    state.draw_mask_restorable_reps = obj_data
+                        .draw_mask_restorable_reps
+                        .unwrap_or(RepMask::NONE)
+                        .intersection(RepMask::DRAW_MASK_REPS);
                 }
 
                 if self.storemask.contains(SceneStoreMask::FRAME) {

@@ -4098,6 +4098,7 @@ name = "patinae-cmd"
 version = "0.4.1"
 dependencies = [
  "ahash",
+ "flate2",
  "image",
  "lin_alg",
  "log",
@@ -4110,6 +4111,7 @@ dependencies = [
  "patinae-select",
  "patinae-session",
  "patinae-settings",
+ "rmp-serde",
  "serde",
  "shellexpand",
 ]

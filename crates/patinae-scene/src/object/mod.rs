@@ -165,6 +165,8 @@ pub struct ObjectState {
     /// This matrix is applied to all coordinates when rendering.
     #[serde(with = "crate::serde_helpers::mat4_serde")]
     pub transform: Mat4,
+    /// Draw-mask reps that may be safely restored without touching per-atom bits.
+    pub draw_mask_restorable_reps: RepMask,
 }
 
 impl Default for ObjectState {
@@ -175,6 +177,7 @@ impl Default for ObjectState {
             visible_reps: RepMask::default(),
             draw_reps: RepMask::default(),
             transform: Mat4::new_identity(),
+            draw_mask_restorable_reps: RepMask::NONE,
         }
     }
 }
@@ -207,6 +210,8 @@ impl<'de> Deserialize<'de> for ObjectState {
                 with = "crate::serde_helpers::mat4_serde"
             )]
             transform: Mat4,
+            #[serde(default)]
+            draw_mask_restorable_reps: RepMask,
         }
 
         let wire = WireObjectState::deserialize(deserializer)?;
@@ -216,6 +221,9 @@ impl<'de> Deserialize<'de> for ObjectState {
             visible_reps: wire.visible_reps,
             draw_reps: wire.draw_reps.unwrap_or(wire.visible_reps),
             transform: wire.transform,
+            draw_mask_restorable_reps: wire
+                .draw_mask_restorable_reps
+                .intersection(RepMask::DRAW_MASK_REPS),
         })
     }
 }
@@ -249,16 +257,35 @@ impl ObjectState {
         self.draw_reps.is_visible(rep)
     }
 
+    /// Check whether a draw-mask-only restore is known to be valid.
+    pub fn can_restore_draw_mask(&self, rep: RepMask) -> bool {
+        rep.can_toggle_with_draw_mask() && rep.is_subset_of(self.draw_mask_restorable_reps)
+    }
+
+    /// Mark draw-mask reps as safely restorable.
+    pub fn mark_draw_mask_restorable(&mut self, rep: RepMask) {
+        self.draw_mask_restorable_reps
+            .set_visible(rep.intersection(RepMask::DRAW_MASK_REPS));
+    }
+
+    /// Clear draw-mask restore permission for reps whose atom-level bits changed.
+    pub fn clear_draw_mask_restorable(&mut self, rep: RepMask) {
+        self.draw_mask_restorable_reps
+            .set_hidden(rep.intersection(RepMask::DRAW_MASK_REPS));
+    }
+
     /// Show a representation
     pub fn show_rep(&mut self, rep: RepMask) {
         self.visible_reps.set_visible(rep);
         self.draw_reps.set_visible(rep);
+        self.clear_draw_mask_restorable(rep);
     }
 
     /// Hide a representation
     pub fn hide_rep(&mut self, rep: RepMask) {
         self.visible_reps.set_hidden(rep);
         self.draw_reps.set_hidden(rep);
+        self.clear_draw_mask_restorable(rep);
     }
 
     /// Show an already-materialized representation.
@@ -269,6 +296,7 @@ impl ObjectState {
     /// Hide a representation without clearing per-atom rep bits.
     pub fn hide_draw_rep(&mut self, rep: RepMask) {
         self.draw_reps.set_hidden(rep);
+        self.mark_draw_mask_restorable(rep);
     }
 }
 

@@ -204,8 +204,13 @@ impl Command for LoadCommand {
                 return Ok(());
             }
             "prs" => {
-                use patinae_session::load_prs;
-                let session = load_prs(&path).map_err(|e| CmdError::file_format(e.to_string()))?;
+                use patinae_session::load_prs_document;
+                let document =
+                    load_prs_document(&path).map_err(|e| CmdError::file_format(e.to_string()))?;
+                for warning in document.warning_messages() {
+                    ctx.print_warning(&warning);
+                }
+                let session = document.session;
                 ctx.viewer.replace_session(session);
                 ctx.viewer.update_movie_state_count();
                 if !quiet {
@@ -1048,6 +1053,64 @@ impl Command for LsCommand {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod prs_tests {
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use patinae_scene::{Session, SessionAdapter};
+
+    use crate::{CommandExecutor, MessageKind};
+
+    fn temp_prs_path(name: &str) -> (PathBuf, PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("patinae_cmd_prs_{}_{}", name, std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("legacy.prs");
+        (dir, path)
+    }
+
+    fn write_legacy_prs(path: &Path) {
+        let data = rmp_serde::to_vec(&Session::new()).unwrap();
+        let file = File::create(path).unwrap();
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder.write_all(&data).unwrap();
+        encoder.finish().unwrap();
+    }
+
+    #[test]
+    fn load_legacy_prs_emits_warning_message() {
+        let (dir, path) = temp_prs_path("legacy_warning");
+        write_legacy_prs(&path);
+        let mut session = Session::new();
+        let mut needs_redraw = false;
+        let mut adapter = SessionAdapter {
+            session: &mut session,
+            render_context: None,
+            default_size: (64, 64),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+
+        let output = CommandExecutor::new()
+            .do_with_options(
+                &mut adapter,
+                &format!("load {}", path.to_string_lossy()),
+                false,
+            )
+            .unwrap();
+
+        assert!(output.messages.iter().any(|message| {
+            message.kind == MessageKind::Warning && message.text.contains("legacy PRS session")
+        }));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

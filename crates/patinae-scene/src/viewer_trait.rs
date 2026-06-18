@@ -380,6 +380,7 @@ pub trait ViewerLike {
     }
 
     /// Visit renderer-owned GPU artifacts for the currently displayed scene.
+    #[cfg(feature = "render-bridge")]
     fn visit_render_artifacts(
         &mut self,
         _visitor: &mut dyn FnMut(patinae_render::RenderArtifactSnapshot<'_>) -> Result<(), String>,

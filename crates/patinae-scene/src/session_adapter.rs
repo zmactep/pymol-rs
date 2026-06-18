@@ -262,6 +262,7 @@ impl<'a> ViewerLike for SessionAdapter<'a> {
             .map_err(|e| e.to_string())
     }
 
+    #[cfg(feature = "render-bridge")]
     fn visit_render_artifacts(
         &mut self,
         visitor: &mut dyn FnMut(patinae_render::RenderArtifactSnapshot<'_>) -> Result<(), String>,

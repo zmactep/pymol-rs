@@ -36,5 +36,9 @@ shellexpand = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
 serde = { workspace = true }
 
+[dev-dependencies]
+flate2.workspace = true
+rmp-serde.workspace = true
+
 [lints]
 workspace = true

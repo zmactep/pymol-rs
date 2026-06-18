@@ -195,10 +195,21 @@ impl MoleculeObject {
         self.state.draw_reps
     }
 
+    /// Get draw-mask reps that can be safely restored without atom rewrites.
+    pub fn draw_mask_restorable_reps(&self) -> RepMask {
+        self.state.draw_mask_restorable_reps
+    }
+
+    /// Check whether a draw-mask-only restore is known to be valid.
+    pub fn can_restore_draw_mask(&self, rep: RepMask) -> bool {
+        self.state.can_restore_draw_mask(rep)
+    }
+
     /// Set the visible representations mask (e.g., copying from another object)
     pub fn set_visible_reps(&mut self, reps: RepMask) {
         self.state.visible_reps = reps;
         self.state.draw_reps = reps;
+        self.state.draw_mask_restorable_reps = RepMask::NONE;
         self.dirty |= DirtyFlags::REPS;
     }
 
@@ -215,14 +226,16 @@ impl MoleculeObject {
         if rep.can_toggle_with_draw_mask()
             && self.state.visible_reps.is_visible(rep)
             && !self.state.draw_reps.is_visible(rep)
+            && self.state.can_restore_draw_mask(rep)
         {
-            self.state.draw_reps.set_visible(rep);
+            self.state.show_draw_rep(rep);
             self.dirty |= DirtyFlags::DRAW_MASK;
             return;
         }
 
         self.state.visible_reps.set_visible(rep);
         self.state.draw_reps.set_visible(rep);
+        self.state.clear_draw_mask_restorable(rep);
         for atom in self.molecule.atoms_mut() {
             atom.repr.visible_reps.set_visible(rep);
         }
@@ -238,13 +251,14 @@ impl MoleculeObject {
     /// This hides the representation both at the object level and for all atoms.
     pub fn hide(&mut self, rep: RepMask) {
         if rep.can_toggle_with_draw_mask() {
-            self.state.draw_reps.set_hidden(rep);
+            self.state.hide_draw_rep(rep);
             self.dirty |= DirtyFlags::DRAW_MASK;
             return;
         }
 
         self.state.visible_reps.set_hidden(rep);
         self.state.draw_reps.set_hidden(rep);
+        self.state.clear_draw_mask_restorable(rep);
         for atom in self.molecule.atoms_mut() {
             atom.repr.visible_reps.set_hidden(rep);
         }
@@ -266,6 +280,7 @@ impl MoleculeObject {
     pub fn hide_all(&mut self) {
         self.state.visible_reps = RepMask::NONE;
         self.state.draw_reps = RepMask::NONE;
+        self.state.draw_mask_restorable_reps = RepMask::NONE;
         self.dirty |= DirtyFlags::REPS;
     }
 
@@ -482,6 +497,7 @@ mod tests {
 
         assert!(obj.visible_reps().is_visible(RepMask::CARTOON));
         assert!(!obj.draw_reps().is_visible(RepMask::CARTOON));
+        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
         assert!(obj
             .molecule()
             .atoms()
@@ -493,6 +509,7 @@ mod tests {
 
         assert!(obj.visible_reps().is_visible(RepMask::CARTOON));
         assert!(obj.draw_reps().is_visible(RepMask::CARTOON));
+        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
         assert_eq!(obj.dirty_flags(), DirtyFlags::DRAW_MASK);
     }
 

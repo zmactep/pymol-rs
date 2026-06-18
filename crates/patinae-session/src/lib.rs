@@ -4,7 +4,10 @@ pub mod prs;
 pub mod pse;
 
 pub use convert::pse_to_session;
-pub use prs::{load_prs, save_prs};
+pub use prs::{
+    load_prs, load_prs_document, save_prs, PrsDocument, PRS_FORMAT_VERSION,
+    PRS_LEGACY_FORMAT_VERSION, PRS_PRODUCER, PRS_PRODUCER_VERSION,
+};
 
 use std::io::Read;
 use std::path::Path;

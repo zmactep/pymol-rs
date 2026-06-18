@@ -71,6 +71,7 @@ fn show_selected_rep(
         && selected_all_atoms
         && mol_obj.visible_reps().is_visible(rep)
         && !mol_obj.draw_reps().is_visible(rep)
+        && mol_obj.can_restore_draw_mask(rep)
     {
         let mut draw_reps = mol_obj.draw_reps();
         draw_reps.set_visible(rep);
@@ -90,6 +91,7 @@ fn show_selected_rep(
     let state = mol_obj.state_mut();
     state.visible_reps.set_visible(rep);
     state.draw_reps.set_visible(rep);
+    state.clear_draw_mask_restorable(rep);
 }
 
 fn hide_selected_rep(
@@ -102,6 +104,7 @@ fn hide_selected_rep(
         let mut draw_reps = mol_obj.draw_reps();
         draw_reps.set_hidden(rep);
         mol_obj.set_draw_reps(draw_reps);
+        mol_obj.state_mut().mark_draw_mask_restorable(rep);
         return;
     }
 
@@ -121,12 +124,15 @@ fn hide_selected_rep(
 
     if selected_all_atoms {
         if rep == RepMask::ALL {
-            mol_obj.state_mut().visible_reps = RepMask::NONE;
-            mol_obj.state_mut().draw_reps = RepMask::NONE;
+            let state = mol_obj.state_mut();
+            state.visible_reps = RepMask::NONE;
+            state.draw_reps = RepMask::NONE;
+            state.clear_draw_mask_restorable(RepMask::ALL);
         } else {
             let state = mol_obj.state_mut();
             state.visible_reps.set_hidden(rep);
             state.draw_reps.set_hidden(rep);
+            state.clear_draw_mask_restorable(rep);
         }
         return;
     }
@@ -138,6 +144,7 @@ fn hide_selected_rep(
     let state = mol_obj.state_mut();
     state.visible_reps = union;
     state.draw_reps = state.draw_reps.intersection(union);
+    state.clear_draw_mask_restorable(rep);
 }
 
 // ============================================================================
@@ -377,6 +384,7 @@ impl Command for ShowAsCommand {
                     state.visible_reps.set_visible(rep);
                     state.draw_reps.set_visible(rep);
                 }
+                state.clear_draw_mask_restorable(RepMask::ALL);
             },
         )?;
 
@@ -1124,7 +1132,7 @@ mod tests {
     use lin_alg::f32::Vec3;
     use patinae_color::ThemedPalette;
     use patinae_mol::{Atom, Element, ObjectMolecule, RepMask};
-    use patinae_scene::{DirtyFlags, MoleculeObject, Session, SessionAdapter};
+    use patinae_scene::{DirtyFlags, MoleculeObject, Object, Session, SessionAdapter};
     use patinae_select::{AtomIndex, SelectionResult};
 
     fn run_display_command(session: &mut Session, command: &str) -> bool {
@@ -1235,6 +1243,7 @@ mod tests {
         assert_eq!(obj.dirty_flags(), DirtyFlags::DRAW_MASK);
         assert!(obj.visible_reps().is_visible(RepMask::CARTOON));
         assert!(!obj.draw_reps().is_visible(RepMask::CARTOON));
+        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
         assert!(obj
             .molecule()
             .atoms()
@@ -1251,6 +1260,7 @@ mod tests {
         hide_selected_rep(&mut obj, &selected, RepMask::CARTOON);
 
         assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
+        assert!(!obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
         assert!(!obj
             .molecule()
             .get_atom(patinae_mol::AtomIndex(0))
@@ -1279,6 +1289,7 @@ mod tests {
 
         assert_eq!(obj.dirty_flags(), DirtyFlags::DRAW_MASK);
         assert!(obj.draw_reps().is_visible(RepMask::CARTOON));
+        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
     }
 
     #[test]
@@ -1297,5 +1308,50 @@ mod tests {
             .molecule()
             .atoms()
             .all(|atom| atom.repr.visible_reps.is_visible(RepMask::CARTOON)));
+    }
+
+    #[test]
+    fn whole_object_cartoon_show_materializes_when_restore_flag_is_missing() {
+        let mut obj = cartoon_object();
+        {
+            let state = obj.state_mut();
+            state.visible_reps.set_visible(RepMask::CARTOON);
+            state.draw_reps.set_hidden(RepMask::CARTOON);
+            state.clear_draw_mask_restorable(RepMask::CARTOON);
+        }
+        obj.molecule_mut()
+            .get_atom_mut(patinae_mol::AtomIndex(1))
+            .unwrap()
+            .repr
+            .visible_reps
+            .set_hidden(RepMask::CARTOON);
+        obj.clear_dirty();
+        let all_atoms = SelectionResult::all(obj.molecule().atom_count());
+
+        show_selected_rep(&mut obj, &all_atoms, RepMask::CARTOON);
+
+        assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
+        assert!(obj.draw_reps().is_visible(RepMask::CARTOON));
+        assert!(!obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
+        assert!(obj
+            .molecule()
+            .atoms()
+            .all(|atom| atom.repr.visible_reps.is_visible(RepMask::CARTOON)));
+    }
+
+    #[test]
+    fn partial_cartoon_mutation_clears_draw_mask_restore_flag() {
+        let mut obj = cartoon_object();
+        let all_atoms = SelectionResult::all(obj.molecule().atom_count());
+        hide_selected_rep(&mut obj, &all_atoms, RepMask::CARTOON);
+        assert!(obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
+        obj.clear_dirty();
+        let one_atom =
+            SelectionResult::from_indices(obj.molecule().atom_count(), [AtomIndex(0)].into_iter());
+
+        hide_selected_rep(&mut obj, &one_atom, RepMask::CARTOON);
+
+        assert_eq!(obj.dirty_flags(), DirtyFlags::VISIBILITY);
+        assert!(!obj.draw_mask_restorable_reps().is_visible(RepMask::CARTOON));
     }
 }
