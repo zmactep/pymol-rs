@@ -60,7 +60,7 @@ fn ss_from_u8(v: u8) -> SecondaryStructure {
     }
 }
 
-/// Convert `Vec<BackboneAtom>` (extracted by `extract_backbone_for`) to
+/// Convert `Vec<BackboneAtom>` extracted by `extract_retained_backbone` to
 /// segments split at `SEG_END` markers. Each segment is a continuous
 /// polymer run.
 pub fn segments_from_backbone_atoms(bb: &[BackboneAtom]) -> Vec<BackboneSegment> {
@@ -84,8 +84,8 @@ pub fn segments_from_backbone_atoms(bb: &[BackboneAtom]) -> Vec<BackboneSegment>
         }
     }
     // Flush trailing segment if it didn't end on a SEG_END marker (last atom
-    // of the buffer). `extract_backbone_for` always sets SEG_END on the last
-    // atom of each subchain, so this is a defensive fallback.
+    // of the buffer). `extract_retained_backbone` always sets SEG_END on the
+    // last atom of each subchain, so this is a defensive fallback.
     if !current.is_empty() {
         segments.push(current);
     }

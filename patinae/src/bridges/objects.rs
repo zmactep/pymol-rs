@@ -8,7 +8,7 @@ use patinae_framework::model::scene::{
     SceneColorContext, SceneEntry, SceneMapVisualKind, SceneModel, SceneObjectKind, SidebarColor,
 };
 use patinae_mol::RepMask;
-use patinae_scene::ObjectRegistry;
+use patinae_scene::{MoleculeObject, ObjectRegistry};
 
 use crate::{
     AppWindow, ObjectItem, ObjectsState, OverflowMenuItem, SelectionRow, SubchainItem, TopLevelRow,
@@ -818,10 +818,10 @@ impl RepSummary {
         }
     }
 
-    fn accumulate(&mut self, atom: &patinae_mol::Atom, draw_reps: RepMask) {
+    fn accumulate(&mut self, mol_obj: &MoleculeObject, atom: &patinae_mol::Atom) {
         use patinae_mol::AtomFlags;
 
-        let vis = atom.repr.visible_reps.intersection(draw_reps);
+        let vis = mol_obj.effective_atom_reps(atom);
         self.mask = self.mask.union(vis);
 
         let has_sticks = vis.is_visible(RepMask::STICKS);
@@ -912,14 +912,13 @@ fn set_active_reps(
     let mol = mol_obj.molecule();
 
     let summary = if entry_index < 0 {
-        RepSummary::from_mask(mol_obj.draw_reps())
+        RepSummary::from_mask(mol_obj.effective_reps())
     } else {
         let mut summary = RepSummary::new();
         let partition = mol.subchain_partition();
-        let draw_reps = mol_obj.draw_reps();
         if let Some(view) = partition.view_for(entry_index as u32, mol.atoms_slice()) {
             for atom in view.iter() {
-                summary.accumulate(atom, draw_reps);
+                summary.accumulate(mol_obj, atom);
             }
         }
         summary
@@ -952,12 +951,11 @@ fn set_active_reps_for_selection(
         let Some(mol_obj) = registry.get_molecule(obj_name) else {
             continue;
         };
-        let draw_reps = mol_obj.draw_reps();
         for (i, atom) in mol_obj.molecule().atoms().enumerate() {
             if !sel_result.contains_index(i) {
                 continue;
             }
-            summary.accumulate(atom, draw_reps);
+            summary.accumulate(mol_obj, atom);
         }
     }
 
@@ -975,9 +973,8 @@ fn set_active_reps_for_multi(os: &ObjectsState, kernel: &AppKernel, objects: &Ob
         if let Some(group) = kernel.scene.get_group(group_name) {
             for child in &group.children {
                 if let Some(mol_obj) = kernel.session.registry.get_molecule(&child.name) {
-                    let draw_reps = mol_obj.draw_reps();
                     for atom in mol_obj.molecule().atoms() {
-                        summary.accumulate(atom, draw_reps);
+                        summary.accumulate(mol_obj, atom);
                     }
                 }
             }
@@ -987,9 +984,8 @@ fn set_active_reps_for_multi(os: &ObjectsState, kernel: &AppKernel, objects: &Ob
     // Objects → all atoms
     for obj_name in &objects.selected_objects {
         if let Some(mol_obj) = kernel.session.registry.get_molecule(obj_name) {
-            let draw_reps = mol_obj.draw_reps();
             for atom in mol_obj.molecule().atoms() {
-                summary.accumulate(atom, draw_reps);
+                summary.accumulate(mol_obj, atom);
             }
         }
     }
@@ -999,10 +995,9 @@ fn set_active_reps_for_multi(os: &ObjectsState, kernel: &AppKernel, objects: &Ob
         if let Some(mol_obj) = kernel.session.registry.get_molecule(&key.obj_name) {
             let mol = mol_obj.molecule();
             let partition = mol.subchain_partition();
-            let draw_reps = mol_obj.draw_reps();
             if let Some(view) = partition.view_for(key.entry_index, mol.atoms_slice()) {
                 for atom in view.iter() {
-                    summary.accumulate(atom, draw_reps);
+                    summary.accumulate(mol_obj, atom);
                 }
             }
         }
@@ -1013,12 +1008,11 @@ fn set_active_reps_for_multi(os: &ObjectsState, kernel: &AppKernel, objects: &Ob
         if let Some(entry) = kernel.session.selections.get(sel_name) {
             for (obj_name, sel_result) in &entry.cached_results {
                 if let Some(mol_obj) = kernel.session.registry.get_molecule(obj_name) {
-                    let draw_reps = mol_obj.draw_reps();
                     for (i, atom) in mol_obj.molecule().atoms().enumerate() {
                         if !sel_result.contains_index(i) {
                             continue;
                         }
-                        summary.accumulate(atom, draw_reps);
+                        summary.accumulate(mol_obj, atom);
                     }
                 }
             }
@@ -1764,7 +1758,7 @@ pub fn setup_callbacks(app: Rc<RefCell<crate::app::App>>, window: &AppWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use patinae_mol::{Atom, Element, RepMask};
+    use patinae_mol::{Atom, Element, ObjectMolecule, RepMask};
 
     /// Build a `SubchainKey` for tests. `entry_index` is irrelevant to
     /// `build_subchains_expr` (which only consumes `selector_clause` and
@@ -1797,9 +1791,12 @@ mod tests {
     fn rep_summary_applies_object_draw_mask_to_atom_bits() {
         let mut atom = Atom::new("CA", Element::Carbon);
         atom.repr.visible_reps = RepMask::CARTOON.union(RepMask::STICKS);
+        let mut mol_obj = MoleculeObject::from_raw(ObjectMolecule::new("mask"));
+        mol_obj.set_visible_reps(RepMask::CARTOON.union(RepMask::STICKS));
+        mol_obj.set_draw_reps(RepMask::STICKS);
 
         let mut summary = RepSummary::new();
-        summary.accumulate(&atom, RepMask::STICKS);
+        summary.accumulate(&mol_obj, &atom);
 
         assert!(!summary.mask.is_visible(RepMask::CARTOON));
         assert!(summary.mask.is_visible(RepMask::STICKS));

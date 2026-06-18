@@ -3,7 +3,7 @@
 //! Wraps `ObjectMolecule` with render state and cached representations.
 
 use lin_alg::f32::Vec3;
-use patinae_mol::{AtomIndex, CoordSet, DirtyFlags, ObjectMolecule, RepMask};
+use patinae_mol::{Atom, AtomIndex, CoordSet, DirtyFlags, ObjectMolecule, RepMask};
 use patinae_select::SelectionResult;
 use patinae_settings::ObjectOverrides;
 
@@ -194,6 +194,16 @@ impl MoleculeObject {
     /// Get the object-level representation draw mask.
     pub fn draw_reps(&self) -> RepMask {
         self.state.draw_reps
+    }
+
+    /// Get representations currently effective for drawing.
+    pub fn effective_reps(&self) -> RepMask {
+        self.state.visible_reps.intersection(self.state.draw_reps)
+    }
+
+    /// Get representations currently effective for one atom.
+    pub fn effective_atom_reps(&self, atom: &Atom) -> RepMask {
+        atom.repr.visible_reps.intersection(self.effective_reps())
     }
 
     /// Get draw-mask reps that can be safely restored without atom rewrites.
@@ -584,6 +594,21 @@ mod tests {
             .molecule()
             .atoms()
             .all(|atom| atom.repr.visible_reps == RepMask::CARTOON));
+    }
+
+    #[test]
+    fn effective_atom_reps_apply_object_draw_mask() {
+        let mol = create_test_molecule();
+        let mut obj = MoleculeObject::new(mol);
+        let first_atom = obj.molecule().get_atom(AtomIndex(0)).unwrap();
+
+        assert_eq!(obj.effective_atom_reps(first_atom), RepMask::CARTOON);
+
+        obj.set_draw_reps(RepMask::NONE);
+        let first_atom = obj.molecule().get_atom(AtomIndex(0)).unwrap();
+
+        assert_eq!(obj.effective_reps(), RepMask::NONE);
+        assert_eq!(obj.effective_atom_reps(first_atom), RepMask::NONE);
     }
 
     #[test]

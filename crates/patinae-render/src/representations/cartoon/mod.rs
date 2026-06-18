@@ -2,7 +2,7 @@
 //!
 //! ## Architecture
 //!
-//!   1. CPU `extract_backbone_for` extracts retained polymer backbone samples
+//!   1. CPU `extract_retained_backbone` extracts retained backbone samples
 //!      and initial orientation from the molecule (per `BackboneAtom`).
 //!   2. CPU `tessellation::process_segment` runs the orient pipeline
 //!      (round_helix → refine_normals → flatten_sheets) +
@@ -47,7 +47,7 @@ use crate::compute::cartoon_extrude::{ExtrudeParams, ExtrudePointGpu};
 use crate::picking::RepKind;
 use crate::pipelines::cartoon::{CartoonParams, CartoonParamsLayout};
 use crate::render_input::RenderObjectInput;
-use crate::representations::cartoon::backbone::{extract_backbone_for, BackboneAtom};
+use crate::representations::cartoon::backbone::{extract_retained_backbone, BackboneAtom};
 use crate::representations::cartoon::tessellation::{
     from_resolved_settings, process_segment, segments_from_backbone_atoms, BackboneSegment,
     ExtrudePoint, GeomSettings, PipelineOutput, PipelineSettings, RunDescriptor,
@@ -597,7 +597,7 @@ impl Representation for CartoonRep {
         }
 
         let gap_cutoff = s.cartoon.gap_cutoff;
-        let bb = extract_backbone_for(input.molecule, input.coord_set, gap_cutoff);
+        let bb = extract_retained_backbone(input.molecule, input.coord_set, gap_cutoff);
         if bb.len() < 2 {
             self.resources = None;
             self.last_build = None;

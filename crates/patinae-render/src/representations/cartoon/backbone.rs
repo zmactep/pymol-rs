@@ -73,13 +73,14 @@ pub fn extract_backbone(
     coord_set: &CoordSet,
     gap_cutoff: i32,
 ) -> Vec<BackboneAtom> {
-    extract_backbone_for(molecule, coord_set, gap_cutoff)
+    extract_retained_backbone(molecule, coord_set, gap_cutoff)
 }
 
-/// Variant of [`extract_backbone`] used by both cartoon and ribbon. It builds
-/// the same retained backbone superset for both modes; per-mode visibility is
-/// handled by the scene atom LUT in WGSL.
-pub fn extract_backbone_for(
+/// Extract retained backbone samples for cartoon and ribbon.
+///
+/// This builds the same retained backbone superset for both modes. Per-mode
+/// visibility is handled by the scene atom LUT in WGSL.
+pub fn extract_retained_backbone(
     molecule: &ObjectMolecule,
     coord_set: &CoordSet,
     gap_cutoff: i32,
