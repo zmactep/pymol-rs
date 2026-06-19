@@ -35,6 +35,7 @@ mod stats;
 /// feature (per-pass GPU timestamps) is off.
 mod stats_history;
 mod uniforms;
+mod viewport_image;
 
 pub use context::RenderContext;
 pub use frame::FrameTargets;
@@ -66,3 +67,7 @@ pub use scene_store::SceneStoreFragmentationStats;
 pub use stats::{FrameStats, FrameStatsCollector};
 pub use stats_history::FrameStatsHistory;
 pub use uniforms::FrameUniforms;
+#[doc(inline)]
+pub use viewport_image::{
+    copy_rgba_buffer_to_viewport_texture, GpuViewportImage, GpuViewportImageError,
+};

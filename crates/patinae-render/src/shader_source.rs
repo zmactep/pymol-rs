@@ -62,6 +62,8 @@ pub const SURFACE_VDW_SDF_WGSL: &str = include_str!("shaders/compute/surface_vdw
 pub const SURFACE_SES_MORPH_WGSL: &str = include_str!("shaders/compute/surface_ses_morph.wgsl");
 pub const SURFACE_MC_WGSL: &str = include_str!("shaders/compute/surface_mc.wgsl");
 pub const PICKING_REPROJECT_WGSL: &str = include_str!("shaders/compute/picking_reproject.wgsl");
+pub const RAY_BUFFER_TO_TEXTURE_WGSL: &str =
+    include_str!("shaders/compute/ray_buffer_to_texture.wgsl");
 pub const SSAO_WGSL: &str = include_str!("shaders/compute/ssao.wgsl");
 pub const SSAO_BLUR_WGSL: &str = include_str!("shaders/compute/ssao_blur.wgsl");
 pub const SSAO_COMPOSE_WGSL: &str = include_str!("shaders/postprocess/ssao_compose.wgsl");
@@ -157,6 +159,7 @@ mod tests {
             ("patinae.surface_ses_morph", SURFACE_SES_MORPH_WGSL),
             ("patinae.surface_mc", SURFACE_MC_WGSL),
             ("patinae.picking_reproject", PICKING_REPROJECT_WGSL),
+            ("patinae.ray_buffer_to_texture", RAY_BUFFER_TO_TEXTURE_WGSL),
             ("patinae.ssao", SSAO_WGSL),
             ("patinae.ssao_blur", SSAO_BLUR_WGSL),
             ("patinae.ssao_compose", SSAO_COMPOSE_WGSL),

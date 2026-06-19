@@ -84,19 +84,8 @@ pub fn capture_rgba(
     });
     let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    // Read-back staging buffer. wgpu requires `bytes_per_row` aligned to
-    // `COPY_BYTES_PER_ROW_ALIGNMENT` (256). Track the padded stride so we
-    // can strip the padding while encoding.
-    let unpadded_bpr = width * 4;
-    let aligned_bpr = unpadded_bpr.div_ceil(256) * 256;
-    let staging = state.ctx.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("patinae.capture.readback"),
-        size: (aligned_bpr * height) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
-    // Render + copy into staging.
+    // Render into an offscreen texture, then reuse the shared RGBA readback
+    // helper so capture and viewport GPU images stay byte-for-byte aligned.
     let mut encoder = state
         .ctx
         .device
@@ -104,9 +93,65 @@ pub fn capture_rgba(
             label: Some("patinae.capture.encoder"),
         });
     state.render(&color_view, &mut encoder);
+    state.ctx.queue.submit(std::iter::once(encoder.finish()));
+
+    read_texture_rgba(
+        &state.ctx.device,
+        &state.ctx.queue,
+        &color_texture,
+        width,
+        height,
+        "patinae.capture",
+    )
+}
+
+pub(crate) fn read_texture_rgba(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    label_prefix: &str,
+) -> Result<Vec<u8>, CaptureError> {
+    if width == 0 || height == 0 {
+        return Err(CaptureError::Gpu(
+            "RGBA texture readback dimensions must be non-zero".into(),
+        ));
+    }
+    let unpadded_bpr = width
+        .checked_mul(4)
+        .ok_or_else(|| CaptureError::Gpu("RGBA texture row size overflow".into()))?;
+    let alignment = u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let aligned_bpr_u64 = u64::from(unpadded_bpr).div_ceil(alignment) * alignment;
+    let aligned_bpr = u32::try_from(aligned_bpr_u64)
+        .map_err(|_| CaptureError::Gpu("RGBA texture aligned row size overflow".into()))?;
+    let staging_size = aligned_bpr_u64
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| CaptureError::Gpu("RGBA texture readback buffer size overflow".into()))?;
+    let output_size = u64::from(unpadded_bpr)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| CaptureError::Gpu("RGBA texture output size overflow".into()))?;
+    let output_capacity = usize::try_from(output_size)
+        .map_err(|_| CaptureError::Gpu("RGBA texture output size exceeds usize".into()))?;
+    let aligned_bpr_usize = usize::try_from(aligned_bpr_u64)
+        .map_err(|_| CaptureError::Gpu("RGBA texture row stride exceeds usize".into()))?;
+    let unpadded_bpr_usize = unpadded_bpr as usize;
+
+    let readback_label = format!("{label_prefix}.readback");
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(readback_label.as_str()),
+        size: staging_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let encoder_label = format!("{label_prefix}.readback.encoder");
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(encoder_label.as_str()),
+    });
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
-            texture: &color_texture,
+            texture,
             mip_level: 0,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
@@ -125,7 +170,7 @@ pub fn capture_rgba(
             depth_or_array_layers: 1,
         },
     );
-    state.ctx.queue.submit(std::iter::once(encoder.finish()));
+    queue.submit(std::iter::once(encoder.finish()));
 
     // Block until the staging buffer is mapped.
     let slice = staging.slice(..);
@@ -133,9 +178,7 @@ pub fn capture_rgba(
     slice.map_async(wgpu::MapMode::Read, move |r| {
         let _ = tx.send(r);
     });
-    state
-        .ctx
-        .device
+    device
         .poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: None,
@@ -147,10 +190,10 @@ pub fn capture_rgba(
 
     // Strip row padding while copying into a tightly packed RGBA8 buffer.
     let mapped = slice.get_mapped_range();
-    let mut tightly_packed = Vec::with_capacity((unpadded_bpr * height) as usize);
+    let mut tightly_packed = Vec::with_capacity(output_capacity);
     for row in 0..height as usize {
-        let start = row * aligned_bpr as usize;
-        let end = start + unpadded_bpr as usize;
+        let start = row * aligned_bpr_usize;
+        let end = start + unpadded_bpr_usize;
         tightly_packed.extend_from_slice(&mapped[start..end]);
     }
     drop(mapped);

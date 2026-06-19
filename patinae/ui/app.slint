@@ -6,8 +6,21 @@ import { ReplState, OutputItem, CompletionItem } from "states/repl-state.slint";
 import { StartState } from "states/start-state.slint";
 import { NotificationState } from "states/notification-state.slint";
 import { SequenceState, SeqChainRow } from "states/sequence-state.slint";
-import { MovieState, MovieTick, MovieMarker, MovieBlock, MovieLane } from "states/movie-state.slint";
-import { PluginState, PluginToolbarItem, PluginPanelTab, PluginControl, PluginOption, PluginButtonItem } from "states/plugin-state.slint";
+import {
+    MovieState,
+    MovieTick,
+    MovieMarker,
+    MovieBlock,
+    MovieLane,
+} from "states/movie-state.slint";
+import {
+    PluginState,
+    PluginToolbarItem,
+    PluginPanelTab,
+    PluginControl,
+    PluginOption,
+    PluginButtonItem,
+} from "states/plugin-state.slint";
 import { MenuState, RecentFileItem } from "states/menu-state.slint";
 import { FetchDialog } from "components/fetch-dialog.slint";
 import { Theme } from "theme.slint";
@@ -83,7 +96,9 @@ export component StartupErrorWindow inherits Window {
 
             Button {
                 text: "OK";
-                clicked => { root.acknowledged(); }
+                clicked => {
+                    root.acknowledged();
+                }
             }
         }
     }
@@ -91,7 +106,7 @@ export component StartupErrorWindow inherits Window {
 
 export component AppWindow inherits Window {
     forward-focus: app-focus;
-    title: "Patinae (Patinae GUI)";
+    title: "Patinae";
     preferred-width: 1200px;
     preferred-height: 800px;
     background: Theme.bg;
@@ -102,14 +117,21 @@ export component AppWindow inherits Window {
             MenuItem {
                 title: "Run Script...";
                 shortcut: @keys(Control + R);
-                activated => { MenuState.action("run-script"); }
+                activated => {
+                    MenuState.action("run-script");
+                }
             }
-            MenuSeparator {}
+
+            MenuSeparator { }
+
             MenuItem {
                 title: "Open...";
                 shortcut: @keys(Control + O);
-                activated => { MenuState.action("open"); }
+                activated => {
+                    MenuState.action("open");
+                }
             }
+
             Menu {
                 title: "Open Recent";
                 if !MenuState.has-recent-files: MenuItem {
@@ -118,34 +140,53 @@ export component AppWindow inherits Window {
                 }
                 for item in MenuState.recent-files: MenuItem {
                     title: item.title;
-                    activated => { MenuState.open-recent(item.path); }
+                    activated => {
+                        MenuState.open-recent(item.path);
+                    }
                 }
             }
+
             MenuItem {
                 title: "Fetch PDB...";
                 shortcut: @keys(Control + F);
-                activated => { MenuState.action("fetch"); }
+                activated => {
+                    MenuState.action("fetch");
+                }
             }
-            MenuSeparator {}
+
+            MenuSeparator { }
+
             MenuItem {
                 title: "Save...";
                 shortcut: @keys(Control + S);
-                activated => { MenuState.action("save"); }
+                activated => {
+                    MenuState.action("save");
+                }
             }
+
             MenuItem {
                 title: "Export PNG...";
                 shortcut: @keys(Control + Shift + E);
-                activated => { MenuState.action("export-png"); }
+                activated => {
+                    MenuState.action("export-png");
+                }
             }
+
             MenuItem {
                 title: "Export Movie...";
-                activated => { MenuState.action("export-movie"); }
+                activated => {
+                    MenuState.action("export-movie");
+                }
             }
-            MenuSeparator {}
+
+            MenuSeparator { }
+
             MenuItem {
                 title: "Quit";
                 shortcut: @keys(Control + Q);
-                activated => { MenuState.action("quit"); }
+                activated => {
+                    MenuState.action("quit");
+                }
             }
         }
 
@@ -154,11 +195,16 @@ export component AppWindow inherits Window {
             MenuItem {
                 title: "Select All Atoms";
                 shortcut: @keys(Control + Shift + A);
-                activated => { MenuState.action("select-all"); }
+                activated => {
+                    MenuState.action("select-all");
+                }
             }
+
             MenuItem {
                 title: "Deselect All";
-                activated => { MenuState.action("deselect-all"); }
+                activated => {
+                    MenuState.action("deselect-all");
+                }
             }
         }
 
@@ -166,86 +212,131 @@ export component AppWindow inherits Window {
             title: "View";
             MenuItem {
                 title: "Reset";
-                activated => { MenuState.action("reset-view"); }
+                activated => {
+                    MenuState.action("reset-view");
+                }
             }
+
             MenuItem {
                 title: "Zoom All";
                 shortcut: @keys(Control + "0");
-                activated => { MenuState.action("zoom-all"); }
+                activated => {
+                    MenuState.action("zoom-all");
+                }
             }
+
             MenuItem {
                 title: "Orient";
-                activated => { MenuState.action("orient"); }
+                activated => {
+                    MenuState.action("orient");
+                }
             }
+
             MenuItem {
                 title: "Center";
-                activated => { MenuState.action("center"); }
+                activated => {
+                    MenuState.action("center");
+                }
             }
-            MenuSeparator {}
+
+            MenuSeparator { }
+
             Menu {
                 title: "Background";
                 MenuItem {
                     title: "Opaque";
                     checkable: true;
                     checked: false;
-                    activated => { MenuState.action("toggle-opaque-background"); }
+                    activated => {
+                        MenuState.action("toggle-opaque-background");
+                    }
                 }
-                MenuSeparator {}
+
+                MenuSeparator { }
+
                 MenuItem {
                     title: "White";
-                    activated => { MenuState.action("bg-white"); }
+                    activated => {
+                        MenuState.action("bg-white");
+                    }
                 }
+
                 MenuItem {
                     title: "Black";
-                    activated => { MenuState.action("bg-black"); }
+                    activated => {
+                        MenuState.action("bg-black");
+                    }
                 }
             }
-            MenuSeparator {}
+
+            MenuSeparator { }
+
             MenuItem {
                 title: "Focus REPL";
                 shortcut: @keys(Control + L);
                 enabled: !LayoutState.empty-mode;
-                activated => { MenuState.action("focus-repl"); }
+                activated => {
+                    MenuState.action("focus-repl");
+                }
             }
+
             MenuItem {
                 title: "Objects Panel";
                 checkable: true;
                 checked: !LayoutState.empty-mode && LayoutState.objects-visible;
                 enabled: !LayoutState.empty-mode;
-                activated => { MenuState.action("panel:objects"); }
+                activated => {
+                    MenuState.action("panel:objects");
+                }
             }
+
             MenuItem {
                 title: "Selections Panel";
                 checkable: true;
                 checked: !LayoutState.empty-mode && LayoutState.selections-visible;
                 enabled: !LayoutState.empty-mode;
-                activated => { MenuState.action("panel:selections"); }
+                activated => {
+                    MenuState.action("panel:selections");
+                }
             }
+
             MenuItem {
                 title: "Sequence Panel";
                 checkable: true;
                 checked: !LayoutState.empty-mode && LayoutState.sequence-visible;
                 enabled: !LayoutState.empty-mode;
-                activated => { MenuState.action("panel:sequence"); }
+                activated => {
+                    MenuState.action("panel:sequence");
+                }
             }
+
             MenuItem {
                 title: "Movie Panel";
                 checkable: true;
                 checked: !LayoutState.empty-mode && LayoutState.movie-visible;
                 enabled: !LayoutState.empty-mode;
-                activated => { MenuState.action("panel:movie"); }
+                activated => {
+                    MenuState.action("panel:movie");
+                }
             }
+
             MenuItem {
                 title: "REPL";
                 checkable: true;
                 checked: !LayoutState.empty-mode && LayoutState.repl-visible;
                 enabled: !LayoutState.empty-mode;
-                activated => { MenuState.action("panel:repl"); }
+                activated => {
+                    MenuState.action("panel:repl");
+                }
             }
-            MenuSeparator {}
+
+            MenuSeparator { }
+
             MenuItem {
                 title: "Fullscreen";
-                activated => { MenuState.action("fullscreen"); }
+                activated => {
+                    MenuState.action("fullscreen");
+                }
             }
         }
 
@@ -253,7 +344,9 @@ export component AppWindow inherits Window {
             title: "Help";
             MenuItem {
                 title: "Command Reference";
-                activated => { MenuState.action("help"); }
+                activated => {
+                    MenuState.action("help");
+                }
             }
         }
     }
