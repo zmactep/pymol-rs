@@ -10,6 +10,7 @@ use std::sync::{
 };
 
 use crate::picking::{decode_pixel, PickHit, RepKind};
+use crate::{memory::buffer_usage, GpuMemoryUsage};
 
 /// 256-byte aligned bytes_per_row for `Rg32Uint` (8 B / pixel). 256 is the
 /// `COPY_BYTES_PER_ROW_ALIGNMENT` constant.
@@ -128,6 +129,11 @@ impl PickingReadback {
                     state_for_cb.store(READBACK_FAILED, Ordering::Release);
                 }
             });
+    }
+
+    /// Estimated GPU bytes allocated by this readback staging buffer.
+    pub fn memory_usage(&self) -> GpuMemoryUsage {
+        buffer_usage(&self.buffer)
     }
 
     /// Collect the mapped pixel and unmap. Returns `None` if no atom was hit

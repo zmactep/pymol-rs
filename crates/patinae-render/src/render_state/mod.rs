@@ -10,6 +10,7 @@ mod culling_flow;
 mod frame_flow;
 mod geometry_export_flow;
 mod math;
+mod memory_flow;
 mod picking_flow;
 mod resize;
 mod screen_flow;

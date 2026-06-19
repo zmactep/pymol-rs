@@ -44,6 +44,7 @@ use rayon::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::compute::cartoon_extrude::{ExtrudeParams, ExtrudePointGpu};
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::cartoon::{CartoonParams, CartoonParamsLayout};
 use crate::render_input::RenderObjectInput;
@@ -766,6 +767,19 @@ impl Representation for CartoonRep {
 
     fn is_opaque(&self) -> bool {
         self.is_opaque_cache
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.render_params_buffer));
+        if let Some(resources) = self.resources.as_ref() {
+            usage.add(buffer_usage(&resources.params_buf));
+            usage.add(buffer_usage(&resources.extrude_points_buf));
+            usage.add(buffer_usage(&resources.runs_buf));
+            usage.add(buffer_usage(&resources.vertex_buf));
+            usage.add(buffer_usage(&resources.indirect_buf));
+        }
+        usage
     }
 
     fn record_translucent<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {

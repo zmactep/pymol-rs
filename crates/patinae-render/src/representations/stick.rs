@@ -11,6 +11,7 @@ use patinae_settings::ResolvedSettings;
 
 use crate::compute::stick_build::{indirect_seed, StickBuildParams, StickBuildPipeline};
 use crate::compute::stick_lod_count::StickLodCountPipeline;
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::stick::{StickParams, StickParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
@@ -505,6 +506,15 @@ impl Representation for StickRep {
         );
         self.viewport_lod_readback
             .record_count_copy(ctx.encoder, &self.viewport_count_buffer);
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = self.gpu.memory_usage();
+        usage.add(buffer_usage(&self.build_params_buffer));
+        usage.add(buffer_usage(&self.render_params_buffer));
+        usage.add(buffer_usage(&self.viewport_count_buffer));
+        usage.add(self.viewport_lod_readback.memory_usage());
+        usage
     }
 
     fn record_translucent<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {

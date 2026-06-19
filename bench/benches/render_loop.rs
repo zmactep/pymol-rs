@@ -1003,6 +1003,8 @@ fn bench_render_loop(c: &mut Criterion) {
     print_histogram("gpu_atlas_ao_ms", &mut atlas_ao_samples);
     print_histogram("gpu_marking_ms", &mut marking_samples);
     print_histogram("gpu_cull_ms", &mut cull_samples);
+    eprintln!("=== GPU Memory Snapshot ===");
+    eprintln!("{}", state.memory_snapshot().timing_line());
 
     // Final per-pass stats summary. We render one more frame, wait for
     // GPU completion, then drain the FrameStatsCollector.

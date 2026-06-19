@@ -14,6 +14,7 @@ use patinae_mol::DirtyFlags;
 use patinae_settings::ResolvedSettings;
 
 use crate::compute::line_build::{indirect_seed, LineBuildParams, LineBuildPipeline};
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::representations::cullable::CullableBuffers;
 use crate::representations::{BuildCtx, CullPlan, CullPlanCtx};
@@ -261,6 +262,12 @@ impl Representation for LineRep {
         let upper = self.cull_upper_bound()?;
         let seed = indirect_seed(4);
         self.gpu.plan_cull(ctx, upper, LINE_KIND_RADIUS, &seed)
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = self.gpu.memory_usage();
+        usage.add(buffer_usage(&self.build_params_buffer));
+        usage
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

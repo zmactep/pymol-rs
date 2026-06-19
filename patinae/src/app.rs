@@ -551,6 +551,9 @@ impl App {
                     stats.gpu_total_ms,
                 );
             }
+            if let Some(memory) = self.renderer.as_ref().map(|r| r.memory_snapshot()) {
+                eprintln!("  {}", memory.timing_line());
+            }
         }
 
         if self.perf_enabled {

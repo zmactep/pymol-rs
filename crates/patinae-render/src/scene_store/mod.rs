@@ -34,6 +34,7 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 
 use crate::lut_buffer::{BufferFlushStats, GrowableStorageBuffer};
+use crate::memory::GpuMemoryUsage;
 use crate::picking::ObjectId;
 use crate::render_input::ColorLutEntry;
 
@@ -315,6 +316,26 @@ impl SceneStore {
             allocated_table_slots: u64::from(self.next_table_index),
             orphaned_table_slots: self.orphaned_table_slots,
         }
+    }
+
+    /// Estimated GPU bytes allocated by scene-wide storage buffers.
+    pub fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(self.atoms.memory_usage());
+        usage.add(self.coords.memory_usage());
+        usage.add(self.bonds.memory_usage());
+        usage.add(self.color_lut.memory_usage());
+        usage.add(self.mask_lut.memory_usage());
+        usage.add(self.marker_lut.memory_usage());
+        usage.add(self.csr_offsets.memory_usage());
+        usage.add(self.csr_indices.memory_usage());
+        if self.obj_table_gpu.is_some() {
+            usage.add(GpuMemoryUsage::live_capacity(
+                self.obj_table_cpu.len() as u64,
+                self.obj_table_capacity_bytes,
+            ));
+        }
+        usage
     }
 
     /// Allocate (or look up) a slot for `object_id` of the given size.

@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 use patinae_color::{NamedPalette, ThemedPalette};
 use patinae_render::picking::readback::PendingPick;
 use patinae_render::{
-    DisplayedGeometry, GeometryExportOptions, RenderArtifactSnapshot, RenderInput, RenderState,
-    SceneLod, TraceGeometryChunk,
+    estimate_texture_2d_bytes, DisplayedGeometry, GeometryExportOptions, GpuMemoryCategory,
+    GpuMemorySnapshot, GpuMemoryUsage, RenderArtifactSnapshot, RenderInput, RenderState, SceneLod,
+    TraceGeometryChunk,
 };
 use patinae_scene::{Camera, CaptureRenderer, ObjectRegistry, PickHit, Session, ViewerError};
 use patinae_settings::{ResolvedSettings, Settings, ShadingMode};
@@ -144,6 +145,31 @@ impl ViewportRenderer {
     /// `patinae-render/stats` feature, which patinae enables by default).
     pub fn take_frame_stats_for_log(&self) -> Option<patinae_render::FrameStats> {
         self.state.take_frame_stats()
+    }
+
+    /// Return a renderer memory snapshot including desktop handoff textures.
+    pub fn memory_snapshot(&self) -> GpuMemorySnapshot {
+        let mut snapshot = self.state.memory_snapshot();
+        if let Some((width, height)) = self.last_viewport_size {
+            let bytes = estimate_texture_2d_bytes(width, height, VIEWPORT_FORMAT);
+            let count = self.color_textures.len() as u64;
+            snapshot.add_usage(
+                GpuMemoryCategory::ViewportHandoff,
+                GpuMemoryUsage::new(
+                    bytes.saturating_mul(count),
+                    bytes.saturating_mul(count),
+                    bytes.saturating_mul(count),
+                    count,
+                ),
+            );
+        }
+        if let Some(image) = self.viewport_gpu_image.as_ref() {
+            snapshot.add_allocation(
+                GpuMemoryCategory::PluginOrArtifact,
+                estimate_texture_2d_bytes(image.width, image.height, VIEWPORT_FORMAT),
+            );
+        }
+        snapshot
     }
 
     pub fn render(

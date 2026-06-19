@@ -19,6 +19,7 @@ mod viewport_lod;
 use crate::picking::RepKind;
 use crate::render_input::RenderObjectInput;
 use crate::render_state::state::GeometryRuntime;
+use crate::GpuMemoryUsage;
 
 use patinae_mol::DirtyFlags;
 use patinae_settings::ResolvedSettings;
@@ -147,6 +148,11 @@ pub trait Representation: std::any::Any {
     /// Record tiny GPU readbacks used by viewport-sensitive LOD decisions.
     /// Defaults to no-op for representations that do not adapt to the camera.
     fn record_viewport_lod_readback(&mut self, _ctx: &mut ViewportLodCtx<'_>) {}
+
+    /// Estimated persistent GPU memory owned by this representation.
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        GpuMemoryUsage::default()
+    }
 
     // Draw contracts. `record_shadow_depth` deliberately uses raw,
     // un-compacted geometry for camera-independent lighting/occlusion passes.

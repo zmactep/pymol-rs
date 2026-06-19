@@ -9,6 +9,10 @@
 //! The WBOIT targets are always available, while picking uses a low-resolution
 //! target to reduce per-frame bandwidth.
 
+use crate::memory::{
+    estimate_texture_2d_bytes, GpuMemoryCategory, GpuMemoryLedger, GpuMemoryUsage,
+};
+
 pub const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const REVEAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -39,6 +43,7 @@ pub const PICKING_SCALE: f32 = 0.5;
 pub struct FrameTargets {
     pub width: u32,
     pub height: u32,
+    pub color_format: wgpu::TextureFormat,
     pub accum: wgpu::TextureView,
     pub reveal: wgpu::TextureView,
     pub depth: wgpu::TextureView,
@@ -305,6 +310,7 @@ impl FrameTargets {
         Self {
             width,
             height,
+            color_format,
             accum,
             reveal,
             depth,
@@ -346,6 +352,74 @@ impl FrameTargets {
 
     pub fn overlay_dims(&self) -> (u32, u32) {
         (self.width.max(1), self.height.max(1))
+    }
+
+    /// Estimated GPU bytes allocated by all owned frame-target textures.
+    pub fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut ledger = GpuMemoryLedger::new();
+        self.record_memory(&mut ledger);
+        let snapshot = ledger.snapshot();
+        let mut usage = GpuMemoryUsage::default();
+        for category in [
+            GpuMemoryCategory::FrameTargets,
+            GpuMemoryCategory::Picking,
+            GpuMemoryCategory::Overlay,
+            GpuMemoryCategory::Postprocess,
+        ] {
+            usage.add(snapshot.category_usage(category));
+        }
+        usage
+    }
+
+    pub(crate) fn record_memory(&self, ledger: &mut GpuMemoryLedger) {
+        let full = (self.width.max(1), self.height.max(1));
+        add_texture_2d(ledger, GpuMemoryCategory::FrameTargets, full, ACCUM_FORMAT);
+        add_texture_2d(ledger, GpuMemoryCategory::FrameTargets, full, REVEAL_FORMAT);
+        add_texture_2d(ledger, GpuMemoryCategory::FrameTargets, full, DEPTH_FORMAT);
+
+        if self.picking_texture.is_some() {
+            let picking = self.picking_dims();
+            add_texture_2d(ledger, GpuMemoryCategory::Picking, picking, PICKING_FORMAT);
+        }
+        if self.picking_prev_texture.is_some() {
+            let picking = self.picking_dims();
+            add_texture_2d(ledger, GpuMemoryCategory::Picking, picking, PICKING_FORMAT);
+        }
+        if self.picking_depth_texture.is_some() {
+            let picking = self.picking_dims();
+            add_texture_2d(ledger, GpuMemoryCategory::Picking, picking, DEPTH_FORMAT);
+        }
+        if self.picking_depth_prev_texture.is_some() {
+            let picking = self.picking_dims();
+            add_texture_2d(ledger, GpuMemoryCategory::Picking, picking, DEPTH_FORMAT);
+        }
+
+        add_texture_2d(ledger, GpuMemoryCategory::Postprocess, full, SSAO_FORMAT);
+        add_texture_2d(ledger, GpuMemoryCategory::Postprocess, full, SSAO_FORMAT);
+        add_texture_2d(
+            ledger,
+            GpuMemoryCategory::Postprocess,
+            full,
+            self.color_format,
+        );
+
+        if self.overlay_id_texture.is_some() {
+            add_texture_2d(ledger, GpuMemoryCategory::Overlay, full, PICKING_FORMAT);
+        }
+        if self.overlay_id_depth_texture.is_some() {
+            add_texture_2d(ledger, GpuMemoryCategory::Overlay, full, DEPTH_FORMAT);
+        }
+        if self.marking_mask_texture.is_some() {
+            add_texture_2d(
+                ledger,
+                GpuMemoryCategory::Overlay,
+                full,
+                MARKING_MASK_FORMAT,
+            );
+        }
+        if self.overlay_color_scratch_texture.is_some() {
+            add_texture_2d(ledger, GpuMemoryCategory::Overlay, full, self.color_format);
+        }
     }
 
     /// Lazily allocate the full-resolution id resources used by visual
@@ -465,4 +539,13 @@ impl FrameTargets {
         self.overlay_id_depth_texture = None;
         self.clear_marking_targets();
     }
+}
+
+fn add_texture_2d(
+    ledger: &mut GpuMemoryLedger,
+    category: GpuMemoryCategory,
+    dims: (u32, u32),
+    format: wgpu::TextureFormat,
+) {
+    ledger.add_allocation(category, estimate_texture_2d_bytes(dims.0, dims.1, format));
 }

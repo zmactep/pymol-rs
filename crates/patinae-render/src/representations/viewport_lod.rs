@@ -3,6 +3,8 @@ use std::sync::{
     Arc,
 };
 
+use crate::memory::{buffer_usage, GpuMemoryUsage};
+
 const VIEWPORT_LOD_READBACK_BYTES: u64 = 4;
 const VIEWPORT_LOD_IDLE: u8 = 0;
 const VIEWPORT_LOD_NEEDS_MAP: u8 = 1;
@@ -99,5 +101,9 @@ impl ViewportLodReadback {
             0,
             VIEWPORT_LOD_READBACK_BYTES,
         );
+    }
+
+    pub(super) fn memory_usage(&self) -> GpuMemoryUsage {
+        buffer_usage(&self.buffer)
     }
 }

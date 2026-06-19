@@ -16,6 +16,7 @@ pub mod frame;
 mod geometry_export;
 pub(crate) mod lut_buffer;
 mod map_contour;
+pub mod memory;
 pub(crate) mod passes;
 pub mod picking;
 pub(crate) mod pipelines;
@@ -42,6 +43,11 @@ pub use geometry_export::{
     DisplayedObjectGeometry, DisplayedPrimitive, GeometryExportError, GeometryExportOptions,
     TraceCylinder, TraceGeometryChunk, TraceLineSegment, TraceMaterial, TracePointSample,
     TraceSphere, TraceTriangle,
+};
+pub use memory::{
+    estimate_texture_2d_bytes, estimate_texture_bytes, estimate_texture_descriptor_bytes,
+    GpuAllocationEstimate, GpuMemoryBucket, GpuMemoryCategory, GpuMemoryLedger, GpuMemorySnapshot,
+    GpuMemoryUsage,
 };
 pub use picking::{ObjectId, PackedId, PickHit, PickingMode, RenderConfig, RepKind};
 pub use render_artifacts::{

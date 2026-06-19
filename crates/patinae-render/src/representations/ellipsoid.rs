@@ -22,6 +22,7 @@ use patinae_settings::ResolvedSettings;
 use crate::compute::ellipsoid_build::{
     indirect_seed, EllipsoidBuildEntry, EllipsoidBuildParams, EllipsoidBuildPipeline,
 };
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::ellipsoid::{EllipsoidParams, EllipsoidParamsLayout};
 use crate::render_input::RenderObjectInput;
@@ -545,6 +546,16 @@ impl Representation for EllipsoidRep {
         let upper = self.cull_upper_bound()?;
         let seed = indirect_seed(6);
         self.gpu.plan_cull(ctx, upper, 0.0, &seed)
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = self.gpu.memory_usage();
+        usage.add(buffer_usage(&self.build_params_buffer));
+        usage.add(buffer_usage(&self.render_params_buffer));
+        if let Some(buffer) = self.build_input_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        usage
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

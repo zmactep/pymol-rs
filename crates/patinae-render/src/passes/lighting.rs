@@ -8,6 +8,8 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
+use crate::memory::{buffer_usage, estimate_texture_2d_bytes, GpuMemoryUsage};
+
 pub const OCCLUSION_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub const DEFAULT_SHADOW_MAP_SIZE: u32 = 1024;
 pub const MAX_ATLAS_DIRECTIONS: usize = 256;
@@ -203,6 +205,17 @@ impl LightingOcclusion {
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.set_depth_view(device, &view);
         self.upload_uniforms(queue, &LightingOcclusionUniforms::disabled(size));
+    }
+
+    pub(crate) fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.uniform_buffer));
+        usage.add(GpuMemoryUsage::allocation(estimate_texture_2d_bytes(
+            1,
+            1,
+            OCCLUSION_DEPTH_FORMAT,
+        )));
+        usage
     }
 }
 

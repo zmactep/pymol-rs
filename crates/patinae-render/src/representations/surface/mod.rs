@@ -47,6 +47,7 @@ use crate::compute::surface_ses_morph::{
     stencil_radius_voxels, MorphParams, SurfaceSesMorphCompute, SurfaceSesMorphInputs,
 };
 use crate::compute::surface_vdw_sdf::{SdfParams, SurfaceVdwSdfCompute, SurfaceVdwSdfInputs};
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::mesh::MeshParamsLayout;
 use crate::pipelines::surface::{SurfaceParams, SurfaceParamsLayout};
@@ -1275,6 +1276,19 @@ impl Representation for SurfaceRep {
 
     fn casts_shadow(&self) -> bool {
         self.mode.casts_shadow(self.is_opaque_cache)
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.render_params_buffer));
+        for part in &self.parts {
+            for chunk in &part.chunks {
+                usage.add(buffer_usage(&chunk.draw.vertex_buf));
+                usage.add(buffer_usage(&chunk.draw.counter_buf));
+                usage.add(buffer_usage(&chunk.draw.indirect_buf));
+            }
+        }
+        usage
     }
 
     fn record_translucent<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {

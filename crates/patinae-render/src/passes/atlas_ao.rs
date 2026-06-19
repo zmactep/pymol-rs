@@ -2,6 +2,7 @@
 
 use wgpu::util::DeviceExt;
 
+use crate::memory::{buffer_usage, estimate_texture_2d_bytes, GpuMemoryUsage};
 use crate::passes::lighting::{create_depth_texture, MAX_ATLAS_DIRECTIONS};
 use crate::uniforms::FrameUniforms;
 
@@ -120,6 +121,19 @@ impl AtlasAoPass {
 
     pub fn atlas_frame_bind_group(&self, index: usize) -> Option<&wgpu::BindGroup> {
         self.atlas_frame_bind_groups.get(index)
+    }
+
+    pub(crate) fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(GpuMemoryUsage::allocation(estimate_texture_2d_bytes(
+            self.size,
+            self.size,
+            crate::passes::lighting::OCCLUSION_DEPTH_FORMAT,
+        )));
+        for buffer in &self.atlas_frame_buffers {
+            usage.add(buffer_usage(buffer));
+        }
+        usage
     }
 }
 

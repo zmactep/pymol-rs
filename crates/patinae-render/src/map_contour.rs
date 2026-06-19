@@ -6,6 +6,7 @@ use patinae_algos::surface::{
 };
 use wgpu::util::DeviceExt;
 
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::pipelines::map::{MapParams, MapParamsLayout};
 use crate::render_input::{RenderMapInput, RenderMapMode};
 
@@ -137,6 +138,19 @@ impl MapEntry {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.index_count, 0, 0..1);
+    }
+
+    /// Estimated GPU bytes allocated by this map contour.
+    pub fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.params_buffer));
+        if let Some(buffer) = self.vertex_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        if let Some(buffer) = self.index_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        usage
     }
 
     fn upload_geometry(&mut self, geometry: &ContourGeometry, device: &wgpu::Device) {

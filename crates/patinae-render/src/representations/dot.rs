@@ -12,6 +12,7 @@ use patinae_mol::DirtyFlags;
 use patinae_settings::ResolvedSettings;
 
 use crate::compute::dot_build::{indirect_seed, DotBuildParams, DotBuildPipeline};
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::dot::{dot_direction_offset, DotDrawParams, DotParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
@@ -325,6 +326,13 @@ impl Representation for DotRep {
         let upper = self.cull_upper_bound()?;
         let seed = indirect_seed(dot_vertex_count(self.effective_dots_per_atom));
         self.gpu.plan_cull(ctx, upper, DOT_CULL_WORLD_PAD, &seed)
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = self.gpu.memory_usage();
+        usage.add(buffer_usage(&self.build_params_buffer));
+        usage.add(buffer_usage(&self.draw_params_buffer));
+        usage
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

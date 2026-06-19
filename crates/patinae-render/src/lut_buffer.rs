@@ -5,6 +5,8 @@
 
 use bytemuck::Pod;
 
+use crate::memory::GpuMemoryUsage;
+
 // Sparse hover updates normally touch one or two marker entries. If a caller
 // dirties many disjoint ranges, a single full upload is cheaper than issuing a
 // long stream of tiny queue writes.
@@ -187,6 +189,18 @@ impl<T: Pod> GrowableStorageBuffer<T> {
 
     pub fn buffer(&self) -> Option<&wgpu::Buffer> {
         self.gpu.as_ref()
+    }
+
+    /// GPU bytes currently allocated for this storage buffer.
+    pub fn memory_usage(&self) -> GpuMemoryUsage {
+        if self.gpu.is_none() {
+            return GpuMemoryUsage::default();
+        }
+        let item_size = std::mem::size_of::<T>() as u64;
+        GpuMemoryUsage::live_capacity(
+            (self.cpu.len() as u64).saturating_mul(item_size),
+            (self.capacity as u64).saturating_mul(item_size),
+        )
     }
 
     /// Capacity in entries (not bytes). Useful for sizing `min_binding_size`.

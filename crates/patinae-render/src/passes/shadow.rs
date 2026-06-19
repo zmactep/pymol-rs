@@ -2,6 +2,7 @@
 
 use wgpu::util::DeviceExt;
 
+use crate::memory::{buffer_usage, estimate_texture_2d_bytes, GpuMemoryUsage};
 use crate::passes::lighting::{create_depth_texture, DEFAULT_SHADOW_MAP_SIZE};
 use crate::uniforms::FrameUniforms;
 
@@ -51,5 +52,16 @@ impl DirectionalShadowPass {
 
     pub fn upload_frame(&self, queue: &wgpu::Queue, frame: &FrameUniforms) {
         queue.write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(frame));
+    }
+
+    pub(crate) fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.frame_buffer));
+        usage.add(GpuMemoryUsage::allocation(estimate_texture_2d_bytes(
+            self.size,
+            self.size,
+            crate::passes::lighting::OCCLUSION_DEPTH_FORMAT,
+        )));
+        usage
     }
 }

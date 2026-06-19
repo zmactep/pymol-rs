@@ -1,6 +1,7 @@
 //! Shared GPU buffer owner for compute-built, camera-culled reps.
 
 use crate::compute::cull::{CullParams, CullPipeline};
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::representations::{prepare_raw_shadow_indirect, CullPlan, CullPlanCtx};
 
 pub(crate) struct CullableBuffers {
@@ -174,6 +175,27 @@ impl CullableBuffers {
 
     pub(crate) fn has_raw_instances(&self) -> bool {
         self.raw_instance_buffer.is_some()
+    }
+
+    pub(crate) fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.cull_params_buffer));
+        if let Some(buffer) = self.raw_instance_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        if let Some(buffer) = self.compacted_instance_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        if let Some(buffer) = self.raw_count_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        if let Some(buffer) = self.indirect_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        if let Some(buffer) = self.shadow_indirect_buffer.as_ref() {
+            usage.add(buffer_usage(buffer));
+        }
+        usage
     }
 
     pub(crate) fn reset_raw_count(&self, queue: &wgpu::Queue) {

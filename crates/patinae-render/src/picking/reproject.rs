@@ -23,6 +23,7 @@ use wgpu::util::DeviceExt;
 
 use crate::context::RenderContext;
 use crate::frame::PICKING_FORMAT;
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::shader_source::{self, PICKING_REPROJECT_WGSL};
 
 /// Mirror of the WGSL `ReprojectParams` uniform.
@@ -194,6 +195,14 @@ impl PickingReproject {
     /// Write `ReprojectParams` into the GPU uniform.
     pub fn upload_params(&self, queue: &wgpu::Queue, params: ReprojectParams) {
         queue.write_buffer(&self.params_buffer, 0, bytemuck::bytes_of(&params));
+    }
+
+    /// Estimated GPU bytes allocated by the reprojection buffers.
+    pub fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = GpuMemoryUsage::default();
+        usage.add(buffer_usage(&self.params_buffer));
+        usage.add(buffer_usage(&self.best_depth_buffer));
+        usage
     }
 
     /// Build a bind group from the current frame's resources. Cheap to

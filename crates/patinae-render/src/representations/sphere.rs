@@ -18,6 +18,7 @@ use patinae_settings::ResolvedSettings;
 
 use crate::compute::sphere_build::{indirect_seed, SphereBuildParams, SphereBuildPipeline};
 use crate::compute::sphere_lod_count::SphereLodCountPipeline;
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::sphere::{SphereParams, SphereParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
@@ -526,6 +527,15 @@ impl Representation for SphereRep {
         );
         self.viewport_lod_readback
             .record_count_copy(ctx.encoder, &self.viewport_count_buffer);
+    }
+
+    fn memory_usage(&self) -> GpuMemoryUsage {
+        let mut usage = self.gpu.memory_usage();
+        usage.add(buffer_usage(&self.build_params_buffer));
+        usage.add(buffer_usage(&self.render_params_buffer));
+        usage.add(buffer_usage(&self.viewport_count_buffer));
+        usage.add(self.viewport_lod_readback.memory_usage());
+        usage
     }
 
     fn record_translucent<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {

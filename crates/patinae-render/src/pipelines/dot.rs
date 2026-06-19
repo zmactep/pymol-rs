@@ -4,6 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::context::RenderContext;
+use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::pipelines::{build_draw_pair, build_fast_overlay_pipeline};
 use crate::representations::dot::DotAtomInstance;
 use crate::scene_store::SceneStoreLayout;
@@ -90,6 +91,10 @@ impl DotParamsLayout {
                 },
             ],
         })
+    }
+
+    pub(crate) fn memory_usage(&self) -> GpuMemoryUsage {
+        buffer_usage(&self.directions_buffer)
     }
 }
 
