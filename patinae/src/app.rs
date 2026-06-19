@@ -12,7 +12,7 @@ use patinae_framework::message::AppMessage;
 use patinae_framework::plugin_ui::{PanelEvent, PanelEventKind, PanelValue};
 use patinae_framework::topics::{self, SaveFileRequest, SAVE_FILE_REQUEST_TOPIC};
 use patinae_plugin_host::PluginHost;
-use patinae_render::FrameStatsHistory;
+use patinae_render::{required_limits_for_memory_policy, FrameStatsHistory, RenderMemoryPolicy};
 use patinae_scene::{
     expand_pick_to_selection, pick_expression_for_hit, CaptureRenderer, KeyBinding, ViewportImage,
 };
@@ -30,7 +30,7 @@ use crate::bridges::plugins::PluginBridge;
 use crate::bridges::repl::ReplBridge;
 use crate::bridges::sequence::SequenceBridge;
 use crate::bridges::viewport::ViewportBridge;
-use crate::components::viewport::ViewportRenderer;
+use crate::components::viewport::{render_memory_policy_for_device, ViewportRenderer};
 #[cfg(not(target_os = "windows"))]
 use crate::display_recovery::log_selected_gpu;
 use crate::display_recovery::{
@@ -50,13 +50,6 @@ const REPL_PILL_WIDTH_LP: f32 = 380.0;
 const REPL_PILL_HEIGHT_LP: f32 = 32.0;
 const REPL_PILL_BOTTOM_LP: f32 = 24.0;
 const TRANSIENT_NOTIFICATION_SECS: u64 = 2;
-#[cfg(any(not(target_os = "windows"), test))]
-const BYTES_PER_GIB: u64 = 1024 * 1024 * 1024;
-#[cfg(any(not(target_os = "windows"), test))]
-const PATINAE_DESIRED_MAX_BUFFER_SIZE: u64 = 4 * BYTES_PER_GIB;
-#[cfg(any(not(target_os = "windows"), test))]
-const PATINAE_DESIRED_MAX_STORAGE_BUFFER_BINDING_SIZE: u32 = (2 * BYTES_PER_GIB - 1) as u32;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartupAction {
     Warning(String),
@@ -1234,17 +1227,9 @@ fn apply_standard_panel_preset(layout: &LayoutState) {
 #[cfg(any(not(target_os = "windows"), test))]
 fn patinae_wgpu_required_limits(
     adapter_limits: &slint::wgpu_28::wgpu::Limits,
+    memory_policy: RenderMemoryPolicy,
 ) -> slint::wgpu_28::wgpu::Limits {
-    slint::wgpu_28::wgpu::Limits {
-        // Large structures (assemblies, ribosomes) need bigger buffers and
-        // bigger single-binding ranges. Request the current Patinae target on
-        // capable GPUs, but never exceed the selected adapter's real limits.
-        max_buffer_size: PATINAE_DESIRED_MAX_BUFFER_SIZE.min(adapter_limits.max_buffer_size),
-        max_storage_buffer_binding_size: PATINAE_DESIRED_MAX_STORAGE_BUFFER_BINDING_SIZE
-            .min(adapter_limits.max_storage_buffer_binding_size),
-        ..slint::wgpu_28::wgpu::Limits::default()
-    }
-    .using_resolution(adapter_limits.clone())
+    required_limits_for_memory_policy(adapter_limits, memory_policy)
 }
 
 fn patinae_wgpu_backends(
@@ -1375,6 +1360,13 @@ fn patinae_wgpu_configuration(
         return Err(no_hardware_wgpu_adapter_error(settings.backends, Some(&adapter_info)).into());
     }
     log_selected_gpu(&adapter_info);
+    let memory_policy = render_memory_policy_for_device(
+        Some(&adapter_info),
+        &adapter_limits,
+        "PATINAE_RENDER_MEMORY_PROFILE",
+        false,
+    );
+    settings.device_memory_hints = memory_policy.wgpu_memory_hints();
     let binding_array_features = slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY
         | slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY;
     let requested_binding_array_features = adapter_features & binding_array_features;
@@ -1382,7 +1374,7 @@ fn patinae_wgpu_configuration(
         adapter_features & slint::wgpu_28::wgpu::Features::TIMESTAMP_QUERY;
     settings.device_required_features |=
         requested_binding_array_features | requested_timestamp_query_feature;
-    let required_limits = patinae_wgpu_required_limits(&adapter_limits);
+    let required_limits = patinae_wgpu_required_limits(&adapter_limits, memory_policy);
     log::info!(
         "wgpu limits: adapter max_storage_buffer_binding_size={} max_buffer_size={}; \
          requested max_storage_buffer_binding_size={} max_buffer_size={}",
@@ -1398,6 +1390,12 @@ fn patinae_wgpu_configuration(
         requested_binding_array_features
             .contains(slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY),
         requested_timestamp_query_feature.contains(slint::wgpu_28::wgpu::Features::TIMESTAMP_QUERY),
+    );
+    log::info!(
+        "render memory profile: profile={} budget={:?} memory_hints={:?}",
+        memory_policy.profile,
+        memory_policy.budget_bytes,
+        settings.device_memory_hints
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(
@@ -2010,6 +2008,10 @@ fn map_winit_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use patinae_render::{
+        gib_to_bytes, mib_to_bytes, PERFORMANCE_MAX_BUFFER_SIZE,
+        PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
+    };
     use patinae_scene::KeyCode;
 
     fn adapter_limits(
@@ -2042,9 +2044,11 @@ mod tests {
 
     #[test]
     fn wgpu_required_limits_clamp_to_intel_storage_limit() {
-        let adapter_limits = adapter_limits(PATINAE_DESIRED_MAX_BUFFER_SIZE, 1_073_741_820);
+        let adapter_limits =
+            adapter_limits(PERFORMANCE_MAX_BUFFER_SIZE, gib_to_bytes(1) as u32 - 4);
 
-        let required = patinae_wgpu_required_limits(&adapter_limits);
+        let required =
+            patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::performance());
 
         assert_eq!(required.max_storage_buffer_binding_size, 1_073_741_820);
         assert!(
@@ -2055,25 +2059,32 @@ mod tests {
 
     #[test]
     fn wgpu_required_limits_preserve_high_end_target() {
-        let adapter_limits = adapter_limits(8 * BYTES_PER_GIB, u32::MAX);
+        let adapter_limits = adapter_limits(gib_to_bytes(8), u32::MAX);
 
-        let required = patinae_wgpu_required_limits(&adapter_limits);
+        let required =
+            patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::performance());
 
-        assert_eq!(required.max_buffer_size, PATINAE_DESIRED_MAX_BUFFER_SIZE);
+        assert_eq!(required.max_buffer_size, PERFORMANCE_MAX_BUFFER_SIZE);
         assert_eq!(
             required.max_storage_buffer_binding_size,
-            PATINAE_DESIRED_MAX_STORAGE_BUFFER_BINDING_SIZE
+            PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
         );
     }
 
     #[test]
     fn wgpu_required_limits_use_adapter_resolution_limits() {
-        let adapter_limits = adapter_limits(512 * 1024 * 1024, 512 * 1024 * 1024);
+        let adapter_buffer_size = mib_to_bytes(512);
+        let adapter_storage_binding_size = mib_to_bytes(512) as u32;
+        let adapter_limits = adapter_limits(adapter_buffer_size, adapter_storage_binding_size);
 
-        let required = patinae_wgpu_required_limits(&adapter_limits);
+        let required =
+            patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::low_memory());
 
-        assert_eq!(required.max_buffer_size, 512 * 1024 * 1024);
-        assert_eq!(required.max_storage_buffer_binding_size, 512 * 1024 * 1024);
+        assert_eq!(required.max_buffer_size, adapter_buffer_size);
+        assert_eq!(
+            required.max_storage_buffer_binding_size,
+            adapter_storage_binding_size
+        );
         assert_eq!(required.max_texture_dimension_1d, 16_384);
         assert_eq!(required.max_texture_dimension_2d, 32_768);
         assert_eq!(required.max_texture_dimension_3d, 2_048);

@@ -9,6 +9,10 @@ use std::sync::Arc;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlCanvasElement;
 
+#[cfg(target_arch = "wasm32")]
+use patinae_render::{
+    required_limits_for_memory_policy, select_render_memory_policy, RenderMemorySelectionInput,
+};
 use patinae_render::{RenderConfig, RenderState};
 
 /// GPU resources initialized from a canvas element. The renderer is the
@@ -45,6 +49,7 @@ impl GpuState {
 
         #[cfg(target_arch = "wasm32")]
         {
+        let mut config = config;
         // Create wgpu instance with WebGPU backend
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::BROWSER_WEBGPU,
@@ -66,15 +71,30 @@ impl GpuState {
             .await
             .map_err(|e| format!("No suitable GPU adapter: {}", e))?;
 
-        log::info!("GPU adapter: {}", adapter.get_info().name);
+        let adapter_info = adapter.get_info();
+        log::info!("GPU adapter: {}", adapter_info.name);
+        let adapter_limits = adapter.limits();
+        let memory_policy = select_render_memory_policy(
+            RenderMemorySelectionInput::from_wgpu(&adapter_info, &adapter_limits, true),
+            None,
+        );
+        config.memory = memory_policy;
+        log::info!(
+            "render memory profile: profile={} budget={:?}",
+            memory_policy.profile,
+            memory_policy.budget_bytes
+        );
 
         // Request device
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("patinae-web"),
                 required_features: wgpu::Features::empty(),
-                required_limits: adapter.limits(),
-                memory_hints: wgpu::MemoryHints::default(),
+                required_limits: required_limits_for_memory_policy(
+                    &adapter_limits,
+                    memory_policy,
+                ),
+                memory_hints: memory_policy.wgpu_memory_hints(),
                 experimental_features: wgpu::ExperimentalFeatures::default(),
                 trace: wgpu::Trace::Off,
             })

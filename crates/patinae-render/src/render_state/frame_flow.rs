@@ -51,11 +51,21 @@ impl RenderState {
         self.stats.mark_record_start();
 
         let wants_selection_overlay = self.screen.selection_overlay_enabled
+            && self.memory.policy.overlays.selection_enabled
             && self.scene.has_any_marker
             && self.screen.marking.is_some();
-        let has_silhouette =
-            self.screen.silhouette_params.is_some() && self.screen.silhouette.is_some();
+        let has_silhouette = self.memory.policy.overlays.silhouette_enabled
+            && self.screen.silhouette_params.is_some()
+            && self.screen.silhouette.is_some();
         let wants_overlay_id = wants_selection_overlay || has_silhouette;
+        let needs_color_scratch = self.screen.fxaa_enabled || wants_selection_overlay;
+        if needs_color_scratch {
+            let color_allocated = self.targets.ensure_color_scratch(&self.ctx.device);
+            if color_allocated {
+                self.refresh_fxaa_bind_group();
+                self.screen.marking_bindings_dirty = true;
+            }
+        }
 
         if wants_overlay_id {
             self.ensure_id_pass();
@@ -102,7 +112,11 @@ impl RenderState {
         let needs_overlay_id = has_selection_overlay || has_silhouette;
         let render_scene_to_scratch = self.screen.fxaa_enabled || has_selection_overlay;
         let effective_target: wgpu::TextureView = if render_scene_to_scratch {
-            self.targets.color_scratch_view.clone()
+            self.targets
+                .color_scratch_view
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| target.clone())
         } else {
             target.clone()
         };

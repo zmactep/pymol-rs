@@ -78,18 +78,25 @@ impl RenderState {
 
         config: RenderConfig,
     ) -> Self {
-        let picking_mode = config.picking;
+        let memory_policy = config.memory;
+        let picking_mode = if memory_policy.picking.hit_test_enabled {
+            config.picking
+        } else {
+            PickingMode::Disabled
+        };
 
         let with_picking = picking_mode != PickingMode::Disabled;
 
         let ctx = RenderContext::new(device, queue, color_format);
 
-        let targets = FrameTargets::new_with_picking(
+        let targets = FrameTargets::new_with_policy(
             &ctx.device,
             viewport.0,
             viewport.1,
             with_picking,
             ctx.color_format,
+            memory_policy.frame_targets,
+            memory_policy.picking.scale,
         );
 
         let mut uniforms = FrameUniforms::default();
@@ -186,13 +193,17 @@ impl RenderState {
 
         let silhouette = None;
 
-        let marking = config.selection_overlay.then(|| MarkingPass::new(&ctx));
+        let selection_overlay_enabled =
+            config.selection_overlay && memory_policy.overlays.selection_enabled;
+        let marking = selection_overlay_enabled.then(|| MarkingPass::new(&ctx));
 
         let readback = with_picking.then(|| PickingReadback::new(&ctx.device));
 
         let hover_readback = with_picking.then(|| PickingReadback::new(&ctx.device));
 
-        let picking_reproject = if picking_mode == PickingMode::Reprojected {
+        let picking_reproject = if picking_mode == PickingMode::Reprojected
+            && memory_policy.picking.reprojection_enabled
+        {
             let (pw, ph) = targets.picking_dims();
 
             Some(PickingReproject::new(&ctx, pw, ph))
@@ -219,35 +230,48 @@ impl RenderState {
 
         let ssao_resources = SsaoResources::new(&ctx);
 
-        let ssao_bind_group = ssao_compute.make_bind_group(
-            &ctx.device,
-            &ctx.frame.buffer,
-            &ssao_resources.ssao_params_buffer,
-            &targets.depth,
-            &targets.ssao_view,
-        );
-
-        let ssao_blur_h_bind_group = ssao_blur.make_bind_group(
-            &ctx.device,
-            &ssao_resources.blur_h_params_buffer,
-            &targets.depth,
-            &targets.ssao_view,
-            &targets.ssao_blurred_view,
-        );
-
-        let ssao_blur_v_bind_group = ssao_blur.make_bind_group(
-            &ctx.device,
-            &ssao_resources.blur_v_params_buffer,
-            &targets.depth,
-            &targets.ssao_blurred_view,
-            &targets.ssao_view,
-        );
-
-        let ssao_compose_bind_group = ssao_compose.make_bind_group(&ctx.device, &targets.ssao_view);
+        let (
+            ssao_bind_group,
+            ssao_blur_h_bind_group,
+            ssao_blur_v_bind_group,
+            ssao_compose_bind_group,
+        ) = match (
+            targets.ssao_view.as_ref(),
+            targets.ssao_blurred_view.as_ref(),
+        ) {
+            (Some(ssao_view), Some(ssao_blurred_view)) => (
+                Some(ssao_compute.make_bind_group(
+                    &ctx.device,
+                    &ctx.frame.buffer,
+                    &ssao_resources.ssao_params_buffer,
+                    &targets.depth,
+                    ssao_view,
+                )),
+                Some(ssao_blur.make_bind_group(
+                    &ctx.device,
+                    &ssao_resources.blur_h_params_buffer,
+                    &targets.depth,
+                    ssao_view,
+                    ssao_blurred_view,
+                )),
+                Some(ssao_blur.make_bind_group(
+                    &ctx.device,
+                    &ssao_resources.blur_v_params_buffer,
+                    &targets.depth,
+                    ssao_blurred_view,
+                    ssao_view,
+                )),
+                Some(ssao_compose.make_bind_group(&ctx.device, ssao_view)),
+            ),
+            _ => (None, None, None, None),
+        };
 
         let fxaa_pass = FxaaPass::new(&ctx);
 
-        let fxaa_bind_group = fxaa_pass.make_bind_group(&ctx.device, &targets.color_scratch_view);
+        let fxaa_bind_group = targets
+            .color_scratch_view
+            .as_ref()
+            .map(|view| fxaa_pass.make_bind_group(&ctx.device, view));
 
         let composite_bind_group =
             composite.make_bind_group(&ctx.device, &targets.accum, &targets.reveal);
@@ -339,7 +363,7 @@ impl RenderState {
                 marking_bindings_dirty: true,
                 marking_params_dirty: true,
                 marking_offsets_dirty: true,
-                selection_overlay_enabled: config.selection_overlay,
+                selection_overlay_enabled,
                 marking_width: 1.0,
                 silhouette_params: None,
                 ssao_compute,
@@ -372,6 +396,16 @@ impl RenderState {
                 skripkin_map_size: 128,
                 skripkin_bias: 0.025,
                 skripkin_intensity: 1.0,
+            },
+
+            memory: MemoryRuntime {
+                policy: memory_policy,
+                warned_ssao_denied: false,
+                warned_fxaa_denied: false,
+                warned_selection_denied: false,
+                warned_silhouette_denied: false,
+                warned_shadow_clamped: false,
+                warned_atlas_clamped: false,
             },
 
             last_sync_timings: RenderSyncTimings::default(),

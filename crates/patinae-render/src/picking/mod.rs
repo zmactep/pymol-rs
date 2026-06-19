@@ -8,6 +8,8 @@ pub mod pass;
 pub mod readback;
 pub mod reproject;
 
+use crate::memory_policy::RenderMemoryPolicy;
+
 pub use pass::{decode_pixel, PickingPass};
 pub use readback::PickingReadback;
 
@@ -46,6 +48,7 @@ pub enum PickingMode {
 pub struct RenderConfig {
     pub picking: PickingMode,
     pub selection_overlay: bool,
+    pub memory: RenderMemoryPolicy,
 }
 
 impl Default for RenderConfig {
@@ -56,6 +59,7 @@ impl Default for RenderConfig {
         Self {
             picking: PickingMode::Reprojected,
             selection_overlay: true,
+            memory: RenderMemoryPolicy::performance(),
         }
     }
 }

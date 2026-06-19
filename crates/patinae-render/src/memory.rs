@@ -3,6 +3,8 @@
 //! The renderer cannot query portable driver VRAM usage today, so this module
 //! accounts for resources from descriptors and known buffer capacities.
 
+use crate::byte_units::bytes_to_mib;
+
 /// Number of tracked GPU memory categories.
 pub const GPU_MEMORY_CATEGORY_COUNT: usize = 12;
 
@@ -377,7 +379,7 @@ fn conservative_block_copy_size(format: wgpu::TextureFormat) -> u32 {
 }
 
 fn format_mib(bytes: u64) -> String {
-    format!("{:.1} MiB", bytes as f64 / (1_u64 << 20) as f64)
+    format!("{:.1} MiB", bytes_to_mib(bytes))
 }
 
 // Rust guideline compliant 2026-02-21

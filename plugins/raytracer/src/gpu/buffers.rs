@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 
 use crate::error::{RaytraceError, RaytraceResult};
 use crate::primitive::Primitives;
+use patinae_render::bytes_to_mib;
 
 /// Readback buffer layout for tightly extracted RGBA rows.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,43 +64,43 @@ pub(crate) fn validate_buffer_sizes(
 
     log::debug!(
         "Buffer sizes: spheres={:.1}MB, cylinders={:.1}MB, capsules={:.1}MB, triangles={:.1}MB (limit={:.1}MB)",
-        sphere_size as f64 / (1024.0 * 1024.0),
-        cylinder_size as f64 / (1024.0 * 1024.0),
-        capsule_size as f64 / (1024.0 * 1024.0),
-        triangle_size as f64 / (1024.0 * 1024.0),
-        max_buffer_size as f64 / (1024.0 * 1024.0)
+        bytes_to_mib(sphere_size as u64),
+        bytes_to_mib(cylinder_size as u64),
+        bytes_to_mib(capsule_size as u64),
+        bytes_to_mib(triangle_size as u64),
+        bytes_to_mib(max_buffer_size as u64)
     );
 
     if triangle_size > max_buffer_size {
         return Err(RaytraceError::RenderFailed(format!(
             "Triangle buffer too large ({:.1} MB, limit {:.1} MB). Scene has {} triangles. \
              Try reducing geometry detail with 'set cartoon_sampling' or use a simpler representation.",
-            triangle_size as f64 / (1024.0 * 1024.0),
-            max_buffer_size as f64 / (1024.0 * 1024.0),
+            bytes_to_mib(triangle_size as u64),
+            bytes_to_mib(max_buffer_size as u64),
             primitives.triangles.len()
         )));
     }
     if sphere_size > max_buffer_size {
         return Err(RaytraceError::RenderFailed(format!(
             "Sphere buffer too large ({:.1} MB, limit {:.1} MB). Scene has {} spheres.",
-            sphere_size as f64 / (1024.0 * 1024.0),
-            max_buffer_size as f64 / (1024.0 * 1024.0),
+            bytes_to_mib(sphere_size as u64),
+            bytes_to_mib(max_buffer_size as u64),
             primitives.spheres.len()
         )));
     }
     if cylinder_size > max_buffer_size {
         return Err(RaytraceError::RenderFailed(format!(
             "Cylinder buffer too large ({:.1} MB, limit {:.1} MB). Scene has {} cylinders.",
-            cylinder_size as f64 / (1024.0 * 1024.0),
-            max_buffer_size as f64 / (1024.0 * 1024.0),
+            bytes_to_mib(cylinder_size as u64),
+            bytes_to_mib(max_buffer_size as u64),
             primitives.cylinders.len()
         )));
     }
     if capsule_size > max_buffer_size {
         return Err(RaytraceError::RenderFailed(format!(
             "Capsule buffer too large ({:.1} MB, limit {:.1} MB). Scene has {} capsules.",
-            capsule_size as f64 / (1024.0 * 1024.0),
-            max_buffer_size as f64 / (1024.0 * 1024.0),
+            bytes_to_mib(capsule_size as u64),
+            bytes_to_mib(max_buffer_size as u64),
             primitives.capsules.len()
         )));
     }

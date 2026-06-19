@@ -26,8 +26,9 @@ use patinae_mol::{
 };
 use patinae_render::scene_store::marker::{MARKER_HOVER, MARKER_SELECTED};
 use patinae_render::{
-    ObjectId, PickingMode, RenderConfig, RenderInput, RenderObjectInput, RenderState,
-    RenderSyncTimings, SceneLod,
+    bytes_to_gib, required_limits_for_memory_policy, select_render_memory_policy, ObjectId,
+    PickingMode, RenderConfig, RenderInput, RenderMemoryPolicy, RenderMemoryProfile,
+    RenderMemorySelectionInput, RenderObjectInput, RenderState, RenderSyncTimings, SceneLod,
 };
 use patinae_settings::{ResolvedSettings, Settings};
 
@@ -341,7 +342,19 @@ fn bench_dims() -> (u32, u32) {
     (w, h)
 }
 
-fn request_device() -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
+fn bench_memory_override() -> Option<RenderMemoryProfile> {
+    std::env::var("BENCH_MEMORY_PROFILE")
+        .ok()
+        .and_then(|value| match value.parse::<RenderMemoryProfile>() {
+            Ok(profile) => Some(profile),
+            Err(err) => {
+                eprintln!("ignoring invalid BENCH_MEMORY_PROFILE={value:?}: {err}");
+                None
+            }
+        })
+}
+
+fn request_device() -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, RenderMemoryPolicy) {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
@@ -353,31 +366,41 @@ fn request_device() -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
     // back to no features (CPU-only stats will still work).
     let wanted = wgpu::Features::TIMESTAMP_QUERY;
     let features = adapter.features() & wanted;
+    let adapter_info = adapter.get_info();
+    let adapter_limits = adapter.limits();
+    let memory_policy = select_render_memory_policy(
+        RenderMemorySelectionInput::from_wgpu(&adapter_info, &adapter_limits, false),
+        bench_memory_override(),
+    );
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("bench.render_loop.device"),
         required_features: features,
-        required_limits: adapter.limits(),
-        memory_hints: wgpu::MemoryHints::Performance,
+        required_limits: required_limits_for_memory_policy(&adapter_limits, memory_policy),
+        memory_hints: memory_policy.wgpu_memory_hints(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
         trace: wgpu::Trace::Off,
     }))
     .expect("device");
-    let lim = adapter.limits();
+    let lim = adapter_limits;
     eprintln!(
         "adapter: {}, TIMESTAMP_QUERY: {}",
-        adapter.get_info().name,
+        adapter_info.name,
         features.contains(wgpu::Features::TIMESTAMP_QUERY)
     );
     eprintln!(
-        "limits: max_storage_buffer_binding_size={} ({:.2} GB)  max_buffer_size={} ({:.2} GB)  \
+        "BENCH_MEMORY_PROFILE={} budget={:?}",
+        memory_policy.profile, memory_policy.budget_bytes
+    );
+    eprintln!(
+        "limits: max_storage_buffer_binding_size={} ({:.2} GiB)  max_buffer_size={} ({:.2} GiB)  \
          max_compute_workgroups_per_dim={}",
         lim.max_storage_buffer_binding_size,
-        lim.max_storage_buffer_binding_size as f64 / (1u64 << 30) as f64,
+        bytes_to_gib(u64::from(lim.max_storage_buffer_binding_size)),
         lim.max_buffer_size,
-        lim.max_buffer_size as f64 / (1u64 << 30) as f64,
+        bytes_to_gib(lim.max_buffer_size),
         lim.max_compute_workgroups_per_dimension,
     );
-    (Arc::new(device), Arc::new(queue))
+    (Arc::new(device), Arc::new(queue), memory_policy)
 }
 
 fn build_orthographic(half: f32) -> [[f32; 4]; 4] {
@@ -521,7 +544,7 @@ fn bench_render_loop(c: &mut Criterion) {
         "BENCH_FRAME_CHECKSUM={}",
         if frame_checksum { 1 } else { 0 }
     );
-    let (device, queue) = request_device();
+    let (device, queue, memory_policy) = request_device();
     let mut mol = load_bench_molecule();
     // Force every atom into the rep set chosen by the scenario or `BENCH_REPS`.
     // patinae-io's CIF loader defaults
@@ -626,6 +649,7 @@ fn bench_render_loop(c: &mut Criterion) {
         (width, height),
         RenderConfig {
             picking: PickingMode::Reprojected,
+            memory: memory_policy,
             ..Default::default()
         },
     );

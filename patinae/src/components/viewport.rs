@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 use patinae_color::{NamedPalette, ThemedPalette};
 use patinae_render::picking::readback::PendingPick;
 use patinae_render::{
-    copy_rgba_buffer_to_viewport_texture, estimate_texture_2d_bytes, DisplayedGeometry,
-    GeometryExportOptions, GpuMemoryCategory, GpuMemorySnapshot, GpuMemoryUsage, GpuViewportImage,
-    RenderArtifactSnapshot, RenderInput, RenderState, SceneLod, TraceGeometryChunk,
+    copy_rgba_buffer_to_viewport_texture, estimate_texture_2d_bytes, select_render_memory_policy,
+    DisplayedGeometry, GeometryExportOptions, GpuMemoryCategory, GpuMemorySnapshot, GpuMemoryUsage,
+    GpuViewportImage, RenderArtifactSnapshot, RenderConfig, RenderInput, RenderMemoryPolicy,
+    RenderMemoryProfile, RenderMemorySelectionInput, RenderState, SceneLod, TraceGeometryChunk,
 };
 use patinae_scene::{Camera, CaptureRenderer, ObjectRegistry, PickHit, Session, ViewerError};
 use patinae_settings::{ResolvedSettings, Settings, ShadingMode};
@@ -53,14 +54,18 @@ pub struct ViewportRenderer {
     color_textures_next: usize,
     /// Transient renderer-owned ray output texture for viewport `ray`.
     viewport_gpu_image: Option<GpuViewportImage>,
+    /// Construction-time memory policy for native viewport handoff resources.
+    memory_policy: RenderMemoryPolicy,
 }
 
 impl ViewportRenderer {
-    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+    pub fn new_with_config(device: wgpu::Device, queue: wgpu::Queue, config: RenderConfig) -> Self {
         // wgpu::Device / wgpu::Queue clone bumps an internal Arc refcount.
         let device_arc = Arc::new(device);
         let queue_arc = Arc::new(queue);
-        let state = RenderState::new(device_arc, queue_arc, VIEWPORT_FORMAT, (1, 1));
+        let memory_policy = config.memory;
+        let state =
+            RenderState::with_config(device_arc, queue_arc, VIEWPORT_FORMAT, (1, 1), config);
         Self {
             state,
             last_viewport_size: None,
@@ -70,6 +75,7 @@ impl ViewportRenderer {
             color_textures: Vec::new(),
             color_textures_next: 0,
             viewport_gpu_image: None,
+            memory_policy,
         }
     }
 
@@ -86,22 +92,40 @@ impl ViewportRenderer {
             return None;
         };
 
-        let info = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .ok()
-        .map(|adapter| {
-            let info = adapter.get_info();
-            AdapterInfo {
-                device_name: info.name,
-                backend: format!("{:?}", info.backend),
-            }
+        let adapter_info =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            }))
+            .ok()
+            .map(|adapter| adapter.get_info());
+        let info = adapter_info.as_ref().map(|info| AdapterInfo {
+            device_name: info.name.clone(),
+            backend: format!("{:?}", info.backend),
         });
+        let memory_policy = render_memory_policy_for_device(
+            adapter_info.as_ref(),
+            &device.limits(),
+            "PATINAE_RENDER_MEMORY_PROFILE",
+            false,
+        );
+        log::info!(
+            "render memory profile: profile={} budget={:?} handoff_ring={}",
+            memory_policy.profile,
+            memory_policy.budget_bytes,
+            memory_policy.frame_targets.viewport_handoff_ring
+        );
         log_wgpu_device_diagnostics(device);
         install_wgpu_uncaptured_error_handler(device);
 
-        let renderer = Self::new(device.clone(), queue.clone());
+        let renderer = Self::new_with_config(
+            device.clone(),
+            queue.clone(),
+            RenderConfig {
+                memory: memory_policy,
+                ..Default::default()
+            },
+        );
         Some((renderer, info))
     }
 
@@ -244,13 +268,17 @@ impl ViewportRenderer {
 
         // 7) Build (or reuse) the offscreen colour texture handed back to
         // Slint each frame and run the FrameGraph. We keep a ring of
-        // textures (default 3) and rotate. Slint may still be sampling
+        // textures and rotate. Slint may still be sampling
         // the previous frame's texture when we kick off this frame —
         // writing into a fresh one lets the GPU pipeline both passes
         // instead of serialising on the read fence.
-        const COLOR_TEXTURE_RING: usize = 3;
+        let color_texture_ring = self
+            .memory_policy
+            .frame_targets
+            .viewport_handoff_ring
+            .max(1);
         if self.color_textures.is_empty() {
-            self.color_textures = (0..COLOR_TEXTURE_RING)
+            self.color_textures = (0..color_texture_ring)
                 .map(|i| {
                     self.state
                         .ctx
@@ -259,7 +287,8 @@ impl ViewportRenderer {
                             label: Some(match i {
                                 0 => "Patinae Viewport 0",
                                 1 => "Patinae Viewport 1",
-                                _ => "Patinae Viewport 2",
+                                2 => "Patinae Viewport 2",
+                                _ => "Patinae Viewport Extra",
                             }),
                             size: wgpu::Extent3d {
                                 width,
@@ -674,6 +703,40 @@ fn install_wgpu_uncaptured_error_handler(device: &wgpu::Device) {
     device.on_uncaptured_error(Arc::new(|error| {
         log::error!("Uncaptured WGPU error: {error}");
     }));
+}
+
+pub(crate) fn render_memory_policy_for_device(
+    adapter_info: Option<&wgpu::AdapterInfo>,
+    limits: &wgpu::Limits,
+    env_var: &str,
+    is_web: bool,
+) -> RenderMemoryPolicy {
+    let override_profile = std::env::var(env_var).ok().and_then(|value| match value
+        .parse::<RenderMemoryProfile>(
+    ) {
+        Ok(profile) => Some(profile),
+        Err(err) => {
+            log::warn!("ignoring invalid {env_var}={value:?}: {err}");
+            None
+        }
+    });
+    let input = adapter_info.map_or_else(
+        || RenderMemorySelectionInput {
+            adapter_type: patinae_render::RenderAdapterType::Other,
+            backend: if is_web {
+                patinae_render::RenderBackend::BrowserWebGpu
+            } else {
+                patinae_render::RenderBackend::Other
+            },
+            max_buffer_size: limits.max_buffer_size,
+            max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
+            max_texture_dimension_2d: limits.max_texture_dimension_2d,
+            is_web,
+            observed_downgrade: false,
+        },
+        |info| RenderMemorySelectionInput::from_wgpu(info, limits, is_web),
+    );
+    select_render_memory_policy(input, override_profile)
 }
 
 fn effective_fxaa(settings: &Settings) -> bool {

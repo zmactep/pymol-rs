@@ -12,6 +12,7 @@
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
 };
+use patinae_render::bytes_to_mib;
 use raytracer_plugin::bvh::Bvh;
 use raytracer_plugin::gpu::{raytrace_profiled, RaytraceContext, RaytraceParams, RaytraceProfile};
 use raytracer_plugin::primitive::{GpuCapsule, GpuSphere, GpuTriangle, Primitives};
@@ -104,8 +105,8 @@ fn request_device() -> (wgpu::Device, wgpu::Queue) {
         "adapter: {} ({:?}); storage_limit={:.2} MiB max_buffer={:.2} MiB",
         info.name,
         info.backend,
-        limits.max_storage_buffer_binding_size as f64 / (1024.0 * 1024.0),
-        limits.max_buffer_size as f64 / (1024.0 * 1024.0)
+        bytes_to_mib(u64::from(limits.max_storage_buffer_binding_size)),
+        bytes_to_mib(limits.max_buffer_size)
     );
 
     (device, queue)
@@ -287,7 +288,7 @@ fn print_profile(label: &str, profile: &RaytraceProfile) {
         profile.capsule_count,
         profile.triangle_count,
         profile.bvh_node_count,
-        profile.readback_bytes as f64 / (1024.0 * 1024.0),
+        bytes_to_mib(profile.readback_bytes),
     );
 }
 

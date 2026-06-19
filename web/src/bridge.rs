@@ -230,6 +230,7 @@ impl WebViewer {
                 PickingMode::Disabled
             },
             selection_overlay: selection_overlay_enabled,
+            ..Default::default()
         };
         let gpu = GpuState::from_canvas(canvas_id, render_config)
             .await

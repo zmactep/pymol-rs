@@ -17,6 +17,7 @@ use crate::compute::surface_vdw_sdf::SurfaceVdwSdfCompute;
 use crate::context::RenderContext;
 use crate::frame::FrameTargets;
 use crate::map_contour::MapEntry;
+use crate::memory_policy::RenderMemoryPolicy;
 use crate::passes::atlas_ao::AtlasAoPass;
 use crate::passes::shadow::DirectionalShadowPass;
 use crate::picking::pass::PickingPass;
@@ -247,10 +248,10 @@ pub(super) struct ScreenRuntime {
     pub(super) ssao_blur: SsaoBlur,
     pub(super) ssao_compose: SsaoComposePass,
     pub(super) ssao_resources: SsaoResources,
-    pub(super) ssao_bind_group: wgpu::BindGroup,
-    pub(super) ssao_blur_h_bind_group: wgpu::BindGroup,
-    pub(super) ssao_blur_v_bind_group: wgpu::BindGroup,
-    pub(super) ssao_compose_bind_group: wgpu::BindGroup,
+    pub(super) ssao_bind_group: Option<wgpu::BindGroup>,
+    pub(super) ssao_blur_h_bind_group: Option<wgpu::BindGroup>,
+    pub(super) ssao_blur_v_bind_group: Option<wgpu::BindGroup>,
+    pub(super) ssao_compose_bind_group: Option<wgpu::BindGroup>,
     /// Cached SSAO settings from the host. `enabled=false` skips the
     /// entire SSAO chain (no compute dispatches, no compose pass).
     pub(super) ssao_enabled: bool,
@@ -261,7 +262,7 @@ pub(super) struct ScreenRuntime {
     /// `targets.color_scratch_view`; the final FXAA pass then writes to the
     /// host target.
     pub(super) fxaa_pass: FxaaPass,
-    pub(super) fxaa_bind_group: wgpu::BindGroup,
+    pub(super) fxaa_bind_group: Option<wgpu::BindGroup>,
     pub(super) fxaa_overlay_bind_group: Option<wgpu::BindGroup>,
     pub(super) fxaa_enabled: bool,
     /// Host clear colour for the visible colour target. Alpha is driven by
@@ -283,6 +284,16 @@ pub(super) struct LightingRuntime {
     pub(super) skripkin_intensity: f32,
 }
 
+pub(super) struct MemoryRuntime {
+    pub(super) policy: RenderMemoryPolicy,
+    pub(super) warned_ssao_denied: bool,
+    pub(super) warned_fxaa_denied: bool,
+    pub(super) warned_selection_denied: bool,
+    pub(super) warned_silhouette_denied: bool,
+    pub(super) warned_shadow_clamped: bool,
+    pub(super) warned_atlas_clamped: bool,
+}
+
 pub struct RenderState {
     pub ctx: RenderContext,
     pub targets: FrameTargets,
@@ -293,6 +304,7 @@ pub struct RenderState {
     pub(super) picking: PickingRuntime,
     pub(super) screen: ScreenRuntime,
     pub(super) lighting: LightingRuntime,
+    pub(super) memory: MemoryRuntime,
     pub(super) last_sync_timings: RenderSyncTimings,
 
     /// Per-frame instrumentation collector. Always present when the

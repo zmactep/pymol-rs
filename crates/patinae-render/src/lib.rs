@@ -8,6 +8,7 @@
 //! - `RenderInput` + `RenderObjectInput` for pull-based host integration
 //! - `RepKind`, `ObjectId`, `PickHit` for picking round-trips
 
+mod byte_units;
 pub mod capture;
 #[allow(dead_code)]
 pub(crate) mod compute;
@@ -17,6 +18,7 @@ mod geometry_export;
 pub(crate) mod lut_buffer;
 mod map_contour;
 pub mod memory;
+mod memory_policy;
 pub(crate) mod passes;
 pub mod picking;
 pub(crate) mod pipelines;
@@ -37,6 +39,10 @@ mod stats_history;
 mod uniforms;
 mod viewport_image;
 
+#[doc(inline)]
+pub use byte_units::{
+    bytes_to_gib, bytes_to_mib, gib_to_bytes, mib_to_bytes, BYTES_PER_GIB, BYTES_PER_MIB,
+};
 pub use context::RenderContext;
 pub use frame::FrameTargets;
 pub use geometry_export::{
@@ -49,6 +55,13 @@ pub use memory::{
     estimate_texture_2d_bytes, estimate_texture_bytes, estimate_texture_descriptor_bytes,
     GpuAllocationEstimate, GpuMemoryBucket, GpuMemoryCategory, GpuMemoryLedger, GpuMemorySnapshot,
     GpuMemoryUsage,
+};
+pub use memory_policy::{
+    required_limits_for_memory_policy, select_render_memory_policy, FrameTargetPolicy,
+    OverlayPolicy, PickingPolicy, PostprocessPolicy, RenderAdapterType, RenderBackend,
+    RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryProfileParseError,
+    RenderMemorySelectionInput, RepresentationBudgetPolicy, ShadowPolicy,
+    PERFORMANCE_MAX_BUFFER_SIZE, PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
 };
 pub use picking::{ObjectId, PackedId, PickHit, PickingMode, RenderConfig, RepKind};
 pub use render_artifacts::{

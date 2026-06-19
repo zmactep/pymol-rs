@@ -12,7 +12,7 @@ pub(super) const SPHERE_INSTANCE_STRIDE: u64 = 32;
 pub(super) const STICK_INSTANCE_STRIDE: u64 = 48;
 pub(super) const LINE_INSTANCE_STRIDE: u64 = 48;
 pub(super) const STD_VERTEX_STRIDE: u64 = 24;
-pub(super) const MAX_OUTPUT_READBACK_BYTES: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_OUTPUT_READBACK_BYTES: u64 = patinae_render::mib_to_bytes(64);
 pub(super) const MAX_ENCODED_PRIMITIVE_INDEX: u32 = 0x3fff_ffff;
 pub(super) const RAY_LINE_RADIUS: f32 = 0.035;
 

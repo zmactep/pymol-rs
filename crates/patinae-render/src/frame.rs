@@ -12,6 +12,7 @@
 use crate::memory::{
     estimate_texture_2d_bytes, GpuMemoryCategory, GpuMemoryLedger, GpuMemoryUsage,
 };
+use crate::memory_policy::FrameTargetPolicy;
 
 pub const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const REVEAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
@@ -44,6 +45,7 @@ pub struct FrameTargets {
     pub width: u32,
     pub height: u32,
     pub color_format: wgpu::TextureFormat,
+    pub picking_scale: f32,
     pub accum: wgpu::TextureView,
     pub reveal: wgpu::TextureView,
     pub depth: wgpu::TextureView,
@@ -64,17 +66,17 @@ pub struct FrameTargets {
     /// blurred in-place by `compute/ssao_blur.rs` (ping-pong with
     /// `ssao_blurred_texture`), read by `postprocess/ssao_compose`.
     /// `None` until SSAO is first dispatched.
-    pub ssao_texture: wgpu::Texture,
-    pub ssao_view: wgpu::TextureView,
-    pub ssao_blurred_texture: wgpu::Texture,
-    pub ssao_blurred_view: wgpu::TextureView,
+    pub ssao_texture: Option<wgpu::Texture>,
+    pub ssao_view: Option<wgpu::TextureView>,
+    pub ssao_blurred_texture: Option<wgpu::Texture>,
+    pub ssao_blurred_view: Option<wgpu::TextureView>,
     /// Off-screen colour target used when FXAA is enabled. Every
     /// render pass writes here; the final FXAA fragment shader reads
     /// it + writes to the host target. Always allocated (cost = 1
     /// host-sized RGBA8 ≈ 8 MB at 1080p), making `set_fxaa(true)` a
     /// zero-rebuild toggle.
-    pub color_scratch_texture: wgpu::Texture,
-    pub color_scratch_view: wgpu::TextureView,
+    pub color_scratch_texture: Option<wgpu::Texture>,
+    pub color_scratch_view: Option<wgpu::TextureView>,
     /// Full-resolution id target used by visual overlays (silhouettes and
     /// selection highlighting). Allocated lazily only when an overlay needs it.
     pub overlay_id: Option<wgpu::TextureView>,
@@ -105,7 +107,19 @@ impl FrameTargets {
         height: u32,
         color_format: wgpu::TextureFormat,
     ) -> Self {
-        Self::new_with_picking(device, width, height, true, color_format)
+        Self::new_with_policy(
+            device,
+            width,
+            height,
+            true,
+            color_format,
+            FrameTargetPolicy {
+                ssao_eager: true,
+                color_scratch_eager: true,
+                viewport_handoff_ring: 3,
+            },
+            PICKING_SCALE,
+        )
     }
 
     /// Allocate frame targets with picking textures conditionally present.
@@ -119,8 +133,34 @@ impl FrameTargets {
         with_picking: bool,
         color_format: wgpu::TextureFormat,
     ) -> Self {
+        Self::new_with_policy(
+            device,
+            width,
+            height,
+            with_picking,
+            color_format,
+            FrameTargetPolicy {
+                ssao_eager: true,
+                color_scratch_eager: true,
+                viewport_handoff_ring: 3,
+            },
+            PICKING_SCALE,
+        )
+    }
+
+    /// Allocate frame targets under an explicit memory policy.
+    pub fn new_with_policy(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        with_picking: bool,
+        color_format: wgpu::TextureFormat,
+        frame_policy: FrameTargetPolicy,
+        picking_scale: f32,
+    ) -> Self {
         let width = width.max(1);
         let height = height.max(1);
+        let picking_scale = picking_scale.clamp(0.125, 1.0);
 
         let accum_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("patinae.frame.accum"),
@@ -177,8 +217,8 @@ impl FrameTargets {
             picking_prev,
             picking_depth_prev,
         ) = if with_picking {
-            let pick_w = ((width as f32 * PICKING_SCALE) as u32).max(1);
-            let pick_h = ((height as f32 * PICKING_SCALE) as u32).max(1);
+            let pick_w = ((width as f32 * picking_scale) as u32).max(1);
+            let pick_h = ((height as f32 * picking_scale) as u32).max(1);
             // `picking` and `picking_prev` share the same descriptor so we
             // can `copy_texture_to_texture` from current → prev after a
             // full re-record. The current texture also needs
@@ -262,55 +302,24 @@ impl FrameTargets {
         let reveal = reveal_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let depth = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let ssao_desc = wgpu::TextureDescriptor {
-            label: Some("patinae.frame.ssao"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: SSAO_FORMAT,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        };
-        let ssao_texture = device.create_texture(&ssao_desc);
-        let ssao_view = ssao_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let ssao_blurred_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("patinae.frame.ssao_blurred"),
-            ..ssao_desc
-        });
-        let ssao_blurred_view =
-            ssao_blurred_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let (ssao_texture, ssao_view, ssao_blurred_texture, ssao_blurred_view) =
+            if frame_policy.ssao_eager {
+                create_ssao_targets(device, width, height)
+            } else {
+                (None, None, None, None)
+            };
 
-        // FXAA needs a separate texture to sample from (a render pass
-        // cannot bind its color attachment as a sampled texture). When
-        // FXAA is enabled, every render pass writes into
-        // `color_scratch_view` and the final FXAA pass reads it +
-        // outputs to the host target.
-        let color_scratch_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("patinae.frame.color_scratch"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: color_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let color_scratch_view =
-            color_scratch_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let (color_scratch_texture, color_scratch_view) = if frame_policy.color_scratch_eager {
+            create_color_scratch(device, width, height, color_format)
+        } else {
+            (None, None)
+        };
 
         Self {
             width,
             height,
             color_format,
+            picking_scale,
             accum,
             reveal,
             depth,
@@ -345,8 +354,8 @@ impl FrameTargets {
     /// Half-resolution picking texture size used for both `picking` and
     /// `picking_prev`. Returns `(width, height)`.
     pub fn picking_dims(&self) -> (u32, u32) {
-        let pick_w = ((self.width as f32 * PICKING_SCALE) as u32).max(1);
-        let pick_h = ((self.height as f32 * PICKING_SCALE) as u32).max(1);
+        let pick_w = ((self.width as f32 * self.picking_scale) as u32).max(1);
+        let pick_h = ((self.height as f32 * self.picking_scale) as u32).max(1);
         (pick_w, pick_h)
     }
 
@@ -394,14 +403,20 @@ impl FrameTargets {
             add_texture_2d(ledger, GpuMemoryCategory::Picking, picking, DEPTH_FORMAT);
         }
 
-        add_texture_2d(ledger, GpuMemoryCategory::Postprocess, full, SSAO_FORMAT);
-        add_texture_2d(ledger, GpuMemoryCategory::Postprocess, full, SSAO_FORMAT);
-        add_texture_2d(
-            ledger,
-            GpuMemoryCategory::Postprocess,
-            full,
-            self.color_format,
-        );
+        if self.ssao_texture.is_some() {
+            add_texture_2d(ledger, GpuMemoryCategory::Postprocess, full, SSAO_FORMAT);
+        }
+        if self.ssao_blurred_texture.is_some() {
+            add_texture_2d(ledger, GpuMemoryCategory::Postprocess, full, SSAO_FORMAT);
+        }
+        if self.color_scratch_texture.is_some() {
+            add_texture_2d(
+                ledger,
+                GpuMemoryCategory::Postprocess,
+                full,
+                self.color_format,
+            );
+        }
 
         if self.overlay_id_texture.is_some() {
             add_texture_2d(ledger, GpuMemoryCategory::Overlay, full, PICKING_FORMAT);
@@ -420,6 +435,46 @@ impl FrameTargets {
         if self.overlay_color_scratch_texture.is_some() {
             add_texture_2d(ledger, GpuMemoryCategory::Overlay, full, self.color_format);
         }
+    }
+
+    /// Lazily allocate SSAO textures. Returns `true` when allocation occurred.
+    pub fn ensure_ssao_targets(&mut self, device: &wgpu::Device) -> bool {
+        if self.ssao_view.is_some() && self.ssao_blurred_view.is_some() {
+            return false;
+        }
+        let (texture, view, blurred_texture, blurred_view) =
+            create_ssao_targets(device, self.width, self.height);
+        self.ssao_texture = texture;
+        self.ssao_view = view;
+        self.ssao_blurred_texture = blurred_texture;
+        self.ssao_blurred_view = blurred_view;
+        true
+    }
+
+    /// Drop SSAO textures and their views.
+    pub fn clear_ssao_targets(&mut self) {
+        self.ssao_texture = None;
+        self.ssao_view = None;
+        self.ssao_blurred_texture = None;
+        self.ssao_blurred_view = None;
+    }
+
+    /// Lazily allocate the scene color scratch texture.
+    pub fn ensure_color_scratch(&mut self, device: &wgpu::Device) -> bool {
+        if self.color_scratch_view.is_some() {
+            return false;
+        }
+        let (texture, view) =
+            create_color_scratch(device, self.width, self.height, self.color_format);
+        self.color_scratch_texture = texture;
+        self.color_scratch_view = view;
+        true
+    }
+
+    /// Drop the scene color scratch texture and view.
+    pub fn clear_color_scratch(&mut self) {
+        self.color_scratch_texture = None;
+        self.color_scratch_view = None;
     }
 
     /// Lazily allocate the full-resolution id resources used by visual
@@ -548,4 +603,69 @@ fn add_texture_2d(
     format: wgpu::TextureFormat,
 ) {
     ledger.add_allocation(category, estimate_texture_2d_bytes(dims.0, dims.1, format));
+}
+
+fn create_ssao_targets(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (
+    Option<wgpu::Texture>,
+    Option<wgpu::TextureView>,
+    Option<wgpu::Texture>,
+    Option<wgpu::TextureView>,
+) {
+    let ssao_desc = wgpu::TextureDescriptor {
+        label: Some("patinae.frame.ssao"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: SSAO_FORMAT,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    };
+    let ssao_texture = device.create_texture(&ssao_desc);
+    let ssao_view = ssao_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let ssao_blurred_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("patinae.frame.ssao_blurred"),
+        ..ssao_desc
+    });
+    let ssao_blurred_view =
+        ssao_blurred_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (
+        Some(ssao_texture),
+        Some(ssao_view),
+        Some(ssao_blurred_texture),
+        Some(ssao_blurred_view),
+    )
+}
+
+fn create_color_scratch(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    color_format: wgpu::TextureFormat,
+) -> (Option<wgpu::Texture>, Option<wgpu::TextureView>) {
+    let color_scratch_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("patinae.frame.color_scratch"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: color_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let color_scratch_view =
+        color_scratch_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (Some(color_scratch_texture), Some(color_scratch_view))
 }

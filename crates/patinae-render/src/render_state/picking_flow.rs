@@ -2,7 +2,6 @@ use super::math::hash_view_proj;
 use super::state::PickingTextureSource;
 use super::state::RepPickingState;
 use super::RenderState;
-use crate::frame::PICKING_SCALE;
 use crate::passes::lighting::identity_mat4;
 use crate::picking::pass::PickingParams;
 use crate::picking::readback::{PendingPick, PickReadbackTarget};
@@ -363,8 +362,8 @@ impl RenderState {
             return None;
         }
         self.ensure_id_pass();
-        let pick_x = ((x as f32) * PICKING_SCALE) as u32;
-        let pick_y = ((y as f32) * PICKING_SCALE) as u32;
+        let pick_x = ((x as f32) * self.targets.picking_scale) as u32;
+        let pick_y = ((y as f32) * self.targets.picking_scale) as u32;
         let mut encoder = self
             .ctx
             .device
@@ -431,8 +430,8 @@ impl RenderState {
             return None;
         }
         self.ensure_id_pass();
-        let pick_x = ((x as f32) * PICKING_SCALE) as u32;
-        let pick_y = ((y as f32) * PICKING_SCALE) as u32;
+        let pick_x = ((x as f32) * self.targets.picking_scale) as u32;
+        let pick_y = ((y as f32) * self.targets.picking_scale) as u32;
 
         let mut encoder = self
             .ctx

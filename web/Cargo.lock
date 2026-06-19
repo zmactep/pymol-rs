@@ -212,6 +212,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -246,6 +271,12 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "either"
+version = "1.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "equivalent"
@@ -766,7 +797,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "patinae-algos"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "bitflags",
  "lin_alg",
@@ -777,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-cmd"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "lin_alg",
@@ -796,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-color"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "patinae-mol",
@@ -806,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-io"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "flate2",
  "lin_alg",
@@ -817,7 +848,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-mol"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "bitflags",
@@ -834,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-render"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "bytemuck",
  "image",
@@ -844,13 +875,14 @@ dependencies = [
  "patinae-mol",
  "patinae-settings",
  "pollster",
+ "rayon",
  "thiserror 2.0.18",
  "wgpu",
 ]
 
 [[package]]
 name = "patinae-scene"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "bitflags",
@@ -870,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-select"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "bitvec",
@@ -883,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "patinae-session"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "flate2",
@@ -900,17 +932,18 @@ dependencies = [
 
 [[package]]
 name = "patinae-settings"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "ahash",
  "dirs",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "patinae-web"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -1099,6 +1132,26 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
+
+[[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "redox_syscall"

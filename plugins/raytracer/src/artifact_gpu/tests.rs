@@ -7,6 +7,7 @@ use super::resources::{checked_storage_buffer_size, storage_bytes_for_device};
 use super::*;
 use crate::primitive::GpuTriangle;
 use crate::shaders;
+use patinae_render::mib_to_bytes;
 use patinae_scene::{
     GpuBufferUsage, GpuHandle, GpuHandleKind, RenderArtifactBufferDescriptor,
     RenderArtifactBufferRole, RenderArtifactPrimitiveTopology, RenderArtifactRepDescriptor,
@@ -930,8 +931,8 @@ fn artifact_plan_accepts_indirect_surface_capacity() {
         scene_bounds_max: [1.0, 1.0, 1.0],
         cull_pass_initialized: true,
         device_limits: patinae_scene::GpuDeviceLimits {
-            max_buffer_size: 128 * 1024 * 1024,
-            max_storage_buffer_binding_size: 128 * 1024 * 1024,
+            max_buffer_size: mib_to_bytes(128),
+            max_storage_buffer_binding_size: mib_to_bytes(128),
             max_compute_workgroups_per_dimension: 65_535,
             max_compute_invocations_per_workgroup: 256,
             max_compute_workgroup_size_x: 256,

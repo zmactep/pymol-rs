@@ -56,6 +56,8 @@ use crate::representations::cartoon::tessellation::{
 use crate::representations::{BuildCtx, Representation};
 use patinae_mol::DirtyFlags;
 
+use crate::byte_units::bytes_to_gib;
+
 const LARGE_CARTOON_BACKBONE_THRESHOLD: usize = 16_384;
 const LARGE_CARTOON_SEGMENT_THRESHOLD: usize = 64;
 
@@ -190,6 +192,7 @@ fn apply_ribbon_pipeline_settings(pipeline: &mut PipelineSettings, ribbon: &Ribb
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::byte_units::{gib_to_bytes, mib_to_bytes};
     use crate::render_input::SceneLod;
     use crate::representations::cartoon::tessellation::GuidePoint;
     use lin_alg::f32::Vec3;
@@ -346,12 +349,12 @@ mod tests {
     #[test]
     fn cartoon_storage_buffer_limit_uses_lower_device_limit() {
         let limits = wgpu::Limits {
-            max_buffer_size: 2 * 1024 * 1024 * 1024,
-            max_storage_buffer_binding_size: 512 * 1024 * 1024,
+            max_buffer_size: gib_to_bytes(2),
+            max_storage_buffer_binding_size: mib_to_bytes(512) as u32,
             ..wgpu::Limits::default()
         };
 
-        assert_eq!(cartoon_storage_buffer_limit(limits), 512 * 1024 * 1024);
+        assert_eq!(cartoon_storage_buffer_limit(limits), mib_to_bytes(512));
     }
 
     #[test]
@@ -674,8 +677,8 @@ impl Representation for CartoonRep {
                 "patinae-render: cartoon {name} buffer ({:.2} GiB) exceeds device \
                  storage-buffer limit ({:.2} GiB) at LOD {:?} - skipping cartoon for this object. \
                  Reduce structure size, switch to a coarser LOD, or wait for chunked emission.",
-                bytes as f64 / (1u64 << 30) as f64,
-                storage_buffer_limit as f64 / (1u64 << 30) as f64,
+                bytes_to_gib(bytes),
+                bytes_to_gib(storage_buffer_limit),
                 input.lod,
             );
             self.resources = None;

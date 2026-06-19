@@ -163,6 +163,39 @@ panels, mouse picking, native file workflows, and a GPU viewport.
   <img src="images/interface.png" alt="Patinae interface" width="800">
 </p>
 
+### Renderer Memory Profiles
+
+Patinae chooses a renderer memory profile when the GPU device and viewport
+renderer are created. This is intentionally a startup-time decision: memory
+profiles are not runtime settings, and changing one requires recreating the
+renderer, normally by restarting the app, web viewer, or benchmark process.
+
+The desktop app accepts `PATINAE_RENDER_MEMORY_PROFILE`:
+
+```bash
+PATINAE_RENDER_MEMORY_PROFILE=balanced patinae protein.pdb
+PATINAE_RENDER_MEMORY_PROFILE=low patinae protein.pdb
+PATINAE_RENDER_MEMORY_PROFILE=low:1024 patinae protein.pdb
+```
+
+`render_loop` benchmarks accept the same values through
+`BENCH_MEMORY_PROFILE`.
+
+Supported profile values are:
+
+- `performance`: default native behavior with the full interactive rendering
+  feature set.
+- `balanced`: lower scratch-target pressure while preserving the normal
+  interactive feature set.
+- `low`: disables or gates optional allocation-heavy viewport features such as
+  SSAO, FXAA scratch targets, picking targets, selection overlays, and larger
+  shadow or atlas resources.
+- `low:<MiB>`: explicit memory budget, for example `low:1024`.
+
+When no override is provided, Patinae selects a profile from the adapter type,
+backend, platform, and GPU limits. Requested WGPU limits are still clamped to
+the adapter capabilities before device creation.
+
 ## Python And Notebooks
 
 The `patinae` Python package exposes a familiar command object for scripting,

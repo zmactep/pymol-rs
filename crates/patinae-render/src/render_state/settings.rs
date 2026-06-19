@@ -23,6 +23,20 @@ impl RenderState {
     /// Enable / disable the selection and hover visual overlay. Picking
     /// readbacks and silhouettes are intentionally controlled separately.
     pub fn set_selection_overlay_enabled(&mut self, enabled: bool) {
+        if enabled && !self.memory.policy.overlays.selection_enabled {
+            if !self.memory.warned_selection_denied {
+                log::warn!(
+                    "selection overlay disabled by render memory profile {}",
+                    self.memory.policy.profile
+                );
+                self.memory.warned_selection_denied = true;
+            }
+            self.screen.selection_overlay_enabled = false;
+            self.screen.marking_bind_groups = None;
+            self.screen.fxaa_overlay_bind_group = None;
+            self.targets.clear_marking_targets();
+            return;
+        }
         if enabled && self.screen.marking.is_none() {
             self.screen.marking = Some(MarkingPass::new(&self.ctx));
         }
@@ -57,6 +71,18 @@ impl RenderState {
     /// to skip it (matches `silhouettes = false` in patinae-settings).
     /// `thickness` is in visible overlay pixels.
     pub fn set_silhouette(&mut self, enabled: bool, thickness: f32, color: [f32; 4]) {
+        if enabled && !self.memory.policy.overlays.silhouette_enabled {
+            if !self.memory.warned_silhouette_denied {
+                log::warn!(
+                    "silhouette overlay disabled by render memory profile {}",
+                    self.memory.policy.profile
+                );
+                self.memory.warned_silhouette_denied = true;
+            }
+            self.screen.silhouette_params = None;
+            self.screen.silhouette_bind_group = None;
+            return;
+        }
         if enabled && self.screen.silhouette.is_none() {
             self.screen.silhouette = Some(SilhouettePass::new(&self.ctx));
         }
@@ -82,6 +108,19 @@ impl RenderState {
     /// reads it + writes to the host `target` with Lottes-style edge
     /// blending. Off by default.
     pub fn set_fxaa(&mut self, enabled: bool) {
+        if enabled && !self.memory.policy.postprocess.fxaa_enabled {
+            if !self.memory.warned_fxaa_denied {
+                log::warn!(
+                    "FXAA disabled by render memory profile {}",
+                    self.memory.policy.profile
+                );
+                self.memory.warned_fxaa_denied = true;
+            }
+            self.screen.fxaa_enabled = false;
+            self.screen.fxaa_bind_group = None;
+            self.screen.fxaa_overlay_bind_group = None;
+            return;
+        }
         if enabled == self.screen.fxaa_enabled {
             return;
         }
@@ -89,6 +128,8 @@ impl RenderState {
         self.screen.fxaa_enabled = enabled;
 
         if enabled {
+            self.targets.ensure_color_scratch(&self.ctx.device);
+            self.refresh_fxaa_bind_group();
             let params = FxaaParams::default_enabled(self.targets.width, self.targets.height);
 
             self.ctx.queue.write_buffer(
@@ -117,11 +158,24 @@ impl RenderState {
     /// via the host bridge; toggling on a host-side `set ssao_enabled,
     /// 1` propagates here.
     pub fn set_ssao(&mut self, enabled: bool, radius: f32, intensity: f32, bias: f32) {
+        if enabled && !self.memory.policy.postprocess.ssao_enabled {
+            if !self.memory.warned_ssao_denied {
+                log::warn!(
+                    "SSAO disabled by render memory profile {}",
+                    self.memory.policy.profile
+                );
+                self.memory.warned_ssao_denied = true;
+            }
+            self.screen.ssao_enabled = false;
+            return;
+        }
         self.screen.ssao_enabled = enabled;
 
         self.screen.ssao_intensity = intensity;
 
         if enabled {
+            self.targets.ensure_ssao_targets(&self.ctx.device);
+            self.refresh_ssao_bind_groups();
             // Refresh the SSAO params uniform (samples are baked once
 
             // per call; `frame_phase` updates per frame in `render()`).
@@ -171,7 +225,18 @@ impl RenderState {
         if enabled && intensity > 0.0 {
             self.lighting.shadow_mode = ShadowPassMode::Directional;
 
-            self.lighting.shadow_map_size = map_size.clamp(64, 4096).next_power_of_two().min(4096);
+            let requested = map_size.clamp(64, 4096).next_power_of_two().min(4096);
+            let capped = requested.min(self.memory.policy.shadows.max_shadow_map_size);
+            if capped < requested && !self.memory.warned_shadow_clamped {
+                log::warn!(
+                    "shadow map size clamped from {} to {} by render memory profile {}",
+                    requested,
+                    capped,
+                    self.memory.policy.profile
+                );
+                self.memory.warned_shadow_clamped = true;
+            }
+            self.lighting.shadow_map_size = capped;
 
             self.lighting.shadow_bias = bias.max(0.0);
 
@@ -218,10 +283,27 @@ impl RenderState {
         if enabled && intensity > 0.0 {
             self.lighting.shadow_mode = ShadowPassMode::AtlasAo;
 
-            self.lighting.skripkin_directions = directions.clamp(1, MAX_ATLAS_DIRECTIONS as u32);
+            let requested_directions = directions.clamp(1, MAX_ATLAS_DIRECTIONS as u32);
+            self.lighting.skripkin_directions =
+                requested_directions.min(self.memory.policy.shadows.max_atlas_directions);
 
+            let requested_map_size = map_size.clamp(32, 4096).next_power_of_two().min(4096);
             self.lighting.skripkin_map_size =
-                map_size.clamp(32, 4096).next_power_of_two().min(4096);
+                requested_map_size.min(self.memory.policy.shadows.max_atlas_tile_size);
+            if (self.lighting.skripkin_directions < requested_directions
+                || self.lighting.skripkin_map_size < requested_map_size)
+                && !self.memory.warned_atlas_clamped
+            {
+                log::warn!(
+                    "atlas AO clamped by render memory profile {}: directions {} -> {}, tile {} -> {}",
+                    self.memory.policy.profile,
+                    requested_directions,
+                    self.lighting.skripkin_directions,
+                    requested_map_size,
+                    self.lighting.skripkin_map_size
+                );
+                self.memory.warned_atlas_clamped = true;
+            }
 
             self.lighting.skripkin_bias = bias.max(0.0);
 
