@@ -132,6 +132,8 @@ impl ViewportRenderer {
                 backend: format!("{:?}", info.backend),
             }
         });
+        log_wgpu_device_diagnostics(device);
+        install_wgpu_uncaptured_error_handler(device);
 
         let renderer = Self::new(device.clone(), queue.clone());
         Some((renderer, info))
@@ -899,6 +901,31 @@ fn read_texture_rgba(
     staging.unmap();
 
     Ok(tightly_packed)
+}
+
+fn log_wgpu_device_diagnostics(device: &wgpu::Device) {
+    let limits = device.limits();
+    let features = device.features();
+    log::info!(
+        "wgpu device limits: max_storage_buffer_binding_size={} max_buffer_size={} \
+         max_compute_workgroups_per_dimension={} max_texture_dimension_2d={}",
+        limits.max_storage_buffer_binding_size,
+        limits.max_buffer_size,
+        limits.max_compute_workgroups_per_dimension,
+        limits.max_texture_dimension_2d,
+    );
+    log::info!(
+        "wgpu device features: buffer_binding_array={} storage_resource_binding_array={} timestamp_query={}",
+        features.contains(wgpu::Features::BUFFER_BINDING_ARRAY),
+        features.contains(wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY),
+        features.contains(wgpu::Features::TIMESTAMP_QUERY),
+    );
+}
+
+fn install_wgpu_uncaptured_error_handler(device: &wgpu::Device) {
+    device.on_uncaptured_error(Arc::new(|error| {
+        log::error!("Uncaptured WGPU error: {error}");
+    }));
 }
 
 fn effective_fxaa(settings: &Settings) -> bool {

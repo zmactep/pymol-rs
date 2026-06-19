@@ -2,6 +2,11 @@
 # by LoadLibraryExW when loading this plugin on Windows.
 #
 # PyO3 links directly against the Python DLL and delay-loading cannot
-# be used (see build.rs). Each line is a command whose stdout (trimmed)
-# is added to PATH before the plugin DLL is loaded.
+# be used (see build.rs). `path` entries are resolved relative to this
+# file and added to PATH before the plugin DLL is loaded. `env` entries
+# set process environment variables for the plugin runtime. Other lines
+# remain command fallbacks whose stdout (trimmed) is added to PATH.
+path ../python
+path ../python-venv/Scripts
+env VIRTUAL_ENV ../python-venv
 python -c "import sys; print(sys.base_prefix)"

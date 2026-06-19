@@ -47,8 +47,11 @@ const REPL_PILL_WIDTH_LP: f32 = 380.0;
 const REPL_PILL_HEIGHT_LP: f32 = 32.0;
 const REPL_PILL_BOTTOM_LP: f32 = 24.0;
 const TRANSIENT_NOTIFICATION_SECS: u64 = 2;
+#[cfg(any(not(target_os = "windows"), test))]
 const BYTES_PER_GIB: u64 = 1024 * 1024 * 1024;
+#[cfg(any(not(target_os = "windows"), test))]
 const PATINAE_DESIRED_MAX_BUFFER_SIZE: u64 = 4 * BYTES_PER_GIB;
+#[cfg(any(not(target_os = "windows"), test))]
 const PATINAE_DESIRED_MAX_STORAGE_BUFFER_BINDING_SIZE: u32 = (2 * BYTES_PER_GIB - 1) as u32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1221,6 +1224,7 @@ fn apply_standard_panel_preset(layout: &LayoutState) {
     layout.set_bottom_active_tab(0);
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 fn patinae_wgpu_required_limits(
     adapter_limits: &slint::wgpu_28::wgpu::Limits,
 ) -> slint::wgpu_28::wgpu::Limits {
@@ -1236,17 +1240,59 @@ fn patinae_wgpu_required_limits(
     .using_resolution(adapter_limits.clone())
 }
 
-fn patinae_wgpu_configuration(
-) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
+fn patinae_wgpu_backends(
+    env_backends: Option<slint::wgpu_28::wgpu::Backends>,
+    is_windows: bool,
+) -> slint::wgpu_28::wgpu::Backends {
+    let backends = if is_windows {
+        env_backends.unwrap_or(slint::wgpu_28::wgpu::Backends::DX12)
+    } else {
+        env_backends.unwrap_or_default()
+    };
+    backends & !slint::wgpu_28::wgpu::Backends::GL
+}
+
+fn patinae_wgpu_settings() -> slint::wgpu_28::WGPUSettings {
     let mut settings = slint::wgpu_28::WGPUSettings::default();
     settings.power_preference = slint::wgpu_28::wgpu::PowerPreference::HighPerformance;
-    let backends = settings.backends & !slint::wgpu_28::wgpu::Backends::GL;
+    settings.backends = patinae_wgpu_backends(
+        slint::wgpu_28::wgpu::Backends::from_env(),
+        cfg!(target_os = "windows"),
+    );
+    settings
+}
+
+#[cfg(target_os = "windows")]
+fn patinae_wgpu_configuration(
+) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
+    let mut settings = patinae_wgpu_settings();
+    // Slint's automatic path selects the adapter after creating the window
+    // surface. On Windows this avoids choosing a headless-incompatible adapter
+    // before winit has a surface, while still giving Patinae native compute and
+    // storage-buffer limits.
+    settings.device_required_limits = slint::wgpu_28::wgpu::Limits::default();
+    log::info!(
+        "wgpu Windows automatic configuration: backends={:?} \
+         requested max_storage_buffer_binding_size={} max_buffer_size={}",
+        settings.backends,
+        settings
+            .device_required_limits
+            .max_storage_buffer_binding_size,
+        settings.device_required_limits.max_buffer_size,
+    );
+    Ok(slint::wgpu_28::WGPUConfiguration::Automatic(settings))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn patinae_wgpu_configuration(
+) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
+    let mut settings = patinae_wgpu_settings();
 
     let instance = pollster::block_on(
         slint::wgpu_28::wgpu::util::new_instance_with_webgpu_detection(
             &slint::wgpu_28::wgpu::InstanceDescriptor {
                 // Match Slint's femtovg-wgpu automatic path, which avoids GL.
-                backends,
+                backends: settings.backends,
                 flags: settings.instance_flags,
                 backend_options: settings.backend_options.clone(),
                 memory_budget_thresholds: settings.instance_memory_budget_thresholds,
@@ -1926,6 +1972,33 @@ mod tests {
         assert_eq!(required.max_texture_dimension_1d, 16_384);
         assert_eq!(required.max_texture_dimension_2d, 32_768);
         assert_eq!(required.max_texture_dimension_3d, 2_048);
+    }
+
+    #[test]
+    fn wgpu_windows_default_backend_prefers_dx12() {
+        let backends = patinae_wgpu_backends(None, true);
+
+        assert_eq!(backends, slint::wgpu_28::wgpu::Backends::DX12);
+    }
+
+    #[test]
+    fn wgpu_windows_backend_env_is_respected_without_gl() {
+        let backends = patinae_wgpu_backends(
+            Some(slint::wgpu_28::wgpu::Backends::VULKAN | slint::wgpu_28::wgpu::Backends::GL),
+            true,
+        );
+
+        assert_eq!(backends, slint::wgpu_28::wgpu::Backends::VULKAN);
+    }
+
+    #[test]
+    fn wgpu_non_windows_default_backend_keeps_wgpu_default_without_gl() {
+        let backends = patinae_wgpu_backends(None, false);
+
+        assert_eq!(
+            backends,
+            slint::wgpu_28::wgpu::Backends::default() & !slint::wgpu_28::wgpu::Backends::GL
+        );
     }
 
     #[test]

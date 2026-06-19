@@ -5,7 +5,7 @@ BundleDir = FSO.GetParentFolderName(WScript.ScriptFullName) & "\"
 
 WshShell.Environment("Process")("PATINAE_PLUGIN_DIR") = BundleDir & "plugins"
 WshShell.Environment("Process")("VIRTUAL_ENV") = BundleDir & "python-venv"
-WshShell.Environment("Process")("PATH") = BundleDir & "python;" & WshShell.Environment("Process")("PATH")
+WshShell.Environment("Process")("PATH") = BundleDir & "python;" & BundleDir & "python-venv\Scripts;" & WshShell.Environment("Process")("PATH")
 
 Dim Args
 Args = ""
