@@ -15,7 +15,7 @@
 
 APP_NAME       := Patinae
 BUNDLE_ID      := me.yakovlev.patinae
-VERSION        := 0.4.1
+VERSION        := 0.4.2
 BINARY_NAME    := patinae
 
 CARGO          ?= cargo
@@ -121,7 +121,7 @@ patinae-fast:
 # ── Python ────────────────────────────────────────────────────────
 
 python-release: widget-assets
-	cd python && $(PYTHON_MATURIN_ENV) $(UVX) maturin build --release
+	cd python && $(PYTHON_MATURIN_ENV) $(UVX) maturin build --release --locked
 
 python-dev: widget-assets
 	cd python && $(PYTHON_MATURIN_ENV) $(UVX) maturin develop

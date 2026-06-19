@@ -135,7 +135,7 @@ jobs:
           version: 1.0
 
       - name: Build with cargo
-        run: cargo build --release -p patinae --target ${{ matrix.target }}
+        run: cargo build --locked --release -p patinae --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -216,7 +216,7 @@ jobs:
 
       - name: Build plugins
         run: >-
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --locked --release --target ${{ matrix.target }}
           -p raytracer-plugin -p hello-plugin -p python-plugin
           ${{ runner.os != 'Windows' && '-p ipc-plugin' || '' }}
         env:
