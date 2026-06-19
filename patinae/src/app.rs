@@ -31,9 +31,11 @@ use crate::bridges::repl::ReplBridge;
 use crate::bridges::sequence::SequenceBridge;
 use crate::bridges::viewport::ViewportBridge;
 use crate::components::viewport::ViewportRenderer;
+#[cfg(not(target_os = "windows"))]
+use crate::display_recovery::log_selected_gpu;
 use crate::display_recovery::{
-    log_selected_gpu, log_window_event, mark_display_transition_and_redraw,
-    request_display_recovery_redraw, DisplayRecovery,
+    log_window_event, mark_display_transition_and_redraw, request_display_recovery_redraw,
+    DisplayRecovery,
 };
 use crate::native_file_actions::{enqueue_file_action, quote_command_arg, NativeFileSource};
 use crate::recent_files::RecentFilesBridge;
