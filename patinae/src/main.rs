@@ -10,6 +10,7 @@ mod native_file_actions;
 mod native_menu;
 mod recent_files;
 mod recent_thumbnails;
+mod startup_alert;
 
 slint::include_modules!();
 

@@ -12,9 +12,82 @@ import { MenuState, RecentFileItem } from "states/menu-state.slint";
 import { FetchDialog } from "components/fetch-dialog.slint";
 import { Theme } from "theme.slint";
 import { Tokens } from "tokens.slint";
-import { Palette } from "std-widgets.slint";
+import { Palette, Button } from "std-widgets.slint";
 
 export { ViewportState, LayoutState, ObjectsState, ReplState, OutputItem, CompletionItem, StartState, NotificationState, SequenceState, SeqChainRow, MovieState, MovieTick, MovieMarker, MovieBlock, MovieLane, PluginState, PluginToolbarItem, PluginPanelTab, PluginControl, PluginOption, PluginButtonItem, MenuState, RecentFileItem, Theme, Tokens, Palette }
+
+export component StartupErrorWindow inherits Window {
+    in property <string> dialog-title: "Patinae Renderer Unavailable";
+    in property <string> message-text: "";
+    callback acknowledged();
+
+    title: root.dialog-title;
+    preferred-width: 560px;
+    preferred-height: 300px;
+    background: Theme.bg;
+
+    VerticalLayout {
+        padding: Tokens.space-lg;
+        spacing: Tokens.space-md;
+
+        HorizontalLayout {
+            height: 44px;
+            spacing: Tokens.space-md;
+
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                border-radius: 18px;
+                background: Theme.error.with-alpha(0.16);
+                border-width: 1px;
+                border-color: Theme.error.with-alpha(0.55);
+
+                Text {
+                    text: "!";
+                    color: Theme.error;
+                    font-size: 22px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                text: root.dialog-title;
+                color: Theme.text;
+                font-size: 18px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        Text {
+            text: root.message-text;
+            color: Theme.text-dim;
+            font-size: 13px;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+        }
+
+        HorizontalLayout {
+            height: 36px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "OK";
+                clicked => { root.acknowledged(); }
+            }
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     forward-focus: app-focus;

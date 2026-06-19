@@ -106,7 +106,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 webbrowser = "1.2"
 
 # Slint integration (Patinae GUI)
-slint = { version = "1.16", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-28", "unstable-winit-030"] }
+slint = { version = "1.16", default-features = false, features = ["compat-1-2", "backend-winit", "renderer-femtovg-wgpu", "renderer-software", "unstable-wgpu-28", "unstable-winit-030"] }
 
 [profile.release]
 lto = "fat"

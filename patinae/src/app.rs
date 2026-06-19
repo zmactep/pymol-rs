@@ -40,6 +40,7 @@ use crate::display_recovery::{
 use crate::native_file_actions::{enqueue_file_action, quote_command_arg, NativeFileSource};
 use crate::recent_files::RecentFilesBridge;
 use crate::recent_thumbnails::{RECENT_THUMBNAIL_HEIGHT, RECENT_THUMBNAIL_WIDTH};
+use crate::startup_alert;
 use crate::{AppWindow, LayoutState, MenuState, NotificationState, Theme, ViewportState};
 
 const SIDEBAR_WIDTH_LP: f32 = 48.0;
@@ -1281,25 +1282,6 @@ fn patinae_wgpu_instance(
     )
 }
 
-#[cfg(any(target_os = "windows", test))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WindowsWgpuStartupMode {
-    Automatic,
-    SoftwareFallback,
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn patinae_windows_wgpu_startup_mode(
-    force_cpu_adapter: bool,
-    has_hardware_adapter: bool,
-) -> WindowsWgpuStartupMode {
-    if force_cpu_adapter || !has_hardware_adapter {
-        WindowsWgpuStartupMode::SoftwareFallback
-    } else {
-        WindowsWgpuStartupMode::Automatic
-    }
-}
-
 #[cfg(target_os = "windows")]
 fn patinae_wgpu_configuration(
 ) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
@@ -1311,31 +1293,16 @@ fn patinae_wgpu_configuration(
     settings.device_required_limits = slint::wgpu_28::wgpu::Limits::default();
     log_windows_wgpu_limits("wgpu Windows configuration", &settings);
 
-    let force_cpu_adapter = std::env::var_os("SLINT_WGPU_CPU").is_some();
-    let has_hardware_adapter = patinae_windows_has_hardware_adapter(&settings);
-    match patinae_windows_wgpu_startup_mode(force_cpu_adapter, has_hardware_adapter) {
-        WindowsWgpuStartupMode::Automatic => {
-            log::info!(
-                "wgpu Windows automatic configuration: hardware adapter preflight succeeded"
-            );
-            Ok(slint::wgpu_28::WGPUConfiguration::Automatic(settings))
-        }
-        WindowsWgpuStartupMode::SoftwareFallback => {
-            if force_cpu_adapter {
-                log::warn!(
-                    "wgpu Windows software fallback requested by SLINT_WGPU_CPU; using WARP/CPU adapter"
-                );
-            } else {
-                log::warn!(
-                    "wgpu Windows hardware adapter preflight found no GPU adapters for {:?}; \
-                     using WARP/CPU fallback",
-                    settings.backends
-                );
-            }
-            std::env::set_var("SLINT_WGPU_CPU", "1");
-            patinae_windows_wgpu_software_configuration(settings)
-        }
+    if std::env::var_os("SLINT_WGPU_CPU").is_some() {
+        return Err(cpu_wgpu_adapter_error().into());
     }
+
+    if !patinae_windows_has_hardware_adapter(&settings) {
+        return Err(no_hardware_wgpu_adapter_error(settings.backends, None).into());
+    }
+
+    log::info!("wgpu Windows automatic configuration: hardware adapter preflight succeeded");
+    Ok(slint::wgpu_28::WGPUConfiguration::Automatic(settings))
 }
 
 #[cfg(target_os = "windows")]
@@ -1376,69 +1343,6 @@ fn patinae_windows_has_hardware_adapter(settings: &slint::wgpu_28::WGPUSettings)
     has_hardware
 }
 
-#[cfg(target_os = "windows")]
-fn patinae_windows_wgpu_software_configuration(
-    settings: slint::wgpu_28::WGPUSettings,
-) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
-    let instance = patinae_wgpu_instance(&settings);
-    let adapter = pollster::block_on(instance.request_adapter(
-        &slint::wgpu_28::wgpu::RequestAdapterOptions {
-            power_preference: settings.power_preference,
-            force_fallback_adapter: true,
-            compatible_surface: None,
-        },
-    ))
-    .map_err(|err| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "No hardware WGPU adapters found for {:?}, and Windows software fallback also failed: {err}. \
-                 In a VM, enable 3D acceleration/DirectX 12 support, install a Vulkan-capable guest driver \
-                 and set WGPU_BACKEND=vulkan, or run on a host with WGPU support.",
-                settings.backends
-            ),
-        )
-    })?;
-
-    let adapter_info = adapter.get_info();
-    let adapter_limits = adapter.limits();
-    let required_limits = settings
-        .device_required_limits
-        .using_resolution(adapter_limits.clone());
-    log::warn!(
-        "wgpu Windows software fallback selected: {} ({:?}, {:?})",
-        adapter_info.name,
-        adapter_info.backend,
-        adapter_info.device_type
-    );
-    log::info!(
-        "wgpu Windows software fallback limits: adapter max_storage_buffer_binding_size={} max_buffer_size={}; \
-         requested max_storage_buffer_binding_size={} max_buffer_size={}",
-        adapter_limits.max_storage_buffer_binding_size,
-        adapter_limits.max_buffer_size,
-        required_limits.max_storage_buffer_binding_size,
-        required_limits.max_buffer_size,
-    );
-
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &slint::wgpu_28::wgpu::DeviceDescriptor {
-            label: settings.device_label.as_deref(),
-            required_features: settings.device_required_features,
-            required_limits,
-            experimental_features: settings.device_experimental_features,
-            memory_hints: settings.device_memory_hints,
-            trace: slint::wgpu_28::wgpu::Trace::default(),
-        },
-    ))?;
-
-    Ok(slint::wgpu_28::WGPUConfiguration::Manual {
-        instance,
-        adapter,
-        device,
-        queue,
-    })
-}
-
 #[cfg(not(target_os = "windows"))]
 fn patinae_wgpu_configuration(
 ) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
@@ -1464,6 +1368,9 @@ fn patinae_wgpu_configuration(
     let adapter_limits = adapter.limits();
     let adapter_features = adapter.features();
     let adapter_info = adapter.get_info();
+    if adapter_info.device_type == slint::wgpu_28::wgpu::DeviceType::Cpu {
+        return Err(no_hardware_wgpu_adapter_error(settings.backends, Some(&adapter_info)).into());
+    }
     log_selected_gpu(&adapter_info);
     let binding_array_features = slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY
         | slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY;
@@ -1514,14 +1421,20 @@ fn patinae_wgpu_configuration(
 // ---------------------------------------------------------------------------
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let selector = slint::BackendSelector::new().require_wgpu_28(patinae_wgpu_configuration()?);
+    let wgpu_configuration = match patinae_wgpu_configuration() {
+        Ok(configuration) => configuration,
+        Err(err) => return abort_startup_for_renderer_error(err),
+    };
+    let selector = slint::BackendSelector::new().require_wgpu_28(wgpu_configuration);
 
     #[cfg(target_os = "macos")]
     let selector = selector.with_winit_window_attributes_hook(|attrs| {
         crate::macos::configure_titlebar_attributes(attrs)
     });
 
-    selector.select()?;
+    if let Err(err) = selector.select() {
+        return abort_startup_for_renderer_error(err);
+    }
 
     let mut app_state = App::new();
     app_state.startup_actions = startup_actions(
@@ -1530,7 +1443,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     let app = Rc::new(RefCell::new(app_state));
 
-    let window = AppWindow::new()?;
+    let window = match AppWindow::new() {
+        Ok(window) => window,
+        Err(err) => return abort_startup_for_renderer_error(err),
+    };
 
     #[cfg(not(target_os = "macos"))]
     window.global::<LayoutState>().set_mod_key("Ctrl".into());
@@ -1795,6 +1711,46 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     window.run()?;
     Ok(())
+}
+
+const STARTUP_RENDERER_ALERT_TITLE: &str = "Patinae Renderer Unavailable";
+
+fn abort_startup_for_renderer_error(
+    err: impl std::fmt::Display,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let message = startup_renderer_error_message(&err.to_string());
+    startup_alert::show_error(STARTUP_RENDERER_ALERT_TITLE, &message);
+    Err(std::io::Error::other(message).into())
+}
+
+fn startup_renderer_error_message(reason: &str) -> String {
+    format!(
+        "Patinae could not start the hardware-accelerated WGPU renderer required \
+         for the interactive viewport.\n\n{reason}\n\nEnable VM 3D acceleration, \
+         install a Vulkan/DirectX 12-capable graphics driver, or run Patinae on \
+         a machine with supported GPU acceleration. Patinae will now exit."
+    )
+}
+
+fn no_hardware_wgpu_adapter_error(
+    backends: slint::wgpu_28::wgpu::Backends,
+    selected_cpu_adapter: Option<&slint::wgpu_28::wgpu::AdapterInfo>,
+) -> std::io::Error {
+    let selected = selected_cpu_adapter
+        .map(|info| format!("; selected adapter was {} ({:?})", info.name, info.backend))
+        .unwrap_or_default();
+    std::io::Error::other(format!(
+        "No hardware-accelerated WGPU adapter is available for {backends:?}{selected}. \
+         CPU/WARP/llvmpipe software rendering is disabled."
+    ))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn cpu_wgpu_adapter_error() -> std::io::Error {
+    std::io::Error::other(
+        "Software WGPU rendering was requested via SLINT_WGPU_CPU, but Patinae requires \
+         a hardware-accelerated WGPU renderer.",
+    )
 }
 
 fn schedule_pending_save_file_requests(app: Rc<RefCell<App>>, window: slint::Weak<AppWindow>) {
@@ -2148,27 +2104,30 @@ mod tests {
     }
 
     #[test]
-    fn wgpu_windows_startup_mode_uses_automatic_with_hardware_adapter() {
-        assert_eq!(
-            patinae_windows_wgpu_startup_mode(false, true),
-            WindowsWgpuStartupMode::Automatic
-        );
+    fn startup_renderer_error_message_explains_hardware_requirement() {
+        let message = startup_renderer_error_message("adapter failed");
+
+        assert!(message.contains("hardware-accelerated WGPU renderer"));
+        assert!(message.contains("adapter failed"));
+        assert!(message.contains("VM 3D acceleration"));
+        assert!(message.contains("Patinae will now exit"));
     }
 
     #[test]
-    fn wgpu_windows_startup_mode_falls_back_without_hardware_adapter() {
-        assert_eq!(
-            patinae_windows_wgpu_startup_mode(false, false),
-            WindowsWgpuStartupMode::SoftwareFallback
-        );
+    fn wgpu_no_hardware_adapter_error_disables_cpu_fallbacks() {
+        let err = no_hardware_wgpu_adapter_error(slint::wgpu_28::wgpu::Backends::DX12, None);
+        let message = err.to_string();
+
+        assert!(message.contains("No hardware-accelerated WGPU adapter"));
+        assert!(message.contains("CPU/WARP/llvmpipe software rendering is disabled"));
     }
 
     #[test]
-    fn wgpu_windows_startup_mode_honors_slint_cpu_override() {
-        assert_eq!(
-            patinae_windows_wgpu_startup_mode(true, true),
-            WindowsWgpuStartupMode::SoftwareFallback
-        );
+    fn wgpu_cpu_override_is_rejected() {
+        let message = cpu_wgpu_adapter_error().to_string();
+
+        assert!(message.contains("SLINT_WGPU_CPU"));
+        assert!(message.contains("hardware-accelerated WGPU renderer"));
     }
 
     #[test]
