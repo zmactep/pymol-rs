@@ -2,14 +2,13 @@
 
 use std::rc::Rc;
 
-use slint::ModelRc;
-use slint::VecModel;
+use slint::{ComponentHandle, ModelRc, VecModel};
 
 use patinae_color::Color;
 use patinae_framework::kernel::AppKernel;
 use patinae_settings::{SettingEnum as _, ThemeMode};
 
-use crate::{NamedColor, Theme};
+use crate::{AppWindow, NamedColor, Theme};
 
 fn to_slint(c: Color) -> slint::Color {
     slint::Color::from_rgb_f32(c.r, c.g, c.b)
@@ -80,6 +79,7 @@ pub fn push_solid_swatches(theme_global: &Theme) {
 pub fn sync_theme(
     kernel: &mut AppKernel,
     theme_global: &Theme,
+    app_window: &AppWindow,
     prev_theme: &mut ThemeMode,
 ) -> bool {
     use patinae_color::ThemedPalette;
@@ -96,6 +96,8 @@ pub fn sync_theme(
 
     // Push dark-mode boolean to Slint (drives UI chrome colors)
     theme_global.set_dark_mode(mode == ThemeMode::Dark);
+    app_window.invoke_sync_widget_theme();
+    sync_window_theme(app_window.window(), mode);
 
     // Push chain palette colors for scheme card icons
     let ch = &kernel.session.palette.chains;
@@ -113,4 +115,20 @@ pub fn sync_theme(
     theme_global.set_ss_sheet(to_slint(ss.sheet));
 
     changed
+}
+
+fn sync_window_theme(window: &slint::Window, mode: ThemeMode) {
+    use slint::winit_030::winit::window::Theme as WinitTheme;
+    use slint::winit_030::WinitWindowAccessor;
+
+    let preferred = match mode {
+        ThemeMode::Dark => WinitTheme::Dark,
+        ThemeMode::Light => WinitTheme::Light,
+    };
+
+    let _ = window.with_winit_window(|winit_window| {
+        if winit_window.theme() != Some(preferred) {
+            winit_window.set_theme(Some(preferred));
+        }
+    });
 }

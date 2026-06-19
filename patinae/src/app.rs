@@ -395,6 +395,7 @@ impl App {
         let theme_changed = crate::bridges::theme::sync_theme(
             &mut self.kernel,
             &app.global::<Theme>(),
+            app,
             &mut self.prev_theme,
         );
         if theme_changed {

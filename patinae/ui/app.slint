@@ -12,8 +12,9 @@ import { MenuState, RecentFileItem } from "states/menu-state.slint";
 import { FetchDialog } from "components/fetch-dialog.slint";
 import { Theme } from "theme.slint";
 import { Tokens } from "tokens.slint";
+import { Palette } from "std-widgets.slint";
 
-export { ViewportState, LayoutState, ObjectsState, ReplState, OutputItem, CompletionItem, StartState, NotificationState, SequenceState, SeqChainRow, MovieState, MovieTick, MovieMarker, MovieBlock, MovieLane, PluginState, PluginToolbarItem, PluginPanelTab, PluginControl, PluginOption, PluginButtonItem, MenuState, RecentFileItem, Theme, Tokens }
+export { ViewportState, LayoutState, ObjectsState, ReplState, OutputItem, CompletionItem, StartState, NotificationState, SequenceState, SeqChainRow, MovieState, MovieTick, MovieMarker, MovieBlock, MovieLane, PluginState, PluginToolbarItem, PluginPanelTab, PluginControl, PluginOption, PluginButtonItem, MenuState, RecentFileItem, Theme, Tokens, Palette }
 
 export component AppWindow inherits Window {
     forward-focus: app-focus;
@@ -208,5 +209,9 @@ export component AppWindow inherits Window {
 
     public function repl-cursor-to-end() {
         main-layout.repl-cursor-to-end();
+    }
+
+    public function sync-widget-theme() {
+        Palette.color-scheme = Theme.dark-mode ? ColorScheme.dark : ColorScheme.light;
     }
 }
