@@ -399,7 +399,7 @@ help:
 	@echo "  bundle-windows   Bundle (exe + plugins + Python + venv + launcher)"
 	@echo ""
 	@echo "Version:"
-	@echo "  version V=X.Y.Z Update version across all crates and packages"
+	@echo "  version V=X.Y.Z Update version across crates, packages, and README badge"
 	@echo ""
 	@echo "Web:"
 	@echo "  web-build        Build WASM + TypeScript bundle"

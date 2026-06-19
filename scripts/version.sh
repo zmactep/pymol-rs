@@ -73,6 +73,21 @@ update_file "web/package.json" \
     "\"version\": \"$OLD\"" \
     "\"version\": \"$NEW\""
 
+# README version badge
+if [ -f "README.md" ]; then
+    badge_count=$(awk '{
+        count += gsub(/img\.shields\.io\/badge\/version-[0-9]+\.[0-9]+\.[0-9]+-green\.svg/, "&")
+        count += gsub(/alt="Version [0-9]+\.[0-9]+\.[0-9]+"/, "&")
+    } END { print count + 0 }' README.md)
+    sed -i '' -E \
+        -e "s|img\.shields\.io/badge/version-[0-9]+\.[0-9]+\.[0-9]+-green\.svg|img.shields.io/badge/version-$NEW-green.svg|g" \
+        -e "s|alt=\"Version [0-9]+\.[0-9]+\.[0-9]+\"|alt=\"Version $NEW\"|g" \
+        README.md
+    echo "  OK    README.md ($badge_count replacement(s))"
+else
+    echo "  SKIP  README.md (not found)"
+fi
+
 # Makefile (match any existing version after VERSION :=)
 if [ -f "Makefile" ]; then
     sed -i '' "s/^VERSION[[:space:]]*:= .*/VERSION        := $NEW/" Makefile
