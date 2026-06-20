@@ -140,8 +140,8 @@ pub const CHAIN_DARK: [Color; 6] = [
 // --- Chain colors (light palette) -------------------------------------------
 
 pub const CHAIN_LIGHT_A: Color = TEAL;
-pub const CHAIN_LIGHT_B: Color = MARINE;
-pub const CHAIN_LIGHT_C: Color = DEEP_OLIVE;
+pub const CHAIN_LIGHT_B: Color = DEEP_OLIVE;
+pub const CHAIN_LIGHT_C: Color = MARINE;
 pub const CHAIN_LIGHT_D: Color = BURNT_ORANGE;
 pub const CHAIN_LIGHT_E: Color = FOREST;
 pub const CHAIN_LIGHT_F: Color = TERRACOTTA;

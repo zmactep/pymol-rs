@@ -115,6 +115,26 @@ mod tests {
     }
 
     #[test]
+    fn test_default_chain_palettes_keep_theme_pair_order() {
+        let dark = ThemedPalette::dark();
+        let light = ThemedPalette::light();
+
+        let expected = [
+            ("A", CHAIN_DARK_A, CHAIN_LIGHT_A),
+            ("B", CHAIN_DARK_B, CHAIN_LIGHT_B),
+            ("C", CHAIN_DARK_C, CHAIN_LIGHT_C),
+            ("D", CHAIN_DARK_D, CHAIN_LIGHT_D),
+            ("E", CHAIN_DARK_E, CHAIN_LIGHT_E),
+            ("F", CHAIN_DARK_F, CHAIN_LIGHT_F),
+        ];
+
+        for (chain, dark_color, light_color) in expected {
+            assert_eq!(dark.chains.get(chain), dark_color);
+            assert_eq!(light.chains.get(chain), light_color);
+        }
+    }
+
+    #[test]
     fn test_default_chain_palettes_avoid_selection_magenta_family() {
         let forbidden = [
             PINK,
