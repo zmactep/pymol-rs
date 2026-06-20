@@ -70,6 +70,7 @@ pub const SSAO_COMPOSE_WGSL: &str = include_str!("shaders/postprocess/ssao_compo
 pub const FXAA_WGSL: &str = include_str!("shaders/postprocess/fxaa.wgsl");
 pub const MARKING_MASK_WGSL: &str = include_str!("shaders/postprocess/marking.wgsl");
 pub const MARKING_COMPOSITE_WGSL: &str = include_str!("shaders/postprocess/marking_composite.wgsl");
+pub const SELECTION_DOTS_WGSL: &str = include_str!("shaders/postprocess/selection_dots.wgsl");
 pub const CULL_INSTANCES_WGSL: &str = include_str!("shaders/compute/cull_instances.wgsl");
 pub const CULL_STICK_WGSL: &str = include_str!("shaders/compute/cull_stick.wgsl");
 pub const CULL_LINE_WGSL: &str = include_str!("shaders/compute/cull_line.wgsl");
@@ -166,6 +167,7 @@ mod tests {
             ("patinae.fxaa", FXAA_WGSL),
             ("patinae.marking_mask", MARKING_MASK_WGSL),
             ("patinae.marking_composite", MARKING_COMPOSITE_WGSL),
+            ("patinae.selection_dots", SELECTION_DOTS_WGSL),
             ("patinae.cull_instances", CULL_INSTANCES_WGSL),
             ("patinae.cull_stick", CULL_STICK_WGSL),
             ("patinae.cull_line", CULL_LINE_WGSL),

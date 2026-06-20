@@ -1,7 +1,13 @@
 use super::state::RenderState;
 use crate::memory::{buffer_usage, GpuMemoryCategory, GpuMemoryLedger, GpuMemorySnapshot};
+use crate::RepBudgetDiagnostic;
 
 impl RenderState {
+    /// Returns diagnostics from the most recent representation budget planning pass.
+    pub fn last_rep_budget_diagnostics(&self) -> &[RepBudgetDiagnostic] {
+        &self.memory.rep_budget_diagnostics
+    }
+
     /// Returns a deterministic estimated GPU-memory snapshot.
     pub fn memory_snapshot(&self) -> GpuMemorySnapshot {
         let mut ledger = GpuMemoryLedger::new();
@@ -60,6 +66,9 @@ impl RenderState {
                 GpuMemoryCategory::Overlay,
                 buffer_usage(&silhouette.uniform_buffer),
             );
+        }
+        if let Some(selection_dots) = self.screen.selection_dots.as_ref() {
+            ledger.add_usage(GpuMemoryCategory::Overlay, selection_dots.memory_usage());
         }
 
         ledger.add_usage(

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::compute::cartoon_extrude::CartoonExtrudeCompute;
 use crate::compute::cull::CullPipeline;
@@ -19,6 +19,7 @@ use crate::frame::FrameTargets;
 use crate::map_contour::MapEntry;
 use crate::memory_policy::RenderMemoryPolicy;
 use crate::passes::atlas_ao::AtlasAoPass;
+use crate::passes::selection_dots::SelectionDotsPass;
 use crate::passes::shadow::DirectionalShadowPass;
 use crate::picking::pass::PickingPass;
 use crate::picking::readback::PickingReadback;
@@ -40,6 +41,7 @@ use crate::postprocess::marking::{MarkingBindGroups, MarkingPass};
 use crate::postprocess::silhouette::{SilhouetteParams, SilhouettePass};
 use crate::postprocess::ssao_compose::SsaoComposePass;
 use crate::render_input::SceneLod;
+use crate::representation_budget::{RepBudgetDiagnostic, RepBudgetRequest, RepBudgetWarningKey};
 use crate::representations::{DrawPhase, Representation};
 use crate::scene_store::{SceneStore, SceneStoreFragmentationStats, SceneStoreLayout};
 #[cfg(feature = "stats")]
@@ -168,6 +170,8 @@ pub(super) struct PickingRuntime {
     /// reprojection resources are absent; visual overlays use a separate id
     /// target and can still be enabled.
     pub(super) picking_mode: PickingMode,
+    /// Runtime budget gate for hit-test picking resources.
+    pub(super) budget_allowed: bool,
     /// Id-rendering pass used by hit-test picking and visual overlays. Created
     /// lazily when either feature first needs visible object/atom ids.
     pub(super) id_pass: Option<PickingPass>,
@@ -227,6 +231,9 @@ pub(super) struct ScreenRuntime {
     /// Lazily created when the selection overlay is enabled. Marking reads the
     /// overlay id texture and marker LUT.
     pub(super) marking: Option<MarkingPass>,
+    /// Low-memory selection-only fallback. Draws compact selected atom dots
+    /// without allocating overlay id, marking mask, or color scratch targets.
+    pub(super) selection_dots: Option<SelectionDotsPass>,
     pub(super) composite_bind_group: wgpu::BindGroup,
     /// `None` until overlay id resources exist and silhouettes are enabled.
     pub(super) silhouette_bind_group: Option<wgpu::BindGroup>,
@@ -236,6 +243,10 @@ pub(super) struct ScreenRuntime {
     pub(super) marking_bindings_dirty: bool,
     pub(super) marking_params_dirty: bool,
     pub(super) marking_offsets_dirty: bool,
+    /// Host requested selection visuals, but the memory policy denied the full
+    /// selection/hover overlay and selected atom dots are used instead.
+    pub(super) selection_dots_enabled: bool,
+    pub(super) selection_dots_rebuild_all: bool,
     pub(super) selection_overlay_enabled: bool,
     /// Screen-space selection / hover outline width, in target pixels.
     pub(super) marking_width: f32,
@@ -286,10 +297,14 @@ pub(super) struct LightingRuntime {
 
 pub(super) struct MemoryRuntime {
     pub(super) policy: RenderMemoryPolicy,
+    pub(super) rep_budget_diagnostics: Vec<RepBudgetDiagnostic>,
+    pub(super) rep_budget_request_cache: HashMap<(u32, RepKind), RepBudgetRequest>,
+    pub(super) warned_rep_budget: HashSet<RepBudgetWarningKey>,
     pub(super) warned_ssao_denied: bool,
     pub(super) warned_fxaa_denied: bool,
     pub(super) warned_selection_denied: bool,
     pub(super) warned_silhouette_denied: bool,
+    pub(super) warned_picking_budget_denied: bool,
     pub(super) warned_shadow_clamped: bool,
     pub(super) warned_atlas_clamped: bool,
 }

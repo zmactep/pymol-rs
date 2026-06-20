@@ -26,6 +26,7 @@ pub(crate) mod postprocess;
 mod render_artifacts;
 mod render_input;
 mod render_state;
+mod representation_budget;
 #[allow(dead_code)]
 pub(crate) mod representations;
 pub mod scene_store;
@@ -73,6 +74,9 @@ pub use render_input::{
     RenderObjectInput, RepColorLutEntry, SceneLod, REP_COLOR_INHERIT,
 };
 pub use render_state::{RenderState, RenderSyncTimings};
+pub use representation_budget::{
+    RepBudgetDiagnostic, RepBuildDecision, RepMemoryEstimate, RepQualityLevel, RepSkipReason,
+};
 pub use representations::sphere::SphereLodDiagnostics;
 pub use representations::stick::StickLodDiagnostics;
 pub use scene_store::SceneStoreFragmentationStats;

@@ -153,6 +153,7 @@ impl RenderState {
                 self.record_marking_overlay(encoder, overlay_target, true);
             }
         }
+        self.record_selection_dots(encoder, effective_target);
         self.record_fxaa(encoder, target, has_selection_overlay);
 
         self.scene.scene_dirty = false;

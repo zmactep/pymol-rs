@@ -16,6 +16,7 @@ use patinae_settings::ResolvedSettings;
 use crate::compute::line_build::{indirect_seed, LineBuildParams, LineBuildPipeline};
 use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
+use crate::representation_budget::{RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cullable::CullableBuffers;
 use crate::representations::{BuildCtx, CullPlan, CullPlanCtx};
 // Constant width used to bound visible lines under camera cull. Lines have
@@ -276,5 +277,24 @@ impl Representation for LineRep {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+pub(crate) fn budget_estimates(input: &RenderObjectInput<'_>) -> Vec<RepMemoryEstimate> {
+    let bond_count = input.molecule.bonds().count() as u32;
+    vec![line_estimate(bond_count, RepQualityLevel::Full)]
+}
+
+fn line_estimate(bond_count: u32, quality: RepQualityLevel) -> RepMemoryEstimate {
+    let instance_capacity_bytes = instance_capacity_for(bond_count);
+    let capacity_bytes = CullableBuffers::estimated_memory(instance_capacity_bytes, true)
+        .saturating_add(LineBuildParams::SIZE);
+    RepMemoryEstimate {
+        required_bytes: instance_capacity_bytes,
+        scratch_bytes: 0,
+        capacity_bytes,
+        quality,
+        can_chunk: false,
+        can_skip: true,
     }
 }

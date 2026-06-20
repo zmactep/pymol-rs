@@ -188,8 +188,8 @@ Supported profile values are:
 - `balanced`: lower scratch-target pressure while preserving the normal
   interactive feature set.
 - `low`: disables or gates optional allocation-heavy viewport features such as
-  SSAO, FXAA scratch targets, picking targets, selection overlays, and larger
-  shadow or atlas resources.
+  SSAO, FXAA scratch targets, selection overlays, and larger shadow or atlas
+  resources.
 - `low:<MiB>`: explicit memory budget, for example `low:1024`.
 
 When no override is provided, Patinae selects a profile from the adapter type,

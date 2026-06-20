@@ -22,6 +22,7 @@ use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::sphere::{SphereParams, SphereParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
+use crate::representation_budget::{RepBuildDecision, RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cullable::CullableBuffers;
 use crate::representations::viewport_lod::ViewportLodReadback;
 use crate::representations::{BuildCtx, CullPlan, CullPlanCtx, Representation, ViewportLodCtx};
@@ -208,6 +209,7 @@ pub struct SphereRep {
     sample_shift: u32,
     sampled_upper_bound: u32,
     cull_upper_bound: u32,
+    budget_sample_shift: Option<u32>,
     viewport_visible_count: u32,
     viewport_full_detail: bool,
     viewport_lod_readback: ViewportLodReadback,
@@ -257,6 +259,7 @@ impl SphereRep {
             sample_shift: 0,
             sampled_upper_bound: 0,
             cull_upper_bound: 0,
+            budget_sample_shift: None,
             viewport_visible_count: 0,
             viewport_full_detail: false,
             viewport_lod_readback: ViewportLodReadback::new(
@@ -356,7 +359,8 @@ impl SphereRep {
         }
         self.viewport_full_detail = full_detail;
         let next_shift =
-            sphere_lod_active_sample_shift(self.base_sample_shift, self.viewport_full_detail);
+            sphere_lod_active_sample_shift(self.base_sample_shift, self.viewport_full_detail)
+                .max(self.budget_sample_shift.unwrap_or(0));
         if next_shift == self.sample_shift {
             return false;
         }
@@ -391,12 +395,11 @@ impl SphereRep {
     fn ensure_buffers(
         &mut self,
         device: &wgpu::Device,
-        atom_count: u32,
         compute_pipeline: &SphereBuildPipeline,
         count_pipeline: &SphereLodCountPipeline,
         cull_pipeline: Option<&crate::compute::cull::CullPipeline>,
     ) -> bool {
-        let needed = instance_capacity_for(atom_count);
+        let needed = instance_capacity_for(self.sampled_upper_bound);
         let instance_grew = self.gpu.ensure(device, needed, cull_pipeline);
         if instance_grew || self.compute_bind_group.is_none() {
             let bg = compute_pipeline.make_bind_group(
@@ -443,7 +446,8 @@ impl Representation for SphereRep {
             self.viewport_full_detail = false;
         }
         let sample_shift =
-            sphere_lod_active_sample_shift(base_sample_shift, self.viewport_full_detail);
+            sphere_lod_active_sample_shift(base_sample_shift, self.viewport_full_detail)
+                .max(self.budget_sample_shift.unwrap_or(0));
         let old_sample_shift = self.sample_shift;
         let old_sampled_upper_bound = self.sampled_upper_bound;
         let old_cull_upper_bound = self.cull_upper_bound;
@@ -597,7 +601,6 @@ impl Representation for SphereRep {
         let cull_pipeline = &ctx.pipelines.cull_pipeline;
         self.ensure_buffers(
             ctx.device,
-            atom_count,
             compute_pipeline,
             count_pipeline,
             Some(cull_pipeline),
@@ -634,6 +637,56 @@ impl Representation for SphereRep {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn apply_budget_decision(
+        &mut self,
+        decision: RepBuildDecision,
+        quality: RepQualityLevel,
+    ) -> bool {
+        let budget_sample_shift = match (decision, quality) {
+            (RepBuildDecision::Downgrade, RepQualityLevel::Sampled { sample_shift }) => {
+                Some(sample_shift)
+            }
+            _ => None,
+        };
+        let changed = self.budget_sample_shift != budget_sample_shift;
+        self.budget_sample_shift = budget_sample_shift;
+        changed
+    }
+}
+
+pub(crate) fn budget_estimates(input: &RenderObjectInput<'_>) -> Vec<RepMemoryEstimate> {
+    let atom_count = input.molecule.atom_count() as u32;
+    let mut estimates = Vec::with_capacity(2);
+    estimates.push(sphere_estimate(atom_count, RepQualityLevel::Full));
+
+    let budget_shift = sphere_lod_sample_shift(atom_count, SceneLod::Minimum);
+    if budget_shift > 0 {
+        estimates.push(sphere_estimate(
+            sampled_sphere_upper_bound(atom_count, budget_shift),
+            RepQualityLevel::Sampled {
+                sample_shift: budget_shift,
+            },
+        ));
+    }
+
+    estimates
+}
+
+fn sphere_estimate(instance_count: u32, quality: RepQualityLevel) -> RepMemoryEstimate {
+    let instance_capacity_bytes = instance_capacity_for(instance_count);
+    let capacity_bytes = CullableBuffers::estimated_memory(instance_capacity_bytes, true)
+        .saturating_add(SphereBuildParams::SIZE)
+        .saturating_add(SphereParams::SIZE)
+        .saturating_add(4);
+    RepMemoryEstimate {
+        required_bytes: instance_capacity_bytes,
+        scratch_bytes: 0,
+        capacity_bytes,
+        quality,
+        can_chunk: false,
+        can_skip: true,
     }
 }
 

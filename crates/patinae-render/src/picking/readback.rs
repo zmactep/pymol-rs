@@ -18,6 +18,8 @@ const READBACK_BYTES_PER_ROW: u32 = 256;
 const BYTES_PER_PICKING_PIXEL: usize = 8;
 const PICK_READBACK_RADIUS: i32 = 3;
 const PICK_READBACK_DIAMETER: u32 = (PICK_READBACK_RADIUS as u32) * 2 + 1;
+pub(crate) const PICKING_READBACK_BUFFER_BYTES: u64 =
+    (READBACK_BYTES_PER_ROW * PICK_READBACK_DIAMETER) as u64;
 const READBACK_IDLE: u8 = 0;
 const READBACK_PENDING: u8 = 1;
 const READBACK_READY: u8 = 2;
@@ -35,13 +37,14 @@ pub struct PickingReadback {
     center: std::cell::Cell<(u32, u32)>,
     dims: std::cell::Cell<(u32, u32)>,
     state: Arc<AtomicU8>,
+    token: Arc<()>,
 }
 
 impl PickingReadback {
     pub fn new(device: &wgpu::Device) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("patinae.picking.readback"),
-            size: (READBACK_BYTES_PER_ROW * PICK_READBACK_DIAMETER) as u64,
+            size: PICKING_READBACK_BUFFER_BYTES,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -51,6 +54,7 @@ impl PickingReadback {
             center: std::cell::Cell::new((0, 0)),
             dims: std::cell::Cell::new((1, 1)),
             state: Arc::new(AtomicU8::new(READBACK_IDLE)),
+            token: Arc::new(()),
         }
     }
 
@@ -112,6 +116,7 @@ impl PickingReadback {
         );
         Some(PendingPick {
             state: Arc::clone(&self.state),
+            token: Arc::clone(&self.token),
             target,
         })
     }
@@ -139,6 +144,9 @@ impl PickingReadback {
     /// Collect the mapped pixel and unmap. Returns `None` if no atom was hit
     /// (cleared pixel == sentinel).
     pub fn try_collect(&self, pending: &PendingPick) -> Option<Option<PickHit>> {
+        if !pending.belongs_to(&self.token) {
+            return Some(None);
+        }
         match pending.status() {
             READBACK_PENDING | READBACK_IDLE => return None,
             READBACK_FAILED => {
@@ -241,9 +249,14 @@ fn rep_pick_priority(kind: RepKind) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    };
+
     use crate::picking::{ObjectId, PickHit, RepKind};
 
-    use super::RankedHit;
+    use super::{PendingPick, PickReadbackTarget, RankedHit, READBACK_READY};
 
     fn hit(rep_kind: RepKind) -> PickHit {
         PickHit {
@@ -268,11 +281,28 @@ mod tests {
 
         assert!(near < far);
     }
+
+    #[test]
+    fn pending_pick_matches_only_issuing_readback_token() {
+        let issuing_token = Arc::new(());
+        let replacement_token = Arc::new(());
+        let pending = PendingPick {
+            state: Arc::new(AtomicU8::new(READBACK_READY)),
+            token: Arc::clone(&issuing_token),
+            target: PickReadbackTarget::Hover,
+        };
+
+        assert!(pending.belongs_to(&issuing_token));
+        assert!(!pending.belongs_to(&replacement_token));
+        assert!(pending.is_ready());
+        assert_eq!(pending.state.load(Ordering::Acquire), READBACK_READY);
+    }
 }
 
 #[derive(Clone)]
 pub struct PendingPick {
     state: Arc<AtomicU8>,
+    token: Arc<()>,
     target: PickReadbackTarget,
 }
 
@@ -290,5 +320,9 @@ impl PendingPick {
 
     fn status(&self) -> u8 {
         self.state.load(Ordering::Acquire)
+    }
+
+    fn belongs_to(&self, token: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.token, token)
     }
 }

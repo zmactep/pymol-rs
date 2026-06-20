@@ -1,8 +1,65 @@
 use super::state::*;
+use std::collections::HashMap;
+
+use crate::passes::selection_dots::{
+    object_marker_bits, should_rebuild_selected_indices, SelectionDotsPass,
+};
+use crate::render_input::RenderInput;
 #[cfg(feature = "stats")]
 use crate::stats::Pass as StatsPass;
 
 impl RenderState {
+    pub(super) fn sync_selection_dots(
+        &mut self,
+        input: &RenderInput<'_>,
+        effective_dirty_by_object: &HashMap<u32, patinae_mol::DirtyFlags>,
+    ) {
+        if !self.screen.selection_dots_enabled {
+            if let Some(selection_dots) = self.screen.selection_dots.as_mut() {
+                selection_dots.clear();
+            }
+            self.screen.selection_dots_rebuild_all = false;
+            return;
+        }
+        let mut rebuild_all = self.screen.selection_dots_rebuild_all;
+        if self.screen.selection_dots.is_none() {
+            self.screen.selection_dots =
+                Some(SelectionDotsPass::new(&self.ctx, &self.scene.scene_layout));
+            rebuild_all = true;
+        }
+        let Some(selection_dots) = self.screen.selection_dots.as_mut() else {
+            return;
+        };
+
+        selection_dots.retain_objects(input.objects.iter().map(|object| object.object_id.0));
+        for object in input.objects {
+            let dirty = effective_dirty_by_object
+                .get(&object.object_id.0)
+                .copied()
+                .unwrap_or(object.dirty);
+            let rebuild = rebuild_all
+                || should_rebuild_selected_indices(
+                    dirty,
+                    selection_dots.selected_indices(object.object_id.0),
+                    object.marker_updates,
+                );
+            if !rebuild {
+                continue;
+            }
+            let Some(slot) = self.scene.scene_store.slot(object.object_id).copied() else {
+                continue;
+            };
+            let marker_bits = object_marker_bits(self.scene.scene_store.marker_lut.cpu(), slot);
+            selection_dots.sync_object(
+                &self.ctx.device,
+                &self.ctx.queue,
+                object.object_id.0,
+                marker_bits,
+            );
+        }
+        self.screen.selection_dots_rebuild_all = false;
+    }
+
     pub(super) fn refresh_marking_resources(&mut self) {
         let (Some(marking), Some(overlay_id), Some(marker_lut), Some(mask)) = (
             self.screen.marking.as_ref(),
@@ -198,6 +255,28 @@ impl RenderState {
         let marking_ts = None;
         marking.record_mask(encoder, mask, &marking_bg.mask, marking_ts);
         marking.record_composite(encoder, target, &marking_bg.composite);
+    }
+
+    pub(super) fn record_selection_dots(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    ) {
+        if !self.screen.selection_dots_enabled {
+            return;
+        }
+        let Some(selection_dots) = self.screen.selection_dots.as_ref() else {
+            return;
+        };
+        selection_dots.upload_params(&self.ctx.queue, self.screen.marking_width);
+        selection_dots.record(
+            encoder,
+            target,
+            &self.targets.depth,
+            &self.ctx.frame.bind_group,
+            &self.ctx.lighting.bind_group,
+            &self.scene.scene_store,
+        );
     }
 
     pub(super) fn record_silhouette_overlay(

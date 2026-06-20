@@ -16,6 +16,7 @@ use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::dot::{dot_direction_offset, DotDrawParams, DotParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
+use crate::representation_budget::{RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cullable::CullableBuffers;
 use crate::representations::{BuildCtx, CullPlan, CullPlanCtx, DrawPhase, Representation};
 
@@ -341,6 +342,26 @@ impl Representation for DotRep {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+pub(crate) fn budget_estimates(input: &RenderObjectInput<'_>) -> Vec<RepMemoryEstimate> {
+    let atom_count = input.molecule.atom_count() as u32;
+    vec![dot_estimate(atom_count, RepQualityLevel::Full)]
+}
+
+fn dot_estimate(atom_count: u32, quality: RepQualityLevel) -> RepMemoryEstimate {
+    let instance_capacity_bytes = instance_capacity_for(atom_count);
+    let capacity_bytes = CullableBuffers::estimated_memory(instance_capacity_bytes, false)
+        .saturating_add(DotBuildParams::SIZE)
+        .saturating_add(DotDrawParams::SIZE);
+    RepMemoryEstimate {
+        required_bytes: instance_capacity_bytes,
+        scratch_bytes: 0,
+        capacity_bytes,
+        quality,
+        can_chunk: false,
+        can_skip: true,
     }
 }
 

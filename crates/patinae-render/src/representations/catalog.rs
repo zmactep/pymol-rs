@@ -4,12 +4,14 @@
 //! table is the crate-local source of truth for built-in representation
 //! construction and per-pass pipeline routing.
 
-use patinae_mol::RepMask;
+use patinae_mol::{DirtyFlags, RepMask};
 
 use crate::compute::cull::CullPipeline;
 use crate::picking::pass::PickingPass;
 use crate::picking::RepKind;
+use crate::render_input::RenderObjectInput;
 use crate::render_state::state::GeometryRuntime;
+use crate::representation_budget::{RepBudgetRequest, RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cartoon::CartoonRep;
 use crate::representations::dot::DotRep;
 use crate::representations::ellipsoid::EllipsoidRep;
@@ -20,11 +22,15 @@ use crate::representations::surface::SurfaceRep;
 use crate::representations::{DrawPhase, Representation};
 
 type RepConstructor = fn(&wgpu::Device) -> Box<dyn Representation>;
+type RepEstimator =
+    fn(&RenderObjectInput<'_>, &patinae_settings::ResolvedSettings) -> Vec<RepMemoryEstimate>;
 
 pub(crate) struct RepCatalogEntry {
     pub(crate) kind: RepKind,
     pub(crate) mask: RepMask,
     constructor: RepConstructor,
+    estimator: RepEstimator,
+    budget_invalidating_dirty: DirtyFlags,
     pub(crate) cullable: bool,
     picking_scene_group: bool,
 }
@@ -32,6 +38,29 @@ pub(crate) struct RepCatalogEntry {
 impl RepCatalogEntry {
     pub(crate) fn construct(&self, device: &wgpu::Device) -> Box<dyn Representation> {
         (self.constructor)(device)
+    }
+
+    pub(crate) fn budget_request(
+        &self,
+        input: &RenderObjectInput<'_>,
+        settings: &patinae_settings::ResolvedSettings,
+    ) -> RepBudgetRequest {
+        let mut estimates = (self.estimator)(input, settings);
+        if estimates.is_empty() {
+            estimates.push(RepMemoryEstimate {
+                required_bytes: 0,
+                scratch_bytes: 0,
+                capacity_bytes: 0,
+                quality: RepQualityLevel::Full,
+                can_chunk: false,
+                can_skip: true,
+            });
+        }
+        RepBudgetRequest::new(input.object_id, self.kind, estimates)
+    }
+
+    pub(crate) fn budget_estimate_invalidated_by(&self, dirty: DirtyFlags) -> bool {
+        dirty.intersects(self.budget_invalidating_dirty)
     }
 
     pub(crate) fn color_pipeline<'a>(
@@ -171,43 +200,130 @@ fn sphere(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(SphereRep::new(device))
 }
 
+fn estimate_sphere(
+    input: &RenderObjectInput<'_>,
+    _settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::sphere::budget_estimates(input)
+}
+
 fn stick(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(StickRep::new(device))
+}
+
+fn estimate_stick(
+    input: &RenderObjectInput<'_>,
+    settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::stick::budget_estimates(input, settings)
 }
 
 fn line(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(LineRep::new(device))
 }
 
+fn estimate_line(
+    input: &RenderObjectInput<'_>,
+    _settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::line::budget_estimates(input)
+}
+
 fn dot(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(DotRep::new(device))
+}
+
+fn estimate_dot(
+    input: &RenderObjectInput<'_>,
+    _settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::dot::budget_estimates(input)
 }
 
 fn surface(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(SurfaceRep::new(device))
 }
 
+fn estimate_surface(
+    input: &RenderObjectInput<'_>,
+    settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::surface::budget_estimates(
+        input,
+        settings,
+        crate::representations::surface::SurfaceMode::Surface,
+    )
+}
+
 fn mesh(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(SurfaceRep::new_mesh(device))
+}
+
+fn estimate_mesh(
+    input: &RenderObjectInput<'_>,
+    settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::surface::budget_estimates(
+        input,
+        settings,
+        crate::representations::surface::SurfaceMode::Mesh,
+    )
 }
 
 fn cartoon(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(CartoonRep::new(device))
 }
 
+fn estimate_cartoon(
+    input: &RenderObjectInput<'_>,
+    settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::cartoon::budget_estimates(
+        input,
+        settings,
+        crate::representations::cartoon::CartoonMode::Cartoon,
+    )
+}
+
 fn ribbon(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(CartoonRep::new_ribbon(device))
+}
+
+fn estimate_ribbon(
+    input: &RenderObjectInput<'_>,
+    settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::cartoon::budget_estimates(
+        input,
+        settings,
+        crate::representations::cartoon::CartoonMode::Ribbon,
+    )
 }
 
 fn ellipsoid(device: &wgpu::Device) -> Box<dyn Representation> {
     Box::new(EllipsoidRep::new(device))
 }
 
+fn estimate_ellipsoid(
+    input: &RenderObjectInput<'_>,
+    _settings: &patinae_settings::ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    crate::representations::ellipsoid::budget_estimates(input)
+}
+
+const COUNT_BUDGET_DIRTY: DirtyFlags = DirtyFlags::TOPOLOGY
+    .union(DirtyFlags::REPS)
+    .union(DirtyFlags::VISIBILITY)
+    .union(DirtyFlags::LOD);
+const GEOMETRY_BUDGET_DIRTY: DirtyFlags = COUNT_BUDGET_DIRTY.union(DirtyFlags::COORDS);
+
 pub(crate) const REPS: &[RepCatalogEntry] = &[
     RepCatalogEntry {
         kind: RepKind::Sphere,
         mask: RepMask::SPHERES,
         constructor: sphere,
+        estimator: estimate_sphere,
+        budget_invalidating_dirty: COUNT_BUDGET_DIRTY,
         cullable: true,
         picking_scene_group: true,
     },
@@ -215,6 +331,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Stick,
         mask: RepMask::STICKS,
         constructor: stick,
+        estimator: estimate_stick,
+        budget_invalidating_dirty: COUNT_BUDGET_DIRTY,
         cullable: true,
         picking_scene_group: false,
     },
@@ -222,6 +340,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Line,
         mask: RepMask::LINES,
         constructor: line,
+        estimator: estimate_line,
+        budget_invalidating_dirty: COUNT_BUDGET_DIRTY,
         cullable: true,
         picking_scene_group: false,
     },
@@ -229,6 +349,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Dot,
         mask: RepMask::DOTS,
         constructor: dot,
+        estimator: estimate_dot,
+        budget_invalidating_dirty: COUNT_BUDGET_DIRTY,
         cullable: true,
         picking_scene_group: false,
     },
@@ -236,6 +358,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Surface,
         mask: RepMask::SURFACE,
         constructor: surface,
+        estimator: estimate_surface,
+        budget_invalidating_dirty: GEOMETRY_BUDGET_DIRTY,
         cullable: false,
         picking_scene_group: false,
     },
@@ -243,6 +367,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Mesh,
         mask: RepMask::MESH,
         constructor: mesh,
+        estimator: estimate_mesh,
+        budget_invalidating_dirty: GEOMETRY_BUDGET_DIRTY,
         cullable: false,
         picking_scene_group: false,
     },
@@ -250,6 +376,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Cartoon,
         mask: RepMask::CARTOON,
         constructor: cartoon,
+        estimator: estimate_cartoon,
+        budget_invalidating_dirty: GEOMETRY_BUDGET_DIRTY,
         cullable: false,
         picking_scene_group: false,
     },
@@ -257,6 +385,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Ribbon,
         mask: RepMask::RIBBON,
         constructor: ribbon,
+        estimator: estimate_ribbon,
+        budget_invalidating_dirty: GEOMETRY_BUDGET_DIRTY,
         cullable: false,
         picking_scene_group: false,
     },
@@ -264,6 +394,8 @@ pub(crate) const REPS: &[RepCatalogEntry] = &[
         kind: RepKind::Ellipsoid,
         mask: RepMask::ELLIPSOIDS,
         constructor: ellipsoid,
+        estimator: estimate_ellipsoid,
+        budget_invalidating_dirty: COUNT_BUDGET_DIRTY,
         cullable: true,
         picking_scene_group: false,
     },

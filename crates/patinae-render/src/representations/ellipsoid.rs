@@ -26,6 +26,7 @@ use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::ellipsoid::{EllipsoidParams, EllipsoidParamsLayout};
 use crate::render_input::RenderObjectInput;
+use crate::representation_budget::{RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cullable::CullableBuffers;
 use crate::representations::{BuildCtx, CullPlan, CullPlanCtx, Representation};
 
@@ -564,6 +565,32 @@ impl Representation for EllipsoidRep {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+pub(crate) fn budget_estimates(input: &RenderObjectInput<'_>) -> Vec<RepMemoryEstimate> {
+    let entry_count = input
+        .molecule
+        .atoms()
+        .filter(|atom| atom.repr.visible_reps.is_visible(RepMask::ELLIPSOIDS))
+        .count() as u32;
+    vec![ellipsoid_estimate(entry_count, RepQualityLevel::Full)]
+}
+
+fn ellipsoid_estimate(entry_count: u32, quality: RepQualityLevel) -> RepMemoryEstimate {
+    let build_input_bytes = build_input_capacity_for(entry_count);
+    let instance_capacity_bytes = instance_capacity_for(entry_count);
+    let capacity_bytes = CullableBuffers::estimated_memory(instance_capacity_bytes, true)
+        .saturating_add(build_input_bytes)
+        .saturating_add(EllipsoidBuildParams::SIZE)
+        .saturating_add(EllipsoidParams::SIZE);
+    RepMemoryEstimate {
+        required_bytes: build_input_bytes.max(instance_capacity_bytes),
+        scratch_bytes: 0,
+        capacity_bytes,
+        quality,
+        can_chunk: false,
+        can_skip: true,
     }
 }
 

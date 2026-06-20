@@ -11,8 +11,6 @@ use crate::byte_units::{gib_to_bytes, mib_to_bytes, BYTES_PER_MIB};
 
 const LOW_MEMORY_BUFFER_THRESHOLD: u64 = gib_to_bytes(1);
 const LOW_MEMORY_STORAGE_BINDING_THRESHOLD: u32 = mib_to_bytes(512) as u32;
-const BALANCED_BUFFER_THRESHOLD: u64 = gib_to_bytes(2);
-
 /// Desired single-buffer target for capable native adapters.
 pub const PERFORMANCE_MAX_BUFFER_SIZE: u64 = gib_to_bytes(4);
 /// Desired single storage-buffer binding target for capable adapters.
@@ -154,7 +152,7 @@ pub struct ShadowPolicy {
     pub max_atlas_directions: u32,
 }
 
-/// Placeholder for the later representation-budgeting phase.
+/// Representation allocation policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepresentationBudgetPolicy {
     /// Whether representation downgrade/skip decisions are active.
@@ -243,7 +241,7 @@ impl RenderMemoryPolicy {
                 max_atlas_tile_size: 1024,
                 max_atlas_directions: BALANCED_ATLAS_DIRECTIONS,
             },
-            reps: RepresentationBudgetPolicy { enabled: false },
+            reps: RepresentationBudgetPolicy { enabled: true },
         }
     }
 
@@ -253,7 +251,7 @@ impl RenderMemoryPolicy {
             profile: RenderMemoryProfile::LowMemory,
             budget_bytes: None,
             picking: PickingPolicy {
-                hit_test_enabled: false,
+                hit_test_enabled: true,
                 scale: LOW_MEMORY_PICKING_SCALE,
                 reprojection_enabled: false,
             },
@@ -275,21 +273,16 @@ impl RenderMemoryPolicy {
                 max_atlas_tile_size: 512,
                 max_atlas_directions: LOW_MEMORY_ATLAS_DIRECTIONS,
             },
-            reps: RepresentationBudgetPolicy { enabled: false },
+            reps: RepresentationBudgetPolicy { enabled: true },
         }
     }
 
-    /// Returns policy derived from an explicit byte budget.
+    /// Returns the constrained policy with an explicit representation budget.
     pub const fn budgeted(bytes: u64) -> Self {
-        let mut policy = if bytes <= LOW_MEMORY_BUFFER_THRESHOLD {
-            Self::low_memory()
-        } else if bytes <= BALANCED_BUFFER_THRESHOLD {
-            Self::balanced()
-        } else {
-            Self::performance()
-        };
+        let mut policy = Self::low_memory();
         policy.profile = RenderMemoryProfile::Budgeted { bytes };
         policy.budget_bytes = Some(bytes);
+        policy.reps.enabled = true;
         policy
     }
 
@@ -551,7 +544,8 @@ mod tests {
         );
 
         assert_eq!(policy.profile, RenderMemoryProfile::LowMemory);
-        assert!(!policy.picking.hit_test_enabled);
+        assert!(policy.picking.hit_test_enabled);
+        assert!(!policy.picking.reprojection_enabled);
         assert!(!policy.postprocess.fxaa_enabled);
         assert!(!policy.overlays.selection_enabled);
         assert_eq!(policy.frame_targets.viewport_handoff_ring, 1);
@@ -566,6 +560,32 @@ mod tests {
 
         assert_eq!(policy.profile, RenderMemoryProfile::LowMemory);
         assert!(!policy.postprocess.ssao_enabled);
+        assert!(policy.reps.enabled);
+    }
+
+    #[test]
+    fn performance_keeps_rep_budgeting_pass_through() {
+        let policy = RenderMemoryPolicy::performance();
+
+        assert!(!policy.reps.enabled);
+    }
+
+    #[test]
+    fn budgeted_profile_enforces_rep_budgeting_even_on_large_budget() {
+        let policy = RenderMemoryPolicy::budgeted(gib_to_bytes(8));
+
+        assert_eq!(
+            policy.profile,
+            RenderMemoryProfile::Budgeted {
+                bytes: gib_to_bytes(8)
+            }
+        );
+        assert!(policy.reps.enabled);
+        assert!(!policy.postprocess.fxaa_enabled);
+        assert!(!policy.postprocess.ssao_enabled);
+        assert!(policy.picking.hit_test_enabled);
+        assert!(!policy.picking.reprojection_enabled);
+        assert!(!policy.overlays.selection_enabled);
     }
 
     #[test]

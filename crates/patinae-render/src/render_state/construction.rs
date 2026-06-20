@@ -20,6 +20,7 @@ use crate::context::RenderContext;
 use crate::frame::FrameTargets;
 use crate::passes::atlas_ao::AtlasAoPass;
 use crate::passes::lighting::DEFAULT_SHADOW_MAP_SIZE;
+use crate::passes::selection_dots::{uses_selection_dots_fallback, SelectionDotsPass};
 use crate::passes::shadow::DirectionalShadowPass;
 use crate::picking::pass::PickingPass;
 use crate::picking::readback::PickingReadback;
@@ -44,6 +45,8 @@ use crate::scene_store::{SceneStore, SceneStoreLayout};
 #[cfg(feature = "stats")]
 use crate::stats::FrameStatsCollector;
 use crate::uniforms::FrameUniforms;
+
+use super::picking_budget::uses_lazy_budgeted_picking;
 
 impl RenderState {
     pub fn new(
@@ -79,13 +82,45 @@ impl RenderState {
         config: RenderConfig,
     ) -> Self {
         let memory_policy = config.memory;
-        let picking_mode = if memory_policy.picking.hit_test_enabled {
+        let policy_allows_picking = memory_policy.picking.hit_test_enabled;
+        if config.picking != PickingMode::Disabled && !policy_allows_picking {
+            log::warn!(
+                "patinae-render: hit-test picking disabled by render memory profile {}",
+                memory_policy.profile
+            );
+        }
+        if config.selection_overlay && !memory_policy.overlays.selection_enabled {
+            if uses_selection_dots_fallback(memory_policy) {
+                log::warn!(
+                    "patinae-render: full selection and hover overlays disabled by render memory profile {}; using selected atom dots",
+                    memory_policy.profile
+                );
+            } else {
+                log::warn!(
+                    "patinae-render: selection and hover overlays disabled by render memory profile {}",
+                    memory_policy.profile
+                );
+            }
+        }
+        let picking_mode = if policy_allows_picking {
             config.picking
         } else {
             PickingMode::Disabled
         };
+        let picking_mode = if picking_mode == PickingMode::Reprojected
+            && !memory_policy.picking.reprojection_enabled
+        {
+            log::warn!(
+                "patinae-render: picking reprojection disabled by render memory profile {}; using full-record hit-test picking",
+                memory_policy.profile
+            );
+            PickingMode::FullRecord
+        } else {
+            picking_mode
+        };
+        let lazy_budgeted_picking = uses_lazy_budgeted_picking(memory_policy);
 
-        let with_picking = picking_mode != PickingMode::Disabled;
+        let with_picking = picking_mode != PickingMode::Disabled && !lazy_budgeted_picking;
 
         let ctx = RenderContext::new(device, queue, color_format);
 
@@ -196,6 +231,10 @@ impl RenderState {
         let selection_overlay_enabled =
             config.selection_overlay && memory_policy.overlays.selection_enabled;
         let marking = selection_overlay_enabled.then(|| MarkingPass::new(&ctx));
+        let selection_dots_enabled =
+            config.selection_overlay && uses_selection_dots_fallback(memory_policy);
+        let selection_dots =
+            selection_dots_enabled.then(|| SelectionDotsPass::new(&ctx, &scene_layout));
 
         let readback = with_picking.then(|| PickingReadback::new(&ctx.device));
 
@@ -340,6 +379,7 @@ impl RenderState {
 
             picking: PickingRuntime {
                 picking_mode,
+                budget_allowed: with_picking,
                 id_pass,
                 readback,
                 hover_readback,
@@ -357,12 +397,15 @@ impl RenderState {
                 composite,
                 silhouette,
                 marking,
+                selection_dots,
                 composite_bind_group,
                 silhouette_bind_group,
                 marking_bind_groups: None,
                 marking_bindings_dirty: true,
                 marking_params_dirty: true,
                 marking_offsets_dirty: true,
+                selection_dots_enabled,
+                selection_dots_rebuild_all: selection_dots_enabled,
                 selection_overlay_enabled,
                 marking_width: 1.0,
                 silhouette_params: None,
@@ -400,10 +443,14 @@ impl RenderState {
 
             memory: MemoryRuntime {
                 policy: memory_policy,
+                rep_budget_diagnostics: Vec::new(),
+                rep_budget_request_cache: HashMap::new(),
+                warned_rep_budget: std::collections::HashSet::new(),
                 warned_ssao_denied: false,
                 warned_fxaa_denied: false,
                 warned_selection_denied: false,
                 warned_silhouette_denied: false,
+                warned_picking_budget_denied: false,
                 warned_shadow_clamped: false,
                 warned_atlas_clamped: false,
             },

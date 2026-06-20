@@ -217,82 +217,17 @@ impl FrameTargets {
             picking_prev,
             picking_depth_prev,
         ) = if with_picking {
-            let pick_w = ((width as f32 * picking_scale) as u32).max(1);
-            let pick_h = ((height as f32 * picking_scale) as u32).max(1);
-            // `picking` and `picking_prev` share the same descriptor so we
-            // can `copy_texture_to_texture` from current → prev after a
-            // full re-record. The current texture also needs
-            // `STORAGE_BINDING` because the reprojection write pass binds
-            // it as `texture_storage_2d<…, write>`.
-            let picking_desc = wgpu::TextureDescriptor {
-                label: Some("patinae.frame.picking"),
-                size: wgpu::Extent3d {
-                    width: pick_w,
-                    height: pick_h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: PICKING_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::STORAGE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            };
-            let picking_prev_desc = wgpu::TextureDescriptor {
-                label: Some("patinae.frame.picking_prev"),
-                ..picking_desc.clone()
-            };
-            let picking_texture = device.create_texture(&picking_desc);
-            let picking_prev_texture = device.create_texture(&picking_prev_desc);
-
-            // Picking depth needs TEXTURE_BINDING so reproject can sample
-            // it (depth_in). And StoreOp::Store on the render pass — set
-            // in render_state. Both depth textures must be COPY_SRC/DST
-            // so we can snapshot current → prev after full re-record.
-            let depth_desc = wgpu::TextureDescriptor {
-                label: Some("patinae.frame.picking_depth"),
-                size: wgpu::Extent3d {
-                    width: pick_w,
-                    height: pick_h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            };
-            let depth_prev_desc = wgpu::TextureDescriptor {
-                label: Some("patinae.frame.picking_depth_prev"),
-                ..depth_desc.clone()
-            };
-            let picking_depth_texture = device.create_texture(&depth_desc);
-            let picking_depth_prev_texture = device.create_texture(&depth_prev_desc);
-
-            let picking = picking_texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let picking_prev =
-                picking_prev_texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let picking_depth =
-                picking_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let picking_depth_prev =
-                picking_depth_prev_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let picking_targets =
+                create_picking_targets(device, width, height, picking_scale, true);
             (
-                Some(picking_texture),
-                Some(picking_depth_texture),
-                Some(picking_prev_texture),
-                Some(picking_depth_prev_texture),
-                Some(picking),
-                Some(picking_depth),
-                Some(picking_prev),
-                Some(picking_depth_prev),
+                Some(picking_targets.picking_texture),
+                Some(picking_targets.picking_depth_texture),
+                picking_targets.picking_prev_texture,
+                picking_targets.picking_depth_prev_texture,
+                Some(picking_targets.picking),
+                Some(picking_targets.picking_depth),
+                picking_targets.picking_prev,
+                picking_targets.picking_depth_prev,
             )
         } else {
             (None, None, None, None, None, None, None, None)
@@ -357,6 +292,51 @@ impl FrameTargets {
         let pick_w = ((self.width as f32 * self.picking_scale) as u32).max(1);
         let pick_h = ((self.height as f32 * self.picking_scale) as u32).max(1);
         (pick_w, pick_h)
+    }
+
+    /// Lazily allocate hit-test picking targets.
+    pub(crate) fn ensure_picking_targets(
+        &mut self,
+        device: &wgpu::Device,
+        with_reprojection: bool,
+    ) -> bool {
+        let needs_current = self.picking.is_none() || self.picking_depth.is_none();
+        let needs_prev =
+            with_reprojection && (self.picking_prev.is_none() || self.picking_depth_prev.is_none());
+        if !needs_current && !needs_prev {
+            return false;
+        }
+
+        let picking_targets = create_picking_targets(
+            device,
+            self.width,
+            self.height,
+            self.picking_scale,
+            with_reprojection,
+        );
+        self.picking = Some(picking_targets.picking);
+        self.picking_depth = Some(picking_targets.picking_depth);
+        self.picking_texture = Some(picking_targets.picking_texture);
+        self.picking_depth_texture = Some(picking_targets.picking_depth_texture);
+        if with_reprojection {
+            self.picking_prev = picking_targets.picking_prev;
+            self.picking_depth_prev = picking_targets.picking_depth_prev;
+            self.picking_prev_texture = picking_targets.picking_prev_texture;
+            self.picking_depth_prev_texture = picking_targets.picking_depth_prev_texture;
+        }
+        true
+    }
+
+    /// Drop hit-test picking targets and their views.
+    pub(crate) fn clear_picking_targets(&mut self) {
+        self.picking = None;
+        self.picking_depth = None;
+        self.picking_prev = None;
+        self.picking_depth_prev = None;
+        self.picking_texture = None;
+        self.picking_depth_texture = None;
+        self.picking_prev_texture = None;
+        self.picking_depth_prev_texture = None;
     }
 
     pub fn overlay_dims(&self) -> (u32, u32) {
@@ -593,6 +573,102 @@ impl FrameTargets {
         self.overlay_id_texture = None;
         self.overlay_id_depth_texture = None;
         self.clear_marking_targets();
+    }
+}
+
+struct PickingTargetResources {
+    picking_texture: wgpu::Texture,
+    picking_depth_texture: wgpu::Texture,
+    picking_prev_texture: Option<wgpu::Texture>,
+    picking_depth_prev_texture: Option<wgpu::Texture>,
+    picking: wgpu::TextureView,
+    picking_depth: wgpu::TextureView,
+    picking_prev: Option<wgpu::TextureView>,
+    picking_depth_prev: Option<wgpu::TextureView>,
+}
+
+fn create_picking_targets(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    picking_scale: f32,
+    with_reprojection: bool,
+) -> PickingTargetResources {
+    let pick_w = ((width as f32 * picking_scale) as u32).max(1);
+    let pick_h = ((height as f32 * picking_scale) as u32).max(1);
+    // The current texture keeps STORAGE_BINDING so the same descriptor can
+    // serve reprojection when enabled by higher-memory profiles.
+    let picking_desc = wgpu::TextureDescriptor {
+        label: Some("patinae.frame.picking"),
+        size: wgpu::Extent3d {
+            width: pick_w,
+            height: pick_h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: PICKING_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    };
+    let picking_texture = device.create_texture(&picking_desc);
+    let picking = picking_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let picking_prev_texture = with_reprojection.then(|| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("patinae.frame.picking_prev"),
+            ..picking_desc.clone()
+        })
+    });
+    let picking_prev = picking_prev_texture
+        .as_ref()
+        .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+    // Picking depth needs TEXTURE_BINDING so reprojection can sample it.
+    let depth_desc = wgpu::TextureDescriptor {
+        label: Some("patinae.frame.picking_depth"),
+        size: wgpu::Extent3d {
+            width: pick_w,
+            height: pick_h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    };
+    let picking_depth_texture = device.create_texture(&depth_desc);
+    let picking_depth = picking_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let picking_depth_prev_texture = with_reprojection.then(|| {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("patinae.frame.picking_depth_prev"),
+            ..depth_desc
+        })
+    });
+    let picking_depth_prev = picking_depth_prev_texture
+        .as_ref()
+        .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+    PickingTargetResources {
+        picking_texture,
+        picking_depth_texture,
+        picking_prev_texture,
+        picking_depth_prev_texture,
+        picking,
+        picking_depth,
+        picking_prev,
+        picking_depth_prev,
     }
 }
 

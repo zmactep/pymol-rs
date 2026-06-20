@@ -1,6 +1,7 @@
 use super::state::*;
 use crate::compute::ssao::SsaoParams;
 use crate::passes::lighting::MAX_ATLAS_DIRECTIONS;
+use crate::passes::selection_dots::{uses_selection_dots_fallback, SelectionDotsPass};
 use crate::postprocess::fxaa::FxaaParams;
 use crate::postprocess::marking::MarkingPass;
 use crate::postprocess::silhouette::SilhouetteParams;
@@ -23,6 +24,36 @@ impl RenderState {
     /// Enable / disable the selection and hover visual overlay. Picking
     /// readbacks and silhouettes are intentionally controlled separately.
     pub fn set_selection_overlay_enabled(&mut self, enabled: bool) {
+        if !enabled {
+            self.screen.selection_dots_enabled = false;
+            self.screen.selection_dots_rebuild_all = false;
+            self.screen.selection_dots = None;
+        }
+
+        if enabled && uses_selection_dots_fallback(self.memory.policy) {
+            let was_enabled = self.screen.selection_dots_enabled;
+            if !self.memory.warned_selection_denied {
+                log::warn!(
+                    "full selection and hover overlays disabled by render memory profile {}; using selected atom dots",
+                    self.memory.policy.profile
+                );
+                self.memory.warned_selection_denied = true;
+            }
+            self.screen.selection_overlay_enabled = false;
+            self.screen.selection_dots_enabled = true;
+            if self.screen.selection_dots.is_none() {
+                self.screen.selection_dots =
+                    Some(SelectionDotsPass::new(&self.ctx, &self.scene.scene_layout));
+            }
+            self.screen.marking_bind_groups = None;
+            self.screen.fxaa_overlay_bind_group = None;
+            self.targets.clear_marking_targets();
+            if !was_enabled {
+                self.screen.selection_dots_rebuild_all = true;
+            }
+            return;
+        }
+
         if enabled && !self.memory.policy.overlays.selection_enabled {
             if !self.memory.warned_selection_denied {
                 log::warn!(
@@ -36,6 +67,11 @@ impl RenderState {
             self.screen.fxaa_overlay_bind_group = None;
             self.targets.clear_marking_targets();
             return;
+        }
+        if enabled {
+            self.screen.selection_dots_enabled = false;
+            self.screen.selection_dots_rebuild_all = false;
+            self.screen.selection_dots = None;
         }
         if enabled && self.screen.marking.is_none() {
             self.screen.marking = Some(MarkingPass::new(&self.ctx));

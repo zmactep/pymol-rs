@@ -1,12 +1,16 @@
 use super::math::hash_view_proj;
+use super::picking_budget::{plan_picking_budget, uses_lazy_budgeted_picking};
 use super::state::PickingTextureSource;
 use super::state::RepPickingState;
 use super::RenderState;
+use crate::byte_units::bytes_to_mib;
 use crate::passes::lighting::identity_mat4;
 use crate::picking::pass::PickingParams;
+use crate::picking::readback::PickingReadback;
 use crate::picking::readback::{PendingPick, PickReadbackTarget};
 use crate::picking::reproject::ReprojectParams;
 use crate::picking::{ObjectId, PickHit, PickingMode, RepKind};
+use crate::render_input::{RenderInput, RenderObjectInput};
 use crate::representations::catalog;
 use crate::scene_store::SceneStore;
 
@@ -57,6 +61,89 @@ impl RenderState {
         self.picking.overlay_id_view_proj_hash = 0;
     }
 
+    pub(super) fn sync_budgeted_picking(
+        &mut self,
+        input: &RenderInput<'_>,
+        active_rep_count: usize,
+    ) -> bool {
+        if self.picking.picking_mode == PickingMode::Disabled
+            || !uses_lazy_budgeted_picking(self.memory.policy)
+        {
+            return false;
+        }
+
+        let snapshot = self.memory_snapshot();
+        let fixed_reserved_bytes = super::picking_budget::fixed_reserved_without_picking(&snapshot);
+        let total_atoms = total_atom_count(input.objects);
+        let decision = plan_picking_budget(
+            self.memory.policy,
+            fixed_reserved_bytes,
+            (self.targets.width, self.targets.height),
+            active_rep_count,
+            total_atoms,
+        );
+
+        if !decision.allowed {
+            if !self.memory.warned_picking_budget_denied {
+                let headroom = decision
+                    .budget_bytes
+                    .unwrap_or(0)
+                    .saturating_sub(decision.fixed_reserved_bytes);
+                log::warn!(
+                    "patinae-render: hit-test picking disabled by render memory profile {}: estimated {:.2} MiB, headroom {:.2} MiB, budget {:.2} MiB, atoms {}, active reps {}",
+                    self.memory.policy.profile,
+                    bytes_to_mib(decision.estimated_bytes),
+                    bytes_to_mib(headroom),
+                    bytes_to_mib(decision.budget_bytes.unwrap_or(0)),
+                    decision.total_atoms,
+                    decision.active_rep_count
+                );
+                self.memory.warned_picking_budget_denied = true;
+            }
+            return self.clear_hit_test_picking_resources();
+        }
+
+        self.memory.warned_picking_budget_denied = false;
+        let was_allowed = self.picking.budget_allowed;
+        let targets_allocated = self.targets.ensure_picking_targets(&self.ctx.device, false);
+        let readback_allocated = ensure_picking_readbacks(&mut self.picking, &self.ctx.device);
+        self.picking.budget_allowed = true;
+        if !was_allowed || targets_allocated || readback_allocated {
+            self.invalidate_picking_cache();
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn clear_hit_test_picking_resources(&mut self) -> bool {
+        let had_resources = self.picking.budget_allowed
+            || self.targets.picking_texture.is_some()
+            || self.targets.picking_depth_texture.is_some()
+            || self.targets.picking_prev_texture.is_some()
+            || self.targets.picking_depth_prev_texture.is_some()
+            || self.picking.readback.is_some()
+            || self.picking.hover_readback.is_some()
+            || self.picking.picking_reproject.is_some()
+            || self.picking.id_pass.is_some()
+            || self
+                .scene
+                .reps
+                .values()
+                .any(|entry| entry.picking.is_some());
+
+        self.targets.clear_picking_targets();
+        self.picking.readback = None;
+        self.picking.hover_readback = None;
+        self.picking.picking_reproject = None;
+        self.picking.id_pass = None;
+        self.picking.budget_allowed = false;
+        for entry in self.scene.reps.values_mut() {
+            entry.picking = None;
+        }
+        self.invalidate_picking_cache();
+        had_resources
+    }
+
     pub(super) fn pick_picking_strategy(
         &self,
         camera_changed: bool,
@@ -64,6 +151,9 @@ impl RenderState {
         allow_reproject: bool,
     ) -> PickingStrategy {
         if self.picking.picking_mode == PickingMode::Disabled {
+            return PickingStrategy::Skip;
+        }
+        if !self.picking.budget_allowed {
             return PickingStrategy::Skip;
         }
         if !has_marker {
@@ -358,7 +448,7 @@ impl RenderState {
         y: u32,
         target: PickReadbackTarget,
     ) -> Option<PendingPick> {
-        if self.picking.picking_mode == PickingMode::Disabled {
+        if !self.hit_test_picking_available() {
             return None;
         }
         self.ensure_id_pass();
@@ -415,18 +505,24 @@ impl RenderState {
     }
 
     pub fn try_collect_pick(&self, pending: &PendingPick) -> Option<Option<PickHit>> {
+        if !self.hit_test_picking_available() {
+            return Some(None);
+        }
         if !pending.is_ready() {
             return None;
         }
         let readback = match pending.target() {
-            PickReadbackTarget::Hover => self.picking.hover_readback.as_ref()?,
-            PickReadbackTarget::Click => self.picking.readback.as_ref()?,
+            PickReadbackTarget::Hover => self.picking.hover_readback.as_ref(),
+            PickReadbackTarget::Click => self.picking.readback.as_ref(),
+        };
+        let Some(readback) = readback else {
+            return Some(None);
         };
         readback.try_collect(pending)
     }
 
     pub fn pick(&mut self, x: u32, y: u32) -> Option<PickHit> {
-        if self.picking.picking_mode == PickingMode::Disabled {
+        if !self.hit_test_picking_available() {
             return None;
         }
         self.ensure_id_pass();
@@ -467,6 +563,38 @@ impl RenderState {
         }
         readback.try_collect(&pending).flatten()
     }
+
+    fn hit_test_picking_available(&self) -> bool {
+        self.picking.picking_mode != PickingMode::Disabled
+            && self.picking.budget_allowed
+            && self.targets.picking_texture.is_some()
+            && self.targets.picking_depth_texture.is_some()
+            && self.picking.readback.is_some()
+            && self.picking.hover_readback.is_some()
+    }
+}
+
+fn ensure_picking_readbacks(
+    picking: &mut super::state::PickingRuntime,
+    device: &wgpu::Device,
+) -> bool {
+    let mut allocated = false;
+    if picking.readback.is_none() {
+        picking.readback = Some(PickingReadback::new(device));
+        allocated = true;
+    }
+    if picking.hover_readback.is_none() {
+        picking.hover_readback = Some(PickingReadback::new(device));
+        allocated = true;
+    }
+    allocated
+}
+
+fn total_atom_count(objects: &[RenderObjectInput<'_>]) -> u64 {
+    objects
+        .iter()
+        .map(|object| object.molecule.atom_count() as u64)
+        .sum()
 }
 
 fn invert_mat4(m: &[[f32; 4]; 4]) -> Option<[[f32; 4]; 4]> {

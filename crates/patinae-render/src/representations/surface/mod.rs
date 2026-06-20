@@ -52,6 +52,7 @@ use crate::picking::RepKind;
 use crate::pipelines::mesh::MeshParamsLayout;
 use crate::pipelines::surface::{SurfaceParams, SurfaceParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
+use crate::representation_budget::{RepBuildDecision, RepMemoryEstimate, RepQualityLevel};
 use crate::representations::surface::constants::{SAS_ALPHA, SAS_ISO};
 use crate::representations::{BuildCtx, DrawPhase, Representation};
 use patinae_mol::{Atom, AtomIndex, DirtyFlags, RepMask};
@@ -141,6 +142,7 @@ pub struct SurfaceRep {
     /// `dispatch_compute_build`.
     needs_dispatch: bool,
     is_opaque_cache: bool,
+    budget_coarsened: bool,
 }
 
 struct SurfacePart {
@@ -214,6 +216,7 @@ impl SurfaceRep {
             render_params_bind_group: None,
             needs_dispatch: false,
             is_opaque_cache: true,
+            budget_coarsened: false,
         }
     }
 
@@ -263,6 +266,10 @@ fn voxel_size_for_quality(quality: i32, lod: SceneLod) -> f32 {
         SceneLod::Minimum => base.max(1.0),
         SceneLod::Auto | SceneLod::High | SceneLod::Medium => base,
     }
+}
+
+fn coarsened_voxel_size(requested_voxel_size: f32) -> f32 {
+    (requested_voxel_size * 2.0).max(1.0)
 }
 
 fn hash_surface_atoms(atoms: &[SurfaceAccelAtom]) -> u64 {
@@ -878,6 +885,7 @@ fn surface_settings_hash(
     filter_mode: SettingSurfaceMode,
     individual_chains: bool,
     rep_mode: SurfaceMode,
+    budget_coarsened: bool,
 ) -> u64 {
     use std::hash::Hasher;
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -887,6 +895,7 @@ fn surface_settings_hash(
     h.write_i32(filter_mode as i32);
     h.write_u8(individual_chains as u8);
     h.write_u32(rep_mode as u32);
+    h.write_u8(budget_coarsened as u8);
     h.finish()
 }
 
@@ -1118,6 +1127,11 @@ impl Representation for SurfaceRep {
 
         let probe_radius = solvent_radius.max(0.0);
         let requested_voxel_size = voxel_size_for_quality(quality, input.lod);
+        let requested_voxel_size = if self.budget_coarsened {
+            coarsened_voxel_size(requested_voxel_size)
+        } else {
+            requested_voxel_size
+        };
         let is_ses = solvent_setting_to_is_ses(solvent_accessible);
         let filter_mode = s.surface.mode;
         let individual_chains = s.surface.individual_chains;
@@ -1128,6 +1142,7 @@ impl Representation for SurfaceRep {
             filter_mode,
             individual_chains,
             self.mode,
+            self.budget_coarsened,
         );
         let reuse_geometry = can_reuse_surface_geometry(
             dirty,
@@ -1388,6 +1403,106 @@ impl Representation for SurfaceRep {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
+
+    fn apply_budget_decision(
+        &mut self,
+        decision: RepBuildDecision,
+        quality: RepQualityLevel,
+    ) -> bool {
+        let budget_coarsened = matches!(
+            (decision, quality),
+            (RepBuildDecision::Downgrade, RepQualityLevel::Coarsened)
+        );
+        let changed = self.budget_coarsened != budget_coarsened;
+        self.budget_coarsened = budget_coarsened;
+        changed
+    }
+}
+
+pub(crate) fn budget_estimates(
+    input: &RenderObjectInput<'_>,
+    settings: &ResolvedSettings,
+    mode: SurfaceMode,
+) -> Vec<RepMemoryEstimate> {
+    let s = input.object_settings.as_ref().unwrap_or(settings);
+    let quality = match mode {
+        SurfaceMode::Surface => s.surface.quality,
+        SurfaceMode::Mesh => s.mesh.quality,
+    };
+    let requested = voxel_size_for_quality(quality, input.lod);
+    let mut estimates = Vec::with_capacity(2);
+    estimates.push(surface_estimate(
+        input,
+        s,
+        mode,
+        requested,
+        RepQualityLevel::Full,
+    ));
+    let coarsened = coarsened_voxel_size(requested);
+    if coarsened > requested * 1.001 {
+        estimates.push(surface_estimate(
+            input,
+            s,
+            mode,
+            coarsened,
+            RepQualityLevel::Coarsened,
+        ));
+    }
+    estimates
+}
+
+fn surface_estimate(
+    input: &RenderObjectInput<'_>,
+    settings: &ResolvedSettings,
+    mode: SurfaceMode,
+    requested_voxel_size: f32,
+    quality: RepQualityLevel,
+) -> RepMemoryEstimate {
+    let probe_radius = match mode {
+        SurfaceMode::Surface => settings.surface.solvent_radius,
+        SurfaceMode::Mesh => settings.mesh.solvent_radius,
+    }
+    .max(0.0);
+    let filter_mode = settings.surface.mode;
+    let individual_chains = settings.surface.individual_chains;
+    let rep_mask = match mode {
+        SurfaceMode::Surface => RepMask::SURFACE,
+        SurfaceMode::Mesh => RepMask::MESH,
+    };
+    let partitions = surface_atom_partitions(input, filter_mode, individual_chains, rep_mask);
+    let mut capacity_bytes = SurfaceParams::SIZE;
+    let mut scratch_bytes = 0_u64;
+    let mut required_bytes = SurfaceParams::SIZE;
+
+    for ids in &partitions {
+        let tiles =
+            prepare_surface_builds_for_atoms(input, ids, probe_radius, requested_voxel_size);
+        for prep in &tiles {
+            let vertex_bytes =
+                u64::from(max_vertices_for_tile(mode, prep)).saturating_mul(SurfaceVertex::SIZE);
+            let chunk_bytes = vertex_bytes.saturating_add(4).saturating_add(16);
+            capacity_bytes = capacity_bytes.saturating_add(chunk_bytes);
+            scratch_bytes = scratch_bytes.saturating_add(surface_scratch_estimate(prep));
+            required_bytes = required_bytes.max(vertex_bytes);
+        }
+    }
+
+    RepMemoryEstimate {
+        required_bytes,
+        scratch_bytes,
+        capacity_bytes,
+        quality,
+        can_chunk: false,
+        can_skip: true,
+    }
+}
+
+fn surface_scratch_estimate(prep: &SurfaceBuildPrep) -> u64 {
+    let voxels = prep
+        .dims
+        .iter()
+        .fold(1_u64, |acc, &dim| acc.saturating_mul(u64::from(dim.max(1))));
+    voxels.saturating_mul(12)
 }
 
 #[cfg(test)]

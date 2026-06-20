@@ -48,6 +48,7 @@ use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::cartoon::{CartoonParams, CartoonParamsLayout};
 use crate::render_input::RenderObjectInput;
+use crate::representation_budget::{RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cartoon::backbone::{extract_retained_backbone, BackboneAtom};
 use crate::representations::cartoon::tessellation::{
     from_resolved_settings, process_segment, segments_from_backbone_atoms, BackboneSegment,
@@ -857,5 +858,66 @@ impl Representation for CartoonRep {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+pub(crate) fn budget_estimates(
+    input: &RenderObjectInput<'_>,
+    settings: &ResolvedSettings,
+    mode: CartoonMode,
+) -> Vec<RepMemoryEstimate> {
+    let s = input.object_settings.as_ref().unwrap_or(settings);
+    vec![cartoon_estimate(input, s, mode)]
+}
+
+fn cartoon_estimate(
+    input: &RenderObjectInput<'_>,
+    settings: &ResolvedSettings,
+    mode: CartoonMode,
+) -> RepMemoryEstimate {
+    let bb =
+        extract_retained_backbone(input.molecule, input.coord_set, settings.cartoon.gap_cutoff);
+    if bb.len() < 2 {
+        return RepMemoryEstimate {
+            required_bytes: 0,
+            scratch_bytes: 0,
+            capacity_bytes: CartoonParams::SIZE,
+            quality: RepQualityLevel::Full,
+            can_chunk: false,
+            can_skip: true,
+        };
+    }
+
+    let (mut pipeline_settings, mut geom_settings) = from_resolved_settings(settings, input.lod);
+    if let CartoonMode::Ribbon = mode {
+        apply_ribbon_pipeline_settings(&mut pipeline_settings, &settings.ribbon);
+        geom_settings.uniform_tube = true;
+        geom_settings.loop_radius = if settings.ribbon.radius > 0.0 {
+            settings.ribbon.radius
+        } else {
+            0.3
+        };
+    }
+    let segments = segments_from_backbone_atoms(&bb);
+    let output = process_cartoon_segments(segments, bb.len(), &pipeline_settings, &geom_settings);
+    let extrude_points_bytes =
+        (output.extrude_points.len() as u64).saturating_mul(ExtrudePointGpu::SIZE);
+    let runs_bytes =
+        (output.runs.len() as u64).saturating_mul(std::mem::size_of::<RunDescriptor>() as u64);
+    let vertex_bytes = (output.total_vertices as u64).saturating_mul(24);
+    let capacity_bytes = CartoonParams::SIZE
+        .saturating_add(ExtrudeParams::SIZE)
+        .saturating_add(extrude_points_bytes)
+        .saturating_add(runs_bytes)
+        .saturating_add(vertex_bytes.max(24))
+        .saturating_add(16);
+
+    RepMemoryEstimate {
+        required_bytes: extrude_points_bytes.max(runs_bytes).max(vertex_bytes),
+        scratch_bytes: 0,
+        capacity_bytes,
+        quality: RepQualityLevel::Full,
+        can_chunk: false,
+        can_skip: true,
     }
 }

@@ -1,9 +1,15 @@
 use super::math::hash_object_ids;
 use super::state::*;
+use crate::byte_units::bytes_to_mib;
 use crate::map_contour::MapEntry;
+use crate::memory::GpuMemoryUsage;
 use crate::picking::pass::PickingParams;
 use crate::picking::RepKind;
 use crate::render_input::{RenderInput, RenderMapInput, RenderObjectInput};
+use crate::representation_budget::{
+    current_warning_keys, plan_rep_budget, RepBudgetDiagnostic, RepBudgetInput, RepBudgetRequest,
+    RepBuildDecision, RepMemoryEstimate, RepQualityLevel,
+};
 use crate::representations::catalog::{self, RepCatalogEntry};
 use patinae_mol::{AtomIndex, DirtyFlags};
 use std::collections::{HashMap, HashSet};
@@ -215,14 +221,30 @@ impl RenderState {
         }
 
         let t0 = sync_now(&mut now_ms);
+        self.sync_selection_dots(input, &effective_dirty_by_object);
         self.refresh_marking_resources();
         timings.marking_resources_ms = sync_elapsed(&mut now_ms, t0);
 
         let t0 = sync_now(&mut now_ms);
+        let rep_budget_diagnostics =
+            self.plan_rep_budget_for_input(input, &effective_dirty_by_object);
+        let budget_plans = rep_budget_plan_map(&rep_budget_diagnostics);
+        self.update_rep_budget_diagnostics(rep_budget_diagnostics);
+
         for obj in input.objects {
             for rep in catalog::active_entries(obj.draw_reps) {
                 let key = (obj.object_id.0, rep.kind);
-                if self.sync_rep(obj, input.settings, rep, lod_dirty).created() {
+                let budget_plan = budget_plans
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_else(RepBudgetPlan::build);
+                if budget_plan.decision.is_skip() {
+                    continue;
+                }
+                if self
+                    .sync_rep(obj, input.settings, rep, lod_dirty, budget_plan)
+                    .created()
+                {
                     scene_changed = true;
                     picking_cache_dirty = true;
                     draw_order_dirty = true;
@@ -253,6 +275,13 @@ impl RenderState {
                         .is_some_and(|entry| obj.visible_reps.is_visible(entry.mask))
                 })
                 .filter(|key| !draw_keep.contains(key))
+                .filter(|key| {
+                    hidden_cache_allowed_by_budget(
+                        *key,
+                        &budget_plans,
+                        self.memory.policy.reps.enabled,
+                    )
+                })
                 .collect();
             keep.extend(hidden_cached_keys);
         }
@@ -351,6 +380,10 @@ impl RenderState {
         if bounds_dirty || self.scene.scene_bounds.is_none() {
             self.scene.scene_bounds = compute_scene_bounds(input.objects, input.maps);
         }
+
+        if self.sync_budgeted_picking(input, draw_keep.len()) {
+            picking_cache_dirty = true;
+        }
         timings.order_bounds_ms += sync_elapsed(&mut now_ms, t0);
 
         // Dispatch GPU instance-build compute for SceneStore-resident
@@ -395,23 +428,30 @@ impl RenderState {
         rep_catalog: &'static RepCatalogEntry,
 
         lod_dirty: bool,
+
+        budget_plan: RepBudgetPlan,
     ) -> RepSyncOutcome {
         let kind = rep_catalog.kind;
         let key = (obj.object_id.0, kind);
 
+        let entry_existed = self.scene.reps.contains_key(&key);
+        let budget_dirty = if entry_existed {
+            self.scene.reps.get_mut(&key).is_some_and(|entry| {
+                entry
+                    .rep
+                    .apply_budget_decision(budget_plan.decision, budget_plan.quality)
+            })
+        } else {
+            false
+        };
+
         // Fast path: entry already exists and the host has no pending dirty
-
         // bits for this object. Skip the entire build — no atom iteration,
-
         // no `write_buffer`. Dominant cost on assemblies with hundreds of
-
         // chain copies; rotating the camera redraws the same geometry
-
         // without any per-rep CPU work.
 
-        let entry_existed = self.scene.reps.contains_key(&key);
-
-        if entry_existed && obj.dirty.is_empty() && !lod_dirty {
+        if entry_existed && obj.dirty.is_empty() && !lod_dirty && !budget_dirty {
             return RepSyncOutcome::Unchanged;
         }
 
@@ -424,7 +464,7 @@ impl RenderState {
             )
             .is_empty();
 
-        if entry_existed && marker_or_draw_only && !lod_dirty {
+        if entry_existed && marker_or_draw_only && !lod_dirty && !budget_dirty {
             return RepSyncOutcome::Unchanged;
         }
 
@@ -451,6 +491,12 @@ impl RenderState {
                 draw_phase: crate::representations::DrawPhase::Opaque,
             }
         });
+
+        if !entry_existed {
+            entry
+                .rep
+                .apply_budget_decision(budget_plan.decision, budget_plan.quality);
+        }
 
         // For a freshly-created rep the host's dirty mask may be empty
 
@@ -482,6 +528,198 @@ impl RenderState {
         } else {
             RepSyncOutcome::Created
         }
+    }
+
+    fn plan_rep_budget_for_input(
+        &mut self,
+        input: &RenderInput,
+        effective_dirty_by_object: &HashMap<u32, DirtyFlags>,
+    ) -> Vec<RepBudgetDiagnostic> {
+        let active_rep_count = input
+            .objects
+            .iter()
+            .map(|obj| catalog::active_entries(obj.draw_reps).count())
+            .sum();
+        let mut requests = Vec::with_capacity(active_rep_count);
+        let estimate_allocations = self.memory.policy.reps.enabled;
+        if !estimate_allocations {
+            self.memory.rep_budget_request_cache.clear();
+        }
+        let mut active_budget_keys = HashSet::with_capacity(active_rep_count);
+        for obj in input.objects {
+            for rep in catalog::active_entries(obj.draw_reps) {
+                let key = (obj.object_id.0, rep.kind);
+                if !estimate_allocations {
+                    requests.push(cheap_budget_request(obj, rep));
+                    continue;
+                }
+
+                active_budget_keys.insert(key);
+                let dirty = effective_dirty_by_object
+                    .get(&obj.object_id.0)
+                    .copied()
+                    .unwrap_or(obj.dirty);
+                if should_reuse_budget_request(rep, dirty) {
+                    if let Some(cached) = self.memory.rep_budget_request_cache.get(&key) {
+                        requests.push(cached.clone());
+                        continue;
+                    }
+                }
+
+                let request = rep.budget_request(obj, input.settings);
+                self.memory
+                    .rep_budget_request_cache
+                    .insert(key, request.clone());
+                requests.push(request);
+            }
+        }
+        if estimate_allocations {
+            self.memory
+                .rep_budget_request_cache
+                .retain(|key, _| active_budget_keys.contains(key));
+        }
+        let snapshot = self.memory_snapshot();
+        let fixed_reserved_bytes = snapshot
+            .total_capacity_bytes()
+            .saturating_sub(replaceable_rep_capacity_bytes(&self.scene));
+        plan_rep_budget(RepBudgetInput {
+            policy: self.memory.policy,
+            fixed_reserved_bytes,
+            device_limits: &self.ctx.device.limits(),
+            requests: &requests,
+            active_rep_count,
+        })
+    }
+
+    fn update_rep_budget_diagnostics(&mut self, diagnostics: Vec<RepBudgetDiagnostic>) {
+        let current_warning_keys = current_warning_keys(&diagnostics);
+        for diagnostic in &diagnostics {
+            let Some(key) = diagnostic.warning_key() else {
+                continue;
+            };
+            if !self.memory.warned_rep_budget.contains(&key) {
+                log_rep_budget_warning(*diagnostic, self.memory.policy.profile);
+            }
+        }
+        self.memory
+            .warned_rep_budget
+            .retain(|key| current_warning_keys.contains(key));
+        self.memory.warned_rep_budget.extend(current_warning_keys);
+        self.memory.rep_budget_diagnostics = diagnostics;
+    }
+}
+
+fn should_reuse_budget_request(rep: &'static RepCatalogEntry, dirty: DirtyFlags) -> bool {
+    dirty.is_empty() || !rep.budget_estimate_invalidated_by(dirty)
+}
+
+fn cheap_budget_request(
+    obj: &RenderObjectInput<'_>,
+    rep: &'static RepCatalogEntry,
+) -> RepBudgetRequest {
+    RepBudgetRequest::new(
+        obj.object_id,
+        rep.kind,
+        vec![RepMemoryEstimate {
+            required_bytes: 0,
+            scratch_bytes: 0,
+            capacity_bytes: 0,
+            quality: RepQualityLevel::Full,
+            can_chunk: false,
+            can_skip: true,
+        }],
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RepBudgetPlan {
+    decision: RepBuildDecision,
+    quality: RepQualityLevel,
+}
+
+impl RepBudgetPlan {
+    const fn build() -> Self {
+        Self {
+            decision: RepBuildDecision::Build,
+            quality: RepQualityLevel::Full,
+        }
+    }
+
+    const fn from_diagnostic(diagnostic: RepBudgetDiagnostic) -> Self {
+        Self {
+            decision: diagnostic.decision,
+            quality: diagnostic.estimate.quality,
+        }
+    }
+}
+
+fn rep_budget_plan_map(
+    diagnostics: &[RepBudgetDiagnostic],
+) -> HashMap<(u32, RepKind), RepBudgetPlan> {
+    let mut decisions = HashMap::with_capacity(diagnostics.len());
+    decisions.extend(diagnostics.iter().map(|diagnostic| {
+        (
+            (diagnostic.object_id.0, diagnostic.kind),
+            RepBudgetPlan::from_diagnostic(*diagnostic),
+        )
+    }));
+    decisions
+}
+
+fn hidden_cache_allowed_by_budget(
+    key: (u32, RepKind),
+    decisions: &HashMap<(u32, RepKind), RepBudgetPlan>,
+    budget_enforced: bool,
+) -> bool {
+    if !budget_enforced {
+        return true;
+    }
+    decisions
+        .get(&key)
+        .is_some_and(|plan| !plan.decision.is_skip())
+}
+
+fn replaceable_rep_capacity_bytes(scene: &SceneRuntime) -> u64 {
+    scene.reps.values().fold(0_u64, |bytes, entry| {
+        let rep = entry.rep.memory_usage();
+        let picking = entry
+            .picking
+            .as_ref()
+            .map(|picking| GpuMemoryUsage::allocation(picking._buffer.size()))
+            .unwrap_or_default();
+        bytes
+            .saturating_add(rep.capacity_bytes)
+            .saturating_add(picking.capacity_bytes)
+    })
+}
+
+fn log_rep_budget_warning(diagnostic: RepBudgetDiagnostic, profile: crate::RenderMemoryProfile) {
+    match diagnostic.decision {
+        RepBuildDecision::Downgrade => log::warn!(
+            "patinae-render: {:?} for object {} downgraded by render memory profile {} to {:?} ({:.2} MiB estimated)",
+            diagnostic.kind,
+            diagnostic.object_id.0,
+            profile,
+            diagnostic.estimate.quality,
+            bytes_to_mib(diagnostic.estimate.reserved_bytes())
+        ),
+        RepBuildDecision::Chunk { max_chunk_bytes } => log::warn!(
+            "patinae-render: {:?} for object {} chunked by render memory profile {} to {:.2} MiB chunks ({:.2} MiB estimated)",
+            diagnostic.kind,
+            diagnostic.object_id.0,
+            profile,
+            bytes_to_mib(max_chunk_bytes),
+            bytes_to_mib(diagnostic.estimate.reserved_bytes())
+        ),
+        RepBuildDecision::Skip { reason } => log::warn!(
+            "patinae-render: {:?} for object {} skipped by render memory profile {}: {:?} ({:.2} MiB estimated)",
+            diagnostic.kind,
+            diagnostic.object_id.0,
+            profile,
+            reason,
+            bytes_to_mib(diagnostic.estimate.reserved_bytes())
+        ),
+        RepBuildDecision::Build => {}
     }
 }
 
@@ -657,5 +895,55 @@ mod tests {
         assert!(!can_retain_hidden_rep_cache(DirtyFlags::COORDS));
         assert!(!can_retain_hidden_rep_cache(DirtyFlags::LOD));
         assert!(!can_retain_hidden_rep_cache(DirtyFlags::TOPOLOGY));
+    }
+
+    #[test]
+    fn budget_request_cache_reuses_clean_and_lut_only_dirty() {
+        let cartoon = catalog::entry(RepKind::Cartoon).expect("cartoon catalog entry");
+
+        assert!(should_reuse_budget_request(cartoon, DirtyFlags::empty()));
+        assert!(should_reuse_budget_request(cartoon, DirtyFlags::COLOR));
+        assert!(should_reuse_budget_request(cartoon, DirtyFlags::SELECTION));
+        assert!(should_reuse_budget_request(cartoon, DirtyFlags::HOVER));
+        assert!(should_reuse_budget_request(
+            cartoon,
+            DirtyFlags::TRANSPARENCY
+        ));
+    }
+
+    #[test]
+    fn budget_request_cache_recomputes_geometry_reps_on_coords_dirty() {
+        let cartoon = catalog::entry(RepKind::Cartoon).expect("cartoon catalog entry");
+        let surface = catalog::entry(RepKind::Surface).expect("surface catalog entry");
+
+        assert!(!should_reuse_budget_request(cartoon, DirtyFlags::COORDS));
+        assert!(!should_reuse_budget_request(surface, DirtyFlags::COORDS));
+    }
+
+    #[test]
+    fn budget_request_cache_reuses_count_reps_on_coords_dirty() {
+        let sphere = catalog::entry(RepKind::Sphere).expect("sphere catalog entry");
+        let stick = catalog::entry(RepKind::Stick).expect("stick catalog entry");
+        let ellipsoid = catalog::entry(RepKind::Ellipsoid).expect("ellipsoid catalog entry");
+
+        assert!(should_reuse_budget_request(sphere, DirtyFlags::COORDS));
+        assert!(should_reuse_budget_request(stick, DirtyFlags::COORDS));
+        assert!(should_reuse_budget_request(ellipsoid, DirtyFlags::COORDS));
+    }
+
+    #[test]
+    fn budget_request_cache_recomputes_relevant_shape_dirty() {
+        let cartoon = catalog::entry(RepKind::Cartoon).expect("cartoon catalog entry");
+        let sphere = catalog::entry(RepKind::Sphere).expect("sphere catalog entry");
+
+        for dirty in [
+            DirtyFlags::TOPOLOGY,
+            DirtyFlags::REPS,
+            DirtyFlags::VISIBILITY,
+            DirtyFlags::LOD,
+        ] {
+            assert!(!should_reuse_budget_request(cartoon, dirty));
+            assert!(!should_reuse_budget_request(sphere, dirty));
+        }
     }
 }

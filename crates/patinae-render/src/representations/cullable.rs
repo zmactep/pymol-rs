@@ -20,6 +20,18 @@ pub(crate) struct CullableBuffers {
 }
 
 impl CullableBuffers {
+    pub(crate) const fn estimated_memory(
+        instance_capacity_bytes: u64,
+        has_shadow_indirect: bool,
+    ) -> u64 {
+        let shadow_bytes = if has_shadow_indirect { 16 } else { 0 };
+        CullParams::SIZE
+            .saturating_add(instance_capacity_bytes.saturating_mul(2))
+            .saturating_add(4)
+            .saturating_add(16)
+            .saturating_add(shadow_bytes)
+    }
+
     pub(crate) fn new(
         device: &wgpu::Device,
         label: &'static str,

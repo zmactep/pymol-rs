@@ -15,6 +15,7 @@ use crate::memory::{buffer_usage, GpuMemoryUsage};
 use crate::picking::RepKind;
 use crate::pipelines::stick::{StickParams, StickParamsLayout};
 use crate::render_input::{RenderObjectInput, SceneLod};
+use crate::representation_budget::{RepBuildDecision, RepMemoryEstimate, RepQualityLevel};
 use crate::representations::cullable::CullableBuffers;
 use crate::representations::viewport_lod::ViewportLodReadback;
 use crate::representations::{BuildCtx, CullPlan, CullPlanCtx, Representation, ViewportLodCtx};
@@ -61,7 +62,11 @@ impl StickInstance {
 /// Multi-bonds emit up to 3 instances per bond (`Triple`). Allocate this
 /// upper bound × bond count, padded to power of two.
 fn instance_capacity_for(bond_count: u32) -> u64 {
-    let needed = (bond_count as u64).max(1) * 3 * StickInstance::SIZE;
+    instance_capacity_for_instances(bond_count.saturating_mul(3))
+}
+
+fn instance_capacity_for_instances(instance_count: u32) -> u64 {
+    let needed = (instance_count as u64).max(1) * StickInstance::SIZE;
     needed.next_power_of_two().max(64 * StickInstance::SIZE)
 }
 
@@ -191,6 +196,8 @@ pub struct StickRep {
     sample_shift: u32,
     sampled_bond_upper_bound: u32,
     cull_upper_bound: u32,
+    budget_sample_shift: Option<u32>,
+    budget_capacity_count: Option<u32>,
     max_slots_per_bond: u32,
     viewport_radius_pad: f32,
     viewport_visible_count: u32,
@@ -235,6 +242,8 @@ impl StickRep {
             sample_shift: 0,
             sampled_bond_upper_bound: 0,
             cull_upper_bound: 0,
+            budget_sample_shift: None,
+            budget_capacity_count: None,
             max_slots_per_bond: 3,
             viewport_radius_pad: 0.0,
             viewport_visible_count: 0,
@@ -332,12 +341,16 @@ impl StickRep {
         }
         self.viewport_full_detail = full_detail;
         let next_shift =
-            stick_lod_active_sample_shift(self.base_sample_shift, self.viewport_full_detail);
+            stick_lod_active_sample_shift(self.base_sample_shift, self.viewport_full_detail)
+                .max(self.budget_sample_shift.unwrap_or(0));
         if next_shift == self.sample_shift {
             return false;
         }
         self.sample_shift = next_shift;
         self.refresh_lod_bounds(bond_count);
+        if self.budget_sample_shift.is_some() {
+            self.budget_capacity_count = Some(self.cull_upper_bound);
+        }
         queue.write_buffer(
             &self.build_params_buffer,
             12,
@@ -370,7 +383,10 @@ impl StickRep {
         count_pipeline: &StickLodCountPipeline,
         cull_pipeline: Option<&crate::compute::cull::CullPipeline>,
     ) {
-        let needed = instance_capacity_for(bond_count);
+        let needed = self
+            .budget_capacity_count
+            .map(instance_capacity_for_instances)
+            .unwrap_or_else(|| instance_capacity_for(bond_count));
         let grew = self.gpu.ensure(device, needed, cull_pipeline);
         if grew || self.compute_bind_group.is_none() {
             self.compute_bind_group = Some(compute_pipeline.make_bind_group(
@@ -419,7 +435,8 @@ impl Representation for StickRep {
             self.viewport_full_detail = false;
         }
         let sample_shift =
-            stick_lod_active_sample_shift(base_sample_shift, self.viewport_full_detail);
+            stick_lod_active_sample_shift(base_sample_shift, self.viewport_full_detail)
+                .max(self.budget_sample_shift.unwrap_or(0));
         let old_base_sample_shift = self.base_sample_shift;
         let old_sample_shift = self.sample_shift;
         let old_sampled_bond_upper_bound = self.sampled_bond_upper_bound;
@@ -433,6 +450,9 @@ impl Representation for StickRep {
         self.viewport_radius_pad =
             stick_viewport_radius_pad(radius, valence_scale_factor, valence_enabled);
         self.refresh_lod_bounds(bond_count);
+        if self.budget_sample_shift.is_some() {
+            self.budget_capacity_count = Some(self.cull_upper_bound);
+        }
         self.upload_build_params(queue, radius, valence_scale_factor);
         queue.write_buffer(
             &self.render_params_buffer,
@@ -613,6 +633,69 @@ impl Representation for StickRep {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    fn apply_budget_decision(
+        &mut self,
+        decision: RepBuildDecision,
+        quality: RepQualityLevel,
+    ) -> bool {
+        let next_budget_sample_shift = match (decision, quality) {
+            (RepBuildDecision::Downgrade, RepQualityLevel::Sampled { sample_shift }) => {
+                Some(sample_shift)
+            }
+            _ => None,
+        };
+        let changed = self.budget_sample_shift != next_budget_sample_shift;
+        self.budget_sample_shift = next_budget_sample_shift;
+        if changed {
+            self.budget_capacity_count = None;
+        }
+        changed
+    }
+}
+
+pub(crate) fn budget_estimates(
+    input: &RenderObjectInput<'_>,
+    settings: &ResolvedSettings,
+) -> Vec<RepMemoryEstimate> {
+    let s = input.object_settings.as_ref().unwrap_or(settings);
+    let bond_count = input.molecule.bonds().count() as u32;
+    let mut estimates = Vec::with_capacity(2);
+    estimates.push(stick_estimate(
+        bond_count.saturating_mul(3),
+        RepQualityLevel::Full,
+    ));
+
+    let budget_shift = stick_lod_sample_shift(bond_count, SceneLod::Minimum);
+    if budget_shift > 0 {
+        let sampled_bonds = sampled_stick_bond_upper_bound(bond_count, budget_shift);
+        let capacity_count =
+            sampled_bonds.saturating_mul(stick_max_slots_per_bond(s.stick.valence));
+        estimates.push(stick_estimate(
+            capacity_count,
+            RepQualityLevel::Sampled {
+                sample_shift: budget_shift,
+            },
+        ));
+    }
+
+    estimates
+}
+
+fn stick_estimate(instance_count: u32, quality: RepQualityLevel) -> RepMemoryEstimate {
+    let instance_capacity_bytes = instance_capacity_for_instances(instance_count);
+    let capacity_bytes = CullableBuffers::estimated_memory(instance_capacity_bytes, true)
+        .saturating_add(StickBuildParams::SIZE)
+        .saturating_add(StickParams::SIZE)
+        .saturating_add(4);
+    RepMemoryEstimate {
+        required_bytes: instance_capacity_bytes,
+        scratch_bytes: 0,
+        capacity_bytes,
+        quality,
+        can_chunk: false,
+        can_skip: true,
     }
 }
 

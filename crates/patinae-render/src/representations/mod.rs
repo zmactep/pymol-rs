@@ -19,6 +19,7 @@ mod viewport_lod;
 use crate::picking::RepKind;
 use crate::render_input::RenderObjectInput;
 use crate::render_state::state::GeometryRuntime;
+use crate::representation_budget::{RepBuildDecision, RepQualityLevel};
 use crate::GpuMemoryUsage;
 
 use patinae_mol::DirtyFlags;
@@ -94,6 +95,15 @@ pub trait Representation: std::any::Any {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     );
+
+    /// Applies the current budget decision before building resources.
+    fn apply_budget_decision(
+        &mut self,
+        _decision: RepBuildDecision,
+        _quality: RepQualityLevel,
+    ) -> bool {
+        false
+    }
 
     // Visibility contracts.
     /// Whether this rep's contents are fully opaque this frame. Reps with

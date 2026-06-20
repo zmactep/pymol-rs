@@ -42,6 +42,8 @@ pub struct PickingParams {
 }
 
 impl PickingParams {
+    pub(crate) const SIZE: u64 = std::mem::size_of::<Self>() as u64;
+
     pub fn new(rep_kind: RepKind, object_id: ObjectId) -> Self {
         let kind = (rep_kind.as_raw() as u32) & 0xF;
         let obj = object_id.0 & 0xFFF;
