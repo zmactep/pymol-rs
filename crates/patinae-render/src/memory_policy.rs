@@ -24,6 +24,12 @@ const LOW_MEMORY_SHADOW_MAP_SIZE: u32 = 1024;
 const PERFORMANCE_ATLAS_DIRECTIONS: u32 = 256;
 const BALANCED_ATLAS_DIRECTIONS: u32 = 64;
 const LOW_MEMORY_ATLAS_DIRECTIONS: u32 = 16;
+const PERFORMANCE_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(512);
+const BALANCED_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(128);
+const LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(32);
+const BUDGETED_SCENE_STORE_ORPHANED_FLOOR_BYTES: u64 = mib_to_bytes(8);
+const BALANCED_SCENE_STORE_SLACK_BYTES: u64 = mib_to_bytes(64);
+const LOW_MEMORY_SCENE_STORE_SLACK_BYTES: u64 = mib_to_bytes(16);
 
 /// User-visible renderer memory profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +165,45 @@ pub struct RepresentationBudgetPolicy {
     pub enabled: bool,
 }
 
+/// SceneStore compaction thresholds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneStoreCompactionPolicy {
+    /// Minimum orphaned bytes before compaction is considered.
+    pub min_orphaned_bytes: u64,
+    /// Minimum orphaned fraction of logical allocation.
+    pub min_orphaned_ratio: f32,
+}
+
+impl SceneStoreCompactionPolicy {
+    /// Returns `true` when fragmentation crosses the policy thresholds.
+    pub fn should_compact(self, orphaned_bytes: u64, allocated_bytes: u64) -> bool {
+        if allocated_bytes == 0 || orphaned_bytes < self.min_orphaned_bytes {
+            return false;
+        }
+        (orphaned_bytes as f64 / allocated_bytes as f64) >= f64::from(self.min_orphaned_ratio)
+    }
+}
+
+/// SceneStore buffer growth strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneStoreGrowthPolicy {
+    /// Grow to the next power of two.
+    PowerOfTwo,
+    /// Grow by roughly 1.5x with a byte slack cap.
+    Moderate { max_slack_bytes: u64 },
+    /// Grow close to the requested size with a byte slack cap.
+    Tight { max_slack_bytes: u64 },
+}
+
+/// SceneStore memory policy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneStoreMemoryPolicy {
+    /// Compaction trigger thresholds.
+    pub compaction: SceneStoreCompactionPolicy,
+    /// Buffer growth strategy.
+    pub growth: SceneStoreGrowthPolicy,
+}
+
 /// Construction-time renderer memory policy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderMemoryPolicy {
@@ -178,6 +223,8 @@ pub struct RenderMemoryPolicy {
     pub shadows: ShadowPolicy,
     /// Future representation-budgeting policy.
     pub reps: RepresentationBudgetPolicy,
+    /// SceneStore growth and compaction policy.
+    pub scene_store: SceneStoreMemoryPolicy,
 }
 
 impl RenderMemoryPolicy {
@@ -210,6 +257,13 @@ impl RenderMemoryPolicy {
                 max_atlas_directions: PERFORMANCE_ATLAS_DIRECTIONS,
             },
             reps: RepresentationBudgetPolicy { enabled: false },
+            scene_store: SceneStoreMemoryPolicy {
+                compaction: SceneStoreCompactionPolicy {
+                    min_orphaned_bytes: PERFORMANCE_SCENE_STORE_ORPHANED_BYTES,
+                    min_orphaned_ratio: 0.5,
+                },
+                growth: SceneStoreGrowthPolicy::PowerOfTwo,
+            },
         }
     }
 
@@ -242,6 +296,15 @@ impl RenderMemoryPolicy {
                 max_atlas_directions: BALANCED_ATLAS_DIRECTIONS,
             },
             reps: RepresentationBudgetPolicy { enabled: true },
+            scene_store: SceneStoreMemoryPolicy {
+                compaction: SceneStoreCompactionPolicy {
+                    min_orphaned_bytes: BALANCED_SCENE_STORE_ORPHANED_BYTES,
+                    min_orphaned_ratio: 0.25,
+                },
+                growth: SceneStoreGrowthPolicy::Moderate {
+                    max_slack_bytes: BALANCED_SCENE_STORE_SLACK_BYTES,
+                },
+            },
         }
     }
 
@@ -274,6 +337,15 @@ impl RenderMemoryPolicy {
                 max_atlas_directions: LOW_MEMORY_ATLAS_DIRECTIONS,
             },
             reps: RepresentationBudgetPolicy { enabled: true },
+            scene_store: SceneStoreMemoryPolicy {
+                compaction: SceneStoreCompactionPolicy {
+                    min_orphaned_bytes: LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES,
+                    min_orphaned_ratio: 0.1,
+                },
+                growth: SceneStoreGrowthPolicy::Tight {
+                    max_slack_bytes: LOW_MEMORY_SCENE_STORE_SLACK_BYTES,
+                },
+            },
         }
     }
 
@@ -283,6 +355,18 @@ impl RenderMemoryPolicy {
         policy.profile = RenderMemoryProfile::Budgeted { bytes };
         policy.budget_bytes = Some(bytes);
         policy.reps.enabled = true;
+        let budget_threshold = bytes / 20;
+        let min_orphaned_bytes = if budget_threshold < BUDGETED_SCENE_STORE_ORPHANED_FLOOR_BYTES {
+            BUDGETED_SCENE_STORE_ORPHANED_FLOOR_BYTES
+        } else if budget_threshold > LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES {
+            LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES
+        } else {
+            budget_threshold
+        };
+        policy.scene_store.compaction = SceneStoreCompactionPolicy {
+            min_orphaned_bytes,
+            min_orphaned_ratio: 0.1,
+        };
         policy
     }
 
@@ -568,6 +652,15 @@ mod tests {
         let policy = RenderMemoryPolicy::performance();
 
         assert!(!policy.reps.enabled);
+        assert_eq!(
+            policy.scene_store.compaction.min_orphaned_bytes,
+            mib_to_bytes(512)
+        );
+        assert_eq!(policy.scene_store.compaction.min_orphaned_ratio, 0.5);
+        assert_eq!(
+            policy.scene_store.growth,
+            SceneStoreGrowthPolicy::PowerOfTwo
+        );
     }
 
     #[test]
@@ -586,6 +679,45 @@ mod tests {
         assert!(policy.picking.hit_test_enabled);
         assert!(!policy.picking.reprojection_enabled);
         assert!(!policy.overlays.selection_enabled);
+        assert_eq!(
+            policy.scene_store.compaction.min_orphaned_bytes,
+            mib_to_bytes(32)
+        );
+        assert_eq!(policy.scene_store.compaction.min_orphaned_ratio, 0.1);
+        assert_eq!(
+            policy.scene_store.growth,
+            SceneStoreGrowthPolicy::Tight {
+                max_slack_bytes: mib_to_bytes(16)
+            }
+        );
+    }
+
+    #[test]
+    fn low_memory_scene_store_policy_uses_aggressive_compaction() {
+        let policy = RenderMemoryPolicy::low_memory();
+
+        assert_eq!(
+            policy.scene_store.compaction.min_orphaned_bytes,
+            mib_to_bytes(32)
+        );
+        assert!(policy
+            .scene_store
+            .compaction
+            .should_compact(mib_to_bytes(32), mib_to_bytes(256)));
+        assert!(!policy
+            .scene_store
+            .compaction
+            .should_compact(mib_to_bytes(16), mib_to_bytes(256)));
+    }
+
+    #[test]
+    fn small_budget_caps_scene_store_threshold_at_budget_fraction() {
+        let policy = RenderMemoryPolicy::budgeted(mib_to_bytes(128));
+
+        assert_eq!(
+            policy.scene_store.compaction.min_orphaned_bytes,
+            mib_to_bytes(8)
+        );
     }
 
     #[test]

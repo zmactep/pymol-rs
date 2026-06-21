@@ -359,7 +359,7 @@ pub(crate) fn should_rebuild_selected_indices(
         && marker_updates_change_selected(old_selected_indices, marker_updates)
 }
 
-pub(crate) fn object_marker_bits<'a>(marker_lut: &'a [u32], slot: ObjectSlot) -> &'a [u32] {
+pub(crate) fn object_marker_bits(marker_lut: &[u32], slot: ObjectSlot) -> &[u32] {
     let start = slot.atom_offset as usize;
     if start >= marker_lut.len() {
         return &[];

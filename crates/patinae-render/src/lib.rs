@@ -61,8 +61,9 @@ pub use memory_policy::{
     required_limits_for_memory_policy, select_render_memory_policy, FrameTargetPolicy,
     OverlayPolicy, PickingPolicy, PostprocessPolicy, RenderAdapterType, RenderBackend,
     RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryProfileParseError,
-    RenderMemorySelectionInput, RepresentationBudgetPolicy, ShadowPolicy,
-    PERFORMANCE_MAX_BUFFER_SIZE, PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
+    RenderMemorySelectionInput, RepresentationBudgetPolicy, SceneStoreCompactionPolicy,
+    SceneStoreGrowthPolicy, SceneStoreMemoryPolicy, ShadowPolicy, PERFORMANCE_MAX_BUFFER_SIZE,
+    PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
 };
 pub use picking::{ObjectId, PackedId, PickHit, PickingMode, RenderConfig, RepKind};
 pub use render_artifacts::{
@@ -79,7 +80,10 @@ pub use representation_budget::{
 };
 pub use representations::sphere::SphereLodDiagnostics;
 pub use representations::stick::StickLodDiagnostics;
-pub use scene_store::SceneStoreFragmentationStats;
+pub use scene_store::{
+    SceneStoreBufferKind, SceneStoreBufferStats, SceneStoreCompactionStats,
+    SceneStoreFragmentationStats, SceneStoreMemoryStats,
+};
 #[cfg(feature = "stats")]
 pub use stats::{FrameStats, FrameStatsCollector};
 pub use stats_history::FrameStatsHistory;

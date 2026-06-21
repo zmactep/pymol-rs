@@ -43,7 +43,9 @@ use crate::postprocess::ssao_compose::SsaoComposePass;
 use crate::render_input::SceneLod;
 use crate::representation_budget::{RepBudgetDiagnostic, RepBudgetRequest, RepBudgetWarningKey};
 use crate::representations::{DrawPhase, Representation};
-use crate::scene_store::{SceneStore, SceneStoreFragmentationStats, SceneStoreLayout};
+use crate::scene_store::{
+    SceneStore, SceneStoreCompactionStats, SceneStoreFragmentationStats, SceneStoreLayout,
+};
 #[cfg(feature = "stats")]
 use crate::stats::FrameStatsCollector;
 use crate::uniforms::FrameUniforms;
@@ -85,6 +87,7 @@ pub struct RenderSyncTimings {
     pub marker_lut_upload_ranges: u32,
     pub marker_lut_reallocated: bool,
     pub scene_store_fragmentation: SceneStoreFragmentationStats,
+    pub scene_store_compaction: SceneStoreCompactionStats,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

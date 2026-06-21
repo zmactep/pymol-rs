@@ -16,7 +16,8 @@ use patinae_render::{
     copy_rgba_buffer_to_viewport_texture, estimate_texture_2d_bytes, select_render_memory_policy,
     DisplayedGeometry, GeometryExportOptions, GpuMemoryCategory, GpuMemorySnapshot, GpuMemoryUsage,
     GpuViewportImage, RenderArtifactSnapshot, RenderConfig, RenderInput, RenderMemoryPolicy,
-    RenderMemoryProfile, RenderMemorySelectionInput, RenderState, SceneLod, TraceGeometryChunk,
+    RenderMemoryProfile, RenderMemorySelectionInput, RenderState, RenderSyncTimings, SceneLod,
+    TraceGeometryChunk,
 };
 use patinae_scene::{Camera, CaptureRenderer, ObjectRegistry, PickHit, Session, ViewerError};
 use patinae_settings::{ResolvedSettings, Settings, ShadingMode};
@@ -136,6 +137,11 @@ impl ViewportRenderer {
         self.state.take_frame_stats()
     }
 
+    /// Return the renderer memory profile selected at construction.
+    pub fn memory_profile(&self) -> RenderMemoryProfile {
+        self.memory_policy.profile
+    }
+
     /// Return a renderer memory snapshot including desktop handoff textures.
     pub fn memory_snapshot(&self) -> GpuMemorySnapshot {
         let mut snapshot = self.state.memory_snapshot();
@@ -159,6 +165,11 @@ impl ViewportRenderer {
             );
         }
         snapshot
+    }
+
+    /// Return timings from the most recent renderer sync.
+    pub fn last_sync_timings(&self) -> RenderSyncTimings {
+        self.state.last_sync_timings()
     }
 
     pub fn render(

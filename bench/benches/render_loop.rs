@@ -142,6 +142,15 @@ fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn force_visible_reps(mol: &mut ObjectMolecule, visible: RepMask) {
+    let n_atoms = mol.atom_count();
+    for idx in 0..n_atoms {
+        if let Some(atom) = mol.atoms_mut().nth(idx) {
+            atom.repr.visible_reps = visible;
+        }
+    }
+}
+
 fn checksum_bytes<'a>(rows: impl Iterator<Item = &'a [u8]>) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -518,10 +527,14 @@ fn sync_with_timing(
 }
 
 fn print_sync_timing(label: &str, wall: Duration, timings: RenderSyncTimings) {
+    let scene = timings.scene_store_fragmentation;
+    let compaction = timings.scene_store_compaction;
     eprintln!(
         "{label}: wall_ms={:.3} scene_store_object_sync_ms={:.3} \
          scene_store_flush_ms={:.3} rep_sync_ms={:.3} order_bounds_ms={:.3} \
-         compute_dispatch_ms={:.3} marker_upload_bytes={}",
+         compute_dispatch_ms={:.3} marker_upload_bytes={} scene_live_mib={:.2} \
+         scene_allocated_mib={:.2} scene_orphaned_mib={:.2} scene_capacity_mib={:.2} \
+         scene_compacted={} scene_reclaimed_mib={:.2}",
         wall.as_secs_f64() * 1000.0,
         timings.scene_store_object_sync_ms,
         timings.scene_store_flush_ms,
@@ -529,7 +542,110 @@ fn print_sync_timing(label: &str, wall: Duration, timings: RenderSyncTimings) {
         timings.order_bounds_ms,
         timings.compute_dispatch_ms,
         timings.marker_lut_upload_bytes,
+        patinae_render::bytes_to_mib(scene.live_bytes),
+        patinae_render::bytes_to_mib(scene.allocated_bytes),
+        patinae_render::bytes_to_mib(scene.orphaned_bytes),
+        patinae_render::bytes_to_mib(scene.capacity_bytes),
+        compaction.ran,
+        patinae_render::bytes_to_mib(compaction.reclaimed_bytes),
     );
+}
+
+fn run_scene_store_churn(
+    state: &mut RenderState,
+    mol: &ObjectMolecule,
+    coord: &CoordSet,
+    atom_colors: &[[f32; 4]],
+    atom_markers: &[u32],
+    has_markers: bool,
+    settings: &ResolvedSettings,
+    visible: RepMask,
+) {
+    if std::env::var("BENCH_SCENE_STORE_CHURN").ok().as_deref() != Some("replace") {
+        return;
+    }
+    let iterations = std::env::var("BENCH_SCENE_STORE_CHURN_ITERS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(8)
+        .max(1);
+    let small_atom_count = if mol.atom_count() > 3 {
+        (mol.atom_count() / 2).max(1)
+    } else {
+        mol.atom_count() + 3
+    };
+    let mut small_mol = synthetic_water_molecule(small_atom_count);
+    force_visible_reps(&mut small_mol, visible);
+    let small_coord = small_mol.current_coord_set().expect("small coord").clone();
+    let named = NamedPalette::new();
+    let palette = ThemedPalette::dark();
+    let resolver = ColorResolver::new(&named, &palette);
+    let small_colors: Vec<[f32; 4]> = small_mol
+        .atoms()
+        .map(|atom| resolver.resolve_atom(atom))
+        .collect();
+    let small_lod = SceneLod::from_atom_count(small_mol.atom_count());
+    let original_lod = SceneLod::from_atom_count(mol.atom_count());
+
+    eprintln!(
+        "BENCH_SCENE_STORE_CHURN=replace iterations={} alternate_atoms={}",
+        iterations, small_atom_count
+    );
+    for i in 0..iterations {
+        let use_small = i % 2 == 0;
+        let (active_mol, active_coord, active_colors, lod) = if use_small {
+            (&small_mol, &small_coord, small_colors.as_slice(), small_lod)
+        } else {
+            (mol, coord, atom_colors, original_lod)
+        };
+        let input = RenderObjectInput {
+            object_id: ObjectId(1),
+            molecule: active_mol,
+            coord_set: active_coord,
+            visible_reps: visible,
+            draw_reps: visible,
+            object_settings: None,
+            atom_colors: active_colors,
+            atom_rep_colors: &[],
+            atom_markers: &[],
+            marker_updates: &[],
+            has_markers: false,
+            lod,
+            dirty: DirtyFlags::ALL,
+        };
+        let render_input = RenderInput {
+            objects: std::slice::from_ref(&input),
+            maps: &[],
+            settings,
+            lod,
+        };
+        let (wall, timings) = sync_with_timing(state, &render_input);
+        print_sync_timing("scene_store_churn.replace", wall, timings);
+    }
+
+    let restore_input = RenderObjectInput {
+        object_id: ObjectId(1),
+        molecule: mol,
+        coord_set: coord,
+        visible_reps: visible,
+        draw_reps: visible,
+        object_settings: None,
+        atom_colors,
+        atom_rep_colors: &[],
+        atom_markers,
+        marker_updates: &[],
+        has_markers,
+        lod: original_lod,
+        dirty: DirtyFlags::ALL,
+    };
+    let restore_render_input = RenderInput {
+        objects: std::slice::from_ref(&restore_input),
+        maps: &[],
+        settings,
+        lod: original_lod,
+    };
+    let (wall, timings) = sync_with_timing(state, &restore_render_input);
+    print_sync_timing("scene_store_churn.restore", wall, timings);
 }
 
 fn bench_render_loop(c: &mut Criterion) {
@@ -570,12 +686,7 @@ fn bench_render_loop(c: &mut Criterion) {
         "BENCH_REPS={}  → force_visible=0x{:x}",
         reps_env, force_visible.0
     );
-    let n_atoms_init = mol.atom_count();
-    for idx in 0..n_atoms_init {
-        if let Some(atom) = mol.atoms_mut().nth(idx) {
-            atom.repr.visible_reps = force_visible;
-        }
-    }
+    force_visible_reps(&mut mol, force_visible);
     let coord = mol.current_coord_set().expect("coord").clone();
 
     // Per-atom colors via the same resolver the live host uses.
@@ -816,6 +927,16 @@ fn bench_render_loop(c: &mut Criterion) {
     }
     print_sphere_lod("sphere_lod_after_warmup", &state);
     print_stick_lod("stick_lod_after_warmup", &state);
+    run_scene_store_churn(
+        &mut state,
+        &mol,
+        &coord,
+        &atom_colors,
+        &atom_markers,
+        has_markers,
+        &settings,
+        visible,
+    );
 
     if scenario.name == "cartoon_toggle_large" {
         let mut hidden_draw = visible;

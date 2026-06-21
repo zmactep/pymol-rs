@@ -12,7 +12,10 @@ use patinae_framework::message::AppMessage;
 use patinae_framework::plugin_ui::{PanelEvent, PanelEventKind, PanelValue};
 use patinae_framework::topics::{self, SaveFileRequest, SAVE_FILE_REQUEST_TOPIC};
 use patinae_plugin_host::PluginHost;
-use patinae_render::{required_limits_for_memory_policy, FrameStatsHistory, RenderMemoryPolicy};
+use patinae_render::{
+    bytes_to_mib, required_limits_for_memory_policy, FrameStatsHistory, RenderMemoryPolicy,
+    RenderMemoryProfile,
+};
 use patinae_scene::{
     expand_pick_to_selection, pick_expression_for_hit, CaptureRenderer, KeyBinding, ViewportImage,
 };
@@ -50,6 +53,36 @@ const REPL_PILL_WIDTH_LP: f32 = 380.0;
 const REPL_PILL_HEIGHT_LP: f32 = 32.0;
 const REPL_PILL_BOTTOM_LP: f32 = 24.0;
 const TRANSIENT_NOTIFICATION_SECS: u64 = 2;
+
+fn format_mib(bytes: u64) -> String {
+    format!("{:.2} MiB", bytes_to_mib(bytes))
+}
+
+fn format_hud_mib(bytes: u64) -> String {
+    let mib = bytes_to_mib(bytes);
+    if mib >= 100.0 {
+        format!("{mib:.0} MiB")
+    } else {
+        format!("{mib:.1} MiB")
+    }
+}
+
+fn memory_profile_hud_label(profile: RenderMemoryProfile) -> &'static str {
+    match profile {
+        RenderMemoryProfile::Performance => "PERF",
+        RenderMemoryProfile::Balanced => "BAL",
+        RenderMemoryProfile::LowMemory | RenderMemoryProfile::Budgeted { .. } => "LOW",
+    }
+}
+
+fn memory_total_hud_text(total_bytes: u64, budget_bytes: Option<u64>) -> String {
+    let total = format_hud_mib(total_bytes);
+    match budget_bytes {
+        Some(budget_bytes) => format!("{total} / {}", format_hud_mib(budget_bytes)),
+        None => total,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartupAction {
     Warning(String),
@@ -547,6 +580,34 @@ impl App {
             if let Some(memory) = self.renderer.as_ref().map(|r| r.memory_snapshot()) {
                 eprintln!("  {}", memory.timing_line());
             }
+            if let Some(timings) = self.renderer.as_ref().map(|r| r.last_sync_timings()) {
+                let scene = timings.scene_store_fragmentation;
+                eprintln!(
+                    "  [gpu-mem] scene_store live={} allocated={} orphaned={} capacity={} slack={}",
+                    format_mib(scene.live_bytes),
+                    format_mib(scene.allocated_bytes),
+                    format_mib(scene.orphaned_bytes),
+                    format_mib(scene.capacity_bytes),
+                    format_mib(scene.capacity_slack_bytes),
+                );
+                if timings.scene_store_compaction.ran {
+                    let compaction = timings.scene_store_compaction;
+                    let largest = compaction
+                        .largest_orphaned_buffer
+                        .map(|kind| kind.label())
+                        .unwrap_or("none");
+                    eprintln!(
+                        "  [gpu-mem] scene_store compacted reclaimed={} capacity_before={} \
+                         capacity_after={} orphaned_before={} moved_objects={} largest_orphaned={}",
+                        format_mib(compaction.reclaimed_bytes),
+                        format_mib(compaction.capacity_before_bytes),
+                        format_mib(compaction.capacity_after_bytes),
+                        format_mib(compaction.orphaned_before_bytes),
+                        compaction.moved_objects,
+                        largest,
+                    );
+                }
+            }
         }
 
         if self.perf_enabled {
@@ -898,6 +959,15 @@ impl App {
         vp.set_perf_avg_text(format!("{:.0} fps  ({:.2} ms)", avg_fps, avg_ms).into());
         vp.set_perf_low_1pct_text(format!("1% low: {:.2} ms", low_1).into());
         vp.set_perf_low_0_1pct_text(format!("0.1% low: {:.2} ms", low_01).into());
+        if let Some(renderer) = self.renderer.as_ref() {
+            let profile = renderer.memory_profile();
+            let memory = renderer.memory_snapshot();
+            vp.set_perf_memory_profile_label(memory_profile_hud_label(profile).into());
+            vp.set_perf_memory_total_text(
+                memory_total_hud_text(memory.total_capacity_bytes(), profile.budget_bytes()).into(),
+            );
+            vp.set_perf_memory_live_text(format_hud_mib(memory.total_live_bytes()).into());
+        }
         if let Some(s) = gpu_stats {
             // Sentinel `-1.0` means the pass didn't run this frame.
             let fmt = |label: &str, ms: f32| -> String {

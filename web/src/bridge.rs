@@ -109,6 +109,17 @@ struct WebPerformanceSnapshot {
     last_sync_scene_store_live_table_slots: u64,
     last_sync_scene_store_allocated_table_slots: u64,
     last_sync_scene_store_orphaned_table_slots: u64,
+    last_sync_scene_store_live_bytes: u64,
+    last_sync_scene_store_allocated_bytes: u64,
+    last_sync_scene_store_orphaned_bytes: u64,
+    last_sync_scene_store_capacity_bytes: u64,
+    last_sync_scene_store_capacity_slack_bytes: u64,
+    last_sync_scene_store_compacted: bool,
+    last_sync_scene_store_compaction_reclaimed_bytes: u64,
+    last_sync_scene_store_compaction_capacity_before_bytes: u64,
+    last_sync_scene_store_compaction_capacity_after_bytes: u64,
+    last_sync_scene_store_compaction_orphaned_before_bytes: u64,
+    last_sync_scene_store_compaction_moved_objects: u64,
     sphere_lod_active: bool,
     sphere_lod_sample_shift: u32,
     sphere_lod_sample_stride: u32,
@@ -502,6 +513,7 @@ impl WebViewer {
             .last_render_timings
             .sync_detail
             .scene_store_fragmentation;
+        let scene_compaction = self.last_render_timings.sync_detail.scene_store_compaction;
         let snapshot = WebPerformanceSnapshot {
             render_count: self.render_count,
             avg_render_ms: self.perf_history.avg_ms(),
@@ -549,6 +561,20 @@ impl WebViewer {
             last_sync_scene_store_live_table_slots: scene_fragmentation.live_table_slots,
             last_sync_scene_store_allocated_table_slots: scene_fragmentation.allocated_table_slots,
             last_sync_scene_store_orphaned_table_slots: scene_fragmentation.orphaned_table_slots,
+            last_sync_scene_store_live_bytes: scene_fragmentation.live_bytes,
+            last_sync_scene_store_allocated_bytes: scene_fragmentation.allocated_bytes,
+            last_sync_scene_store_orphaned_bytes: scene_fragmentation.orphaned_bytes,
+            last_sync_scene_store_capacity_bytes: scene_fragmentation.capacity_bytes,
+            last_sync_scene_store_capacity_slack_bytes: scene_fragmentation.capacity_slack_bytes,
+            last_sync_scene_store_compacted: scene_compaction.ran,
+            last_sync_scene_store_compaction_reclaimed_bytes: scene_compaction.reclaimed_bytes,
+            last_sync_scene_store_compaction_capacity_before_bytes: scene_compaction
+                .capacity_before_bytes,
+            last_sync_scene_store_compaction_capacity_after_bytes: scene_compaction
+                .capacity_after_bytes,
+            last_sync_scene_store_compaction_orphaned_before_bytes: scene_compaction
+                .orphaned_before_bytes,
+            last_sync_scene_store_compaction_moved_objects: scene_compaction.moved_objects,
             sphere_lod_active: sphere_lod.active,
             sphere_lod_sample_shift: sphere_lod.sample_shift,
             sphere_lod_sample_stride: sphere_lod.sample_stride,

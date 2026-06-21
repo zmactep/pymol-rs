@@ -99,6 +99,17 @@ export interface ViewerWasmPerformanceSnapshot {
   last_sync_scene_store_live_table_slots: number;
   last_sync_scene_store_allocated_table_slots: number;
   last_sync_scene_store_orphaned_table_slots: number;
+  last_sync_scene_store_live_bytes: number;
+  last_sync_scene_store_allocated_bytes: number;
+  last_sync_scene_store_orphaned_bytes: number;
+  last_sync_scene_store_capacity_bytes: number;
+  last_sync_scene_store_capacity_slack_bytes: number;
+  last_sync_scene_store_compacted: boolean;
+  last_sync_scene_store_compaction_reclaimed_bytes: number;
+  last_sync_scene_store_compaction_capacity_before_bytes: number;
+  last_sync_scene_store_compaction_capacity_after_bytes: number;
+  last_sync_scene_store_compaction_orphaned_before_bytes: number;
+  last_sync_scene_store_compaction_moved_objects: number;
   sphere_lod_active: boolean;
   sphere_lod_sample_shift: number;
   sphere_lod_sample_stride: number;

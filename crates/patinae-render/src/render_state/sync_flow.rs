@@ -11,6 +11,7 @@ use crate::representation_budget::{
     RepBuildDecision, RepMemoryEstimate, RepQualityLevel,
 };
 use crate::representations::catalog::{self, RepCatalogEntry};
+use crate::scene_store::SceneStoreCompactionStats;
 use patinae_mol::{AtomIndex, DirtyFlags};
 use std::collections::{HashMap, HashSet};
 
@@ -199,19 +200,54 @@ impl RenderState {
 
             self.scene.scene_store.sync_object(obj, effective_dirty);
         }
+        if self
+            .scene
+            .scene_store
+            .retain_objects(input.objects.iter().map(|obj| obj.object_id))
+        {
+            scene_changed = true;
+            picking_cache_dirty = true;
+            draw_order_dirty = true;
+            bounds_dirty = true;
+            object_offsets_changed = true;
+        }
+        let mut scene_store_compaction = if self
+            .scene
+            .scene_store
+            .should_compact(self.memory.policy.scene_store.compaction)
+        {
+            self.scene.scene_store.compact()
+        } else {
+            Default::default()
+        };
+        if scene_store_compaction.ran {
+            scene_changed = true;
+            picking_cache_dirty = true;
+            draw_order_dirty = true;
+            bounds_dirty = true;
+            object_offsets_changed = true;
+            self.memory.rep_budget_request_cache.clear();
+        }
         timings.scene_store_object_sync_ms = sync_elapsed(&mut now_ms, t0);
 
         let t0 = sync_now(&mut now_ms);
-        let flush_stats = self.scene.scene_store.flush(
+        let mut flush_stats = self.scene.scene_store.flush(
             &self.ctx.device,
             &self.ctx.queue,
             &self.scene.scene_layout,
+            self.memory.policy.scene_store.growth,
         );
+        scene_store_compaction.finish_after_flush(flush_stats.fragmentation.capacity_bytes);
+        flush_stats.compaction = scene_store_compaction;
         timings.scene_store_flush_ms = sync_elapsed(&mut now_ms, t0);
         timings.marker_lut_upload_bytes = flush_stats.marker_lut_upload_bytes;
         timings.marker_lut_upload_ranges = flush_stats.marker_lut_upload_ranges;
         timings.marker_lut_reallocated = flush_stats.marker_lut_reallocated;
         timings.scene_store_fragmentation = flush_stats.fragmentation;
+        timings.scene_store_compaction = flush_stats.compaction;
+        if flush_stats.compaction.ran {
+            log_scene_store_compaction(flush_stats.compaction, self.memory.policy.profile);
+        }
 
         if object_offsets_changed {
             self.screen.marking_offsets_dirty = true;
@@ -721,6 +757,26 @@ fn log_rep_budget_warning(diagnostic: RepBudgetDiagnostic, profile: crate::Rende
         ),
         RepBuildDecision::Build => {}
     }
+}
+
+fn log_scene_store_compaction(
+    compaction: SceneStoreCompactionStats,
+    profile: crate::RenderMemoryProfile,
+) {
+    let largest = compaction
+        .largest_orphaned_buffer
+        .map(|kind| kind.label())
+        .unwrap_or("none");
+    log::info!(
+        "patinae-render: [gpu-mem] scene_store compacted profile={} reclaimed={:.2} MiB capacity_before={:.2} MiB capacity_after={:.2} MiB orphaned_before={:.2} MiB moved_objects={} largest_orphaned={}",
+        profile,
+        bytes_to_mib(compaction.reclaimed_bytes),
+        bytes_to_mib(compaction.capacity_before_bytes),
+        bytes_to_mib(compaction.capacity_after_bytes),
+        bytes_to_mib(compaction.orphaned_before_bytes),
+        compaction.moved_objects,
+        largest
+    );
 }
 
 fn rep_key_set_changed(
