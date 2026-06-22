@@ -155,6 +155,13 @@ export interface ViewerPerformanceSnapshot {
   wasm: ViewerWasmPerformanceSnapshot | null;
 }
 
+export type RenderMemoryProfileOption =
+  | "auto"
+  | "performance"
+  | "balanced"
+  | "lite"
+  | `manual:${number}`;
+
 export interface ViewerOptions {
   /** Simple list — all panels go into a "sidebar" element (legacy). */
   panels?: PanelName[];
@@ -180,7 +187,7 @@ export interface ViewerOptions {
    * Force the renderer memory profile at WebGPU initialization.
    * Defaults to adapter-based selection.
    */
-  memoryProfile?: "auto" | "performance" | "balanced" | "low";
+  memoryProfile?: RenderMemoryProfileOption;
 }
 
 export type PanelName = "repl" | "objects" | "sequence" | "movie";

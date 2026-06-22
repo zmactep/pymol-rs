@@ -1055,8 +1055,8 @@ fn memory_policy_supported_by_device(policy: RenderMemoryPolicy, limits: &wgpu::
                     >= PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
         }
         RenderMemoryProfile::Balanced
-        | RenderMemoryProfile::LowMemory
-        | RenderMemoryProfile::Budgeted { .. } => true,
+        | RenderMemoryProfile::Lite
+        | RenderMemoryProfile::Manual { .. } => true,
     }
 }
 

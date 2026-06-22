@@ -183,14 +183,11 @@ fn parse_memory_profile_override(value: &str) -> Result<Option<RenderMemoryProfi
     {
         return Ok(None);
     }
-    match value.to_ascii_lowercase().as_str() {
-        "performance" => Ok(Some(RenderMemoryProfile::Performance)),
-        "balanced" => Ok(Some(RenderMemoryProfile::Balanced)),
-        "low" => Ok(Some(RenderMemoryProfile::LowMemory)),
-        _ => Err(JsValue::from_str(&format!(
-            "invalid render memory profile {value:?}: expected auto, performance, balanced, or low"
-        ))),
-    }
+    value.parse::<RenderMemoryProfile>().map(Some).map_err(|_| {
+        JsValue::from_str(&format!(
+            "invalid render memory profile {value:?}: expected auto, performance, balanced, lite, or manual:<MiB>"
+        ))
+    })
 }
 
 async fn create_web_viewer(
@@ -341,7 +338,7 @@ impl WebViewer {
     /// Create a WebViewer with an explicit renderer memory profile.
     ///
     /// Pass `"auto"` or an empty string to use adapter-based selection.
-    /// Accepted forced profiles are `"performance"`, `"balanced"`, and `"low"`.
+    /// Accepted forced profiles are `"performance"`, `"balanced"`, and `"lite"`.
     #[wasm_bindgen(js_name = createWithMemoryProfile)]
     pub async fn create_with_memory_profile(
         canvas_id: &str,

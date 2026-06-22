@@ -234,7 +234,7 @@ pub(super) struct ScreenRuntime {
     /// Lazily created when the selection overlay is enabled. Marking reads the
     /// overlay id texture and marker LUT.
     pub(super) marking: Option<MarkingPass>,
-    /// Low-memory selection-only fallback. Draws compact selected atom dots
+    /// Lite selection-only fallback. Draws compact selected atom dots
     /// without allocating overlay id, marking mask, or color scratch targets.
     pub(super) selection_dots: Option<SelectionDotsPass>,
     pub(super) composite_bind_group: wgpu::BindGroup,

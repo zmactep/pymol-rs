@@ -15,7 +15,7 @@
 
 APP_NAME       := Patinae
 BUNDLE_ID      := me.yakovlev.patinae
-VERSION        := 0.4.2
+VERSION        := 0.4.3
 BINARY_NAME    := patinae
 
 CARGO          ?= cargo

@@ -1,4 +1,4 @@
-// Low-memory selected atom dots. Draws compact selected-index buffers, not
+// Lite selected atom dots. Draws compact selected-index buffers, not
 // every atom in the scene.
 
 // {{INCLUDE_FRAME}}

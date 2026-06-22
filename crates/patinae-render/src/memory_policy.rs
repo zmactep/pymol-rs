@@ -9,27 +9,27 @@ use std::str::FromStr;
 
 use crate::byte_units::{gib_to_bytes, mib_to_bytes, BYTES_PER_MIB};
 
-const LOW_MEMORY_BUFFER_THRESHOLD: u64 = gib_to_bytes(1);
-const LOW_MEMORY_STORAGE_BINDING_THRESHOLD: u32 = mib_to_bytes(512) as u32;
+const LITE_BUFFER_THRESHOLD: u64 = gib_to_bytes(1);
+const LITE_STORAGE_BINDING_THRESHOLD: u32 = mib_to_bytes(512) as u32;
 /// Desired single-buffer target for capable native adapters.
 pub const PERFORMANCE_MAX_BUFFER_SIZE: u64 = gib_to_bytes(4);
 /// Desired single storage-buffer binding target for capable adapters.
 pub const PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE: u32 = (gib_to_bytes(2) - 1) as u32;
 
 const DEFAULT_PICKING_SCALE: f32 = 0.5;
-const LOW_MEMORY_PICKING_SCALE: f32 = 0.25;
+const LITE_PICKING_SCALE: f32 = 0.25;
 const PERFORMANCE_SHADOW_MAP_SIZE: u32 = 4096;
 const BALANCED_SHADOW_MAP_SIZE: u32 = 2048;
-const LOW_MEMORY_SHADOW_MAP_SIZE: u32 = 1024;
+const LITE_SHADOW_MAP_SIZE: u32 = 1024;
 const PERFORMANCE_ATLAS_DIRECTIONS: u32 = 256;
 const BALANCED_ATLAS_DIRECTIONS: u32 = 64;
-const LOW_MEMORY_ATLAS_DIRECTIONS: u32 = 16;
+const LITE_ATLAS_DIRECTIONS: u32 = 16;
 const PERFORMANCE_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(512);
 const BALANCED_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(128);
-const LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(32);
-const BUDGETED_SCENE_STORE_ORPHANED_FLOOR_BYTES: u64 = mib_to_bytes(8);
+const LITE_SCENE_STORE_ORPHANED_BYTES: u64 = mib_to_bytes(32);
+const MANUAL_SCENE_STORE_ORPHANED_FLOOR_BYTES: u64 = mib_to_bytes(8);
 const BALANCED_SCENE_STORE_SLACK_BYTES: u64 = mib_to_bytes(64);
-const LOW_MEMORY_SCENE_STORE_SLACK_BYTES: u64 = mib_to_bytes(16);
+const LITE_SCENE_STORE_SLACK_BYTES: u64 = mib_to_bytes(16);
 
 /// User-visible renderer memory profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,17 +39,17 @@ pub enum RenderMemoryProfile {
     /// Prefer lower baseline memory without disabling normal interaction.
     Balanced,
     /// Disable or deny optional full-resolution screen resources.
-    LowMemory,
+    Lite,
     /// Apply profile policy from an explicit byte budget.
-    Budgeted { bytes: u64 },
+    Manual { bytes: u64 },
 }
 
 impl RenderMemoryProfile {
-    /// Returns the configured budget, if this profile is budgeted.
+    /// Returns the configured budget, if this profile is manual.
     pub const fn budget_bytes(self) -> Option<u64> {
         match self {
-            Self::Budgeted { bytes } => Some(bytes),
-            Self::Performance | Self::Balanced | Self::LowMemory => None,
+            Self::Manual { bytes } => Some(bytes),
+            Self::Performance | Self::Balanced | Self::Lite => None,
         }
     }
 }
@@ -59,8 +59,8 @@ impl fmt::Display for RenderMemoryProfile {
         match self {
             Self::Performance => f.write_str("performance"),
             Self::Balanced => f.write_str("balanced"),
-            Self::LowMemory => f.write_str("low"),
-            Self::Budgeted { bytes } => write!(f, "low:{}MiB", bytes / BYTES_PER_MIB),
+            Self::Lite => f.write_str("lite"),
+            Self::Manual { bytes } => write!(f, "manual:{}MiB", bytes / BYTES_PER_MIB),
         }
     }
 }
@@ -73,14 +73,14 @@ impl FromStr for RenderMemoryProfile {
         match value.as_str() {
             "performance" | "perf" => return Ok(Self::Performance),
             "balanced" | "balance" => return Ok(Self::Balanced),
-            "low" | "low-memory" | "low_memory" => return Ok(Self::LowMemory),
+            "lite" => return Ok(Self::Lite),
             _ => {}
         }
 
         let Some((kind, mib)) = value.split_once(':') else {
             return Err(RenderMemoryProfileParseError);
         };
-        if kind != "low" && kind != "budget" && kind != "budgeted" {
+        if kind != "manual" {
             return Err(RenderMemoryProfileParseError);
         }
         let mib = mib
@@ -89,7 +89,7 @@ impl FromStr for RenderMemoryProfile {
         if mib == 0 {
             return Err(RenderMemoryProfileParseError);
         }
-        Ok(Self::Budgeted {
+        Ok(Self::Manual {
             bytes: mib_to_bytes(mib),
         })
     }
@@ -101,7 +101,7 @@ pub struct RenderMemoryProfileParseError;
 
 impl fmt::Display for RenderMemoryProfileParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("expected performance, balanced, low, or low:<MiB>")
+        f.write_str("expected performance, balanced, lite, or manual:<MiB>")
     }
 }
 
@@ -209,7 +209,7 @@ pub struct SceneStoreMemoryPolicy {
 pub struct RenderMemoryPolicy {
     /// Selected profile.
     pub profile: RenderMemoryProfile,
-    /// Explicit byte budget for budgeted profiles.
+    /// Explicit byte budget for manual profiles.
     pub budget_bytes: Option<u64>,
     /// Hit-test picking resource policy.
     pub picking: PickingPolicy,
@@ -308,14 +308,14 @@ impl RenderMemoryPolicy {
         }
     }
 
-    /// Returns the constrained low-memory policy.
-    pub const fn low_memory() -> Self {
+    /// Returns the constrained lite policy.
+    pub const fn lite() -> Self {
         Self {
-            profile: RenderMemoryProfile::LowMemory,
+            profile: RenderMemoryProfile::Lite,
             budget_bytes: None,
             picking: PickingPolicy {
                 hit_test_enabled: true,
-                scale: LOW_MEMORY_PICKING_SCALE,
+                scale: LITE_PICKING_SCALE,
                 reprojection_enabled: false,
             },
             frame_targets: FrameTargetPolicy {
@@ -332,34 +332,34 @@ impl RenderMemoryPolicy {
                 fxaa_enabled: false,
             },
             shadows: ShadowPolicy {
-                max_shadow_map_size: LOW_MEMORY_SHADOW_MAP_SIZE,
+                max_shadow_map_size: LITE_SHADOW_MAP_SIZE,
                 max_atlas_tile_size: 512,
-                max_atlas_directions: LOW_MEMORY_ATLAS_DIRECTIONS,
+                max_atlas_directions: LITE_ATLAS_DIRECTIONS,
             },
             reps: RepresentationBudgetPolicy { enabled: true },
             scene_store: SceneStoreMemoryPolicy {
                 compaction: SceneStoreCompactionPolicy {
-                    min_orphaned_bytes: LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES,
+                    min_orphaned_bytes: LITE_SCENE_STORE_ORPHANED_BYTES,
                     min_orphaned_ratio: 0.1,
                 },
                 growth: SceneStoreGrowthPolicy::Tight {
-                    max_slack_bytes: LOW_MEMORY_SCENE_STORE_SLACK_BYTES,
+                    max_slack_bytes: LITE_SCENE_STORE_SLACK_BYTES,
                 },
             },
         }
     }
 
     /// Returns the constrained policy with an explicit representation budget.
-    pub const fn budgeted(bytes: u64) -> Self {
-        let mut policy = Self::low_memory();
-        policy.profile = RenderMemoryProfile::Budgeted { bytes };
+    pub const fn manual(bytes: u64) -> Self {
+        let mut policy = Self::lite();
+        policy.profile = RenderMemoryProfile::Manual { bytes };
         policy.budget_bytes = Some(bytes);
         policy.reps.enabled = true;
         let budget_threshold = bytes / 20;
-        let min_orphaned_bytes = if budget_threshold < BUDGETED_SCENE_STORE_ORPHANED_FLOOR_BYTES {
-            BUDGETED_SCENE_STORE_ORPHANED_FLOOR_BYTES
-        } else if budget_threshold > LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES {
-            LOW_MEMORY_SCENE_STORE_ORPHANED_BYTES
+        let min_orphaned_bytes = if budget_threshold < MANUAL_SCENE_STORE_ORPHANED_FLOOR_BYTES {
+            MANUAL_SCENE_STORE_ORPHANED_FLOOR_BYTES
+        } else if budget_threshold > LITE_SCENE_STORE_ORPHANED_BYTES {
+            LITE_SCENE_STORE_ORPHANED_BYTES
         } else {
             budget_threshold
         };
@@ -375,8 +375,8 @@ impl RenderMemoryPolicy {
         match profile {
             RenderMemoryProfile::Performance => Self::performance(),
             RenderMemoryProfile::Balanced => Self::balanced(),
-            RenderMemoryProfile::LowMemory => Self::low_memory(),
-            RenderMemoryProfile::Budgeted { bytes } => Self::budgeted(bytes),
+            RenderMemoryProfile::Lite => Self::lite(),
+            RenderMemoryProfile::Manual { bytes } => Self::manual(bytes),
         }
     }
 
@@ -385,8 +385,8 @@ impl RenderMemoryPolicy {
         match self.profile {
             RenderMemoryProfile::Performance => wgpu::MemoryHints::Performance,
             RenderMemoryProfile::Balanced
-            | RenderMemoryProfile::LowMemory
-            | RenderMemoryProfile::Budgeted { .. } => wgpu::MemoryHints::MemoryUsage,
+            | RenderMemoryProfile::Lite
+            | RenderMemoryProfile::Manual { .. } => wgpu::MemoryHints::MemoryUsage,
         }
     }
 }
@@ -501,11 +501,11 @@ pub fn select_render_memory_policy(
     if input.observed_downgrade
         || input.adapter_type == RenderAdapterType::Cpu
         || input.adapter_type == RenderAdapterType::VirtualGpu
-        || input.max_buffer_size < LOW_MEMORY_BUFFER_THRESHOLD
-        || input.max_storage_buffer_binding_size < LOW_MEMORY_STORAGE_BINDING_THRESHOLD
+        || input.max_buffer_size < LITE_BUFFER_THRESHOLD
+        || input.max_storage_buffer_binding_size < LITE_STORAGE_BINDING_THRESHOLD
         || input.max_texture_dimension_2d < 8192
     {
-        return RenderMemoryPolicy::low_memory();
+        return RenderMemoryPolicy::lite();
     }
     if input.is_web
         || matches!(
@@ -534,10 +534,10 @@ pub fn render_memory_policy_from_settings(
             RenderMemoryPolicy::performance()
         }
         patinae_settings::RenderMemoryProfileSetting::Balanced => RenderMemoryPolicy::balanced(),
-        patinae_settings::RenderMemoryProfileSetting::LowMemory => RenderMemoryPolicy::low_memory(),
-        patinae_settings::RenderMemoryProfileSetting::Budgeted => {
+        patinae_settings::RenderMemoryProfileSetting::Lite => RenderMemoryPolicy::lite(),
+        patinae_settings::RenderMemoryProfileSetting::Manual => {
             match u64::try_from(settings.renderer.memory_budget_mib) {
-                Ok(mib) if mib > 0 => RenderMemoryPolicy::budgeted(mib_to_bytes(mib)),
+                Ok(mib) if mib > 0 => RenderMemoryPolicy::manual(mib_to_bytes(mib)),
                 _ => auto_policy,
             }
         }
@@ -599,15 +599,35 @@ mod tests {
             Ok(RenderMemoryProfile::Balanced)
         );
         assert_eq!(
-            "low".parse::<RenderMemoryProfile>(),
-            Ok(RenderMemoryProfile::LowMemory)
+            "lite".parse::<RenderMemoryProfile>(),
+            Ok(RenderMemoryProfile::Lite)
         );
         assert_eq!(
-            "low:1024".parse::<RenderMemoryProfile>(),
-            Ok(RenderMemoryProfile::Budgeted {
+            "manual:1024".parse::<RenderMemoryProfile>(),
+            Ok(RenderMemoryProfile::Manual {
                 bytes: gib_to_bytes(1)
             })
         );
+    }
+
+    #[test]
+    fn profile_override_rejects_legacy_profile_values() {
+        let legacy_values = [
+            ["lo", "w"].concat(),
+            ["lo", "w-memory"].concat(),
+            ["lo", "w_memory"].concat(),
+            ["lo", "w:1024"].concat(),
+            ["li", "te:1024"].concat(),
+            ["bud", "get"].concat(),
+            ["bud", "geted"].concat(),
+        ];
+
+        for value in legacy_values {
+            assert_eq!(
+                value.parse::<RenderMemoryProfile>(),
+                Err(RenderMemoryProfileParseError)
+            );
+        }
     }
 
     #[test]
@@ -641,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn constrained_adapter_selects_low_memory() {
+    fn constrained_adapter_selects_lite() {
         let policy = select_render_memory_policy(
             input(
                 RenderAdapterType::IntegratedGpu,
@@ -651,7 +671,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(policy.profile, RenderMemoryProfile::LowMemory);
+        assert_eq!(policy.profile, RenderMemoryProfile::Lite);
         assert!(policy.picking.hit_test_enabled);
         assert!(!policy.picking.reprojection_enabled);
         assert!(!policy.postprocess.fxaa_enabled);
@@ -660,13 +680,13 @@ mod tests {
     }
 
     #[test]
-    fn forced_low_memory_changes_policy_without_weak_hardware() {
+    fn forced_lite_changes_policy_without_weak_hardware() {
         let policy = select_render_memory_policy(
             input(RenderAdapterType::DiscreteGpu, gib_to_bytes(8), u32::MAX),
-            Some(RenderMemoryProfile::LowMemory),
+            Some(RenderMemoryProfile::Lite),
         );
 
-        assert_eq!(policy.profile, RenderMemoryProfile::LowMemory);
+        assert_eq!(policy.profile, RenderMemoryProfile::Lite);
         assert!(!policy.postprocess.ssao_enabled);
         assert!(policy.reps.enabled);
     }
@@ -688,12 +708,12 @@ mod tests {
     }
 
     #[test]
-    fn budgeted_profile_enforces_rep_budgeting_even_on_large_budget() {
-        let policy = RenderMemoryPolicy::budgeted(gib_to_bytes(8));
+    fn manual_profile_enforces_rep_budgeting_even_on_large_budget() {
+        let policy = RenderMemoryPolicy::manual(gib_to_bytes(8));
 
         assert_eq!(
             policy.profile,
-            RenderMemoryProfile::Budgeted {
+            RenderMemoryProfile::Manual {
                 bytes: gib_to_bytes(8)
             }
         );
@@ -717,8 +737,8 @@ mod tests {
     }
 
     #[test]
-    fn low_memory_scene_store_policy_uses_aggressive_compaction() {
-        let policy = RenderMemoryPolicy::low_memory();
+    fn lite_scene_store_policy_uses_aggressive_compaction() {
+        let policy = RenderMemoryPolicy::lite();
 
         assert_eq!(
             policy.scene_store.compaction.min_orphaned_bytes,
@@ -736,7 +756,7 @@ mod tests {
 
     #[test]
     fn small_budget_caps_scene_store_threshold_at_budget_fraction() {
-        let policy = RenderMemoryPolicy::budgeted(mib_to_bytes(128));
+        let policy = RenderMemoryPolicy::manual(mib_to_bytes(128));
 
         assert_eq!(
             policy.scene_store.compaction.min_orphaned_bytes,
@@ -747,8 +767,7 @@ mod tests {
     #[test]
     fn required_limits_never_exceed_adapter_limits() {
         let adapter = limits(mib_to_bytes(512), mib_to_bytes(384) as u32);
-        let required =
-            required_limits_for_memory_policy(&adapter, RenderMemoryPolicy::low_memory());
+        let required = required_limits_for_memory_policy(&adapter, RenderMemoryPolicy::lite());
 
         assert!(required.max_buffer_size <= adapter.max_buffer_size);
         assert!(
@@ -779,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn render_memory_settings_budget_value_does_not_force_budgeted() {
+    fn render_memory_settings_budget_value_does_not_force_manual() {
         let mut settings = patinae_settings::Settings::default();
         settings.renderer.memory_budget_mib = 1024;
 
@@ -791,19 +810,19 @@ mod tests {
     #[test]
     fn render_memory_settings_explicit_profile_ignores_stale_budget() {
         let mut settings = patinae_settings::Settings::default();
-        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::LowMemory;
+        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Lite;
         settings.renderer.memory_budget_mib = 1024;
 
         let policy =
             render_memory_policy_from_settings(&settings, RenderMemoryPolicy::performance());
 
-        assert_eq!(policy.profile, RenderMemoryProfile::LowMemory);
+        assert_eq!(policy.profile, RenderMemoryProfile::Lite);
     }
 
     #[test]
-    fn render_memory_settings_budgeted_uses_mib_budget() {
+    fn render_memory_settings_manual_uses_mib_budget() {
         let mut settings = patinae_settings::Settings::default();
-        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Budgeted;
+        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Manual;
         settings.renderer.memory_budget_mib = 1024;
 
         let policy =
@@ -811,16 +830,16 @@ mod tests {
 
         assert_eq!(
             policy.profile,
-            RenderMemoryProfile::Budgeted {
+            RenderMemoryProfile::Manual {
                 bytes: gib_to_bytes(1)
             }
         );
     }
 
     #[test]
-    fn render_memory_settings_budgeted_without_budget_falls_back_to_auto() {
+    fn render_memory_settings_manual_without_budget_falls_back_to_auto() {
         let mut settings = patinae_settings::Settings::default();
-        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Budgeted;
+        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Manual;
 
         let policy = render_memory_policy_from_settings(&settings, RenderMemoryPolicy::balanced());
 

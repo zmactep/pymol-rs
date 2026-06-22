@@ -46,7 +46,7 @@ use crate::scene_store::{SceneStore, SceneStoreLayout};
 use crate::stats::FrameStatsCollector;
 use crate::uniforms::FrameUniforms;
 
-use super::picking_budget::uses_lazy_budgeted_picking;
+use super::picking_budget::uses_lazy_manual_picking;
 
 impl RenderState {
     pub fn new(
@@ -127,9 +127,9 @@ impl RenderState {
         } else {
             picking_mode
         };
-        let lazy_budgeted_picking = uses_lazy_budgeted_picking(memory_policy);
+        let lazy_manual_picking = uses_lazy_manual_picking(memory_policy);
 
-        let with_picking = picking_mode != PickingMode::Disabled && !lazy_budgeted_picking;
+        let with_picking = picking_mode != PickingMode::Disabled && !lazy_manual_picking;
 
         let ctx = RenderContext::new(device, queue, color_format);
 

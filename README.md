@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/version-0.4.2-green.svg" alt="Version 0.4.2">
+  <img src="https://img.shields.io/badge/version-0.4.3-green.svg" alt="Version 0.4.3">
   <img src="https://img.shields.io/badge/GPU-WebGPU-purple.svg" alt="WebGPU">
 </p>
 
@@ -174,8 +174,8 @@ The desktop app accepts `PATINAE_RENDER_MEMORY_PROFILE`:
 
 ```bash
 PATINAE_RENDER_MEMORY_PROFILE=balanced patinae protein.pdb
-PATINAE_RENDER_MEMORY_PROFILE=low patinae protein.pdb
-PATINAE_RENDER_MEMORY_PROFILE=low:1024 patinae protein.pdb
+PATINAE_RENDER_MEMORY_PROFILE=lite patinae protein.pdb
+PATINAE_RENDER_MEMORY_PROFILE=manual:1024 patinae protein.pdb
 ```
 
 `render_loop` benchmarks accept the same values through
@@ -187,10 +187,10 @@ Supported profile values are:
   feature set.
 - `balanced`: lower scratch-target pressure while preserving the normal
   interactive feature set.
-- `low`: disables or gates optional allocation-heavy viewport features such as
+- `lite`: disables or gates optional allocation-heavy viewport features such as
   SSAO, FXAA scratch targets, selection overlays, and larger shadow or atlas
   resources.
-- `low:<MiB>`: explicit memory budget, for example `low:1024`.
+- `manual:<MiB>`: explicit memory budget, for example `manual:1024`.
 
 When no override is provided, Patinae selects a profile from the adapter type,
 backend, platform, and GPU limits. Requested WGPU limits are still clamped to

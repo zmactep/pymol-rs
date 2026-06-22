@@ -224,8 +224,8 @@ pub enum RenderMemoryProfileSetting {
     Auto = 0,
     Performance = 1,
     Balanced = 2,
-    LowMemory = 3,
-    Budgeted = 4,
+    Lite = 3,
+    Manual = 4,
 }
 
 impl_setting_enum! {
@@ -233,8 +233,8 @@ impl_setting_enum! {
         Auto = 0 => "auto",
         Performance = 1 => "performance",
         Balanced = 2 => "balanced",
-        LowMemory = 3 => "low",
-        Budgeted = 4 => "budgeted",
+        Lite = 3 => "lite",
+        Manual = 4 => "manual",
     }
     default: Auto
 }

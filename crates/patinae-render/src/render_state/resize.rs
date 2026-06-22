@@ -1,13 +1,13 @@
-use super::picking_budget::uses_lazy_budgeted_picking;
+use super::picking_budget::uses_lazy_manual_picking;
 use super::state::*;
 use crate::frame::FrameTargets;
 use crate::picking::PickingMode;
 
 impl RenderState {
     pub fn resize(&mut self, viewport: (u32, u32)) {
-        let lazy_budgeted_picking = uses_lazy_budgeted_picking(self.memory.policy);
+        let lazy_manual_picking = uses_lazy_manual_picking(self.memory.policy);
         let with_picking =
-            self.picking.picking_mode != PickingMode::Disabled && !lazy_budgeted_picking;
+            self.picking.picking_mode != PickingMode::Disabled && !lazy_manual_picking;
 
         self.targets = FrameTargets::new_with_policy(
             &self.ctx.device,
@@ -18,7 +18,7 @@ impl RenderState {
             self.memory.policy.frame_targets,
             self.memory.policy.picking.scale,
         );
-        if lazy_budgeted_picking {
+        if lazy_manual_picking {
             self.clear_hit_test_picking_resources();
         } else {
             self.picking.budget_allowed = with_picking;

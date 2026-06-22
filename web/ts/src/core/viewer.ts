@@ -7,6 +7,7 @@ import type {
   CommandOutput,
   LabelInfo,
   OutputMessage,
+  RenderMemoryProfileOption,
   ViewerPerformanceSnapshot,
   ViewerWasmPerformanceSnapshot,
 } from "./types.js";
@@ -87,13 +88,13 @@ export class ViewerCore {
    * @param options.selectionOverlay — whether to draw visible selection /
    *   hover overlays. Defaults to `options.picking`.
    * @param options.memoryProfile — optional renderer memory profile override:
-   *   "performance", "balanced", "low", or "auto".
+   *   "performance", "balanced", "lite", "manual:<MiB>", or "auto".
    */
   async init(
     options: {
       picking?: boolean;
       selectionOverlay?: boolean;
-      memoryProfile?: "auto" | "performance" | "balanced" | "low";
+      memoryProfile?: RenderMemoryProfileOption;
     } = {},
   ): Promise<WebViewer> {
     // Dynamically import the WASM module

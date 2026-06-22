@@ -1,5 +1,5 @@
 use super::math::hash_view_proj;
-use super::picking_budget::{plan_picking_budget, uses_lazy_budgeted_picking};
+use super::picking_budget::{plan_picking_budget, uses_lazy_manual_picking};
 use super::state::PickingTextureSource;
 use super::state::RepPickingState;
 use super::RenderState;
@@ -61,13 +61,13 @@ impl RenderState {
         self.picking.overlay_id_view_proj_hash = 0;
     }
 
-    pub(super) fn sync_budgeted_picking(
+    pub(super) fn sync_manual_picking(
         &mut self,
         input: &RenderInput<'_>,
         active_rep_count: usize,
     ) -> bool {
         if self.picking.picking_mode == PickingMode::Disabled
-            || !uses_lazy_budgeted_picking(self.memory.policy)
+            || !uses_lazy_manual_picking(self.memory.policy)
         {
             return false;
         }

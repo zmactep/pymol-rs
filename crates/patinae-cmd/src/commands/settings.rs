@@ -884,17 +884,50 @@ mod tests {
             session.settings.renderer.memory_profile,
             patinae_settings::RenderMemoryProfileSetting::Performance
         );
+
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_profile, lite",
+        )
+        .unwrap();
+        assert_eq!(
+            session.settings.renderer.memory_profile,
+            patinae_settings::RenderMemoryProfileSetting::Lite
+        );
     }
 
     #[test]
-    fn render_memory_budgeted_profile_uses_regular_setting_path() {
+    fn render_memory_profile_rejects_legacy_profile_name() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+        let legacy = ["lo", "w"].concat();
+        let command = format!("set render_memory_profile, {legacy}");
+
+        let err = execute(&mut session, &mut executor, &command).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains(&format!("Unknown value '{legacy}'")));
+
+        let legacy = ["bud", "geted"].concat();
+        let command = format!("set render_memory_profile, {legacy}");
+        let err = execute(&mut session, &mut executor, &command).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains(&format!("Unknown value '{legacy}'")));
+    }
+
+    #[test]
+    fn render_memory_manual_profile_uses_regular_setting_path() {
         let mut session = Session::new();
         let mut executor = CommandExecutor::new();
 
         execute(
             &mut session,
             &mut executor,
-            "set render_memory_profile, budgeted",
+            "set render_memory_profile, manual",
         )
         .unwrap();
         execute(
@@ -906,7 +939,7 @@ mod tests {
 
         assert_eq!(
             session.settings.renderer.memory_profile,
-            patinae_settings::RenderMemoryProfileSetting::Budgeted
+            patinae_settings::RenderMemoryProfileSetting::Manual
         );
         assert_eq!(session.settings.renderer.memory_budget_mib, 1024);
     }

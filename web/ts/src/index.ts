@@ -8,6 +8,8 @@
  *   viewer.execute("load https://files.rcsb.org/download/1CRN.pdb");
  */
 
+import type { RenderMemoryProfileOption } from "./core/types.js";
+
 export { PatinaeViewer } from "./core/api.js";
 export type {
   CommandOutput,
@@ -19,6 +21,7 @@ export type {
   ViewerOptions,
   ViewerPerformanceSnapshot,
   ViewerWasmPerformanceSnapshot,
+  RenderMemoryProfileOption,
   PanelName,
   PanelSlot,
   PanelPlacement,
@@ -36,7 +39,7 @@ import { PatinaeViewer } from "./core/api.js";
  *   panels            — comma-separated panel names (repl, objects, sequence, movie)
  *   command           — command to run after loading
  *   selection-overlay — set to "false" to suppress selection/hover visuals
- *   memory-profile    — force "performance", "balanced", or "low" at startup
+ *   memory-profile    — force "performance", "balanced", "lite", or "manual:<MiB>" at startup
  */
 export function registerElement(tagName = "patinae-viewer"): void {
   if (customElements.get(tagName)) return;
@@ -71,11 +74,12 @@ export function registerElement(tagName = "patinae-viewer"): void {
           ? undefined
           : selectionOverlayAttr !== "false";
         const memoryProfileAttr = this.getAttribute("memory-profile")?.trim();
-        const memoryProfile = memoryProfileAttr === "performance"
+        const memoryProfile: RenderMemoryProfileOption | undefined = memoryProfileAttr === "performance"
           || memoryProfileAttr === "balanced"
-          || memoryProfileAttr === "low"
+          || memoryProfileAttr === "lite"
+          || /^manual:[1-9]\d*$/.test(memoryProfileAttr ?? "")
           || memoryProfileAttr === "auto"
-          ? memoryProfileAttr
+          ? memoryProfileAttr as RenderMemoryProfileOption
           : undefined;
 
         this.viewer = new PatinaeViewer(wrapper, {

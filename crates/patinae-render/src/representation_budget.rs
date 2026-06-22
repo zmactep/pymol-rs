@@ -253,8 +253,8 @@ fn budget_bytes_for_policy(policy: RenderMemoryPolicy) -> Option<u64> {
     match policy.profile {
         RenderMemoryProfile::Performance => None,
         RenderMemoryProfile::Balanced => Some(gib_to_bytes(2)),
-        RenderMemoryProfile::LowMemory => Some(gib_to_bytes(1)),
-        RenderMemoryProfile::Budgeted { bytes } => Some(bytes),
+        RenderMemoryProfile::Lite => Some(gib_to_bytes(1)),
+        RenderMemoryProfile::Manual { bytes } => Some(bytes),
     }
 }
 
@@ -349,7 +349,7 @@ mod tests {
         ];
 
         let diagnostics = plan_rep_budget(RepBudgetInput {
-            policy: RenderMemoryPolicy::low_memory(),
+            policy: RenderMemoryPolicy::lite(),
             fixed_reserved_bytes: mib_to_bytes(128),
             device_limits: &limits(),
             requests: &requests,
@@ -377,7 +377,7 @@ mod tests {
         )];
 
         let diagnostics = plan_rep_budget(RepBudgetInput {
-            policy: RenderMemoryPolicy::low_memory(),
+            policy: RenderMemoryPolicy::lite(),
             fixed_reserved_bytes: mib_to_bytes(512),
             device_limits: &limits(),
             requests: &requests,
@@ -401,7 +401,7 @@ mod tests {
         )];
 
         let diagnostics = plan_rep_budget(RepBudgetInput {
-            policy: RenderMemoryPolicy::low_memory(),
+            policy: RenderMemoryPolicy::lite(),
             fixed_reserved_bytes: 0,
             device_limits: &limits,
             requests: &requests,

@@ -71,7 +71,8 @@ fn memory_profile_hud_label(profile: RenderMemoryProfile) -> &'static str {
     match profile {
         RenderMemoryProfile::Performance => "PERF",
         RenderMemoryProfile::Balanced => "BAL",
-        RenderMemoryProfile::LowMemory | RenderMemoryProfile::Budgeted { .. } => "LOW",
+        RenderMemoryProfile::Lite => "LITE",
+        RenderMemoryProfile::Manual { .. } => "MAN",
     }
 }
 
@@ -2173,8 +2174,7 @@ mod tests {
         let adapter_storage_binding_size = mib_to_bytes(512) as u32;
         let adapter_limits = adapter_limits(adapter_buffer_size, adapter_storage_binding_size);
 
-        let required =
-            patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::low_memory());
+        let required = patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::lite());
 
         assert_eq!(required.max_buffer_size, adapter_buffer_size);
         assert_eq!(

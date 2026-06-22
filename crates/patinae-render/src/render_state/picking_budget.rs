@@ -5,7 +5,7 @@ use crate::memory_policy::{RenderMemoryPolicy, RenderMemoryProfile};
 use crate::picking::pass::PickingParams;
 use crate::picking::readback::PICKING_READBACK_BUFFER_BYTES;
 
-const LOW_MEMORY_PICKING_BUDGET_BYTES: u64 = gib_to_bytes(1);
+const LITE_PICKING_BUDGET_BYTES: u64 = gib_to_bytes(1);
 const BALANCED_PICKING_BUDGET_BYTES: u64 = gib_to_bytes(2);
 const PICKING_ATOM_PRESSURE_BYTES: u64 = 512;
 
@@ -19,11 +19,11 @@ pub(super) struct PickingBudgetDecision {
     pub(super) active_rep_count: usize,
 }
 
-pub(super) fn uses_lazy_budgeted_picking(policy: RenderMemoryPolicy) -> bool {
+pub(super) fn uses_lazy_manual_picking(policy: RenderMemoryPolicy) -> bool {
     policy.picking.hit_test_enabled
         && matches!(
             policy.profile,
-            RenderMemoryProfile::LowMemory | RenderMemoryProfile::Budgeted { .. }
+            RenderMemoryProfile::Lite | RenderMemoryProfile::Manual { .. }
         )
 }
 
@@ -34,8 +34,8 @@ pub(super) fn effective_picking_budget_bytes(policy: RenderMemoryPolicy) -> Opti
     match policy.profile {
         RenderMemoryProfile::Performance => None,
         RenderMemoryProfile::Balanced => Some(BALANCED_PICKING_BUDGET_BYTES),
-        RenderMemoryProfile::LowMemory => Some(LOW_MEMORY_PICKING_BUDGET_BYTES),
-        RenderMemoryProfile::Budgeted { bytes } => Some(bytes),
+        RenderMemoryProfile::Lite => Some(LITE_PICKING_BUDGET_BYTES),
+        RenderMemoryProfile::Manual { bytes } => Some(bytes),
     }
 }
 
@@ -105,8 +105,8 @@ mod tests {
     use crate::byte_units::mib_to_bytes;
 
     #[test]
-    fn small_scene_fits_low_memory_headroom() {
-        let policy = RenderMemoryPolicy::low_memory();
+    fn small_scene_fits_lite_headroom() {
+        let policy = RenderMemoryPolicy::lite();
         let fixed = mib_to_bytes(256);
 
         let decision = plan_picking_budget(policy, fixed, (1920, 1080), 8, 50_000);
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn atom_pressure_can_deny_large_scene() {
-        let policy = RenderMemoryPolicy::low_memory();
+        let policy = RenderMemoryPolicy::lite();
         let fixed = mib_to_bytes(256);
 
         let decision = plan_picking_budget(policy, fixed, (640, 480), 8, 2_000_000);
@@ -137,8 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn budgeted_profile_uses_explicit_budget() {
-        let policy = RenderMemoryPolicy::budgeted(mib_to_bytes(512));
+    fn manual_profile_uses_explicit_budget() {
+        let policy = RenderMemoryPolicy::manual(mib_to_bytes(512));
         let fits = plan_picking_budget(policy, mib_to_bytes(128), (1280, 720), 4, 100_000);
         let denied = plan_picking_budget(policy, mib_to_bytes(490), (1280, 720), 4, 100_000);
 

@@ -128,8 +128,8 @@ pub enum RenderMemoryRecoveryAction {
 pub const fn next_oom_fallback(profile: RenderMemoryProfile) -> Option<RenderMemoryProfile> {
     match profile {
         RenderMemoryProfile::Performance => Some(RenderMemoryProfile::Balanced),
-        RenderMemoryProfile::Balanced => Some(RenderMemoryProfile::LowMemory),
-        RenderMemoryProfile::LowMemory | RenderMemoryProfile::Budgeted { .. } => None,
+        RenderMemoryProfile::Balanced => Some(RenderMemoryProfile::Lite),
+        RenderMemoryProfile::Lite | RenderMemoryProfile::Manual { .. } => None,
     }
 }
 
@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_performance_baseline_retries_then_balanced_then_low_then_blocks() {
+    fn recovery_performance_baseline_retries_then_balanced_then_lite_then_blocks() {
         let mut stage = RenderMemoryRecoveryStage::normal(RenderMemoryProfile::Performance);
 
         assert_eq!(
@@ -169,13 +169,13 @@ mod tests {
         assert_eq!(
             stage.advance_after_oom(),
             RenderMemoryRecoveryAction::SwitchProfile {
-                effective_profile: RenderMemoryProfile::LowMemory
+                effective_profile: RenderMemoryProfile::Lite
             }
         );
         assert_eq!(
             stage.advance_after_oom(),
             RenderMemoryRecoveryAction::Blocked {
-                last_profile: RenderMemoryProfile::LowMemory
+                last_profile: RenderMemoryProfile::Lite
             }
         );
     }
@@ -193,38 +193,38 @@ mod tests {
         assert_eq!(
             stage.advance_after_oom(),
             RenderMemoryRecoveryAction::SwitchProfile {
-                effective_profile: RenderMemoryProfile::LowMemory
+                effective_profile: RenderMemoryProfile::Lite
             }
         );
         assert_eq!(
             stage.advance_after_oom(),
             RenderMemoryRecoveryAction::Blocked {
-                last_profile: RenderMemoryProfile::LowMemory
+                last_profile: RenderMemoryProfile::Lite
             }
         );
     }
 
     #[test]
-    fn recovery_low_memory_baseline_only_retries_then_blocks() {
-        let mut stage = RenderMemoryRecoveryStage::normal(RenderMemoryProfile::LowMemory);
+    fn recovery_lite_baseline_only_retries_then_blocks() {
+        let mut stage = RenderMemoryRecoveryStage::normal(RenderMemoryProfile::Lite);
 
         assert_eq!(
             stage.advance_after_oom(),
             RenderMemoryRecoveryAction::RetryAfterDefrag {
-                profile: RenderMemoryProfile::LowMemory
+                profile: RenderMemoryProfile::Lite
             }
         );
         assert_eq!(
             stage.advance_after_oom(),
             RenderMemoryRecoveryAction::Blocked {
-                last_profile: RenderMemoryProfile::LowMemory
+                last_profile: RenderMemoryProfile::Lite
             }
         );
     }
 
     #[test]
-    fn recovery_budgeted_baseline_does_not_invent_lower_budget() {
-        let profile = RenderMemoryProfile::Budgeted { bytes: 512 };
+    fn recovery_manual_baseline_does_not_invent_lower_budget() {
+        let profile = RenderMemoryProfile::Manual { bytes: 512 };
         let mut stage = RenderMemoryRecoveryStage::normal(profile);
 
         assert_eq!(

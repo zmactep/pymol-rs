@@ -417,7 +417,7 @@ impl RenderState {
             self.scene.scene_bounds = compute_scene_bounds(input.objects, input.maps);
         }
 
-        if self.sync_budgeted_picking(input, draw_keep.len()) {
+        if self.sync_manual_picking(input, draw_keep.len()) {
             picking_cache_dirty = true;
         }
         timings.order_bounds_ms += sync_elapsed(&mut now_ms, t0);

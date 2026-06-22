@@ -1,4 +1,4 @@
-//! Low-memory selected atom dots.
+//! Lite selected atom dots.
 
 use std::collections::{BTreeMap, HashSet};
 use std::num::NonZeroU64;
@@ -343,7 +343,7 @@ fn make_selection_dots_object(
 pub(crate) fn uses_selection_dots_fallback(policy: RenderMemoryPolicy) -> bool {
     matches!(
         policy.profile,
-        RenderMemoryProfile::LowMemory | RenderMemoryProfile::Budgeted { .. }
+        RenderMemoryProfile::Lite | RenderMemoryProfile::Manual { .. }
     ) && !policy.overlays.selection_enabled
 }
 
@@ -504,15 +504,13 @@ mod tests {
     }
 
     #[test]
-    fn selection_dots_fallback_is_only_low_and_budgeted() {
+    fn selection_dots_fallback_is_only_lite_and_manual() {
         assert!(!uses_selection_dots_fallback(
             RenderMemoryPolicy::performance()
         ));
         assert!(!uses_selection_dots_fallback(RenderMemoryPolicy::balanced()));
-        assert!(uses_selection_dots_fallback(
-            RenderMemoryPolicy::low_memory()
-        ));
-        assert!(uses_selection_dots_fallback(RenderMemoryPolicy::budgeted(
+        assert!(uses_selection_dots_fallback(RenderMemoryPolicy::lite()));
+        assert!(uses_selection_dots_fallback(RenderMemoryPolicy::manual(
             mib_to_bytes(2048)
         )));
     }
