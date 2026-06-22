@@ -779,6 +779,28 @@ mod tests {
     }
 
     #[test]
+    fn render_memory_settings_budget_value_does_not_force_budgeted() {
+        let mut settings = patinae_settings::Settings::default();
+        settings.renderer.memory_budget_mib = 1024;
+
+        let policy = render_memory_policy_from_settings(&settings, RenderMemoryPolicy::balanced());
+
+        assert_eq!(policy.profile, RenderMemoryProfile::Balanced);
+    }
+
+    #[test]
+    fn render_memory_settings_explicit_profile_ignores_stale_budget() {
+        let mut settings = patinae_settings::Settings::default();
+        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::LowMemory;
+        settings.renderer.memory_budget_mib = 1024;
+
+        let policy =
+            render_memory_policy_from_settings(&settings, RenderMemoryPolicy::performance());
+
+        assert_eq!(policy.profile, RenderMemoryProfile::LowMemory);
+    }
+
+    #[test]
     fn render_memory_settings_budgeted_uses_mib_budget() {
         let mut settings = patinae_settings::Settings::default();
         settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Budgeted;

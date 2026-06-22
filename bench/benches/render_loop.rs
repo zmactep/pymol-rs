@@ -6,6 +6,7 @@
 //! BENCH_FILE="$TEST_STRUCTURES_DIR/1fsd.cif" BENCH_SCENARIO=cartoon_only cargo bench -p patinae-bench --bench render_loop
 //! BENCH_FILE="$TEST_STRUCTURES_DIR/7KP3-assembly1.cif.gz" cargo bench -p patinae-bench --bench render_loop
 //! BENCH_FILE="$TEST_STRUCTURES_DIR/3J3Q.cif" BENCH_SCENARIO=cartoon_only cargo bench -p patinae-bench --bench render_loop
+//! BENCH_FILE="$TEST_STRUCTURES_DIR/3J3Q.cif.gz" BENCH_SCENARIO=skripkin_silhouettes cargo bench -p patinae-bench --bench render_loop
 //! BENCH_FILE="$TEST_STRUCTURES_DIR/3J3Q.cif.gz" BENCH_SCENARIO=cartoon_toggle_large cargo bench -p patinae-bench --bench render_loop
 //! BENCH_SYNTHETIC_WATER_ATOMS=100000 BENCH_REPS=dots cargo bench -p patinae-bench --bench render_loop
 //! ```
@@ -246,6 +247,7 @@ struct BenchScenario {
     markers: &'static str,
     shadows: bool,
     skripkin: bool,
+    silhouettes: bool,
     force_atlas_rebuild: bool,
 }
 
@@ -260,6 +262,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "cartoon_toggle_large" => BenchScenario {
@@ -268,6 +271,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "classic_large" => BenchScenario {
@@ -276,6 +280,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "full_shadows" => BenchScenario {
@@ -284,6 +289,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: true,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "skripkin_cached" => BenchScenario {
@@ -292,6 +298,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: true,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "skripkin_forced_rebuild" => BenchScenario {
@@ -300,7 +307,17 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: true,
+            silhouettes: false,
             force_atlas_rebuild: true,
+        },
+        "skripkin_silhouettes" => BenchScenario {
+            name: "skripkin_silhouettes",
+            reps: "cartoon,sticks,spheres",
+            markers: "none",
+            shadows: false,
+            skripkin: true,
+            silhouettes: true,
+            force_atlas_rebuild: false,
         },
         "sticks_heavy" => BenchScenario {
             name: "sticks_heavy",
@@ -308,6 +325,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "marking" => BenchScenario {
@@ -316,6 +334,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "selected",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         "surface_cartoon_large" => BenchScenario {
@@ -324,6 +343,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
         _ => BenchScenario {
@@ -332,6 +352,7 @@ fn bench_scenario() -> BenchScenario {
             markers: "none",
             shadows: false,
             skripkin: false,
+            silhouettes: false,
             force_atlas_rebuild: false,
         },
     }
@@ -551,16 +572,23 @@ fn print_sync_timing(label: &str, wall: Duration, timings: RenderSyncTimings) {
     );
 }
 
-fn run_scene_store_churn(
-    state: &mut RenderState,
-    mol: &ObjectMolecule,
-    coord: &CoordSet,
-    atom_colors: &[[f32; 4]],
-    atom_markers: &[u32],
+fn print_memory_warnings(state: &mut RenderState) {
+    for warning in state.take_memory_warnings() {
+        eprintln!("renderer-warning: {warning}");
+    }
+}
+
+struct SceneStoreChurnInput<'a> {
+    mol: &'a ObjectMolecule,
+    coord: &'a CoordSet,
+    atom_colors: &'a [[f32; 4]],
+    atom_markers: &'a [u32],
     has_markers: bool,
-    settings: &ResolvedSettings,
+    settings: &'a ResolvedSettings,
     visible: RepMask,
-) {
+}
+
+fn run_scene_store_churn(state: &mut RenderState, input: SceneStoreChurnInput<'_>) {
     if std::env::var("BENCH_SCENE_STORE_CHURN").ok().as_deref() != Some("replace") {
         return;
     }
@@ -569,13 +597,13 @@ fn run_scene_store_churn(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(8)
         .max(1);
-    let small_atom_count = if mol.atom_count() > 3 {
-        (mol.atom_count() / 2).max(1)
+    let small_atom_count = if input.mol.atom_count() > 3 {
+        (input.mol.atom_count() / 2).max(1)
     } else {
-        mol.atom_count() + 3
+        input.mol.atom_count() + 3
     };
     let mut small_mol = synthetic_water_molecule(small_atom_count);
-    force_visible_reps(&mut small_mol, visible);
+    force_visible_reps(&mut small_mol, input.visible);
     let small_coord = small_mol.current_coord_set().expect("small coord").clone();
     let named = NamedPalette::new();
     let palette = ThemedPalette::dark();
@@ -585,7 +613,7 @@ fn run_scene_store_churn(
         .map(|atom| resolver.resolve_atom(atom))
         .collect();
     let small_lod = SceneLod::from_atom_count(small_mol.atom_count());
-    let original_lod = SceneLod::from_atom_count(mol.atom_count());
+    let original_lod = SceneLod::from_atom_count(input.mol.atom_count());
 
     eprintln!(
         "BENCH_SCENE_STORE_CHURN=replace iterations={} alternate_atoms={}",
@@ -596,14 +624,14 @@ fn run_scene_store_churn(
         let (active_mol, active_coord, active_colors, lod) = if use_small {
             (&small_mol, &small_coord, small_colors.as_slice(), small_lod)
         } else {
-            (mol, coord, atom_colors, original_lod)
+            (input.mol, input.coord, input.atom_colors, original_lod)
         };
-        let input = RenderObjectInput {
+        let object_input = RenderObjectInput {
             object_id: ObjectId(1),
             molecule: active_mol,
             coord_set: active_coord,
-            visible_reps: visible,
-            draw_reps: visible,
+            visible_reps: input.visible,
+            draw_reps: input.visible,
             object_settings: None,
             atom_colors: active_colors,
             atom_rep_colors: &[],
@@ -614,9 +642,9 @@ fn run_scene_store_churn(
             dirty: DirtyFlags::ALL,
         };
         let render_input = RenderInput {
-            objects: std::slice::from_ref(&input),
+            objects: std::slice::from_ref(&object_input),
             maps: &[],
-            settings,
+            settings: input.settings,
             lod,
         };
         let (wall, timings) = sync_with_timing(state, &render_input);
@@ -625,23 +653,23 @@ fn run_scene_store_churn(
 
     let restore_input = RenderObjectInput {
         object_id: ObjectId(1),
-        molecule: mol,
-        coord_set: coord,
-        visible_reps: visible,
-        draw_reps: visible,
+        molecule: input.mol,
+        coord_set: input.coord,
+        visible_reps: input.visible,
+        draw_reps: input.visible,
         object_settings: None,
-        atom_colors,
+        atom_colors: input.atom_colors,
         atom_rep_colors: &[],
-        atom_markers,
+        atom_markers: input.atom_markers,
         marker_updates: &[],
-        has_markers,
+        has_markers: input.has_markers,
         lod: original_lod,
         dirty: DirtyFlags::ALL,
     };
     let restore_render_input = RenderInput {
         objects: std::slice::from_ref(&restore_input),
         maps: &[],
-        settings,
+        settings: input.settings,
         lod: original_lod,
     };
     let (wall, timings) = sync_with_timing(state, &restore_render_input);
@@ -825,6 +853,20 @@ fn bench_render_loop(c: &mut Criterion) {
     } else {
         eprintln!("BENCH_SKRIPKIN=0");
     }
+    let silhouettes_enabled = scenario.silhouettes || env_flag("BENCH_SILHOUETTES");
+    let silhouette_width = std::env::var("BENCH_SILHOUETTE_WIDTH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        // Matches the patinae-settings default silhouette width.
+        .unwrap_or(2.0);
+    if silhouettes_enabled {
+        state.set_silhouette(true, silhouette_width, [0.0, 0.0, 0.0, 1.0]);
+        eprintln!("BENCH_SILHOUETTES=1 width={silhouette_width}");
+    } else {
+        state.set_silhouette(false, silhouette_width, [0.0, 0.0, 0.0, 1.0]);
+        eprintln!("BENCH_SILHOUETTES=0");
+    }
+    print_memory_warnings(&mut state);
 
     // Fit the molecule's bounding sphere into the orthographic frame.
     let (mut lo, mut hi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
@@ -910,6 +952,7 @@ fn bench_render_loop(c: &mut Criterion) {
     };
     let (initial_wall, initial_timings) = sync_with_timing(&mut state, &initial_render_input);
     print_sync_timing("cartoon_toggle.first_sync", initial_wall, initial_timings);
+    print_memory_warnings(&mut state);
     print_sphere_lod("sphere_lod_initial", &state);
     print_stick_lod("stick_lod_initial", &state);
 
@@ -929,13 +972,15 @@ fn bench_render_loop(c: &mut Criterion) {
     print_stick_lod("stick_lod_after_warmup", &state);
     run_scene_store_churn(
         &mut state,
-        &mol,
-        &coord,
-        &atom_colors,
-        &atom_markers,
-        has_markers,
-        &settings,
-        visible,
+        SceneStoreChurnInput {
+            mol: &mol,
+            coord: &coord,
+            atom_colors: &atom_colors,
+            atom_markers: &atom_markers,
+            has_markers,
+            settings: &settings,
+            visible,
+        },
     );
 
     if scenario.name == "cartoon_toggle_large" {

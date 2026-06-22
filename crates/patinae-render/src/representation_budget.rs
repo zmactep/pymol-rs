@@ -415,4 +415,27 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn warning_keys_dedupe_equivalent_non_build_decisions() {
+        let diagnostic = RepBudgetDiagnostic {
+            object_id: ObjectId(7),
+            kind: RepKind::Sphere,
+            decision: RepBuildDecision::Skip {
+                reason: RepSkipReason::BudgetExceeded,
+            },
+            estimate: estimate(128, RepQualityLevel::Sampled { sample_shift: 2 }),
+        };
+        let build = RepBudgetDiagnostic {
+            object_id: ObjectId(8),
+            kind: RepKind::Line,
+            decision: RepBuildDecision::Build,
+            estimate: estimate(1, RepQualityLevel::Full),
+        };
+
+        let keys = current_warning_keys(&[diagnostic, diagnostic, build]);
+
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains(&diagnostic.warning_key().expect("warning key")));
+    }
 }

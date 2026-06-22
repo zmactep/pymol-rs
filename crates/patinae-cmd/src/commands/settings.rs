@@ -887,6 +887,31 @@ mod tests {
     }
 
     #[test]
+    fn render_memory_budgeted_profile_uses_regular_setting_path() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_profile, budgeted",
+        )
+        .unwrap();
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_budget, 1024",
+        )
+        .unwrap();
+
+        assert_eq!(
+            session.settings.renderer.memory_profile,
+            patinae_settings::RenderMemoryProfileSetting::Budgeted
+        );
+        assert_eq!(session.settings.renderer.memory_budget_mib, 1024);
+    }
+
+    #[test]
     fn render_memory_budget_uses_regular_setting_path() {
         let mut session = Session::new();
         let mut executor = CommandExecutor::new();

@@ -146,10 +146,8 @@ pub const fn is_surface_oom(error: wgpu::SurfaceError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
-
     fn test_error_source(message: &'static str) -> wgpu::ErrorSource {
-        Box::new(io::Error::new(io::ErrorKind::Other, message))
+        Box::new(std::io::Error::other(message))
     }
 
     #[test]
