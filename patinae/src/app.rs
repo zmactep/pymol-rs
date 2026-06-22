@@ -83,6 +83,16 @@ fn memory_total_hud_text(total_bytes: u64, budget_bytes: Option<u64>) -> String 
     }
 }
 
+/// Fraction of the memory budget currently allocated, clamped to `0..=1`.
+/// Returns `-1.0` when the profile has no budget (unbounded) so the HUD can
+/// hide the usage bar.
+fn memory_budget_fill(total_bytes: u64, budget_bytes: Option<u64>) -> f32 {
+    match budget_bytes {
+        Some(budget) if budget > 0 => (total_bytes as f32 / budget as f32).clamp(0.0, 1.0),
+        _ => -1.0,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StartupAction {
     Warning(String),
@@ -952,13 +962,13 @@ impl App {
             return;
         }
         let avg_ms = history.avg_ms();
-        let avg_fps = history.avg_fps();
         let low_1 = history.low_1pct_ms();
         let low_01 = history.low_0_1pct_ms();
         vp.set_perf_visible(true);
-        vp.set_perf_avg_text(format!("{:.0} fps  ({:.2} ms)", avg_fps, avg_ms).into());
-        vp.set_perf_low_1pct_text(format!("1% low: {:.2} ms", low_1).into());
-        vp.set_perf_low_0_1pct_text(format!("0.1% low: {:.2} ms", low_01).into());
+        // Labels ("avg" / "1% low" / "0.1% low") live in the HUD; feed values only.
+        vp.set_perf_avg_text(format!("{:.2} ms", avg_ms).into());
+        vp.set_perf_low_1pct_text(format!("{:.2} ms", low_1).into());
+        vp.set_perf_low_0_1pct_text(format!("{:.2} ms", low_01).into());
         if let Some(renderer) = self.renderer.as_ref() {
             let profile = renderer.memory_profile();
             let memory = renderer.memory_snapshot();
@@ -967,6 +977,10 @@ impl App {
                 memory_total_hud_text(memory.total_capacity_bytes(), profile.budget_bytes()).into(),
             );
             vp.set_perf_memory_live_text(format_hud_mib(memory.total_live_bytes()).into());
+            vp.set_perf_memory_fill(memory_budget_fill(
+                memory.total_capacity_bytes(),
+                profile.budget_bytes(),
+            ));
         }
         if let Some(s) = gpu_stats {
             // Sentinel `-1.0` means the pass didn't run this frame.
@@ -991,7 +1005,7 @@ impl App {
                     parts.push(s);
                 }
             }
-            vp.set_perf_gpu_text(parts.join("  ").into());
+            vp.set_perf_gpu_text(parts.join(" · ").into());
         }
     }
 

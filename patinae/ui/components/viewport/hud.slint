@@ -2,58 +2,89 @@ import { Theme } from "../../theme.slint";
 import { Tokens } from "../../tokens.slint";
 import { ViewportState } from "../../states/viewport-state.slint";
 
-component PerfMemoryMetric inherits HorizontalLayout {
-    in property <string> metric-label;
-    in property <string> metric-value;
+// Thin separator between HUD sections; stretches to the card's content width.
+component HudRule inherits Rectangle {
+    height: Tokens.hairline;
+    background: Theme.line;
+}
 
-    spacing: 2px;
-    alignment: center;
+// `label …………… value` row (label flush left, value flush right).
+component StatRow inherits HorizontalLayout {
+    in property <string> stat-label;
+    in property <string> stat-value;
+
+    alignment: space-between;
+    spacing: Tokens.space-md;
 
     Text {
-        text: root.metric-label;
+        text: root.stat-label;
         color: Theme.text-faint;
         font-size: Tokens.font-xs;
     }
     Text {
-        text: root.metric-value;
-        color: Theme.text-muted;
+        text: root.stat-value;
+        color: Theme.text-dim;
         font-size: Tokens.font-xs;
     }
 }
 
-component PerfMemoryStrip inherits HorizontalLayout {
+// Memory section: profile badge + budget figure, a usage bar, and live bytes.
+component MemoryPanel inherits VerticalLayout {
     in property <color> badge-color;
-
-    height: 16px;
     spacing: 5px;
-    alignment: end;
 
-    Rectangle {
-        width: badge-label.preferred-width + 2 * Tokens.space-xs;
-        height: 16px;
-        border-radius: Tokens.radius-sm;
-        background: root.badge-color.with-alpha(0.16);
-        border-width: Tokens.hairline;
-        border-color: root.badge-color.with-alpha(0.42);
+    // Bar fill warms up as the budget fills: green → amber → red.
+    property <color> fill-color:
+        ViewportState.perf-memory-fill >= 0.9 ? Theme.error
+        : ViewportState.perf-memory-fill >= 0.7 ? Theme.warning
+        : Theme.good;
 
-        badge-label := Text {
-            width: 100%;
-            height: 100%;
-            text: ViewportState.perf-memory-profile-label;
-            color: root.badge-color;
+    HorizontalLayout {
+        alignment: space-between;
+        spacing: Tokens.space-sm;
+
+        Rectangle {
+            width: badge-label.preferred-width + 2 * Tokens.space-xs;
+            height: 14px;
+            border-radius: Tokens.radius-sm;
+            background: root.badge-color.with-alpha(0.16);
+            border-width: Tokens.hairline;
+            border-color: root.badge-color.with-alpha(0.42);
+
+            badge-label := Text {
+                text: ViewportState.perf-memory-profile-label;
+                color: root.badge-color;
+                font-size: Tokens.font-xs;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            y: (parent.height - self.height) / 2;
+            text: ViewportState.perf-memory-total-text;
+            color: Theme.text-dim;
             font-size: Tokens.font-xs;
-            font-weight: 600;
-            horizontal-alignment: center;
-            vertical-alignment: center;
         }
     }
-    PerfMemoryMetric {
-        metric-label: "gpu";
-        metric-value: ViewportState.perf-memory-total-text;
+
+    if ViewportState.perf-memory-fill >= 0: Rectangle {
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.bg-inset;
+
+        Rectangle {
+            x: 0;
+            width: parent.width * max(0.02, ViewportState.perf-memory-fill);
+            height: 100%;
+            border-radius: 2px;
+            background: root.fill-color;
+        }
     }
-    PerfMemoryMetric {
-        metric-label: "live";
-        metric-value: ViewportState.perf-memory-live-text;
+
+    StatRow {
+        stat-label: "live";
+        stat-value: ViewportState.perf-memory-live-text;
     }
 }
 
@@ -74,8 +105,9 @@ export component Hud inherits Rectangle {
         : Theme.warning;
 
     layout := VerticalLayout {
-        spacing: 2px;
+        spacing: Tokens.space-xs;
 
+        // Device + engine header — unchanged.
         Text {
             text: ViewportState.device-name;
             color: Theme.text-muted;
@@ -88,6 +120,8 @@ export component Hud inherits Rectangle {
             font-size: Tokens.font-xs;
             horizontal-alignment: right;
         }
+
+        // Live FPS line with status dot.
         HorizontalLayout {
             alignment: end;
             spacing: 4px;
@@ -104,31 +138,29 @@ export component Hud inherits Rectangle {
                 font-size: Tokens.font-xs;
             }
         }
-        // `PATINAE_PERF=1` → tail-latency rows + per-pass GPU times.
-        if ViewportState.perf-visible: Text {
-            text: ViewportState.perf-avg-text;
-            color: Theme.text-muted;
-            font-size: Tokens.font-xs;
-            horizontal-alignment: right;
+
+        // `PATINAE_PERF=1` → tail-latency rows, memory panel, per-pass GPU times.
+        if ViewportState.perf-visible: HudRule {}
+        if ViewportState.perf-visible: StatRow {
+            stat-label: "avg";
+            stat-value: ViewportState.perf-avg-text;
         }
-        if ViewportState.perf-visible: Text {
-            text: ViewportState.perf-low-1pct-text;
-            color: Theme.text-muted;
-            font-size: Tokens.font-xs;
-            horizontal-alignment: right;
+        if ViewportState.perf-visible: StatRow {
+            stat-label: "1% low";
+            stat-value: ViewportState.perf-low-1pct-text;
         }
-        if ViewportState.perf-visible: Text {
-            text: ViewportState.perf-low-0_1pct-text;
-            color: Theme.text-muted;
-            font-size: Tokens.font-xs;
-            horizontal-alignment: right;
+        if ViewportState.perf-visible: StatRow {
+            stat-label: "0.1% low";
+            stat-value: ViewportState.perf-low-0_1pct-text;
         }
-        if ViewportState.perf-visible && ViewportState.perf-memory-profile-label != "": PerfMemoryStrip {
+        if ViewportState.perf-visible && ViewportState.perf-memory-profile-label != "": HudRule {}
+        if ViewportState.perf-visible && ViewportState.perf-memory-profile-label != "": MemoryPanel {
             badge-color: root.memory-profile-color;
         }
+        if ViewportState.perf-visible && ViewportState.perf-gpu-text != "": HudRule {}
         if ViewportState.perf-visible && ViewportState.perf-gpu-text != "": Text {
             text: ViewportState.perf-gpu-text;
-            color: Theme.text-faint;
+            color: Theme.text-ghost;
             font-size: Tokens.font-xs;
             horizontal-alignment: right;
             wrap: word-wrap;

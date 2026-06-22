@@ -13,6 +13,9 @@ export global ViewportState {
     in-out property <string> perf-memory-profile-label: "";
     in-out property <string> perf-memory-total-text: "";
     in-out property <string> perf-memory-live-text: "";
+    /// GPU allocation as a fraction of the budget (0..1) for the usage bar.
+    /// Negative when no budget is set (unbounded profile) → bar is hidden.
+    in-out property <float> perf-memory-fill: -1;
     /// Multi-line: per-pass GPU ms (cull / shadow / atlas AO / opaque / translucent).
     /// Empty when the `stats` cargo feature is off.
     in-out property <string> perf-gpu-text: "";
