@@ -634,7 +634,9 @@ impl RenderState {
                 continue;
             };
             if !self.memory.warned_rep_budget.contains(&key) {
-                log_rep_budget_warning(*diagnostic, self.memory.policy.profile);
+                let message = rep_budget_warning(*diagnostic, self.memory.policy.profile);
+                log::warn!("patinae-render: {message}");
+                self.memory.pending_warnings.push(message);
             }
         }
         self.memory
@@ -729,33 +731,36 @@ fn replaceable_rep_capacity_bytes(scene: &SceneRuntime) -> u64 {
     })
 }
 
-fn log_rep_budget_warning(diagnostic: RepBudgetDiagnostic, profile: crate::RenderMemoryProfile) {
+fn rep_budget_warning(
+    diagnostic: RepBudgetDiagnostic,
+    profile: crate::RenderMemoryProfile,
+) -> String {
     match diagnostic.decision {
-        RepBuildDecision::Downgrade => log::warn!(
-            "patinae-render: {:?} for object {} downgraded by render memory profile {} to {:?} ({:.2} MiB estimated)",
+        RepBuildDecision::Downgrade => format!(
+            "{:?} for object {} downgraded by render memory profile {} to {:?} ({:.2} MiB estimated).",
             diagnostic.kind,
             diagnostic.object_id.0,
             profile,
             diagnostic.estimate.quality,
             bytes_to_mib(diagnostic.estimate.reserved_bytes())
         ),
-        RepBuildDecision::Chunk { max_chunk_bytes } => log::warn!(
-            "patinae-render: {:?} for object {} chunked by render memory profile {} to {:.2} MiB chunks ({:.2} MiB estimated)",
+        RepBuildDecision::Chunk { max_chunk_bytes } => format!(
+            "{:?} for object {} chunked by render memory profile {} to {:.2} MiB chunks ({:.2} MiB estimated).",
             diagnostic.kind,
             diagnostic.object_id.0,
             profile,
             bytes_to_mib(max_chunk_bytes),
             bytes_to_mib(diagnostic.estimate.reserved_bytes())
         ),
-        RepBuildDecision::Skip { reason } => log::warn!(
-            "patinae-render: {:?} for object {} skipped by render memory profile {}: {:?} ({:.2} MiB estimated)",
+        RepBuildDecision::Skip { reason } => format!(
+            "{:?} for object {} skipped by render memory profile {}: {:?} ({:.2} MiB estimated).",
             diagnostic.kind,
             diagnostic.object_id.0,
             profile,
             reason,
             bytes_to_mib(diagnostic.estimate.reserved_bytes())
         ),
-        RepBuildDecision::Build => {}
+        RepBuildDecision::Build => String::new(),
     }
 }
 

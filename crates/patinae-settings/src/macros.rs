@@ -477,11 +477,13 @@ macro_rules! __patinae_settings_root_manifest {
                 shading: ShadingSettings,
                 ui: UiSettings,
                 movie: MovieSettings,
+                renderer: RendererSettings,
                 behavior: BehaviorSettings,
                 ssao: SsaoSettings,
                 fxaa: FxaaSettings,
             }
             object {
+                object: ObjectSettings => ObjectSettingOverrides,
                 cartoon: CartoonSettings => CartoonOverrides,
                 stick: StickSettings => StickOverrides,
                 sphere: SphereSettings => SphereOverrides,

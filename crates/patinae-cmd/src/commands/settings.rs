@@ -3,11 +3,9 @@
 use crate::args::ParsedCommand;
 use crate::command::{ArgHint, Command, CommandContext, CommandRegistry, ViewerLike};
 use crate::command_help;
-use crate::commands::selecting::evaluate_selection;
 use crate::error::{CmdError, CmdResult};
 use crate::ResolvedSetting;
 use patinae_scene::{DirtyFlags, MoleculeObject, Object};
-use patinae_select::AtomIndex;
 use patinae_settings::{SettingType, SettingValue, SideEffectCategory};
 
 /// Register settings commands
@@ -185,86 +183,9 @@ fn apply_object_side_effects(
 // set command
 // ============================================================================
 
-/// Map a rep color setting name to the corresponding mutable field accessor in AtomColors
-fn rep_color_field(name: &str) -> Option<fn(&mut patinae_mol::AtomColors) -> &mut i32> {
-    match name {
-        "stick_color" => Some(|c| &mut c.stick),
-        "line_color" => Some(|c| &mut c.line),
-        "cartoon_color" => Some(|c| &mut c.cartoon),
-        "surface_color" => Some(|c| &mut c.surface),
-        "mesh_color" => Some(|c| &mut c.mesh),
-        "sphere_color" => Some(|c| &mut c.sphere),
-        "ribbon_color" => Some(|c| &mut c.ribbon),
-        "dot_color" => Some(|c| &mut c.dot),
-        "ellipsoid_color" => Some(|c| &mut c.ellipsoid),
-        _ => None,
-    }
-}
-
-/// Map a rep color setting name to the corresponding read-only field accessor in AtomColors
-fn rep_color_field_read(name: &str) -> Option<fn(&patinae_mol::AtomColors) -> i32> {
-    match name {
-        "stick_color" => Some(|c| c.stick),
-        "line_color" => Some(|c| c.line),
-        "cartoon_color" => Some(|c| c.cartoon),
-        "surface_color" => Some(|c| c.surface),
-        "mesh_color" => Some(|c| c.mesh),
-        "sphere_color" => Some(|c| c.sphere),
-        "ribbon_color" => Some(|c| c.ribbon),
-        "dot_color" => Some(|c| c.dot),
-        "ellipsoid_color" => Some(|c| c.ellipsoid),
-        _ => None,
-    }
-}
-
-/// Map a per-atom transparency setting name to the corresponding mutable field accessor
-fn per_atom_transparency_field(
-    name: &str,
-) -> Option<fn(&mut patinae_mol::AtomRepresentation) -> &mut Option<f32>> {
-    match name {
-        "sphere_transparency" => Some(|r| &mut r.sphere_transparency),
-        "stick_transparency" => Some(|r| &mut r.stick_transparency),
-        "cartoon_transparency" => Some(|r| &mut r.cartoon_transparency),
-        "surface_transparency" => Some(|r| &mut r.surface_transparency),
-        _ => None,
-    }
-}
-
 struct SetCommand;
 
 impl SetCommand {
-    /// Handle the pseudo-setting "set state, N"
-    fn handle_set_state<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        value_str: Option<String>,
-    ) -> CmdResult {
-        let value_str = value_str.ok_or_else(|| CmdError::missing_argument("value".to_string()))?;
-        let state_num: i64 = value_str.parse().map_err(|_| {
-            CmdError::invalid_arg("value", format!("Invalid state number: {}", value_str))
-        })?;
-        if state_num < 1 {
-            return Err(CmdError::invalid_arg("value", "State number must be >= 1"));
-        }
-        let state_idx = (state_num - 1) as usize;
-        let names: Vec<String> = ctx
-            .viewer
-            .objects()
-            .names()
-            .map(|s| s.to_string())
-            .collect();
-        for obj_name in &names {
-            if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(obj_name) {
-                mol_obj.set_display_state(state_idx);
-            }
-        }
-        ctx.viewer.request_redraw();
-        if !ctx.quiet {
-            ctx.print(&format!(" state = {}", state_num));
-        }
-        Ok(())
-    }
-
     /// Parse a value string with per-setting overrides.
     fn parse_value<'v, 'r>(
         &self,
@@ -315,101 +236,6 @@ impl SetCommand {
         }
 
         setting.parse_value(value_str)
-    }
-
-    /// Apply a rep color per-atom via the dispatch table
-    fn apply_per_atom_color<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        selection_str: &str,
-        color_index: i32,
-        field_accessor: fn(&mut patinae_mol::AtomColors) -> &mut i32,
-    ) -> CmdResult<usize> {
-        let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
-        let mut total_affected = 0usize;
-
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            *field_accessor(&mut atom.repr.colors) = color_index;
-                        }
-                    }
-                    total_affected += count;
-                    mol_obj.invalidate(DirtyFlags::COLOR);
-                }
-            }
-        }
-
-        Ok(total_affected)
-    }
-
-    /// Apply sphere_scale per-atom
-    fn apply_per_atom_sphere_scale<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        selection_str: &str,
-        scale_value: f32,
-    ) -> CmdResult<usize> {
-        let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
-        let mut total_affected = 0usize;
-
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            atom.repr.sphere_scale = Some(scale_value);
-                        }
-                    }
-                    total_affected += count;
-                    mol_obj.invalidate(DirtyFlags::REPS);
-                }
-            }
-        }
-
-        Ok(total_affected)
-    }
-
-    /// Apply per-atom transparency for a selection.
-    ///
-    /// `dirty` controls how aggressively the affected objects are invalidated:
-    /// for surface transparency we use `COLOR`, since `recolor_lut`'s fast path
-    /// already respects each atom's `surface_transparency` override. Other reps
-    /// (sphere/stick/cartoon) need a full `REPS` rebuild.
-    fn apply_per_atom_transparency<'v, 'r>(
-        &self,
-        ctx: &mut CommandContext<'v, 'r, dyn ViewerLike + 'v>,
-        selection_str: &str,
-        transparency: f32,
-        field_accessor: fn(&mut patinae_mol::AtomRepresentation) -> &mut Option<f32>,
-        dirty: DirtyFlags,
-    ) -> CmdResult<usize> {
-        let selection_results = evaluate_selection(ctx.viewer, selection_str)?;
-        let mut total_affected = 0usize;
-
-        for (obj_name, selected) in selection_results {
-            let count = selected.count();
-            if count > 0 {
-                if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                    let mol_mut = mol_obj.molecule_mut();
-                    for idx in selected.indices() {
-                        if let Some(atom) = mol_mut.get_atom_mut(AtomIndex(idx.0)) {
-                            *field_accessor(&mut atom.repr) = Some(transparency);
-                        }
-                    }
-                    total_affected += count;
-                    mol_obj.invalidate(dirty);
-                }
-            }
-        }
-
-        Ok(total_affected)
     }
 
     /// Execute a `set` for a resolved setting.
@@ -484,87 +310,6 @@ impl SetCommand {
             .map_err(|msg| CmdError::invalid_arg("value", msg))?;
 
         if let Some(desc) = setting.built_in_descriptor() {
-            // Per-atom rep color
-            if let Some(field_accessor) = rep_color_field(desc.name) {
-                let is_global = selection.is_none();
-                let selection_str = selection.unwrap_or("all");
-                let color_index = value
-                    .as_int()
-                    .ok_or_else(|| CmdError::execution("Expected color/int value"))?;
-
-                if is_global {
-                    setting
-                        .set_global(ctx.viewer, value.clone())
-                        .map_err(CmdError::execution)?;
-                }
-
-                let total_affected =
-                    self.apply_per_atom_color(ctx, selection_str, color_index, field_accessor)?;
-                ctx.viewer.request_redraw();
-
-                if !ctx.quiet {
-                    ctx.print(&format!(
-                        " Set {} = {} for {} atoms",
-                        name, value_str, total_affected
-                    ));
-                }
-                return Ok(());
-            }
-
-            // Per-atom sphere_scale
-            if desc.name == "sphere_scale" {
-                if let Some(selection_str) = selection {
-                    let scale_value = value.as_float().ok_or_else(|| {
-                        CmdError::execution("Expected float value for sphere_scale")
-                    })?;
-
-                    let total_affected =
-                        self.apply_per_atom_sphere_scale(ctx, selection_str, scale_value)?;
-                    ctx.viewer.request_redraw();
-
-                    if !ctx.quiet {
-                        ctx.print(&format!(
-                            " Set sphere_scale = {} for {} atoms",
-                            scale_value, total_affected
-                        ));
-                    }
-                    return Ok(());
-                }
-            }
-
-            // Per-atom transparency (sphere_transparency, stick_transparency,
-            // cartoon_transparency, transparency=surface). Surface uses the
-            // recolor_lut fast path (DirtyFlags::COLOR); others need a rebuild.
-            if let Some(field_accessor) = per_atom_transparency_field(desc.name) {
-                if let Some(selection_str) = selection {
-                    let trans_value = value.as_float().ok_or_else(|| {
-                        CmdError::execution("Expected float value for transparency")
-                    })?;
-
-                    let dirty = if desc.name == "surface_transparency" {
-                        DirtyFlags::COLOR
-                    } else {
-                        DirtyFlags::REPS
-                    };
-                    let total_affected = self.apply_per_atom_transparency(
-                        ctx,
-                        selection_str,
-                        trans_value,
-                        field_accessor,
-                        dirty,
-                    )?;
-                    ctx.viewer.request_redraw();
-
-                    if !ctx.quiet {
-                        ctx.print(&format!(
-                            " Set {} = {} for {} atoms",
-                            name, trans_value, total_affected
-                        ));
-                    }
-                    return Ok(());
-                }
-            }
-
             // Built-in object override
             if let Some(sel) = selection {
                 if desc.is_object_overridable() {
@@ -579,6 +324,7 @@ impl SetCommand {
                         }
                         return Ok(());
                     }
+                    return Err(CmdError::object_not_found(sel.to_string()));
                 }
             }
         }
@@ -631,19 +377,19 @@ impl Command for SetCommand {
             "changes a setting value.",
         ]
         USAGE [
-            "set name [, value [, selection [, state ]]]",
+            "set name [, value [, object [, state ]]]",
         ]
         REQUIRED [
             { "name", "string", "setting name" },
         ]
         OPTIONAL [
             { "value", "string", "new value (depends on setting type)", "" },
-            { "selection", "string", "apply to specific selection", "global" },
+            { "object", "string", "apply object-overridable settings to an object", "global" },
             { "state", "integer", "state for state-specific settings", "0" },
         ]
         EXAMPLES [
             "set sphere_scale, 0.5",
-            "set cartoon_color, red, chain A",
+            "set cartoon_color, red, obj",
             "set cartoon_color, red",
         ]
     }
@@ -666,11 +412,6 @@ impl Command for SetCommand {
             .or_else(|| args.get_named("value").and_then(|v| v.to_string_repr()));
 
         let selection = args.str_arg(2, "selection");
-
-        // === 2. Intercept pseudo-settings ===
-        if name == "state" {
-            return self.handle_set_state(ctx, value_str);
-        }
 
         let setting = ctx
             .resolve_setting(name)
@@ -700,13 +441,13 @@ impl Command for GetCommand {
             "displays the current value of a setting.",
         ]
         USAGE [
-            "get name [, selection [, state ]]",
+            "get name [, object [, state ]]",
         ]
         REQUIRED [
             { "name", "string", "setting name" },
         ]
         OPTIONAL [
-            { "selection", "string", "get from specific selection", "global" },
+            { "object", "string", "get object override when present", "global" },
             { "state", "integer", "state for state-specific settings", "0" },
         ]
         EXAMPLES [
@@ -726,39 +467,6 @@ impl Command for GetCommand {
         let resolved = resolve_legacy_setting_name(ctx, raw_name);
         let name = resolved.as_ref();
 
-        // Intercept "get state" — report displayed state for each object
-        if name == "state" {
-            let obj_arg = args.str_arg(1, "selection");
-            if let Some(obj_name) = obj_arg {
-                if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
-                    ctx.print(&format!(
-                        " state (int) = {} for \"{}\"",
-                        mol_obj.display_state() + 1,
-                        obj_name
-                    ));
-                } else {
-                    return Err(CmdError::object_not_found(obj_name.to_string()));
-                }
-            } else {
-                let names: Vec<String> = ctx
-                    .viewer
-                    .objects()
-                    .names()
-                    .map(|s| s.to_string())
-                    .collect();
-                for obj_name in &names {
-                    if let Some(mol_obj) = ctx.viewer.objects().get_molecule(obj_name) {
-                        ctx.print(&format!(
-                            " state (int) = {} for \"{}\"",
-                            mol_obj.display_state() + 1,
-                            obj_name
-                        ));
-                    }
-                }
-            }
-            return Ok(());
-        }
-
         let setting = ctx
             .resolve_setting(name)
             .ok_or_else(|| unknown_setting(name))?;
@@ -766,29 +474,14 @@ impl Command for GetCommand {
 
         if let Some(desc) = setting.built_in_descriptor() {
             if let Some(sel) = selection {
-                if let Some(field_reader) = rep_color_field_read(desc.name) {
-                    let selection_results = evaluate_selection(ctx.viewer, sel)?;
-                    for (obj_name, selected) in &selection_results {
-                        if let Some(mol) = ctx.viewer.objects().get_molecule(obj_name) {
-                            for idx in selected.indices() {
-                                if let Some(atom) = mol.molecule().get_atom(idx) {
-                                    let color_val = field_reader(&atom.repr.colors);
-                                    let value = SettingValue::Int(color_val);
-                                    let display = setting.format_display(&value);
-                                    ctx.print(&format!(" {} = {} ({})", name, display, sel));
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                }
-
                 if desc.is_object_overridable() {
                     if let Some(mol) = ctx.viewer.objects().get_molecule(sel) {
                         if let Some(value) = setting.built_in_object_value(mol) {
                             ctx.print(&format!(" {}", format_object_report(&setting, &value, sel)));
                             return Ok(());
                         }
+                    } else {
+                        return Err(CmdError::object_not_found(sel.to_string()));
                     }
                 }
             }
@@ -832,13 +525,13 @@ impl Command for UnsetCommand {
             "restores a setting to its default value.",
         ]
         USAGE [
-            "unset name [, selection [, state ]]",
+            "unset name [, object [, state ]]",
         ]
         REQUIRED [
             { "name", "string", "setting name" },
         ]
         OPTIONAL [
-            { "selection", "string", "apply to specific selection", "global" },
+            { "object", "string", "reset object override when present", "global" },
             { "state", "integer", "state for state-specific settings", "0" },
         ]
         EXAMPLES [
@@ -865,68 +558,6 @@ impl Command for UnsetCommand {
 
         if let Some(desc) = setting.built_in_descriptor() {
             if let Some(sel) = selection {
-                if let Some(field_accessor) = rep_color_field(desc.name) {
-                    let selection_results = evaluate_selection(ctx.viewer, sel)?;
-                    let mut total = 0usize;
-                    for (obj_name, selected) in selection_results {
-                        if selected.count() > 0 {
-                            if let Some(mol_obj) =
-                                ctx.viewer.objects_mut().get_molecule_mut(&obj_name)
-                            {
-                                for idx in selected.indices() {
-                                    if let Some(atom) =
-                                        mol_obj.molecule_mut().get_atom_mut(AtomIndex(idx.0))
-                                    {
-                                        *field_accessor(&mut atom.repr.colors) =
-                                            patinae_mol::COLOR_UNSET;
-                                    }
-                                }
-                                total += selected.count();
-                                mol_obj.invalidate(DirtyFlags::COLOR);
-                            }
-                        }
-                    }
-                    ctx.viewer.request_redraw();
-                    if !ctx.quiet {
-                        ctx.print(&format!(" {} reset for {} atoms", name, total));
-                    }
-                    return Ok(());
-                }
-
-                // Per-atom transparency unset. Surface uses recolor_lut
-                // (COLOR); other reps need full rebuild (REPS).
-                if let Some(field_accessor) = per_atom_transparency_field(desc.name) {
-                    let unset_dirty = if desc.name == "surface_transparency" {
-                        DirtyFlags::COLOR
-                    } else {
-                        DirtyFlags::REPS
-                    };
-                    let selection_results = evaluate_selection(ctx.viewer, sel)?;
-                    let mut total = 0usize;
-                    for (obj_name, selected) in selection_results {
-                        if selected.count() > 0 {
-                            if let Some(mol_obj) =
-                                ctx.viewer.objects_mut().get_molecule_mut(&obj_name)
-                            {
-                                for idx in selected.indices() {
-                                    if let Some(atom) =
-                                        mol_obj.molecule_mut().get_atom_mut(AtomIndex(idx.0))
-                                    {
-                                        *field_accessor(&mut atom.repr) = None;
-                                    }
-                                }
-                                total += selected.count();
-                                mol_obj.invalidate(unset_dirty);
-                            }
-                        }
-                    }
-                    ctx.viewer.request_redraw();
-                    if !ctx.quiet {
-                        ctx.print(&format!(" {} reset for {} atoms", name, total));
-                    }
-                    return Ok(());
-                }
-
                 if desc.is_object_overridable() {
                     let inherited_value = desc.get(ctx.viewer.settings());
                     if let Some(mol) = ctx.viewer.objects_mut().get_molecule_mut(sel) {
@@ -948,23 +579,7 @@ impl Command for UnsetCommand {
                         }
                         return Ok(());
                     }
-                }
-            }
-
-            if let Some(field_accessor) = rep_color_field(desc.name) {
-                let names: Vec<_> = ctx
-                    .viewer
-                    .objects()
-                    .names()
-                    .map(|s| s.to_string())
-                    .collect();
-                for obj_name in names {
-                    if let Some(mol_obj) = ctx.viewer.objects_mut().get_molecule_mut(&obj_name) {
-                        for atom in mol_obj.molecule_mut().atoms_mut() {
-                            *field_accessor(&mut atom.repr.colors) = patinae_mol::COLOR_UNSET;
-                        }
-                        mol_obj.invalidate(DirtyFlags::COLOR);
-                    }
+                    return Err(CmdError::object_not_found(sel.to_string()));
                 }
             }
         }
@@ -1096,7 +711,31 @@ impl Command for SetupCcdCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CommandExecutor;
+    use patinae_mol::{AtomBuilder, ObjectMolecule, COLOR_UNSET};
+    use patinae_scene::{Session, SessionAdapter};
     use patinae_settings::registry;
+
+    fn execute(session: &mut Session, executor: &mut CommandExecutor, cmd: &str) -> CmdResult {
+        let mut needs_redraw = false;
+        let mut adapter = SessionAdapter {
+            session,
+            render_context: None,
+            default_size: (800, 600),
+            needs_redraw: &mut needs_redraw,
+            async_fetch_fn: None,
+        };
+        executor.do_(&mut adapter, cmd)
+    }
+
+    fn session_with_single_atom_object(name: &str) -> Session {
+        let mut mol = ObjectMolecule::new(name);
+        mol.add_atom(AtomBuilder::new().name("CA").element_symbol("C").build());
+
+        let mut session = Session::new();
+        session.registry.add(MoleculeObject::with_name(mol, name));
+        session
+    }
 
     #[test]
     fn test_cartoon_smooth_loops_set_on_value_path() {
@@ -1135,5 +774,174 @@ mod tests {
             &SettingValue::Float(0.5),
         );
         assert!(obj.dirty_flags().contains(DirtyFlags::TRANSPARENCY));
+    }
+
+    #[test]
+    fn set_object_setting_uses_object_override_without_atom_write() {
+        let mut session = session_with_single_atom_object("obj");
+        let mut executor = CommandExecutor::new();
+
+        execute(&mut session, &mut executor, "set sphere_scale, 0.5, obj").unwrap();
+
+        let obj = session.registry.get_molecule("obj").unwrap();
+        assert_eq!(session.settings.sphere.scale, 1.0);
+        assert_eq!(obj.overrides().unwrap().sphere.scale, Some(0.5));
+        assert_eq!(obj.molecule().atoms_slice()[0].repr.sphere_scale, None);
+    }
+
+    #[test]
+    fn global_color_setting_does_not_write_atom_color_override() {
+        let mut session = session_with_single_atom_object("obj");
+        let mut executor = CommandExecutor::new();
+
+        execute(&mut session, &mut executor, "set sphere_color, red").unwrap();
+
+        let obj = session.registry.get_molecule("obj").unwrap();
+        assert_ne!(session.settings.sphere.color.0, COLOR_UNSET);
+        assert_eq!(
+            obj.molecule().atoms_slice()[0].repr.colors.sphere,
+            COLOR_UNSET
+        );
+    }
+
+    #[test]
+    fn object_setting_rejects_non_object_selection_without_global_fallback() {
+        let mut session = session_with_single_atom_object("obj");
+        let mut executor = CommandExecutor::new();
+
+        let err = execute(
+            &mut session,
+            &mut executor,
+            "set sphere_scale, 0.5, chain A",
+        )
+        .unwrap_err();
+
+        assert!(err.is_object_not_found());
+        assert_eq!(session.settings.sphere.scale, 1.0);
+    }
+
+    #[test]
+    fn unset_global_color_setting_preserves_atom_color_override() {
+        let mut session = session_with_single_atom_object("obj");
+        session
+            .registry
+            .get_molecule_mut("obj")
+            .unwrap()
+            .molecule_mut()
+            .atoms_slice_mut()[0]
+            .repr
+            .colors
+            .sphere = 7;
+        let mut executor = CommandExecutor::new();
+
+        execute(&mut session, &mut executor, "set sphere_color, red").unwrap();
+        execute(&mut session, &mut executor, "unset sphere_color").unwrap();
+
+        let obj = session.registry.get_molecule("obj").unwrap();
+        assert_eq!(
+            session.settings.sphere.color.0,
+            patinae_settings::Color::UNSET.0
+        );
+        assert_eq!(obj.molecule().atoms_slice()[0].repr.colors.sphere, 7);
+    }
+
+    #[test]
+    fn unset_object_setting_clears_object_override_without_atom_write() {
+        let mut session = session_with_single_atom_object("obj");
+        let mut executor = CommandExecutor::new();
+
+        execute(&mut session, &mut executor, "set sphere_scale, 0.5, obj").unwrap();
+        execute(&mut session, &mut executor, "unset sphere_scale, obj").unwrap();
+
+        let obj = session.registry.get_molecule("obj").unwrap();
+        assert_eq!(obj.overrides().unwrap().sphere.scale, None);
+        assert_eq!(obj.molecule().atoms_slice()[0].repr.sphere_scale, None);
+    }
+
+    #[test]
+    fn state_uses_regular_setting_path() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+
+        execute(&mut session, &mut executor, "set state, 2").unwrap();
+
+        let desc = registry::lookup_by_name("state").unwrap();
+        assert_eq!(desc.get(&session.settings), SettingValue::Int(2));
+    }
+
+    #[test]
+    fn render_memory_profile_uses_regular_setting_path() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_profile, performance",
+        )
+        .unwrap();
+        assert_eq!(
+            session.settings.renderer.memory_profile,
+            patinae_settings::RenderMemoryProfileSetting::Performance
+        );
+    }
+
+    #[test]
+    fn render_memory_budget_uses_regular_setting_path() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_budget, 1024",
+        )
+        .unwrap();
+
+        assert_eq!(session.settings.renderer.memory_budget_mib, 1024);
+    }
+
+    #[test]
+    fn render_memory_budget_rejects_negative_values() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+
+        let err = execute(&mut session, &mut executor, "set render_memory_budget, -1").unwrap_err();
+
+        assert!(err.to_string().contains("out of range"));
+    }
+
+    #[test]
+    fn render_memory_unset_is_independent_regular_setting_reset() {
+        let mut session = Session::new();
+        let mut executor = CommandExecutor::new();
+
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_profile, balanced",
+        )
+        .unwrap();
+        execute(
+            &mut session,
+            &mut executor,
+            "set render_memory_budget, 1024",
+        )
+        .unwrap();
+        execute(&mut session, &mut executor, "unset render_memory_profile").unwrap();
+
+        assert_eq!(
+            session.settings.renderer.memory_profile,
+            patinae_settings::RenderMemoryProfileSetting::Auto
+        );
+        assert_eq!(session.settings.renderer.memory_budget_mib, 1024);
+
+        execute(&mut session, &mut executor, "unset render_memory_budget").unwrap();
+
+        assert_eq!(
+            session.settings.renderer.memory_profile,
+            patinae_settings::RenderMemoryProfileSetting::Auto
+        );
+        assert_eq!(session.settings.renderer.memory_budget_mib, 0);
     }
 }

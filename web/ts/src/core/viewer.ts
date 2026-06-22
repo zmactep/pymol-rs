@@ -4,12 +4,32 @@
 
 import type { WebViewer } from "../../../pkg/patinae_web.js";
 import type {
+  CommandOutput,
   LabelInfo,
+  OutputMessage,
   ViewerPerformanceSnapshot,
   ViewerWasmPerformanceSnapshot,
 } from "./types.js";
 import { MOD_SHIFT, MOD_CTRL, MOD_ALT, MOD_META } from "./types.js";
 import { LabelOverlay } from "./labels.js";
+
+type WebViewerConstructorWithMemoryProfile = {
+  create(
+    canvas_id: string,
+    picking_enabled: boolean,
+    selection_overlay_enabled: boolean,
+  ): Promise<WebViewer>;
+  createWithMemoryProfile(
+    canvas_id: string,
+    picking_enabled: boolean,
+    selection_overlay_enabled: boolean,
+    memory_profile: string,
+  ): Promise<WebViewer>;
+};
+
+type WebViewerWithMemoryWarnings = WebViewer & {
+  takeWarnings?: () => CommandOutput;
+};
 
 /** Click-detection threshold: drag distance squared in CSS pixels. */
 const CLICK_THRESHOLD_SQ = 25; // 5 CSS-px radius
@@ -35,6 +55,8 @@ export class ViewerCore {
 
   /** Called with the raw WASM pick result (PickHitInfo | null) on each click. */
   onPick: ((hit: unknown | null) => void) | null = null;
+  /** Called for renderer warnings produced outside direct command execution. */
+  onOutput: ((message: OutputMessage) => void) | null = null;
 
   constructor(private container: HTMLElement) {
     // Ensure container is a positioning context for the label overlay
@@ -64,9 +86,15 @@ export class ViewerCore {
    *   later requires re-creating the viewer.
    * @param options.selectionOverlay — whether to draw visible selection /
    *   hover overlays. Defaults to `options.picking`.
+   * @param options.memoryProfile — optional renderer memory profile override:
+   *   "performance", "balanced", "low", or "auto".
    */
   async init(
-    options: { picking?: boolean; selectionOverlay?: boolean } = {},
+    options: {
+      picking?: boolean;
+      selectionOverlay?: boolean;
+      memoryProfile?: "auto" | "performance" | "balanced" | "low";
+    } = {},
   ): Promise<WebViewer> {
     // Dynamically import the WASM module
     const wasmModule = await import("../../../pkg/patinae_web.js");
@@ -77,11 +105,20 @@ export class ViewerCore {
 
     const pickingEnabled = options.picking ?? false;
     const selectionOverlay = options.selectionOverlay ?? pickingEnabled;
-    const viewer = await wasmModule.WebViewer.create(
-      this.canvas.id,
-      pickingEnabled,
-      selectionOverlay,
-    );
+    const memoryProfile = options.memoryProfile ?? "auto";
+    const WebViewerCtor = wasmModule.WebViewer as WebViewerConstructorWithMemoryProfile;
+    const viewer = memoryProfile === "auto"
+      ? await WebViewerCtor.create(
+        this.canvas.id,
+        pickingEnabled,
+        selectionOverlay,
+      )
+      : await WebViewerCtor.createWithMemoryProfile(
+        this.canvas.id,
+        pickingEnabled,
+        selectionOverlay,
+        memoryProfile,
+      );
     this.wasm = viewer;
     this.fatalError = null;
     this.fatalLabel = null;
@@ -289,6 +326,8 @@ export class ViewerCore {
       if (this.callWasm("needs_redraw", (wasm) => wasm.needs_redraw())) {
         this.callWasm("render_frame", (wasm) => wasm.render_frame());
         if (this.isFailed) return;
+        this.drainRendererWarnings();
+        if (this.isFailed) return;
         const labels = this.callWasm(
           "get_labels",
           (wasm) => wasm.get_labels() as LabelInfo[] | null,
@@ -308,6 +347,17 @@ export class ViewerCore {
       }
     };
     this.animFrameId = requestAnimationFrame(loop);
+  }
+
+  private drainRendererWarnings(): void {
+    const output = this.callWasm("takeWarnings", (wasm) => {
+      const takeWarnings = (wasm as WebViewerWithMemoryWarnings).takeWarnings;
+      return takeWarnings ? takeWarnings.call(wasm) : null;
+    });
+    if (!output) return;
+    for (const message of output.messages ?? []) {
+      this.onOutput?.(message);
+    }
   }
 
   // ---------------------------------------------------------------------------

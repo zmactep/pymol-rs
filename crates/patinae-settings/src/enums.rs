@@ -211,6 +211,35 @@ impl_setting_enum! {
 }
 
 // ---------------------------------------------------------------------------
+// RenderMemoryProfileSetting enum
+// ---------------------------------------------------------------------------
+
+/// Renderer memory profile selected by user settings.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[repr(i32)]
+pub enum RenderMemoryProfileSetting {
+    #[default]
+    Auto = 0,
+    Performance = 1,
+    Balanced = 2,
+    LowMemory = 3,
+    Budgeted = 4,
+}
+
+impl_setting_enum! {
+    RenderMemoryProfileSetting {
+        Auto = 0 => "auto",
+        Performance = 1 => "performance",
+        Balanced = 2 => "balanced",
+        LowMemory = 3 => "low",
+        Budgeted = 4 => "budgeted",
+    }
+    default: Auto
+}
+
+// ---------------------------------------------------------------------------
 // SurfaceMode enum
 // ---------------------------------------------------------------------------
 

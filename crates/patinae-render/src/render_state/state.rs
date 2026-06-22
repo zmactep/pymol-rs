@@ -300,6 +300,7 @@ pub(super) struct LightingRuntime {
 
 pub(super) struct MemoryRuntime {
     pub(super) policy: RenderMemoryPolicy,
+    pub(super) pending_warnings: Vec<String>,
     pub(super) rep_budget_diagnostics: Vec<RepBudgetDiagnostic>,
     pub(super) rep_budget_request_cache: HashMap<(u32, RepKind), RepBudgetRequest>,
     pub(super) warned_rep_budget: HashSet<RepBudgetWarningKey>,

@@ -557,6 +557,9 @@ impl App {
         if let Some(warning) = render_outcome.warning {
             self.kernel.bus.print_warning(warning);
         }
+        for warning in renderer.take_memory_warnings() {
+            self.kernel.bus.print_warning(warning);
+        }
         if render_outcome.request_redraw {
             self.kernel.bus.request_redraw();
             app.window().request_redraw();

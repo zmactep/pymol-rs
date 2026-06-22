@@ -33,10 +33,12 @@ impl RenderState {
         if enabled && uses_selection_dots_fallback(self.memory.policy) {
             let was_enabled = self.screen.selection_dots_enabled;
             if !self.memory.warned_selection_denied {
-                log::warn!(
-                    "full selection and hover overlays disabled by render memory profile {}; using selected atom dots",
+                let message = format!(
+                    "Full selection and hover overlays disabled by render memory profile {}; using selected atom dots.",
                     self.memory.policy.profile
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_selection_denied = true;
             }
             self.screen.selection_overlay_enabled = false;
@@ -56,10 +58,12 @@ impl RenderState {
 
         if enabled && !self.memory.policy.overlays.selection_enabled {
             if !self.memory.warned_selection_denied {
-                log::warn!(
-                    "selection overlay disabled by render memory profile {}",
+                let message = format!(
+                    "Selection overlay disabled by render memory profile {}.",
                     self.memory.policy.profile
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_selection_denied = true;
             }
             self.screen.selection_overlay_enabled = false;
@@ -109,10 +113,12 @@ impl RenderState {
     pub fn set_silhouette(&mut self, enabled: bool, thickness: f32, color: [f32; 4]) {
         if enabled && !self.memory.policy.overlays.silhouette_enabled {
             if !self.memory.warned_silhouette_denied {
-                log::warn!(
-                    "silhouette overlay disabled by render memory profile {}",
+                let message = format!(
+                    "Silhouette overlay disabled by render memory profile {}.",
                     self.memory.policy.profile
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_silhouette_denied = true;
             }
             self.screen.silhouette_params = None;
@@ -146,10 +152,12 @@ impl RenderState {
     pub fn set_fxaa(&mut self, enabled: bool) {
         if enabled && !self.memory.policy.postprocess.fxaa_enabled {
             if !self.memory.warned_fxaa_denied {
-                log::warn!(
-                    "FXAA disabled by render memory profile {}",
+                let message = format!(
+                    "FXAA disabled by render memory profile {}.",
                     self.memory.policy.profile
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_fxaa_denied = true;
             }
             self.screen.fxaa_enabled = false;
@@ -196,10 +204,12 @@ impl RenderState {
     pub fn set_ssao(&mut self, enabled: bool, radius: f32, intensity: f32, bias: f32) {
         if enabled && !self.memory.policy.postprocess.ssao_enabled {
             if !self.memory.warned_ssao_denied {
-                log::warn!(
-                    "SSAO disabled by render memory profile {}",
+                let message = format!(
+                    "SSAO disabled by render memory profile {}.",
                     self.memory.policy.profile
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_ssao_denied = true;
             }
             self.screen.ssao_enabled = false;
@@ -264,12 +274,12 @@ impl RenderState {
             let requested = map_size.clamp(64, 4096).next_power_of_two().min(4096);
             let capped = requested.min(self.memory.policy.shadows.max_shadow_map_size);
             if capped < requested && !self.memory.warned_shadow_clamped {
-                log::warn!(
-                    "shadow map size clamped from {} to {} by render memory profile {}",
-                    requested,
-                    capped,
-                    self.memory.policy.profile
+                let message = format!(
+                    "Shadow map size clamped from {} to {} by render memory profile {}.",
+                    requested, capped, self.memory.policy.profile
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_shadow_clamped = true;
             }
             self.lighting.shadow_map_size = capped;
@@ -330,14 +340,16 @@ impl RenderState {
                 || self.lighting.skripkin_map_size < requested_map_size)
                 && !self.memory.warned_atlas_clamped
             {
-                log::warn!(
-                    "atlas AO clamped by render memory profile {}: directions {} -> {}, tile {} -> {}",
+                let message = format!(
+                    "Atlas AO clamped by render memory profile {}: directions {} -> {}, tile {} -> {}.",
                     self.memory.policy.profile,
                     requested_directions,
                     self.lighting.skripkin_directions,
                     requested_map_size,
                     self.lighting.skripkin_map_size
                 );
+                log::warn!("{message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_atlas_clamped = true;
             }
 

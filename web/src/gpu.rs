@@ -12,7 +12,10 @@ use web_sys::HtmlCanvasElement;
 use patinae_render::{
     required_limits_for_memory_policy, select_render_memory_policy, RenderMemorySelectionInput,
 };
-use patinae_render::{RenderConfig, RenderMemoryPolicy, RenderMemoryProfile, RenderState};
+use patinae_render::{
+    RenderConfig, RenderMemoryPolicy, RenderMemoryProfile, RenderState,
+    PERFORMANCE_MAX_BUFFER_SIZE, PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
+};
 
 /// GPU resources initialized from a canvas element. The renderer is the
 /// shared `patinae_render::RenderState`; the surface + config drive the
@@ -27,7 +30,11 @@ pub struct GpuState {
 impl GpuState {
     /// Create GPU resources from a `<canvas>` element ID.
     #[allow(unreachable_code, unused_variables)]
-    pub async fn from_canvas(canvas_id: &str, config: RenderConfig) -> Result<Self, String> {
+    pub async fn from_canvas(
+        canvas_id: &str,
+        config: RenderConfig,
+        memory_profile_override: Option<RenderMemoryProfile>,
+    ) -> Result<Self, String> {
         // Get the canvas element
         let window = web_sys::window().ok_or("No global window")?;
         let document = window.document().ok_or("No document")?;
@@ -43,7 +50,7 @@ impl GpuState {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let _ = (canvas, width, height);
+            let _ = (canvas, width, height, memory_profile_override);
             return Err("WebViewer only runs on wasm32".into());
         }
 
@@ -76,7 +83,7 @@ impl GpuState {
         let adapter_limits = adapter.limits();
         let memory_policy = select_render_memory_policy(
             RenderMemorySelectionInput::from_wgpu(&adapter_info, &adapter_limits, true),
-            None,
+            memory_profile_override,
         );
         config.memory = memory_policy;
         log::info!(
@@ -172,7 +179,12 @@ impl GpuState {
 
     /// Rebuild the render state with a lower effective memory profile.
     pub fn rebuild_with_memory_profile(&mut self, profile: RenderMemoryProfile) {
-        self.config.memory = RenderMemoryPolicy::from_profile(profile);
+        self.rebuild_with_memory_policy(RenderMemoryPolicy::from_profile(profile));
+    }
+
+    /// Rebuild the render state with an explicit memory policy.
+    pub fn rebuild_with_memory_policy(&mut self, policy: RenderMemoryPolicy) {
+        self.config.memory = policy;
         self.state = RenderState::with_config(
             self.state.ctx.device.clone(),
             self.state.ctx.queue.clone(),
@@ -180,5 +192,25 @@ impl GpuState {
             (self.surface_config.width, self.surface_config.height),
             self.config,
         );
+    }
+
+    /// Returns whether the existing device can support `policy`.
+    pub fn supports_memory_policy(&self, policy: RenderMemoryPolicy) -> bool {
+        match policy.profile {
+            RenderMemoryProfile::Performance => {
+                let limits = self.state.ctx.device.limits();
+                limits.max_buffer_size >= PERFORMANCE_MAX_BUFFER_SIZE
+                    && limits.max_storage_buffer_binding_size
+                        >= PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
+            }
+            RenderMemoryProfile::Balanced
+            | RenderMemoryProfile::LowMemory
+            | RenderMemoryProfile::Budgeted { .. } => true,
+        }
+    }
+
+    /// Drains pending user-visible renderer memory warnings.
+    pub fn take_memory_warnings(&mut self) -> Vec<String> {
+        self.state.take_memory_warnings()
     }
 }

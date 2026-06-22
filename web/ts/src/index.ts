@@ -11,6 +11,7 @@
 export { PatinaeViewer } from "./core/api.js";
 export type {
   CommandOutput,
+  OutputMessage,
   ObjectInfo,
   SequenceChain,
   SequenceResidue,
@@ -35,6 +36,7 @@ import { PatinaeViewer } from "./core/api.js";
  *   panels            — comma-separated panel names (repl, objects, sequence, movie)
  *   command           — command to run after loading
  *   selection-overlay — set to "false" to suppress selection/hover visuals
+ *   memory-profile    — force "performance", "balanced", or "low" at startup
  */
 export function registerElement(tagName = "patinae-viewer"): void {
   if (customElements.get(tagName)) return;
@@ -68,11 +70,19 @@ export function registerElement(tagName = "patinae-viewer"): void {
         const selectionOverlay = selectionOverlayAttr === null
           ? undefined
           : selectionOverlayAttr !== "false";
+        const memoryProfileAttr = this.getAttribute("memory-profile")?.trim();
+        const memoryProfile = memoryProfileAttr === "performance"
+          || memoryProfileAttr === "balanced"
+          || memoryProfileAttr === "low"
+          || memoryProfileAttr === "auto"
+          ? memoryProfileAttr
+          : undefined;
 
         this.viewer = new PatinaeViewer(wrapper, {
           panels,
           defer: shouldDefer,
           selectionOverlay,
+          memoryProfile,
         });
         await this.viewer.init();
 

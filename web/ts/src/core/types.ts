@@ -176,6 +176,11 @@ export interface ViewerOptions {
    * read-only embedded viewers stay visually inert unless explicitly enabled.
    */
   selectionOverlay?: boolean;
+  /**
+   * Force the renderer memory profile at WebGPU initialization.
+   * Defaults to adapter-based selection.
+   */
+  memoryProfile?: "auto" | "performance" | "balanced" | "low";
 }
 
 export type PanelName = "repl" | "objects" | "sequence" | "movie";

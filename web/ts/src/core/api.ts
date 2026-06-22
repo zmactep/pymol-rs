@@ -11,6 +11,7 @@ import type {
   SelectionInfo,
   SequenceChain,
   MovieState,
+  OutputMessage,
   ViewerOptions,
   PanelName,
   PanelPlacement,
@@ -45,12 +46,15 @@ export class PatinaeViewer {
     const wasm = await this.core.init({
       picking: this.options.picking ?? false,
       selectionOverlay: this.options.selectionOverlay,
+      memoryProfile: this.options.memoryProfile,
     });
 
     // Arm the CPU-side hit-test flag so click/hover events trigger picks.
     if (this.options.picking) {
       this.core.requireWasm("set_picking_enabled", (wasm) => wasm.set_picking_enabled(true));
     }
+
+    this.core.onOutput = (message) => this.emitRendererOutput(message);
 
     // Forward pick results as typed events.
     this.core.onPick = (hit) => {
@@ -165,7 +169,7 @@ export class PatinaeViewer {
       return { messages: [{ level: "info", text }] };
     }
     const result = this.core.requireWasm("execute", (wasm) => wasm.execute(command) as CommandOutput);
-    this.events.emit("command-output", result.messages[0] ?? { level: "info", text: "" });
+    this.emitCommandMessages(result.messages);
     this.refreshPanels();
     return result;
   }
@@ -299,6 +303,20 @@ export class PatinaeViewer {
       panel.update();
     }
     this.events.emit("objects-changed", { names: this.getObjectNames() });
+  }
+
+  private emitCommandMessages(messages: OutputMessage[]): void {
+    for (const message of messages) {
+      this.events.emit("command-output", message);
+    }
+  }
+
+  private emitRendererOutput(message: OutputMessage): void {
+    this.events.emit("command-output", message);
+    const panel = this.panels.get("repl");
+    if (panel instanceof ReplPanel) {
+      panel.appendOutputMessage(message);
+    }
   }
 
   destroy(): void {

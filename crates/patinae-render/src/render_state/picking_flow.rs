@@ -89,8 +89,8 @@ impl RenderState {
                     .budget_bytes
                     .unwrap_or(0)
                     .saturating_sub(decision.fixed_reserved_bytes);
-                log::warn!(
-                    "patinae-render: hit-test picking disabled by render memory profile {}: estimated {:.2} MiB, headroom {:.2} MiB, budget {:.2} MiB, atoms {}, active reps {}",
+                let message = format!(
+                    "Hit-test picking disabled by render memory profile {}: estimated {:.2} MiB, headroom {:.2} MiB, budget {:.2} MiB, atoms {}, active reps {}.",
                     self.memory.policy.profile,
                     bytes_to_mib(decision.estimated_bytes),
                     bytes_to_mib(headroom),
@@ -98,6 +98,8 @@ impl RenderState {
                     decision.total_atoms,
                     decision.active_rep_count
                 );
+                log::warn!("patinae-render: {message}");
+                self.memory.pending_warnings.push(message);
                 self.memory.warned_picking_budget_denied = true;
             }
             return self.clear_hit_test_picking_resources();

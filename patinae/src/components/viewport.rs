@@ -15,11 +15,12 @@ use patinae_color::{NamedPalette, ThemedPalette};
 use patinae_render::picking::readback::PendingPick;
 use patinae_render::{
     copy_rgba_buffer_to_viewport_texture, estimate_texture_2d_bytes, is_wgpu_oom,
-    select_render_memory_policy, DisplayedGeometry, GeometryExportOptions, GpuMemoryCategory,
-    GpuMemorySnapshot, GpuMemoryUsage, GpuViewportImage, RenderArtifactSnapshot, RenderConfig,
-    RenderInput, RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryRecoveryAction,
-    RenderMemoryRecoveryStage, RenderMemorySelectionInput, RenderState, RenderSyncTimings,
-    SceneLod, TraceGeometryChunk,
+    render_memory_policy_from_settings, select_render_memory_policy, DisplayedGeometry,
+    GeometryExportOptions, GpuMemoryCategory, GpuMemorySnapshot, GpuMemoryUsage, GpuViewportImage,
+    RenderArtifactSnapshot, RenderConfig, RenderInput, RenderMemoryPolicy, RenderMemoryProfile,
+    RenderMemoryRecoveryAction, RenderMemoryRecoveryStage, RenderMemorySelectionInput, RenderState,
+    RenderSyncTimings, SceneLod, TraceGeometryChunk, PERFORMANCE_MAX_BUFFER_SIZE,
+    PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
 };
 use patinae_scene::{Camera, CaptureRenderer, ObjectRegistry, PickHit, Session, ViewerError};
 use patinae_settings::{ResolvedSettings, Settings, ShadingMode};
@@ -109,6 +110,8 @@ pub struct ViewportRenderer {
     state: RenderState,
     /// Current renderer configuration, including temporary recovery profile.
     config: RenderConfig,
+    /// Startup policy used when runtime settings select `auto`.
+    auto_memory_policy: RenderMemoryPolicy,
     /// OOM recovery state relative to the sequence baseline profile.
     recovery: RenderMemoryRecoveryStage,
     /// Error signals reported outside explicit error scopes.
@@ -133,6 +136,7 @@ pub struct ViewportRenderer {
     viewport_gpu_image: Option<GpuViewportImage>,
     /// Construction-time memory policy for native viewport handoff resources.
     memory_policy: RenderMemoryPolicy,
+    warned_unsupported_memory_policy: bool,
 }
 
 impl ViewportRenderer {
@@ -152,6 +156,7 @@ impl ViewportRenderer {
         Self {
             state,
             config,
+            auto_memory_policy: memory_policy,
             recovery,
             wgpu_errors,
             last_viewport_size: None,
@@ -163,6 +168,7 @@ impl ViewportRenderer {
             color_textures_next: 0,
             viewport_gpu_image: None,
             memory_policy,
+            warned_unsupported_memory_policy: false,
         }
     }
 
@@ -259,6 +265,10 @@ impl ViewportRenderer {
         self.state.last_sync_timings()
     }
 
+    pub fn take_memory_warnings(&mut self) -> Vec<String> {
+        self.state.take_memory_warnings()
+    }
+
     pub(crate) fn render(
         &mut self,
         session: &mut Session,
@@ -271,6 +281,10 @@ impl ViewportRenderer {
         }
         if self.wgpu_errors.take_oom() {
             return self.recover_after_oom(session);
+        }
+
+        if let Some(warning) = self.apply_runtime_memory_policy(session) {
+            return ViewportRenderOutcome::recovery(Some(warning), true);
         }
 
         if let Some(image) = self.viewport_gpu_image.as_ref() {
@@ -415,10 +429,43 @@ impl ViewportRenderer {
         }
     }
 
+    fn apply_runtime_memory_policy(&mut self, session: &mut Session) -> Option<String> {
+        let requested =
+            render_memory_policy_from_settings(&session.settings, self.auto_memory_policy);
+        if requested == self.memory_policy {
+            return None;
+        }
+        if !memory_policy_supported_by_device(requested, &self.state.ctx.device.limits()) {
+            if !self.warned_unsupported_memory_policy {
+                self.warned_unsupported_memory_policy = true;
+                return Some(format!(
+                    "Renderer memory profile {} requires GPU limits unavailable on this device; keeping {}.",
+                    requested.profile, self.memory_policy.profile
+                ));
+            }
+            return None;
+        }
+
+        self.config.memory = requested;
+        self.memory_policy = requested;
+        self.warned_unsupported_memory_policy = false;
+        self.recovery.reset(requested.profile);
+        self.rebuild_for_policy(requested);
+        session.registry.mark_all_dirty();
+        Some(format!(
+            "Renderer memory profile switched to {} by user setting.",
+            requested.profile
+        ))
+    }
+
     fn rebuild_for_profile(&mut self, profile: RenderMemoryProfile) {
+        self.rebuild_for_policy(RenderMemoryPolicy::from_profile(profile));
+    }
+
+    fn rebuild_for_policy(&mut self, policy: RenderMemoryPolicy) {
         let device = self.state.ctx.device.clone();
         let queue = self.state.ctx.queue.clone();
-        self.config.memory = RenderMemoryPolicy::from_profile(profile);
+        self.config.memory = policy;
         self.memory_policy = self.config.memory;
         let viewport = self.last_viewport_size.unwrap_or((1, 1));
         self.state =
@@ -998,6 +1045,19 @@ pub(crate) fn render_memory_policy_for_device(
         |info| RenderMemorySelectionInput::from_wgpu(info, limits, is_web),
     );
     select_render_memory_policy(input, override_profile)
+}
+
+fn memory_policy_supported_by_device(policy: RenderMemoryPolicy, limits: &wgpu::Limits) -> bool {
+    match policy.profile {
+        RenderMemoryProfile::Performance => {
+            limits.max_buffer_size >= PERFORMANCE_MAX_BUFFER_SIZE
+                && limits.max_storage_buffer_binding_size
+                    >= PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
+        }
+        RenderMemoryProfile::Balanced
+        | RenderMemoryProfile::LowMemory
+        | RenderMemoryProfile::Budgeted { .. } => true,
+    }
 }
 
 fn effective_fxaa(settings: &Settings) -> bool {

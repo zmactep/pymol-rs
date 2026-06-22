@@ -59,12 +59,12 @@ pub use memory::{
     GpuMemoryUsage,
 };
 pub use memory_policy::{
-    required_limits_for_memory_policy, select_render_memory_policy, FrameTargetPolicy,
-    OverlayPolicy, PickingPolicy, PostprocessPolicy, RenderAdapterType, RenderBackend,
-    RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryProfileParseError,
-    RenderMemorySelectionInput, RepresentationBudgetPolicy, SceneStoreCompactionPolicy,
-    SceneStoreGrowthPolicy, SceneStoreMemoryPolicy, ShadowPolicy, PERFORMANCE_MAX_BUFFER_SIZE,
-    PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
+    render_memory_policy_from_settings, required_limits_for_memory_policy,
+    select_render_memory_policy, FrameTargetPolicy, OverlayPolicy, PickingPolicy,
+    PostprocessPolicy, RenderAdapterType, RenderBackend, RenderMemoryPolicy, RenderMemoryProfile,
+    RenderMemoryProfileParseError, RenderMemorySelectionInput, RepresentationBudgetPolicy,
+    SceneStoreCompactionPolicy, SceneStoreGrowthPolicy, SceneStoreMemoryPolicy, ShadowPolicy,
+    PERFORMANCE_MAX_BUFFER_SIZE, PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
 };
 pub use memory_recovery::{
     is_surface_oom, is_wgpu_oom, next_oom_fallback, RenderMemoryRecoveryAction,

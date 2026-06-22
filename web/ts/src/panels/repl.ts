@@ -3,6 +3,7 @@
  */
 
 import type { PatinaeViewer } from "../core/api.js";
+import type { OutputMessage } from "../core/types.js";
 
 export class ReplPanel {
   private container: HTMLElement;
@@ -43,11 +44,7 @@ export class ReplPanel {
 
       const result = await this.viewer.executeAsync(cmd);
       for (const msg of result.messages) {
-        if (msg.level === "clear") {
-          this.clearOutput();
-          continue;
-        }
-        this.appendLine(msg.text, msg.level);
+        this.appendOutputMessage(msg);
       }
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
@@ -65,6 +62,14 @@ export class ReplPanel {
         this.input.value = "";
       }
     }
+  }
+
+  appendOutputMessage(message: OutputMessage): void {
+    if (message.level === "clear") {
+      this.clearOutput();
+      return;
+    }
+    this.appendLine(message.text, message.level);
   }
 
   private appendLine(text: string, level: string): void {

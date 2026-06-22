@@ -62,7 +62,10 @@ mod store;
 
 // Re-export main types
 pub use definitions::{get_setting, get_setting_id, setting_names, SETTINGS, SETTING_COUNT};
-pub use enums::{DssAlgorithm, MouseSelectionMode, SettingEnum, SurfaceMode, ThemeMode};
+pub use enums::{
+    DssAlgorithm, MouseSelectionMode, RenderMemoryProfileSetting, SettingEnum, SurfaceMode,
+    ThemeMode,
+};
 pub use error::SettingError;
 pub use setting::{Color, Setting, SettingLevel, SettingType, SettingValue};
 pub use shading_mode::ShadingMode;

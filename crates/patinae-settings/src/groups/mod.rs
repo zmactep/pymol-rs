@@ -12,6 +12,8 @@ pub mod fxaa;
 pub mod line;
 pub mod mesh;
 pub mod movie;
+pub mod object;
+pub mod renderer;
 pub mod ribbon;
 pub mod shading;
 pub mod sphere;
@@ -28,6 +30,8 @@ pub use fxaa::FxaaSettings;
 pub use line::{LineOverrides, LineSettings};
 pub use mesh::{MeshOverrides, MeshSettings};
 pub use movie::MovieSettings;
+pub use object::{ObjectSettingOverrides, ObjectSettings};
+pub use renderer::RendererSettings;
 pub use ribbon::{RibbonOverrides, RibbonSettings};
 pub use shading::{
     ClassicShadingSettings, CommonShadingSettings, FullShadingSettings, ShadingSettings,

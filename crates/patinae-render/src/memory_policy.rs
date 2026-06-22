@@ -520,6 +520,30 @@ pub fn select_render_memory_policy(
     RenderMemoryPolicy::performance()
 }
 
+/// Resolves user settings into an effective memory policy.
+///
+/// `auto_policy` is the startup policy selected from adapter facts and
+/// environment or host initialization overrides.
+pub fn render_memory_policy_from_settings(
+    settings: &patinae_settings::Settings,
+    auto_policy: RenderMemoryPolicy,
+) -> RenderMemoryPolicy {
+    match settings.renderer.memory_profile {
+        patinae_settings::RenderMemoryProfileSetting::Auto => auto_policy,
+        patinae_settings::RenderMemoryProfileSetting::Performance => {
+            RenderMemoryPolicy::performance()
+        }
+        patinae_settings::RenderMemoryProfileSetting::Balanced => RenderMemoryPolicy::balanced(),
+        patinae_settings::RenderMemoryProfileSetting::LowMemory => RenderMemoryPolicy::low_memory(),
+        patinae_settings::RenderMemoryProfileSetting::Budgeted => {
+            match u64::try_from(settings.renderer.memory_budget_mib) {
+                Ok(mib) if mib > 0 => RenderMemoryPolicy::budgeted(mib_to_bytes(mib)),
+                _ => auto_policy,
+            }
+        }
+    }
+}
+
 /// Builds `wgpu` required limits for a memory policy.
 pub fn required_limits_for_memory_policy(
     adapter_limits: &wgpu::Limits,
@@ -744,5 +768,40 @@ mod tests {
             required.max_storage_buffer_binding_size,
             PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
         );
+    }
+
+    #[test]
+    fn render_memory_settings_auto_uses_startup_policy() {
+        let settings = patinae_settings::Settings::default();
+        let policy = render_memory_policy_from_settings(&settings, RenderMemoryPolicy::balanced());
+
+        assert_eq!(policy.profile, RenderMemoryProfile::Balanced);
+    }
+
+    #[test]
+    fn render_memory_settings_budgeted_uses_mib_budget() {
+        let mut settings = patinae_settings::Settings::default();
+        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Budgeted;
+        settings.renderer.memory_budget_mib = 1024;
+
+        let policy =
+            render_memory_policy_from_settings(&settings, RenderMemoryPolicy::performance());
+
+        assert_eq!(
+            policy.profile,
+            RenderMemoryProfile::Budgeted {
+                bytes: gib_to_bytes(1)
+            }
+        );
+    }
+
+    #[test]
+    fn render_memory_settings_budgeted_without_budget_falls_back_to_auto() {
+        let mut settings = patinae_settings::Settings::default();
+        settings.renderer.memory_profile = patinae_settings::RenderMemoryProfileSetting::Budgeted;
+
+        let policy = render_memory_policy_from_settings(&settings, RenderMemoryPolicy::balanced());
+
+        assert_eq!(policy.profile, RenderMemoryProfile::Balanced);
     }
 }

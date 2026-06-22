@@ -6,9 +6,9 @@
 
 use crate::groups::{
     CartoonOverrides, CartoonSettings, DotOverrides, DotSettings, EllipsoidOverrides,
-    EllipsoidSettings, LineOverrides, LineSettings, MeshOverrides, MeshSettings, RibbonOverrides,
-    RibbonSettings, SphereOverrides, SphereSettings, StickOverrides, StickSettings,
-    SurfaceOverrides, SurfaceSettings,
+    EllipsoidSettings, LineOverrides, LineSettings, MeshOverrides, MeshSettings,
+    ObjectSettingOverrides, ObjectSettings, RibbonOverrides, RibbonSettings, SphereOverrides,
+    SphereSettings, StickOverrides, StickSettings, SurfaceOverrides, SurfaceSettings,
 };
 use crate::macros::Merge;
 

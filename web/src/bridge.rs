@@ -9,8 +9,8 @@ use wasm_bindgen::prelude::*;
 use patinae_cmd::{CommandAction, CommandExecutor, MessageKind};
 use patinae_render::picking::readback::{PendingPick, PickReadbackTarget};
 use patinae_render::{
-    FrameStatsHistory, PickingMode, RenderConfig, RenderMemoryRecoveryAction,
-    RenderMemoryRecoveryStage,
+    render_memory_policy_from_settings, FrameStatsHistory, PickingMode, RenderConfig,
+    RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryRecoveryAction, RenderMemoryRecoveryStage,
 };
 use patinae_scene::bridge::{resolve_pick, CachedRenderScene};
 use patinae_scene::{
@@ -175,6 +175,93 @@ fn performance_now_ms() -> f64 {
         .unwrap_or(0.0)
 }
 
+fn parse_memory_profile_override(value: &str) -> Result<Option<RenderMemoryProfile>, JsValue> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.eq_ignore_ascii_case("auto")
+        || value.eq_ignore_ascii_case("default")
+    {
+        return Ok(None);
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "performance" => Ok(Some(RenderMemoryProfile::Performance)),
+        "balanced" => Ok(Some(RenderMemoryProfile::Balanced)),
+        "low" => Ok(Some(RenderMemoryProfile::LowMemory)),
+        _ => Err(JsValue::from_str(&format!(
+            "invalid render memory profile {value:?}: expected auto, performance, balanced, or low"
+        ))),
+    }
+}
+
+async fn create_web_viewer(
+    canvas_id: &str,
+    picking_enabled: bool,
+    selection_overlay_enabled: bool,
+    memory_profile_override: Option<RenderMemoryProfile>,
+) -> Result<WebViewer, JsValue> {
+    let render_config = RenderConfig {
+        picking: if picking_enabled {
+            PickingMode::Reprojected
+        } else {
+            PickingMode::Disabled
+        },
+        selection_overlay: selection_overlay_enabled,
+        ..Default::default()
+    };
+    let gpu = GpuState::from_canvas(canvas_id, render_config, memory_profile_override)
+        .await
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let width = gpu.surface_config.width;
+    let height = gpu.surface_config.height;
+
+    let mut session = Session::new();
+    session.camera.set_aspect(width as f32 / height as f32);
+
+    let recovery = RenderMemoryRecoveryStage::normal(gpu.config.memory.profile);
+    let auto_memory_policy = gpu.config.memory;
+    let last_registry_generation = session.registry.generation();
+
+    Ok(WebViewer {
+        session,
+        executor: CommandExecutor::new(),
+        gpu: Some(gpu),
+        auto_memory_policy,
+        recovery,
+        last_registry_generation,
+        render_scene: CachedRenderScene::default(),
+        input: InputState::new(),
+        needs_redraw: true,
+        width,
+        height,
+        picking_enabled,
+        selection_overlay_enabled,
+        hover_hit: None,
+        pending_hover: None,
+        hover_epoch: 0,
+        pending_hover_epoch: None,
+        queued_hover: None,
+        pending_click: None,
+        last_completed_click: None,
+        perf_history: FrameStatsHistory::with_default_capacity(),
+        last_render_ms: 0.0,
+        last_poll_picks_ms: 0.0,
+        last_render_timings: render_loop::WebRenderTimings::default(),
+        render_count: 0,
+        hover_submitted: 0,
+        hover_completed: 0,
+        hover_stale: 0,
+        hover_queued: 0,
+        hover_deferred: 0,
+        hover_cancelled: 0,
+        click_submitted: 0,
+        click_completed: 0,
+        last_hover_submit_ms: f64::NEG_INFINITY,
+        warned_unsupported_memory_policy: false,
+        pending_warnings: Vec::new(),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // WebViewer
 // ---------------------------------------------------------------------------
@@ -185,6 +272,7 @@ pub struct WebViewer {
     session: Session,
     executor: CommandExecutor,
     gpu: Option<GpuState>,
+    auto_memory_policy: RenderMemoryPolicy,
     recovery: RenderMemoryRecoveryStage,
     last_registry_generation: u64,
     render_scene: CachedRenderScene,
@@ -224,6 +312,8 @@ pub struct WebViewer {
     click_submitted: u64,
     click_completed: u64,
     last_hover_submit_ms: f64,
+    warned_unsupported_memory_policy: bool,
+    pending_warnings: Vec<String>,
 }
 
 #[wasm_bindgen]
@@ -239,63 +329,33 @@ impl WebViewer {
         picking_enabled: bool,
         selection_overlay_enabled: bool,
     ) -> Result<WebViewer, JsValue> {
-        let render_config = RenderConfig {
-            picking: if picking_enabled {
-                PickingMode::Reprojected
-            } else {
-                PickingMode::Disabled
-            },
-            selection_overlay: selection_overlay_enabled,
-            ..Default::default()
-        };
-        let gpu = GpuState::from_canvas(canvas_id, render_config)
-            .await
-            .map_err(|e| JsValue::from_str(&e))?;
-
-        let width = gpu.surface_config.width;
-        let height = gpu.surface_config.height;
-
-        let mut session = Session::new();
-        session.camera.set_aspect(width as f32 / height as f32);
-
-        let recovery = RenderMemoryRecoveryStage::normal(gpu.config.memory.profile);
-        let last_registry_generation = session.registry.generation();
-
-        Ok(WebViewer {
-            session,
-            executor: CommandExecutor::new(),
-            gpu: Some(gpu),
-            recovery,
-            last_registry_generation,
-            render_scene: CachedRenderScene::default(),
-            input: InputState::new(),
-            needs_redraw: true,
-            width,
-            height,
+        create_web_viewer(
+            canvas_id,
             picking_enabled,
             selection_overlay_enabled,
-            hover_hit: None,
-            pending_hover: None,
-            hover_epoch: 0,
-            pending_hover_epoch: None,
-            queued_hover: None,
-            pending_click: None,
-            last_completed_click: None,
-            perf_history: FrameStatsHistory::with_default_capacity(),
-            last_render_ms: 0.0,
-            last_poll_picks_ms: 0.0,
-            last_render_timings: render_loop::WebRenderTimings::default(),
-            render_count: 0,
-            hover_submitted: 0,
-            hover_completed: 0,
-            hover_stale: 0,
-            hover_queued: 0,
-            hover_deferred: 0,
-            hover_cancelled: 0,
-            click_submitted: 0,
-            click_completed: 0,
-            last_hover_submit_ms: f64::NEG_INFINITY,
-        })
+            None,
+        )
+        .await
+    }
+
+    /// Create a WebViewer with an explicit renderer memory profile.
+    ///
+    /// Pass `"auto"` or an empty string to use adapter-based selection.
+    /// Accepted forced profiles are `"performance"`, `"balanced"`, and `"low"`.
+    #[wasm_bindgen(js_name = createWithMemoryProfile)]
+    pub async fn create_with_memory_profile(
+        canvas_id: &str,
+        picking_enabled: bool,
+        selection_overlay_enabled: bool,
+        memory_profile: &str,
+    ) -> Result<WebViewer, JsValue> {
+        create_web_viewer(
+            canvas_id,
+            picking_enabled,
+            selection_overlay_enabled,
+            parse_memory_profile_override(memory_profile)?,
+        )
+        .await
     }
 
     // =======================================================================
@@ -307,6 +367,7 @@ impl WebViewer {
     pub fn render_frame(&mut self) {
         let t0 = performance_now_ms();
         self.refresh_recovery_for_scene_change();
+        self.apply_runtime_memory_policy();
         // Drain any GPU pick readbacks that completed since the last frame.
         let poll_t0 = performance_now_ms();
         self.poll_pending_picks();
@@ -322,6 +383,7 @@ impl WebViewer {
                 self.last_render_timings = timings;
                 self.needs_redraw = false;
                 self.recovery.record_success();
+                self.drain_memory_warnings();
             }
             Err(e) => {
                 log::warn!("Render error: {:?}", e);
@@ -339,12 +401,58 @@ impl WebViewer {
                         self.handle_surface_oom();
                     }
                 }
+                self.drain_memory_warnings();
             }
         }
         let render_ms = (performance_now_ms() - t0).max(0.0) as f32;
         self.last_render_ms = render_ms;
         self.perf_history.push(render_ms);
         self.render_count = self.render_count.saturating_add(1);
+    }
+
+    fn apply_runtime_memory_policy(&mut self) {
+        let requested =
+            render_memory_policy_from_settings(&self.session.settings, self.auto_memory_policy);
+        let Some(current) = self.gpu.as_ref().map(|gpu| gpu.config.memory) else {
+            return;
+        };
+        if requested == current {
+            return;
+        }
+        let supported = self
+            .gpu
+            .as_ref()
+            .is_some_and(|gpu| gpu.supports_memory_policy(requested));
+        if !supported {
+            if !self.warned_unsupported_memory_policy {
+                self.pending_warnings.push(format!(
+                    "Renderer memory profile {} requires GPU limits unavailable on this device; keeping {}.",
+                    requested.profile, current.profile
+                ));
+                self.warned_unsupported_memory_policy = true;
+            }
+            return;
+        }
+
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.rebuild_with_memory_policy(requested);
+            gpu.resize(self.width, self.height);
+        }
+        self.clear_pending_gpu_picks();
+        self.warned_unsupported_memory_policy = false;
+        self.recovery.reset(requested.profile);
+        self.session.registry.mark_all_dirty();
+        self.needs_redraw = true;
+        self.pending_warnings.push(format!(
+            "Renderer memory profile switched to {} by user setting.",
+            requested.profile
+        ));
+    }
+
+    fn drain_memory_warnings(&mut self) {
+        if let Some(gpu) = self.gpu.as_mut() {
+            self.pending_warnings.extend(gpu.take_memory_warnings());
+        }
     }
 
     fn refresh_recovery_for_scene_change(&mut self) {
@@ -980,6 +1088,21 @@ impl WebViewer {
 
         let output = CmdOutput { messages };
         serde_wasm_bindgen::to_value(&output).unwrap_or(JsValue::NULL)
+    }
+
+    /// Drain renderer warnings produced outside direct command execution.
+    #[wasm_bindgen(js_name = takeWarnings)]
+    pub fn take_warnings(&mut self) -> JsValue {
+        self.drain_memory_warnings();
+        let messages = self
+            .pending_warnings
+            .drain(..)
+            .map(|text| OutputMsg {
+                level: "warning",
+                text,
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&CmdOutput { messages }).unwrap_or(JsValue::NULL)
     }
 
     /// Load molecular or map data from bytes.

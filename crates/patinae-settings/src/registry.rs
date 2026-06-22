@@ -138,6 +138,36 @@ mod tests {
     }
 
     #[test]
+    fn test_state_is_regular_object_setting() {
+        let mut settings = Settings::default();
+        let d = lookup_by_name("state").expect("state not found");
+
+        assert!(d.is_object_overridable());
+        assert_eq!(d.setting_type, SettingType::Int);
+
+        d.set(&mut settings, SettingValue::Int(2)).unwrap();
+        assert_eq!(d.get(&settings), SettingValue::Int(2));
+    }
+
+    #[test]
+    fn test_render_memory_settings_are_registered() {
+        let mut settings = Settings::default();
+        let profile = lookup_by_name("render_memory_profile").expect("profile not found");
+        let budget = lookup_by_name("render_memory_budget").expect("budget not found");
+
+        assert_eq!(profile.setting_type, SettingType::Int);
+        assert_eq!(budget.setting_type, SettingType::Int);
+        assert!(!profile.is_object_overridable());
+        assert!(!budget.is_object_overridable());
+
+        profile.set(&mut settings, SettingValue::Int(3)).unwrap();
+        budget.set(&mut settings, SettingValue::Int(1024)).unwrap();
+
+        assert_eq!(profile.get(&settings), SettingValue::Int(3));
+        assert_eq!(budget.get(&settings), SettingValue::Int(1024));
+    }
+
+    #[test]
     fn test_no_duplicate_names() {
         let names: Vec<&str> = DESCRIPTORS.iter().map(|d| d.name).collect();
         let mut seen = std::collections::HashSet::new();

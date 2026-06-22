@@ -8,6 +8,11 @@ impl RenderState {
         self.memory.policy
     }
 
+    /// Drains pending user-visible renderer memory warnings.
+    pub fn take_memory_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.memory.pending_warnings)
+    }
+
     /// Force SceneStore compaction before an OOM retry.
     pub fn force_scene_store_compaction(&mut self) -> SceneStoreCompactionStats {
         let compaction = self.scene.scene_store.compact();

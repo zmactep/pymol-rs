@@ -82,24 +82,31 @@ impl RenderState {
         config: RenderConfig,
     ) -> Self {
         let memory_policy = config.memory;
+        let mut memory_warnings = Vec::new();
         let policy_allows_picking = memory_policy.picking.hit_test_enabled;
         if config.picking != PickingMode::Disabled && !policy_allows_picking {
-            log::warn!(
-                "patinae-render: hit-test picking disabled by render memory profile {}",
+            let message = format!(
+                "Hit-test picking disabled by render memory profile {}.",
                 memory_policy.profile
             );
+            log::warn!("patinae-render: {message}");
+            memory_warnings.push(message);
         }
         if config.selection_overlay && !memory_policy.overlays.selection_enabled {
             if uses_selection_dots_fallback(memory_policy) {
-                log::warn!(
-                    "patinae-render: full selection and hover overlays disabled by render memory profile {}; using selected atom dots",
+                let message = format!(
+                    "Full selection and hover overlays disabled by render memory profile {}; using selected atom dots.",
                     memory_policy.profile
                 );
+                log::warn!("patinae-render: {message}");
+                memory_warnings.push(message);
             } else {
-                log::warn!(
-                    "patinae-render: selection and hover overlays disabled by render memory profile {}",
+                let message = format!(
+                    "Selection and hover overlays disabled by render memory profile {}.",
                     memory_policy.profile
                 );
+                log::warn!("patinae-render: {message}");
+                memory_warnings.push(message);
             }
         }
         let picking_mode = if policy_allows_picking {
@@ -110,10 +117,12 @@ impl RenderState {
         let picking_mode = if picking_mode == PickingMode::Reprojected
             && !memory_policy.picking.reprojection_enabled
         {
-            log::warn!(
-                "patinae-render: picking reprojection disabled by render memory profile {}; using full-record hit-test picking",
+            let message = format!(
+                "Picking reprojection disabled by render memory profile {}; using full-record hit-test picking.",
                 memory_policy.profile
             );
+            log::warn!("patinae-render: {message}");
+            memory_warnings.push(message);
             PickingMode::FullRecord
         } else {
             picking_mode
@@ -443,6 +452,7 @@ impl RenderState {
 
             memory: MemoryRuntime {
                 policy: memory_policy,
+                pending_warnings: memory_warnings,
                 rep_budget_diagnostics: Vec::new(),
                 rep_budget_request_cache: HashMap::new(),
                 warned_rep_budget: std::collections::HashSet::new(),
