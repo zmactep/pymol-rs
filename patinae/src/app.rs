@@ -552,12 +552,21 @@ impl App {
 
         // Render (rebuilds GPU reps from dirty flags, then clears them)
         let renderer = self.renderer.as_mut().unwrap();
-        let rendered_image = renderer.render(&mut self.kernel.session, vw, vh);
+        let render_outcome = renderer.render(&mut self.kernel.session, vw, vh);
         mark("renderer.render", &mut t_section);
-        let image =
-            viewport_image_to_slint(self.kernel.session.viewport_image.as_ref()).or(rendered_image);
-        self.viewport.push_frame(image, &vp);
-        mark("push_frame", &mut t_section);
+        if let Some(warning) = render_outcome.warning {
+            self.kernel.bus.print_warning(warning);
+        }
+        if render_outcome.request_redraw {
+            self.kernel.bus.request_redraw();
+            app.window().request_redraw();
+        }
+        if render_outcome.present_frame {
+            let image = viewport_image_to_slint(self.kernel.session.viewport_image.as_ref())
+                .or(render_outcome.image);
+            self.viewport.push_frame(image, &vp);
+            mark("push_frame", &mut t_section);
+        }
 
         // Drain GPU stats once per frame; both PATINAE_TIMING (log) and
         // PATINAE_PERF (HUD) consume the same snapshot.

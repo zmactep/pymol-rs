@@ -7,17 +7,19 @@
 //! PNG capture (via `CaptureRenderer`).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use patinae_color::{NamedPalette, ThemedPalette};
 use patinae_render::picking::readback::PendingPick;
 use patinae_render::{
-    copy_rgba_buffer_to_viewport_texture, estimate_texture_2d_bytes, select_render_memory_policy,
-    DisplayedGeometry, GeometryExportOptions, GpuMemoryCategory, GpuMemorySnapshot, GpuMemoryUsage,
-    GpuViewportImage, RenderArtifactSnapshot, RenderConfig, RenderInput, RenderMemoryPolicy,
-    RenderMemoryProfile, RenderMemorySelectionInput, RenderState, RenderSyncTimings, SceneLod,
-    TraceGeometryChunk,
+    copy_rgba_buffer_to_viewport_texture, estimate_texture_2d_bytes, is_wgpu_oom,
+    select_render_memory_policy, DisplayedGeometry, GeometryExportOptions, GpuMemoryCategory,
+    GpuMemorySnapshot, GpuMemoryUsage, GpuViewportImage, RenderArtifactSnapshot, RenderConfig,
+    RenderInput, RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryRecoveryAction,
+    RenderMemoryRecoveryStage, RenderMemorySelectionInput, RenderState, RenderSyncTimings,
+    SceneLod, TraceGeometryChunk,
 };
 use patinae_scene::{Camera, CaptureRenderer, ObjectRegistry, PickHit, Session, ViewerError};
 use patinae_settings::{ResolvedSettings, Settings, ShadingMode};
@@ -35,14 +37,88 @@ pub struct AdapterInfo {
     pub backend: String,
 }
 
+#[derive(Debug, Clone)]
+struct WgpuErrorFlags {
+    oom: Arc<AtomicBool>,
+    device_lost: Arc<AtomicBool>,
+}
+
+impl Default for WgpuErrorFlags {
+    fn default() -> Self {
+        Self {
+            oom: Arc::new(AtomicBool::new(false)),
+            device_lost: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl WgpuErrorFlags {
+    fn mark_oom(&self) {
+        self.oom.store(true, Ordering::Relaxed);
+    }
+
+    fn mark_device_lost(&self) {
+        self.device_lost.store(true, Ordering::Relaxed);
+    }
+
+    fn take_oom(&self) -> bool {
+        self.oom.swap(false, Ordering::Relaxed)
+    }
+
+    fn take_device_lost(&self) -> bool {
+        self.device_lost.swap(false, Ordering::Relaxed)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewportRenderFailure {
+    OutOfMemory,
+    DeviceLost,
+}
+
+pub(crate) struct ViewportRenderOutcome {
+    pub(crate) image: Option<slint::Image>,
+    pub(crate) warning: Option<String>,
+    pub(crate) request_redraw: bool,
+    pub(crate) present_frame: bool,
+}
+
+impl ViewportRenderOutcome {
+    fn frame(image: Option<slint::Image>) -> Self {
+        Self {
+            image,
+            warning: None,
+            request_redraw: false,
+            present_frame: true,
+        }
+    }
+
+    fn recovery(warning: Option<String>, request_redraw: bool) -> Self {
+        Self {
+            image: None,
+            warning,
+            request_redraw,
+            present_frame: false,
+        }
+    }
+}
+
 /// GPU viewport that renders a [`Session`] to an offscreen wgpu texture.
 pub struct ViewportRenderer {
     /// Live-render path — patinae-render.
     state: RenderState,
+    /// Current renderer configuration, including temporary recovery profile.
+    config: RenderConfig,
+    /// OOM recovery state relative to the sequence baseline profile.
+    recovery: RenderMemoryRecoveryStage,
+    /// Error signals reported outside explicit error scopes.
+    wgpu_errors: WgpuErrorFlags,
     /// Last viewport size — used to detect resize before each frame.
     last_viewport_size: Option<(u32, u32)>,
     /// Persistent host-side render cache shared with the web viewer.
     render_scene: CachedRenderScene,
+    /// Last structural object-registry generation observed by recovery logic.
+    last_registry_generation: u64,
     /// In-flight async hover pick. At most one outstanding handle.
     pending_hover: Option<PendingPick>,
     /// Last hover readback submission, used to pace 3J3Q-class sphere scenes.
@@ -60,17 +136,27 @@ pub struct ViewportRenderer {
 }
 
 impl ViewportRenderer {
-    pub fn new_with_config(device: wgpu::Device, queue: wgpu::Queue, config: RenderConfig) -> Self {
+    fn new_with_config_and_errors(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        config: RenderConfig,
+        wgpu_errors: WgpuErrorFlags,
+    ) -> Self {
         // wgpu::Device / wgpu::Queue clone bumps an internal Arc refcount.
         let device_arc = Arc::new(device);
         let queue_arc = Arc::new(queue);
         let memory_policy = config.memory;
+        let recovery = RenderMemoryRecoveryStage::normal(memory_policy.profile);
         let state =
             RenderState::with_config(device_arc, queue_arc, VIEWPORT_FORMAT, (1, 1), config);
         Self {
             state,
+            config,
+            recovery,
+            wgpu_errors,
             last_viewport_size: None,
             render_scene: CachedRenderScene::default(),
+            last_registry_generation: 0,
             pending_hover: None,
             last_hover_submit: None,
             color_textures: Vec::new(),
@@ -117,15 +203,16 @@ impl ViewportRenderer {
             memory_policy.frame_targets.viewport_handoff_ring
         );
         log_wgpu_device_diagnostics(device);
-        install_wgpu_uncaptured_error_handler(device);
+        let wgpu_errors = install_wgpu_error_handlers(device);
 
-        let renderer = Self::new_with_config(
+        let renderer = Self::new_with_config_and_errors(
             device.clone(),
             queue.clone(),
             RenderConfig {
                 memory: memory_policy,
                 ..Default::default()
             },
+            wgpu_errors,
         );
         Some((renderer, info))
     }
@@ -172,29 +259,179 @@ impl ViewportRenderer {
         self.state.last_sync_timings()
     }
 
-    pub fn render(
+    pub(crate) fn render(
         &mut self,
         session: &mut Session,
         width: u32,
         height: u32,
-    ) -> Option<slint::Image> {
+    ) -> ViewportRenderOutcome {
+        self.refresh_recovery_for_scene_change(session);
+        if self.wgpu_errors.take_device_lost() {
+            return self.block_after_device_loss();
+        }
+        if self.wgpu_errors.take_oom() {
+            return self.recover_after_oom(session);
+        }
+
         if let Some(image) = self.viewport_gpu_image.as_ref() {
             return match slint::Image::try_from(image.texture.clone()) {
-                Ok(image) => Some(image),
+                Ok(image) => ViewportRenderOutcome::frame(Some(image)),
                 Err(e) => {
                     log::error!("Failed to import GPU viewport image: {:?}", e);
-                    None
+                    ViewportRenderOutcome::frame(None)
                 }
             };
         }
+
+        match self.render_frame_scoped(session, width, height) {
+            Ok(texture) => match slint::Image::try_from(texture) {
+                Ok(image) => {
+                    self.recovery.record_success();
+                    ViewportRenderOutcome::frame(Some(image))
+                }
+                Err(e) => {
+                    log::error!("Failed to import texture: {:?}", e);
+                    ViewportRenderOutcome::frame(None)
+                }
+            },
+            Err(ViewportRenderFailure::OutOfMemory) => self.recover_after_oom(session),
+            Err(ViewportRenderFailure::DeviceLost) => self.block_after_device_loss(),
+        }
+    }
+
+    fn refresh_recovery_for_scene_change(&mut self, session: &mut Session) {
+        let generation = session.registry.generation();
+        if generation == self.last_registry_generation {
+            return;
+        }
+        self.last_registry_generation = generation;
+        let _ = self.wgpu_errors.take_oom();
+
+        if self.recovery.is_normal() {
+            return;
+        }
+
+        let base_profile = self.recovery.base_profile();
+        let previous_profile = self.recovery.effective_profile();
+        self.recovery.reset(base_profile);
+        if previous_profile != base_profile {
+            self.rebuild_for_profile(base_profile);
+        } else {
+            self.drop_transient_resources();
+        }
+        session.registry.mark_all_dirty();
+        log::info!(
+            "renderer memory recovery reset after scene generation changed; baseline profile={}",
+            base_profile
+        );
+    }
+
+    fn render_frame_scoped(
+        &mut self,
+        session: &mut Session,
+        width: u32,
+        height: u32,
+    ) -> Result<wgpu::Texture, ViewportRenderFailure> {
+        let device = self.state.ctx.device.clone();
+        let oom_scope = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
         let texture = self.render_frame(session, width, height);
-        match slint::Image::try_from(texture) {
-            Ok(image) => Some(image),
-            Err(e) => {
-                log::error!("Failed to import texture: {:?}", e);
-                None
+        let scoped_error = pollster::block_on(oom_scope.pop());
+        if let Some(error) = scoped_error {
+            if is_wgpu_oom(&error) {
+                log::warn!("Renderer frame captured WGPU OOM: {error}");
+                return Err(ViewportRenderFailure::OutOfMemory);
+            }
+            log::error!("Renderer frame captured unexpected WGPU error: {error}");
+        }
+        if self.wgpu_errors.take_device_lost() {
+            return Err(ViewportRenderFailure::DeviceLost);
+        }
+        if self.wgpu_errors.take_oom() {
+            return Err(ViewportRenderFailure::OutOfMemory);
+        }
+        Ok(texture)
+    }
+
+    fn recover_after_oom(&mut self, session: &mut Session) -> ViewportRenderOutcome {
+        match self.recovery.advance_after_oom() {
+            RenderMemoryRecoveryAction::RetryAfterDefrag { profile } => {
+                self.prepare_oom_retry(session);
+                log::warn!(
+                    "renderer GPU OOM under profile {}; compacted SceneStore and retrying once",
+                    profile
+                );
+                ViewportRenderOutcome::recovery(None, true)
+            }
+            RenderMemoryRecoveryAction::SwitchProfile { effective_profile } => {
+                self.rebuild_for_profile(effective_profile);
+                session.registry.mark_all_dirty();
+                ViewportRenderOutcome::recovery(
+                    Some(format!(
+                        "Renderer memory profile switched to {} after confirmed GPU memory pressure.",
+                        effective_profile
+                    )),
+                    true,
+                )
+            }
+            RenderMemoryRecoveryAction::Blocked { last_profile } => {
+                self.drop_transient_resources();
+                ViewportRenderOutcome::recovery(
+                    Some(format!(
+                        "Renderer stopped retrying after GPU memory pressure in {} profile; reduce visible representations or load a smaller scene.",
+                        last_profile
+                    )),
+                    false,
+                )
             }
         }
+    }
+
+    fn block_after_device_loss(&mut self) -> ViewportRenderOutcome {
+        let base_profile = self.recovery.base_profile();
+        let last_profile = self.recovery.effective_profile();
+        self.recovery = RenderMemoryRecoveryStage::Blocked {
+            base_profile,
+            last_profile,
+        };
+        self.drop_transient_resources();
+        ViewportRenderOutcome::recovery(
+            Some("GPU device was lost; rendering is paused for this session state.".to_string()),
+            false,
+        )
+    }
+
+    fn prepare_oom_retry(&mut self, session: &mut Session) {
+        self.drop_transient_resources();
+        let compaction = self.state.force_scene_store_compaction();
+        self.state.drop_unused_optional_targets();
+        session.registry.mark_all_dirty();
+        if compaction.ran {
+            log::info!(
+                "renderer OOM recovery compacted SceneStore: capacity_before={:.2} MiB orphaned_before={:.2} MiB moved_objects={}",
+                patinae_render::bytes_to_mib(compaction.capacity_before_bytes),
+                patinae_render::bytes_to_mib(compaction.orphaned_before_bytes),
+                compaction.moved_objects
+            );
+        }
+    }
+
+    fn rebuild_for_profile(&mut self, profile: RenderMemoryProfile) {
+        let device = self.state.ctx.device.clone();
+        let queue = self.state.ctx.queue.clone();
+        self.config.memory = RenderMemoryPolicy::from_profile(profile);
+        self.memory_policy = self.config.memory;
+        let viewport = self.last_viewport_size.unwrap_or((1, 1));
+        self.state =
+            RenderState::with_config(device, queue, VIEWPORT_FORMAT, viewport, self.config);
+        self.drop_transient_resources();
+    }
+
+    fn drop_transient_resources(&mut self) {
+        self.pending_hover = None;
+        self.last_hover_submit = None;
+        self.viewport_gpu_image = None;
+        self.color_textures.clear();
+        self.color_textures_next = 0;
     }
 
     pub fn clear_viewport_gpu_image(&mut self) -> bool {
@@ -710,10 +947,23 @@ fn log_wgpu_device_diagnostics(device: &wgpu::Device) {
     );
 }
 
-fn install_wgpu_uncaptured_error_handler(device: &wgpu::Device) {
-    device.on_uncaptured_error(Arc::new(|error| {
-        log::error!("Uncaptured WGPU error: {error}");
+fn install_wgpu_error_handlers(device: &wgpu::Device) -> WgpuErrorFlags {
+    let flags = WgpuErrorFlags::default();
+    let uncaptured = flags.clone();
+    device.on_uncaptured_error(Arc::new(move |error| {
+        if is_wgpu_oom(&error) {
+            uncaptured.mark_oom();
+            log::warn!("Uncaptured WGPU OOM: {error}");
+        } else {
+            log::error!("Uncaptured WGPU error: {error}");
+        }
     }));
+    let lost = flags.clone();
+    device.set_device_lost_callback(move |reason, message| {
+        lost.mark_device_lost();
+        log::error!("WGPU device lost: {reason:?}: {message}");
+    });
+    flags
 }
 
 pub(crate) fn render_memory_policy_for_device(
@@ -769,5 +1019,20 @@ fn configure_ambient_occlusion(state: &mut RenderState, settings: &Settings) {
     } else {
         state.set_skripkin_ao(false, 1, 32, 0.0, 0.0);
         state.set_ssao(ssao.enabled, ssao.radius, ssao.intensity, ssao.bias);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_outcome_requests_redraw_without_presenting_frame() {
+        let outcome = ViewportRenderOutcome::recovery(Some("retry".to_string()), true);
+
+        assert_eq!(outcome.warning.as_deref(), Some("retry"));
+        assert!(outcome.request_redraw);
+        assert!(!outcome.present_frame);
+        assert!(outcome.image.is_none());
     }
 }

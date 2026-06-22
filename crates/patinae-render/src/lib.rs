@@ -19,6 +19,7 @@ pub(crate) mod lut_buffer;
 mod map_contour;
 pub mod memory;
 mod memory_policy;
+mod memory_recovery;
 pub(crate) mod passes;
 pub mod picking;
 pub(crate) mod pipelines;
@@ -64,6 +65,10 @@ pub use memory_policy::{
     RenderMemorySelectionInput, RepresentationBudgetPolicy, SceneStoreCompactionPolicy,
     SceneStoreGrowthPolicy, SceneStoreMemoryPolicy, ShadowPolicy, PERFORMANCE_MAX_BUFFER_SIZE,
     PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
+};
+pub use memory_recovery::{
+    is_surface_oom, is_wgpu_oom, next_oom_fallback, RenderMemoryRecoveryAction,
+    RenderMemoryRecoveryStage,
 };
 pub use picking::{ObjectId, PackedId, PickHit, PickingMode, RenderConfig, RepKind};
 pub use render_artifacts::{

@@ -1,8 +1,56 @@
 use super::state::RenderState;
 use crate::memory::{buffer_usage, GpuMemoryCategory, GpuMemoryLedger, GpuMemorySnapshot};
-use crate::RepBudgetDiagnostic;
+use crate::{RenderMemoryPolicy, RepBudgetDiagnostic, SceneStoreCompactionStats};
 
 impl RenderState {
+    /// Returns the active renderer memory policy.
+    pub fn memory_policy(&self) -> RenderMemoryPolicy {
+        self.memory.policy
+    }
+
+    /// Force SceneStore compaction before an OOM retry.
+    pub fn force_scene_store_compaction(&mut self) -> SceneStoreCompactionStats {
+        let compaction = self.scene.scene_store.compact();
+        if compaction.ran {
+            self.scene.scene_dirty = true;
+            self.screen.marking_offsets_dirty = true;
+            self.screen.marking_bindings_dirty = true;
+            self.memory.rep_budget_request_cache.clear();
+            self.invalidate_cull_cache();
+            self.invalidate_picking_cache();
+            self.invalidate_overlay_id_cache();
+        }
+        compaction
+    }
+
+    /// Drop optional render targets that are not required by active settings.
+    pub fn drop_unused_optional_targets(&mut self) {
+        if !self.screen.ssao_enabled {
+            self.targets.clear_ssao_targets();
+            self.screen.ssao_bind_group = None;
+            self.screen.ssao_blur_h_bind_group = None;
+            self.screen.ssao_blur_v_bind_group = None;
+            self.screen.ssao_compose_bind_group = None;
+        }
+
+        if !self.screen.fxaa_enabled {
+            self.targets.clear_color_scratch();
+            self.screen.fxaa_bind_group = None;
+            self.screen.fxaa_overlay_bind_group = None;
+        }
+
+        if !self.screen.selection_overlay_enabled {
+            self.screen.marking_bind_groups = None;
+            self.targets.clear_marking_targets();
+        }
+
+        if self.screen.silhouette_params.is_none() && !self.screen.selection_overlay_enabled {
+            self.screen.silhouette_bind_group = None;
+            self.targets.clear_overlay_targets();
+            self.invalidate_overlay_id_cache();
+        }
+    }
+
     /// Returns diagnostics from the most recent representation budget planning pass.
     pub fn last_rep_budget_diagnostics(&self) -> &[RepBudgetDiagnostic] {
         &self.memory.rep_budget_diagnostics

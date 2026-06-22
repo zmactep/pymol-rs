@@ -3,7 +3,6 @@
 //! Hosts `patinae_render::RenderState` for the frame pipeline. The surface
 //! owns the canvas-backed swapchain.
 
-#[cfg(target_arch = "wasm32")]
 use std::sync::Arc;
 
 use wasm_bindgen::JsCast;
@@ -13,7 +12,7 @@ use web_sys::HtmlCanvasElement;
 use patinae_render::{
     required_limits_for_memory_policy, select_render_memory_policy, RenderMemorySelectionInput,
 };
-use patinae_render::{RenderConfig, RenderState};
+use patinae_render::{RenderConfig, RenderMemoryPolicy, RenderMemoryProfile, RenderState};
 
 /// GPU resources initialized from a canvas element. The renderer is the
 /// shared `patinae_render::RenderState`; the surface + config drive the
@@ -22,6 +21,7 @@ pub struct GpuState {
     pub state: RenderState,
     pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
+    pub config: RenderConfig,
 }
 
 impl GpuState {
@@ -143,6 +143,7 @@ impl GpuState {
             state,
             surface,
             surface_config,
+            config,
         })
         }
     }
@@ -161,5 +162,23 @@ impl GpuState {
         self.surface
             .configure(&self.state.ctx.device, &self.surface_config);
         self.state.resize((width, height));
+    }
+
+    /// Drop optional targets and compact SceneStore before an OOM retry.
+    pub fn prepare_oom_retry(&mut self) {
+        self.state.force_scene_store_compaction();
+        self.state.drop_unused_optional_targets();
+    }
+
+    /// Rebuild the render state with a lower effective memory profile.
+    pub fn rebuild_with_memory_profile(&mut self, profile: RenderMemoryProfile) {
+        self.config.memory = RenderMemoryPolicy::from_profile(profile);
+        self.state = RenderState::with_config(
+            self.state.ctx.device.clone(),
+            self.state.ctx.queue.clone(),
+            self.surface_config.format,
+            (self.surface_config.width, self.surface_config.height),
+            self.config,
+        );
     }
 }

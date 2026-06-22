@@ -8,7 +8,10 @@ use wasm_bindgen::prelude::*;
 
 use patinae_cmd::{CommandAction, CommandExecutor, MessageKind};
 use patinae_render::picking::readback::{PendingPick, PickReadbackTarget};
-use patinae_render::{FrameStatsHistory, PickingMode, RenderConfig};
+use patinae_render::{
+    FrameStatsHistory, PickingMode, RenderConfig, RenderMemoryRecoveryAction,
+    RenderMemoryRecoveryStage,
+};
 use patinae_scene::bridge::{resolve_pick, CachedRenderScene};
 use patinae_scene::{
     expand_pick_to_selection, pick_expression_for_hit, CameraDelta, InputState, MoleculeObject,
@@ -182,6 +185,8 @@ pub struct WebViewer {
     session: Session,
     executor: CommandExecutor,
     gpu: Option<GpuState>,
+    recovery: RenderMemoryRecoveryStage,
+    last_registry_generation: u64,
     render_scene: CachedRenderScene,
     input: InputState,
     needs_redraw: bool,
@@ -253,10 +258,15 @@ impl WebViewer {
         let mut session = Session::new();
         session.camera.set_aspect(width as f32 / height as f32);
 
+        let recovery = RenderMemoryRecoveryStage::normal(gpu.config.memory.profile);
+        let last_registry_generation = session.registry.generation();
+
         Ok(WebViewer {
             session,
             executor: CommandExecutor::new(),
             gpu: Some(gpu),
+            recovery,
+            last_registry_generation,
             render_scene: CachedRenderScene::default(),
             input: InputState::new(),
             needs_redraw: true,
@@ -296,6 +306,7 @@ impl WebViewer {
     #[wasm_bindgen]
     pub fn render_frame(&mut self) {
         let t0 = performance_now_ms();
+        self.refresh_recovery_for_scene_change();
         // Drain any GPU pick readbacks that completed since the last frame.
         let poll_t0 = performance_now_ms();
         self.poll_pending_picks();
@@ -310,6 +321,7 @@ impl WebViewer {
             Ok(timings) => {
                 self.last_render_timings = timings;
                 self.needs_redraw = false;
+                self.recovery.record_success();
             }
             Err(e) => {
                 log::warn!("Render error: {:?}", e);
@@ -324,7 +336,7 @@ impl WebViewer {
                         self.needs_redraw = true;
                     }
                     wgpu::SurfaceError::OutOfMemory => {
-                        self.needs_redraw = false;
+                        self.handle_surface_oom();
                     }
                 }
             }
@@ -333,6 +345,77 @@ impl WebViewer {
         self.last_render_ms = render_ms;
         self.perf_history.push(render_ms);
         self.render_count = self.render_count.saturating_add(1);
+    }
+
+    fn refresh_recovery_for_scene_change(&mut self) {
+        let generation = self.session.registry.generation();
+        if generation == self.last_registry_generation {
+            return;
+        }
+        self.last_registry_generation = generation;
+        if self.recovery.is_normal() {
+            return;
+        }
+
+        let base_profile = self.recovery.base_profile();
+        let previous_profile = self.recovery.effective_profile();
+        self.recovery.reset(base_profile);
+        if previous_profile != base_profile {
+            if let Some(gpu) = &mut self.gpu {
+                gpu.rebuild_with_memory_profile(base_profile);
+                gpu.resize(self.width, self.height);
+            }
+        }
+        self.clear_pending_gpu_picks();
+        self.session.registry.mark_all_dirty();
+        self.needs_redraw = true;
+        log::info!(
+            "WebGPU memory recovery reset after scene generation changed; baseline profile={}",
+            base_profile
+        );
+    }
+
+    fn handle_surface_oom(&mut self) {
+        self.clear_pending_gpu_picks();
+        match self.recovery.advance_after_oom() {
+            RenderMemoryRecoveryAction::RetryAfterDefrag { profile } => {
+                if let Some(gpu) = &mut self.gpu {
+                    gpu.prepare_oom_retry();
+                }
+                self.session.registry.mark_all_dirty();
+                self.needs_redraw = true;
+                log::warn!(
+                    "WebGPU OOM under profile {}; compacted SceneStore and retrying once",
+                    profile
+                );
+            }
+            RenderMemoryRecoveryAction::SwitchProfile { effective_profile } => {
+                if let Some(gpu) = &mut self.gpu {
+                    gpu.rebuild_with_memory_profile(effective_profile);
+                    gpu.resize(self.width, self.height);
+                }
+                self.session.registry.mark_all_dirty();
+                self.needs_redraw = true;
+                log::warn!(
+                    "WebGPU memory profile switched to {} after confirmed GPU memory pressure",
+                    effective_profile
+                );
+            }
+            RenderMemoryRecoveryAction::Blocked { last_profile } => {
+                self.needs_redraw = false;
+                log::warn!(
+                    "WebGPU rendering stopped after repeated OOM in {} profile",
+                    last_profile
+                );
+            }
+        }
+    }
+
+    fn clear_pending_gpu_picks(&mut self) {
+        self.pending_hover = None;
+        self.pending_hover_epoch = None;
+        self.queued_hover = None;
+        self.pending_click = None;
     }
 
     /// Returns true when the scene has changed and needs a re-render.
