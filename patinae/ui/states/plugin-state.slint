@@ -30,6 +30,31 @@ export struct PluginToolbarItem {
     active: bool,
 }
 
+// Terminal control inside a leaf-level row/column (the 4th nesting level).
+// Lets a zone column hold horizontal field rows (label-above pairs, a title +
+// action button, etc.) instead of one control per line.
+export struct PluginSubLeaf {
+    id: string,
+    kind: string,
+    label: string,
+    text: string,
+    value-text: string,
+    bool-value: bool,
+    num-value: float,
+    min: float,
+    max: float,
+    step: float,
+    primary: bool,
+    read-only: bool,
+    rows: float,
+    grow: float,
+    gap: float,
+    height: float,
+    highlight-lines: [PluginHighlightLine],
+    options: [PluginOption],
+    buttons: [PluginButtonItem],
+}
+
 export struct PluginControlLeaf {
     id: string,
     kind: string,
@@ -51,6 +76,7 @@ export struct PluginControlLeaf {
     highlight-lines: [PluginHighlightLine],
     options: [PluginOption],
     buttons: [PluginButtonItem],
+    sub-children: [PluginSubLeaf],
     image-value: image,
     image-width: float,
     image-height: float,

@@ -685,6 +685,7 @@ mod tests {
             | PanelControl::Select { id, .. }
             | PanelControl::TextInput { id, .. }
             | PanelControl::Image { id, .. }
+            | PanelControl::TitleDesc { id, .. }
             | PanelControl::Spacer { id, .. } => ids.push(id.clone()),
             PanelControl::TextArea(area) => ids.push(area.id.clone()),
             PanelControl::Row(row) => {
@@ -766,6 +767,7 @@ mod tests {
             | PanelControl::Select { id, .. }
             | PanelControl::TextInput { id, .. }
             | PanelControl::Image { id, .. }
+            | PanelControl::TitleDesc { id, .. }
             | PanelControl::Spacer { id, .. }
             | PanelControl::Row(PanelRow { id, .. })
             | PanelControl::Column(PanelColumn { id, .. })

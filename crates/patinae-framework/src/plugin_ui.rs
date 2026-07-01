@@ -307,6 +307,13 @@ pub enum PanelControl {
         id: String,
         text: String,
     },
+    /// A bold title with a muted description beneath — a compact header block
+    /// that pairs well with an action button to its right.
+    TitleDesc {
+        id: String,
+        title: String,
+        desc: String,
+    },
     Heading {
         id: String,
         text: String,

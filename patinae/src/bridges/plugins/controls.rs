@@ -7,7 +7,10 @@ use patinae_framework::plugin_ui::{
     PanelOption as CoreOption,
 };
 
-use crate::{PluginButtonItem, PluginControl, PluginControlLeaf, PluginControlNode, PluginOption};
+use crate::{
+    PluginButtonItem, PluginControl, PluginControlLeaf, PluginControlNode, PluginOption,
+    PluginSubLeaf,
+};
 
 use super::text_highlights::{empty_highlight_lines_model, highlight_lines_model};
 
@@ -24,6 +27,12 @@ pub(crate) fn to_slint_control(control: &CoreControl) -> PluginControl {
             row.id = id.clone().into();
             row.kind = "heading".into();
             row.text = text.clone().into();
+        }
+        CoreControl::TitleDesc { id, title, desc } => {
+            row.id = id.clone().into();
+            row.kind = "titledesc".into();
+            row.label = title.clone().into();
+            row.text = desc.clone().into();
         }
         CoreControl::Section { id, title, open } => {
             row.id = id.clone().into();
@@ -255,9 +264,49 @@ fn control_leaf_model(nodes: &[CoreControlNode]) -> ModelRc<PluginControlLeaf> {
                 highlight_lines: control.highlight_lines,
                 options: control.options,
                 buttons: control.buttons,
+                sub_children: sub_leaf_model(&node.control),
                 image_value: control.image_value,
                 image_width: control.image_width,
                 image_height: control.image_height,
+            }
+        })
+        .collect();
+    ModelRc::from(Rc::new(VecModel::from(rows)))
+}
+
+fn sub_leaf_model(control: &CoreControl) -> ModelRc<PluginSubLeaf> {
+    match control {
+        CoreControl::Row(layout) => sub_leaf_rows(&layout.children),
+        CoreControl::Column(layout) => sub_leaf_rows(&layout.children),
+        _ => ModelRc::from(Rc::new(VecModel::default())),
+    }
+}
+
+fn sub_leaf_rows(nodes: &[CoreControlNode]) -> ModelRc<PluginSubLeaf> {
+    let rows: Vec<PluginSubLeaf> = nodes
+        .iter()
+        .map(|node| {
+            let control = to_slint_control(&node.control);
+            PluginSubLeaf {
+                id: control.id,
+                kind: control.kind,
+                label: control.label,
+                text: control.text,
+                value_text: control.value_text,
+                bool_value: control.bool_value,
+                num_value: control.num_value,
+                min: control.min,
+                max: control.max,
+                step: control.step,
+                primary: control.primary,
+                read_only: control.read_only,
+                rows: control.rows,
+                grow: node.grow,
+                gap: control.gap,
+                height: control.height,
+                highlight_lines: control.highlight_lines,
+                options: control.options,
+                buttons: control.buttons,
             }
         })
         .collect();
@@ -293,8 +342,11 @@ fn control_height(control: &CoreControl) -> f32 {
     match control {
         CoreControl::Heading { .. } => 24.0,
         CoreControl::Text { .. } => 20.0,
+        CoreControl::TitleDesc { .. } => 46.0,
         CoreControl::Section { .. } => 36.0,
-        CoreControl::Button { .. } => 32.0,
+        // Tool-rail rows are compact; the prominent "run" action button is taller.
+        CoreControl::Button { id, .. } if id == "run" => 30.0,
+        CoreControl::Button { .. } => 26.0,
         CoreControl::ButtonRow { .. } => 24.0,
         CoreControl::Toggle { .. } => 28.0,
         CoreControl::Slider { .. } => 38.0,
@@ -316,7 +368,8 @@ fn control_height(control: &CoreControl) -> f32 {
                 .map(|node| control_height(&node.control))
                 .sum::<f32>();
             let gaps = child_count.saturating_sub(1) as f32 * layout.gap;
-            (children_height + gaps).max(4.0)
+            // +24: the renderer wraps a column-in-row in a padded card.
+            (children_height + gaps + 24.0).max(4.0)
         }
         CoreControl::Group(group) => {
             let child_count = if group.open { group.children.len() } else { 0 };
@@ -417,7 +470,8 @@ mod tests {
 
         assert_eq!(column.kind.as_str(), "column");
         assert_eq!(column.children.row_count(), 2);
-        assert_eq!(column.height, 67.0);
+        // two 26px rail buttons + 3px gap + 24px card padding
+        assert_eq!(column.height, 79.0);
     }
 
     #[test]
