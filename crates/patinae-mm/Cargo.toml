@@ -1,0 +1,24 @@
+[package]
+name = "patinae-mm"
+description = "Molecular-mechanics engine for Patinae (force fields, parametrization, energy, minimization, building)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[dependencies]
+patinae-mol = { workspace = true }
+patinae-select = { workspace = true }
+lin_alg = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+patinae-io = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true

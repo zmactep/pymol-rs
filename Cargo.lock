@@ -4173,6 +4173,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "patinae-mm"
+version = "0.4.3"
+dependencies = [
+ "lin_alg",
+ "log",
+ "patinae-io",
+ "patinae-mol",
+ "patinae-select",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "patinae-mol"
 version = "0.4.3"
 dependencies = [
