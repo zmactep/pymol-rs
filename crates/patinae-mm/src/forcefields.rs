@@ -6,10 +6,7 @@ pub const FORCE_FIELD_HINT: &str = "AMBER, CHARMM, OPLS-AA, or /path/to/custom.f
 const ENV_FORCEFIELDS_DIR: &str = "PATINAE_DESIGN_TOOLBOX_FORCEFIELDS_DIR";
 const SOURCE_FORCEFIELDS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/forcefields");
 
-pub fn resolve_force_field_path(
-    input: &str,
-    plugin_dirs: &[PathBuf],
-) -> Result<PathBuf, String> {
+pub fn resolve_force_field_path(input: &str, plugin_dirs: &[PathBuf]) -> Result<PathBuf, String> {
     let trimmed = input.trim();
     let exact = Path::new(trimmed);
     if exact.exists() {

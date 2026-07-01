@@ -341,12 +341,14 @@ mod tests {
             restrain_backbone_k: None,
             settings: EnergySettings::default(),
         };
-        let (out, result) =
-            minimize_with_environment(&sys, &coords, &energy_mask, &movable, &opts);
+        let (out, result) = minimize_with_environment(&sys, &coords, &energy_mask, &movable, &opts);
         assert_eq!(out[0], coords[0], "frozen environment atom must not move");
         let r = (f64::from(out[1].x) - f64::from(out[0].x)).abs();
         assert!(result.energy_final < result.energy_start);
-        assert!((r - 1.5).abs() < 0.05, "bond length {r} should relax to ~1.5 Å");
+        assert!(
+            (r - 1.5).abs() < 0.05,
+            "bond length {r} should relax to ~1.5 Å"
+        );
     }
 
     #[test]
@@ -365,6 +367,9 @@ mod tests {
         let (out, result) = minimize(&sys, &coords, &mask, &opts);
         let r = (f64::from(out[1].x) - f64::from(out[0].x)).abs();
         assert!(result.energy_final < result.energy_start);
-        assert!((r - 1.5).abs() < 0.05, "bond length {r} should relax to ~1.5 Å");
+        assert!(
+            (r - 1.5).abs() < 0.05,
+            "bond length {r} should relax to ~1.5 Å"
+        );
     }
 }

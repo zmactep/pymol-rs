@@ -30,10 +30,7 @@ pub struct HydrogenAddition {
 ///
 /// Synthetic hydrogens whose parent is itself synthetic (no loaded parent) are
 /// skipped — they cannot be attached to an existing atom.
-pub fn hydrogens_to_add(
-    topology: &ParameterizedSystem,
-    coords: &[Vec3],
-) -> Vec<HydrogenAddition> {
+pub fn hydrogens_to_add(topology: &ParameterizedSystem, coords: &[Vec3]) -> Vec<HydrogenAddition> {
     let mut additions = Vec::new();
     for (idx, atom) in topology.atoms.iter().enumerate() {
         if !matches!(atom.source, CoordinateSource::RebuiltHydrogen(_)) {

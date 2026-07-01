@@ -918,9 +918,7 @@ impl ObjectMolecule {
         let mut chain_rank: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for (i, atom) in self.atoms.iter().enumerate() {
-            chain_rank
-                .entry(atom.residue.chain.clone())
-                .or_insert(i);
+            chain_rank.entry(atom.residue.chain.clone()).or_insert(i);
         }
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by_key(|&i| {

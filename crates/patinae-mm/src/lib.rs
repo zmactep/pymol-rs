@@ -12,10 +12,10 @@
 pub mod build;
 pub mod cap;
 pub mod energy;
-pub mod hbond;
 pub mod forcefields;
 pub mod gradient;
 pub mod gromacs;
+pub mod hbond;
 pub mod minimize;
 pub mod mutate;
 pub mod parametrize;

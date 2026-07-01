@@ -157,16 +157,18 @@ mod tests {
         let pivot = Vec3::new(-1.4, 0.0, 0.0);
         let h = Vec3::new(0.3, -0.95, 0.0); // ~1.0 Å O-H, pointing down
         let acceptor = Vec3::new(0.6, 2.7, 0.0); // off-axis, reachable at +y
-        let out = optimize_polar_hydrogens(
-            &[PolarH { h, donor, pivot }],
-            &[acceptor],
-            3,
-        );
+        let out = optimize_polar_hydrogens(&[PolarH { h, donor, pivot }], &[acceptor], 3);
         let p = out[0];
         let d_start = ((h.x - acceptor.x).powi(2) + (h.y - acceptor.y).powi(2)).sqrt();
         let d_end = ((p.x - acceptor.x).powi(2) + (p.y - acceptor.y).powi(2)).sqrt();
-        assert!(d_end < d_start, "H did not move toward the acceptor (start {d_start}, end {d_end})");
-        assert!(p.y > 0.0, "H should have swung to the +y side toward the acceptor");
+        assert!(
+            d_end < d_start,
+            "H did not move toward the acceptor (start {d_start}, end {d_end})"
+        );
+        assert!(
+            p.y > 0.0,
+            "H should have swung to the +y side toward the acceptor"
+        );
         // Bond length to the donor is preserved by the rigid rotation.
         let r = ((p.x - donor.x).powi(2) + (p.y - donor.y).powi(2) + p.z.powi(2)).sqrt();
         assert!((r - 1.0).abs() < 0.05, "O-H length not preserved: {r}");

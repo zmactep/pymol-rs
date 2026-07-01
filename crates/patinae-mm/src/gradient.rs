@@ -283,7 +283,13 @@ fn restraint_energy(
     energy
 }
 
-fn combine_lj(rule: CombinationRule, sigma_a: f64, eps_a: f64, sigma_b: f64, eps_b: f64) -> (f64, f64) {
+fn combine_lj(
+    rule: CombinationRule,
+    sigma_a: f64,
+    eps_a: f64,
+    sigma_b: f64,
+    eps_b: f64,
+) -> (f64, f64) {
     let epsilon = (eps_a * eps_b).sqrt();
     let sigma = match rule {
         CombinationRule::Geometric => (sigma_a * sigma_b).sqrt(),
@@ -321,7 +327,7 @@ pub fn max_force(forces: &[Vec3d], mask: &HashSet<usize>) -> f64 {
 mod tests {
     use super::*;
     use crate::topology::{
-        AtomKey, CoordinateSource, ForceFieldDefaults, ParameterizedAtom, ParameterizedAngle,
+        AtomKey, CoordinateSource, ForceFieldDefaults, ParameterizedAngle, ParameterizedAtom,
         ParameterizedBond,
     };
     use std::collections::HashMap;
@@ -426,10 +432,7 @@ mod tests {
 
     #[test]
     fn nonbonded_force_matches_finite_difference() {
-        let sys = system(vec![
-            atom(0.6, 3.2, 0.6, 1.7),
-            atom(-0.5, 3.0, 0.5, 1.6),
-        ]);
+        let sys = system(vec![atom(0.6, 3.2, 0.6, 1.7), atom(-0.5, 3.0, 0.5, 1.6)]);
         let coords = vec![[0.0, 0.0, 0.0], [3.4, 0.5, 0.2]];
         check_gradient(&sys, &coords, &EnergySettings::default());
     }

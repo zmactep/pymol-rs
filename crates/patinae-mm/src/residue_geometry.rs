@@ -308,7 +308,12 @@ impl Frame {
         let e1 = normalize(sub(n, ca));
         let e3 = normalize(cross(e1, sub(c, ca)));
         let e2 = cross(e3, e1);
-        Frame { origin: ca, e1, e2, e3 }
+        Frame {
+            origin: ca,
+            e1,
+            e2,
+            e3,
+        }
     }
     fn to_local(&self, p: V) -> V {
         let d = sub(p, self.origin);
@@ -387,7 +392,10 @@ mod tests {
             let sc = ideal_side_chain(resn).unwrap();
             for (a, b) in &sc.bonds {
                 let len = d(coord(&sc, a), coord(&sc, b));
-                assert!((1.0..2.0).contains(&len), "{resn} bond {a}-{b} length {len}");
+                assert!(
+                    (1.0..2.0).contains(&len),
+                    "{resn} bond {a}-{b} length {len}"
+                );
             }
         }
     }
@@ -399,7 +407,12 @@ mod tests {
             for i in 0..sc.atoms.len() {
                 for j in (i + 1)..sc.atoms.len() {
                     let dist = d(sc.atoms[i].2, sc.atoms[j].2);
-                    assert!(dist > 1.0, "{resn} clash {} {} = {dist}", sc.atoms[i].0, sc.atoms[j].0);
+                    assert!(
+                        dist > 1.0,
+                        "{resn} clash {} {} = {dist}",
+                        sc.atoms[i].0,
+                        sc.atoms[j].0
+                    );
                 }
             }
         }

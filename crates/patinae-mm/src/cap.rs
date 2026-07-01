@@ -87,7 +87,14 @@ pub struct CapBuild {
 
 /// Builds an acetyl (`ACE`) cap on the N-terminus, from the first residue's
 /// backbone N/CA/C positions. `n_atom_index` is the N atom in the molecule.
-pub fn build_ace(n: Vec3, ca: Vec3, c: Vec3, chain: String, resv: i32, n_atom_index: usize) -> CapBuild {
+pub fn build_ace(
+    n: Vec3,
+    ca: Vec3,
+    c: Vec3,
+    chain: String,
+    resv: i32,
+    n_atom_index: usize,
+) -> CapBuild {
     let (n, ca, c) = (v(n), v(ca), v(c));
     let c_ace = place(c, ca, n, 1.335, 121.0, 180.0);
     let o = place(ca, n, c_ace, 1.229, 122.0, 0.0);
@@ -100,12 +107,36 @@ pub fn build_ace(n: Vec3, ca: Vec3, c: Vec3, chain: String, resv: i32, n_atom_in
         chain,
         resv,
         atoms: vec![
-            CapAtom { name: "C", element: Element::Carbon, coord: to_vec3(c_ace) },
-            CapAtom { name: "O", element: Element::Oxygen, coord: to_vec3(o) },
-            CapAtom { name: "CH3", element: Element::Carbon, coord: to_vec3(ct) },
-            CapAtom { name: "HH31", element: Element::Hydrogen, coord: to_vec3(h1) },
-            CapAtom { name: "HH32", element: Element::Hydrogen, coord: to_vec3(h2) },
-            CapAtom { name: "HH33", element: Element::Hydrogen, coord: to_vec3(h3) },
+            CapAtom {
+                name: "C",
+                element: Element::Carbon,
+                coord: to_vec3(c_ace),
+            },
+            CapAtom {
+                name: "O",
+                element: Element::Oxygen,
+                coord: to_vec3(o),
+            },
+            CapAtom {
+                name: "CH3",
+                element: Element::Carbon,
+                coord: to_vec3(ct),
+            },
+            CapAtom {
+                name: "HH31",
+                element: Element::Hydrogen,
+                coord: to_vec3(h1),
+            },
+            CapAtom {
+                name: "HH32",
+                element: Element::Hydrogen,
+                coord: to_vec3(h2),
+            },
+            CapAtom {
+                name: "HH33",
+                element: Element::Hydrogen,
+                coord: to_vec3(h3),
+            },
         ],
         internal_bonds: vec![(0, 1), (0, 2), (2, 3), (2, 4), (2, 5)],
         parent_bonds: vec![0],
@@ -134,9 +165,21 @@ pub fn build_nterm_nh3(
         chain,
         resv,
         atoms: vec![
-            CapAtom { name: "H1", element: Element::Hydrogen, coord: to_vec3(h1) },
-            CapAtom { name: "H2", element: Element::Hydrogen, coord: to_vec3(h2) },
-            CapAtom { name: "H3", element: Element::Hydrogen, coord: to_vec3(h3) },
+            CapAtom {
+                name: "H1",
+                element: Element::Hydrogen,
+                coord: to_vec3(h1),
+            },
+            CapAtom {
+                name: "H2",
+                element: Element::Hydrogen,
+                coord: to_vec3(h2),
+            },
+            CapAtom {
+                name: "H3",
+                element: Element::Hydrogen,
+                coord: to_vec3(h3),
+            },
         ],
         internal_bonds: vec![],
         parent_bonds: vec![0, 1, 2],
@@ -147,7 +190,14 @@ pub fn build_nterm_nh3(
 
 /// Builds an N-methyl amide (`NME`) cap on the C-terminus, from the last
 /// residue's backbone C/CA/O positions. `c_atom_index` is the C atom.
-pub fn build_nme(c: Vec3, ca: Vec3, o: Vec3, chain: String, resv: i32, c_atom_index: usize) -> CapBuild {
+pub fn build_nme(
+    c: Vec3,
+    ca: Vec3,
+    o: Vec3,
+    chain: String,
+    resv: i32,
+    c_atom_index: usize,
+) -> CapBuild {
     let (c, ca, o) = (v(c), v(ca), v(o));
     let n = place(o, ca, c, 1.335, 116.0, 180.0);
     let h = place(ca, c, n, 1.010, 119.0, 0.0);
@@ -160,12 +210,36 @@ pub fn build_nme(c: Vec3, ca: Vec3, o: Vec3, chain: String, resv: i32, c_atom_in
         chain,
         resv,
         atoms: vec![
-            CapAtom { name: "N", element: Element::Nitrogen, coord: to_vec3(n) },
-            CapAtom { name: "H", element: Element::Hydrogen, coord: to_vec3(h) },
-            CapAtom { name: "CH3", element: Element::Carbon, coord: to_vec3(ct) },
-            CapAtom { name: "HH31", element: Element::Hydrogen, coord: to_vec3(h1) },
-            CapAtom { name: "HH32", element: Element::Hydrogen, coord: to_vec3(h2) },
-            CapAtom { name: "HH33", element: Element::Hydrogen, coord: to_vec3(h3) },
+            CapAtom {
+                name: "N",
+                element: Element::Nitrogen,
+                coord: to_vec3(n),
+            },
+            CapAtom {
+                name: "H",
+                element: Element::Hydrogen,
+                coord: to_vec3(h),
+            },
+            CapAtom {
+                name: "CH3",
+                element: Element::Carbon,
+                coord: to_vec3(ct),
+            },
+            CapAtom {
+                name: "HH31",
+                element: Element::Hydrogen,
+                coord: to_vec3(h1),
+            },
+            CapAtom {
+                name: "HH32",
+                element: Element::Hydrogen,
+                coord: to_vec3(h2),
+            },
+            CapAtom {
+                name: "HH33",
+                element: Element::Hydrogen,
+                coord: to_vec3(h3),
+            },
         ],
         internal_bonds: vec![(0, 1), (0, 2), (2, 3), (2, 4), (2, 5)],
         parent_bonds: vec![0],
@@ -193,9 +267,21 @@ pub fn build_cterm_amide(
         chain,
         resv,
         atoms: vec![
-            CapAtom { name: "N", element: Element::Nitrogen, coord: to_vec3(n) },
-            CapAtom { name: "H1", element: Element::Hydrogen, coord: to_vec3(h1) },
-            CapAtom { name: "H2", element: Element::Hydrogen, coord: to_vec3(h2) },
+            CapAtom {
+                name: "N",
+                element: Element::Nitrogen,
+                coord: to_vec3(n),
+            },
+            CapAtom {
+                name: "H1",
+                element: Element::Hydrogen,
+                coord: to_vec3(h1),
+            },
+            CapAtom {
+                name: "H2",
+                element: Element::Hydrogen,
+                coord: to_vec3(h2),
+            },
         ],
         internal_bonds: vec![(0, 1), (0, 2)],
         parent_bonds: vec![0],
@@ -220,7 +306,11 @@ pub fn build_cterm_carboxylate(
         resn: "",
         chain,
         resv,
-        atoms: vec![CapAtom { name: "OXT", element: Element::Oxygen, coord: to_vec3(oxt) }],
+        atoms: vec![CapAtom {
+            name: "OXT",
+            element: Element::Oxygen,
+            coord: to_vec3(oxt),
+        }],
         internal_bonds: vec![],
         parent_bonds: vec![0],
         parent_atom_index: c_atom_index,
@@ -244,7 +334,11 @@ mod tests {
         let cap = build_ace(n, ca, c, "A".into(), 0, 0);
         let carbonyl = cap.atoms[0].coord;
         // C(ace)–N bond ~1.335 Å
-        assert!((dist(carbonyl, n) - 1.335).abs() < 0.05, "C-N = {}", dist(carbonyl, n));
+        assert!(
+            (dist(carbonyl, n) - 1.335).abs() < 0.05,
+            "C-N = {}",
+            dist(carbonyl, n)
+        );
         // C=O bond ~1.229 Å
         assert!((dist(carbonyl, cap.atoms[1].coord) - 1.229).abs() < 0.05);
         // C-CH3 bond ~1.5 Å
@@ -260,7 +354,11 @@ mod tests {
         let o = Vec3::new(0.5, 1.2, 0.0);
         let cap = build_nme(c, ca, o, "A".into(), 100, 5);
         let amide_n = cap.atoms[0].coord;
-        assert!((dist(amide_n, c) - 1.335).abs() < 0.05, "N-C = {}", dist(amide_n, c));
+        assert!(
+            (dist(amide_n, c) - 1.335).abs() < 0.05,
+            "N-C = {}",
+            dist(amide_n, c)
+        );
         assert!((dist(amide_n, cap.atoms[1].coord) - 1.01).abs() < 0.05);
         assert_eq!(cap.resn, "NME");
     }
@@ -289,7 +387,10 @@ mod tests {
         assert!(cap.extend_parent_residue);
         assert_eq!(cap.atoms.len(), 1);
         assert_eq!(cap.atoms[0].name, "OXT");
-        assert!((dist(cap.atoms[0].coord, c) - 1.251).abs() < 0.05, "C-OXT length off");
+        assert!(
+            (dist(cap.atoms[0].coord, c) - 1.251).abs() < 0.05,
+            "C-OXT length off"
+        );
     }
 
     #[test]

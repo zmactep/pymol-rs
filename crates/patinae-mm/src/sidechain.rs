@@ -52,7 +52,12 @@ impl Frame {
         let e1 = normalize(sub(n, ca));
         let e3 = normalize(cross(e1, sub(c, ca)));
         let e2 = cross(e3, e1);
-        Frame { origin: ca, e1, e2, e3 }
+        Frame {
+            origin: ca,
+            e1,
+            e2,
+            e3,
+        }
     }
 
     fn to_local(&self, p: V) -> V {
@@ -173,10 +178,9 @@ pub fn plan_side_chains(molecule: &ObjectMolecule, selected: &HashSet<usize>) ->
             if atom_residue.get(&a).map(String::as_str) == Some(donor_key)
                 && atom_residue.get(&b).map(String::as_str) == Some(donor_key)
             {
-                if let (Some(an), Some(bn)) = (
-                    molecule.get_atom(bond.atom1),
-                    molecule.get_atom(bond.atom2),
-                ) {
+                if let (Some(an), Some(bn)) =
+                    (molecule.get_atom(bond.atom1), molecule.get_atom(bond.atom2))
+                {
                     pairs.push((an.name.to_string(), bn.name.to_string()));
                 }
             }

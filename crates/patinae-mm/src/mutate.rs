@@ -84,15 +84,14 @@ pub fn build_mutant(
         }
     }
 
-    let mut next_id = mol.atoms().map(|a| a.id).max().unwrap_or(0) + 1;
-    for (name, element, coord) in &side_chain.atoms {
+    let first_new_id = mol.atoms().map(|a| a.id).max().unwrap_or(0) + 1;
+    for (id, (name, element, coord)) in (first_new_id..).zip(&side_chain.atoms) {
         let mut atom = template.clone();
         atom.name = name.as_str().into();
         atom.element = *element;
         atom.residue = residue.clone();
         atom.partial_charge = 0.0;
-        atom.id = next_id;
-        next_id += 1;
+        atom.id = id;
         let idx = mol.push_atom_with_coord(atom, *coord);
         name_to_idx.insert(name.clone(), idx);
     }

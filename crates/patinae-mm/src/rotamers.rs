@@ -218,10 +218,7 @@ fn resolve_chi_axes(
 /// Soft clash penalty of the side chain against the fixed environment: summed
 /// squared overlap where atoms are closer than the sum of their vdW radii
 /// (minus a small tolerance so van-der-Waals contact is not penalized).
-fn clash_score(
-    sidechain: &HashMap<String, (V, Element)>,
-    environment: &[(V, Element)],
-) -> f64 {
+fn clash_score(sidechain: &HashMap<String, (V, Element)>, environment: &[(V, Element)]) -> f64 {
     const TOL: f64 = 0.4;
     let mut score = 0.0;
     for (sc_pos, sc_el) in sidechain.values() {
@@ -253,17 +250,25 @@ pub fn optimize_rotamer(
 ) -> HashMap<String, Vec3> {
     let present: HashSet<String> = sidechain.iter().map(|a| a.name.clone()).collect();
     let axes = resolve_chi_axes(resn, &present, bonds);
-    let mut current: HashMap<String, (V, Element)> =
-        sidechain.iter().map(|a| (a.name.clone(), (v(a.coord), a.element))).collect();
+    let mut current: HashMap<String, (V, Element)> = sidechain
+        .iter()
+        .map(|a| (a.name.clone(), (v(a.coord), a.element)))
+        .collect();
 
     if axes.is_empty() {
-        return current.into_iter().map(|(k, (p, _))| (k, to_vec3(p))).collect();
+        return current
+            .into_iter()
+            .map(|(k, (p, _))| (k, to_vec3(p)))
+            .collect();
     }
 
     let fixed: HashMap<String, V> = fixed.iter().map(|(k, p)| (k.clone(), v(*p))).collect();
     let env: Vec<(V, Element)> = environment.iter().map(|(p, e)| (v(*p), *e)).collect();
     let pos_of = |current: &HashMap<String, (V, Element)>, name: &str| -> Option<V> {
-        current.get(name).map(|(p, _)| *p).or_else(|| fixed.get(name).copied())
+        current
+            .get(name)
+            .map(|(p, _)| *p)
+            .or_else(|| fixed.get(name).copied())
     };
 
     let samples = chi_samples(fine);
@@ -312,7 +317,9 @@ pub fn optimize_rotamer(
         best = current;
     }
 
-    best.into_iter().map(|(k, (p, _))| (k, to_vec3(p))).collect()
+    best.into_iter()
+        .map(|(k, (p, _))| (k, to_vec3(p)))
+        .collect()
 }
 
 /// Sets a single χ to `target_deg` by rotating its downstream atoms.
@@ -398,8 +405,16 @@ mod tests {
         .into_iter()
         .collect();
         let sidechain = vec![
-            SideAtom { name: "CB".into(), element: Element::Carbon, coord: Vec3::new(1.5, 0.0, 0.0) },
-            SideAtom { name: "OG".into(), element: Element::Oxygen, coord: Vec3::new(2.0, 1.2, 0.0) },
+            SideAtom {
+                name: "CB".into(),
+                element: Element::Carbon,
+                coord: Vec3::new(1.5, 0.0, 0.0),
+            },
+            SideAtom {
+                name: "OG".into(),
+                element: Element::Oxygen,
+                coord: Vec3::new(2.0, 1.2, 0.0),
+            },
         ];
         let bonds = vec![("CB".to_string(), "OG".to_string())];
         // Environment atom sitting where OG starts → initial clash.
@@ -407,7 +422,10 @@ mod tests {
         let out = optimize_rotamer("SER", &sidechain, &fixed, &bonds, &environment, true);
         let og = out.get("OG").unwrap();
         let d = ((og.x - 2.0).powi(2) + (og.y - 1.2).powi(2) + og.z.powi(2)).sqrt();
-        assert!(d > 1.0, "optimizer left OG on top of the clashing atom (d={d})");
+        assert!(
+            d > 1.0,
+            "optimizer left OG on top of the clashing atom (d={d})"
+        );
         // CB is on the χ1 axis and must not move.
         let cb = out.get("CB").unwrap();
         assert!((cb.x - 1.5).abs() < 1e-4 && cb.y.abs() < 1e-4);
