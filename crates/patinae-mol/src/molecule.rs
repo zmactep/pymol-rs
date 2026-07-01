@@ -190,6 +190,19 @@ impl ObjectMolecule {
         index
     }
 
+    /// Add an atom and give it `coord` in every existing coordinate set.
+    ///
+    /// Convenience for growing a loaded molecule (e.g. when building hydrogens):
+    /// [`add_atom`](Self::add_atom) alone leaves coordinate sets short, which
+    /// makes [`set_coord`](Self::set_coord) fail for the new atom.
+    pub fn push_atom_with_coord(&mut self, atom: Atom, coord: Vec3) -> AtomIndex {
+        let index = self.add_atom(atom);
+        for coord_set in &mut self.coord_sets {
+            coord_set.add_coord(index, coord);
+        }
+        index
+    }
+
     /// Get an atom by index
     #[inline]
     pub fn get_atom(&self, index: AtomIndex) -> Option<&Atom> {
@@ -849,6 +862,123 @@ impl ObjectMolecule {
         self.invalidate_subchain_partition();
     }
 
+    /// Reorders atoms so each residue's atoms are contiguous, preserving the
+    /// original residue order and slotting newly-appended atoms (e.g. rebuilt
+    /// hydrogens or side chains) directly after the residue they belong to.
+    ///
+    /// Without this, atoms pushed onto the end form separate trailing subchains
+    /// because the bond-aware partition keys off contiguous index ranges.
+    pub fn regroup_by_residue(&mut self) {
+        let n = self.atoms.len();
+        if n == 0 {
+            return;
+        }
+        // First original index seen for each residue defines its position.
+        let mut first: std::collections::HashMap<(String, i32, char), usize> =
+            std::collections::HashMap::new();
+        for (i, atom) in self.atoms.iter().enumerate() {
+            let key = (
+                atom.residue.chain.clone(),
+                atom.residue.resv,
+                atom.residue.inscode,
+            );
+            first.entry(key).or_insert(i);
+        }
+        let residue_rank = |atom: &Atom| -> usize {
+            *first
+                .get(&(
+                    atom.residue.chain.clone(),
+                    atom.residue.resv,
+                    atom.residue.inscode,
+                ))
+                .unwrap_or(&0)
+        };
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| (residue_rank(&self.atoms[i]), i));
+        self.apply_atom_permutation(order);
+    }
+
+    /// Like [`regroup_by_residue`](Self::regroup_by_residue), but additionally
+    /// orders residues *within each chain* by `(resv, inscode)` rather than by
+    /// first appearance. Use this when newly-appended atoms form a residue that
+    /// must slot into sequence — e.g. an N-terminal ACE cap (resv before the
+    /// first residue) or a C-terminal NME cap (resv after the last). Without
+    /// the sequence ordering a freshly-appended cap residue lands after every
+    /// other chain and the bond-aware partition splits it into its own subchain.
+    ///
+    /// Chains keep their original first-appearance order; atoms within a
+    /// residue keep their original order.
+    pub fn regroup_residues_in_sequence(&mut self) {
+        let n = self.atoms.len();
+        if n == 0 {
+            return;
+        }
+        // Chain ordering follows first appearance so the overall chain layout
+        // is preserved; only residues within a chain are sequence-sorted.
+        let mut chain_rank: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (i, atom) in self.atoms.iter().enumerate() {
+            chain_rank
+                .entry(atom.residue.chain.clone())
+                .or_insert(i);
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| {
+            let atom = &self.atoms[i];
+            let crank = *chain_rank.get(&atom.residue.chain).unwrap_or(&0);
+            (crank, atom.residue.resv, atom.residue.inscode, i)
+        });
+        self.apply_atom_permutation(order);
+    }
+
+    /// Applies a precomputed atom permutation (`order[new] = old`), remapping
+    /// bonds, the per-atom bond index, and every coordinate set, then
+    /// invalidates the subchain partition. No-op if `order` is the identity.
+    fn apply_atom_permutation(&mut self, order: Vec<usize>) {
+        let n = self.atoms.len();
+        if order.iter().enumerate().all(|(new, &old)| new == old) {
+            return; // already in order
+        }
+
+        let mut old_to_new = vec![0u32; n];
+        for (new, &old) in order.iter().enumerate() {
+            old_to_new[old] = new as u32;
+        }
+
+        let new_atoms: Vec<Atom> = order.iter().map(|&old| self.atoms[old].clone()).collect();
+        self.atoms = new_atoms;
+
+        for bond in &mut self.bonds {
+            bond.atom1 = AtomIndex(old_to_new[bond.atom1.as_usize()]);
+            bond.atom2 = AtomIndex(old_to_new[bond.atom2.as_usize()]);
+        }
+        self.atom_bonds = vec![SmallVec::new(); n];
+        for (bi, bond) in self.bonds.iter().enumerate() {
+            let bond_idx = BondIndex(bi as u32);
+            self.atom_bonds[bond.atom1.as_usize()].push(bond_idx);
+            self.atom_bonds[bond.atom2.as_usize()].push(bond_idx);
+        }
+
+        for cs in &mut self.coord_sets {
+            let mut new_coords = Vec::with_capacity(n * 3);
+            for &old in &order {
+                if let Some(v) = cs.get_atom_coord(AtomIndex(old as u32)) {
+                    new_coords.push(v.x);
+                    new_coords.push(v.y);
+                    new_coords.push(v.z);
+                } else {
+                    new_coords.extend_from_slice(&[0.0, 0.0, 0.0]);
+                }
+            }
+            let mut new_cs = CoordSet::from_coords(new_coords);
+            new_cs.name = std::mem::take(&mut cs.name);
+            new_cs.symmetry = cs.symmetry.take();
+            new_cs.settings = cs.settings.take();
+            *cs = new_cs;
+        }
+        self.invalidate_subchain_partition();
+    }
+
     // =========================================================================
     // Selection Support
     // =========================================================================
@@ -1159,6 +1289,45 @@ mod tests {
         assert!(
             ca_atom.state.flags.contains(AtomFlags::GUIDE),
             "CA atom should have GUIDE flag"
+        );
+    }
+
+    #[test]
+    fn regroup_in_sequence_slots_appended_cap_into_chain() {
+        use crate::atom::AtomResidue;
+        use std::sync::Arc;
+
+        // Two chains; a cap residue (chain A, resv 0) is appended at the very
+        // end — after chain B — as the cap commands do.
+        let mut mol = ObjectMolecule::new("capped");
+        let add = |mol: &mut ObjectMolecule, chain: &str, resn: &str, resv: i32, name: &str| {
+            let res = Arc::new(AtomResidue::from_parts(chain, resn, resv, ' ', ""));
+            let mut atom = Atom::new(name, Element::Carbon);
+            atom.residue = res;
+            mol.add_atom(atom)
+        };
+        add(&mut mol, "A", "ALA", 1, "CA");
+        add(&mut mol, "A", "GLY", 2, "CA");
+        add(&mut mol, "B", "SER", 1, "CA");
+        // Appended out of sequence: ACE cap (resv 0) belongs before A/1.
+        add(&mut mol, "A", "ACE", 0, "CH3");
+
+        mol.regroup_residues_in_sequence();
+
+        // Chain A atoms must be contiguous and resv-ordered: ACE(0), ALA(1), GLY(2).
+        let chains: Vec<(String, i32)> = mol
+            .atoms()
+            .map(|a| (a.residue.chain.to_string(), a.residue.resv))
+            .collect();
+        assert_eq!(
+            chains,
+            vec![
+                ("A".into(), 0),
+                ("A".into(), 1),
+                ("A".into(), 2),
+                ("B".into(), 1),
+            ],
+            "cap residue must slot into chain A in sequence, not trail chain B"
         );
     }
 
