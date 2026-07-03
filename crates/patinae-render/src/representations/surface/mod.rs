@@ -297,6 +297,15 @@ struct SurfaceBuildPrep {
     atoms: Vec<SurfaceAccelAtom>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SurfaceTileGeom {
+    bbox_min: [f32; 3],
+    dims: [u32; 3],
+    voxel_size: f32,
+    emit_core_min: [f32; 3],
+    emit_core_max: [f32; 3],
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SurfaceAccelAtom {
     local_id: u32,
@@ -491,6 +500,22 @@ fn make_surface_build_prep(
     }
 }
 
+fn make_surface_tile_geom(
+    bbox_min: [f32; 3],
+    dims: [u32; 3],
+    voxel_size: f32,
+    emit_core_min: [f32; 3],
+    emit_core_max: [f32; 3],
+) -> SurfaceTileGeom {
+    SurfaceTileGeom {
+        bbox_min,
+        dims,
+        voxel_size,
+        emit_core_min,
+        emit_core_max,
+    }
+}
+
 fn atom_matches_surface_mode(atom: &Atom, mode: SettingSurfaceMode, rep_mask: RepMask) -> bool {
     match mode {
         SettingSurfaceMode::Normal => atom.state.flags.is_biomolecule(),
@@ -670,6 +695,64 @@ fn prepare_surface_builds_from_atom_set(
         ));
     }
     preps
+}
+
+fn surface_tile_geoms(
+    atom_set: &SurfaceAtomSet,
+    probe_radius: f32,
+    requested_voxel_size: f32,
+) -> Vec<SurfaceTileGeom> {
+    let (bbox_min, dims, voxel_size) = grid_layout_from_bounds(
+        atom_set.lo,
+        atom_set.hi,
+        atom_set.max_radius,
+        probe_radius,
+        requested_voxel_size,
+    );
+    if voxel_size <= SURFACE_TILE_TRIGGER_VOXEL_SIZE {
+        let emit_core_min = bbox_min;
+        let emit_core_max = grid_domain_max(bbox_min, dims, voxel_size);
+        return vec![make_surface_tile_geom(
+            bbox_min,
+            dims,
+            voxel_size,
+            emit_core_min,
+            emit_core_max,
+        )];
+    }
+
+    let tile_voxel_size =
+        tiled_surface_voxel_size(atom_set.max_radius, probe_radius, requested_voxel_size);
+    let (domain_min, domain_max) = surface_domain_from_bounds(
+        atom_set.lo,
+        atom_set.hi,
+        atom_set.max_radius,
+        probe_radius,
+        tile_voxel_size,
+    );
+    let field_margin = atom_set.max_radius + probe_radius + 2.0 * tile_voxel_size;
+
+    tile_core_bounds_for_domain(domain_min, domain_max)
+        .into_iter()
+        .map(|(core_min, core_max)| {
+            let mut field_min = [0.0_f32; 3];
+            let mut field_max = [0.0_f32; 3];
+            for k in 0..3 {
+                field_min[k] = snap_floor_to_lattice(
+                    core_min[k] - field_margin,
+                    domain_min[k],
+                    tile_voxel_size,
+                );
+                field_max[k] = snap_ceil_to_lattice(
+                    core_max[k] + field_margin,
+                    domain_min[k],
+                    tile_voxel_size,
+                );
+            }
+            let dims = dims_for_snapped_domain(field_min, field_max, tile_voxel_size);
+            make_surface_tile_geom(field_min, dims, tile_voxel_size, core_min, core_max)
+        })
+        .collect()
 }
 
 fn prepare_surface_builds_for_atoms(
@@ -960,23 +1043,54 @@ fn allocate_draw_resources(device: &wgpu::Device, args: DrawAllocArgs) -> DrawRe
     }
 }
 
-fn estimate_emit_cube_count(prep: &SurfaceBuildPrep) -> u64 {
+fn estimate_emit_cube_count_for_geom(
+    dims: [u32; 3],
+    voxel_size: f32,
+    emit_core_min: [f32; 3],
+    emit_core_max: [f32; 3],
+) -> u64 {
     let mut cubes = 1_u64;
     for k in 0..3 {
-        let core_span = (prep.emit_core_max[k] - prep.emit_core_min[k]).max(0.0);
-        let core_cubes = ((core_span / prep.voxel_size).ceil() as u64).max(1);
-        let grid_cubes = prep.dims[k].saturating_sub(1) as u64;
+        let core_span = (emit_core_max[k] - emit_core_min[k]).max(0.0);
+        let core_cubes = ((core_span / voxel_size).ceil() as u64).max(1);
+        let grid_cubes = dims[k].saturating_sub(1) as u64;
         cubes *= core_cubes.min(grid_cubes.max(1));
     }
     cubes
 }
 
+fn estimate_emit_cube_count(prep: &SurfaceBuildPrep) -> u64 {
+    estimate_emit_cube_count_for_geom(
+        prep.dims,
+        prep.voxel_size,
+        prep.emit_core_min,
+        prep.emit_core_max,
+    )
+}
+
 fn max_vertices_for_tile(mode: SurfaceMode, prep: &SurfaceBuildPrep) -> u32 {
+    max_vertices_for_tile_geom(
+        mode,
+        prep.dims,
+        prep.voxel_size,
+        prep.emit_core_min,
+        prep.emit_core_max,
+    )
+}
+
+fn max_vertices_for_tile_geom(
+    mode: SurfaceMode,
+    dims: [u32; 3],
+    voxel_size: f32,
+    emit_core_min: [f32; 3],
+    emit_core_max: [f32; 3],
+) -> u32 {
     let per_cube = match mode {
         SurfaceMode::Surface => 6u64,
         SurfaceMode::Mesh => 12u64,
     };
-    let cubes = estimate_emit_cube_count(prep).max(1);
+    let cubes =
+        estimate_emit_cube_count_for_geom(dims, voxel_size, emit_core_min, emit_core_max).max(1);
     ((cubes * per_cube).min(MAX_VERTICES as u64).max(64)) as u32
 }
 
@@ -1430,9 +1544,20 @@ pub(crate) fn budget_estimates(
         SurfaceMode::Mesh => s.mesh.quality,
     };
     let requested = voxel_size_for_quality(quality, input.lod);
+    let filter_mode = s.surface.mode;
+    let individual_chains = s.surface.individual_chains;
+    let rep_mask = match mode {
+        SurfaceMode::Surface => RepMask::SURFACE,
+        SurfaceMode::Mesh => RepMask::MESH,
+    };
+    let partitions = surface_atom_partitions(input, filter_mode, individual_chains, rep_mask);
+    let atom_sets: Vec<_> = partitions
+        .iter()
+        .filter_map(|ids| collect_surface_atom_set(input, ids))
+        .collect();
     let mut estimates = Vec::with_capacity(2);
     estimates.push(surface_estimate(
-        input,
+        &atom_sets,
         s,
         mode,
         requested,
@@ -1441,7 +1566,7 @@ pub(crate) fn budget_estimates(
     let coarsened = coarsened_voxel_size(requested);
     if coarsened > requested * 1.001 {
         estimates.push(surface_estimate(
-            input,
+            &atom_sets,
             s,
             mode,
             coarsened,
@@ -1452,7 +1577,7 @@ pub(crate) fn budget_estimates(
 }
 
 fn surface_estimate(
-    input: &RenderObjectInput<'_>,
+    atom_sets: &[SurfaceAtomSet],
     settings: &ResolvedSettings,
     mode: SurfaceMode,
     requested_voxel_size: f32,
@@ -1463,26 +1588,23 @@ fn surface_estimate(
         SurfaceMode::Mesh => settings.mesh.solvent_radius,
     }
     .max(0.0);
-    let filter_mode = settings.surface.mode;
-    let individual_chains = settings.surface.individual_chains;
-    let rep_mask = match mode {
-        SurfaceMode::Surface => RepMask::SURFACE,
-        SurfaceMode::Mesh => RepMask::MESH,
-    };
-    let partitions = surface_atom_partitions(input, filter_mode, individual_chains, rep_mask);
     let mut capacity_bytes = SurfaceParams::SIZE;
     let mut scratch_bytes = 0_u64;
     let mut required_bytes = SurfaceParams::SIZE;
 
-    for ids in &partitions {
-        let tiles =
-            prepare_surface_builds_for_atoms(input, ids, probe_radius, requested_voxel_size);
-        for prep in &tiles {
-            let vertex_bytes =
-                u64::from(max_vertices_for_tile(mode, prep)).saturating_mul(SurfaceVertex::SIZE);
+    for atom_set in atom_sets {
+        for tile in surface_tile_geoms(atom_set, probe_radius, requested_voxel_size) {
+            let vertex_bytes = u64::from(max_vertices_for_tile_geom(
+                mode,
+                tile.dims,
+                tile.voxel_size,
+                tile.emit_core_min,
+                tile.emit_core_max,
+            ))
+            .saturating_mul(SurfaceVertex::SIZE);
             let chunk_bytes = vertex_bytes.saturating_add(4).saturating_add(16);
             capacity_bytes = capacity_bytes.saturating_add(chunk_bytes);
-            scratch_bytes = scratch_bytes.saturating_add(surface_scratch_estimate(prep));
+            scratch_bytes = scratch_bytes.saturating_add(surface_scratch_estimate(tile.dims));
             required_bytes = required_bytes.max(vertex_bytes);
         }
     }
@@ -1497,9 +1619,8 @@ fn surface_estimate(
     }
 }
 
-fn surface_scratch_estimate(prep: &SurfaceBuildPrep) -> u64 {
-    let voxels = prep
-        .dims
+fn surface_scratch_estimate(dims: [u32; 3]) -> u64 {
+    let voxels = dims
         .iter()
         .fold(1_u64, |acc, &dim| acc.saturating_mul(u64::from(dim.max(1))));
     voxels.saturating_mul(12)
@@ -1613,8 +1734,59 @@ mod tests {
                 .iter()
                 .map(|&capacity| capacity as u64)
                 .sum::<u64>()
-                > MAX_VERTICES as u64
+            > MAX_VERTICES as u64
         );
+    }
+
+    #[test]
+    fn surface_tile_geoms_match_build_prep_dimensions() {
+        let base_atom_set = SurfaceAtomSet {
+            lo: [80.000, 28.094, 100.111],
+            hi: [846.690, 1105.052, 897.788],
+            max_radius: 2.0,
+            atoms: vec![
+                SurfaceAccelAtom {
+                    local_id: 0,
+                    pos: [80.000, 28.094, 100.111],
+                },
+                SurfaceAccelAtom {
+                    local_id: 1,
+                    pos: [846.690, 1105.052, 897.788],
+                },
+            ],
+        };
+        let probe = 1.4;
+        let requested = 1.0;
+        let base_tiles = surface_tile_geoms(&base_atom_set, probe, requested);
+
+        let mut atoms = base_atom_set.atoms.clone();
+        atoms.extend(base_tiles.iter().enumerate().map(|(i, tile)| {
+            let pos = [
+                (tile.emit_core_min[0] + tile.emit_core_max[0]) * 0.5,
+                (tile.emit_core_min[1] + tile.emit_core_max[1]) * 0.5,
+                (tile.emit_core_min[2] + tile.emit_core_max[2]) * 0.5,
+            ];
+            SurfaceAccelAtom {
+                local_id: (i + 2) as u32,
+                pos,
+            }
+        }));
+        let atom_set = SurfaceAtomSet {
+            atoms,
+            ..base_atom_set
+        };
+
+        let geoms = surface_tile_geoms(&atom_set, probe, requested);
+        let preps = prepare_surface_builds_from_atom_set(&atom_set, probe, requested);
+
+        assert_eq!(geoms.len(), preps.len());
+        for (geom, prep) in geoms.iter().zip(preps.iter()) {
+            assert_eq!(geom.bbox_min, prep.bbox_min);
+            assert_eq!(geom.dims, prep.dims);
+            assert_eq!(geom.voxel_size, prep.voxel_size);
+            assert_eq!(geom.emit_core_min, prep.emit_core_min);
+            assert_eq!(geom.emit_core_max, prep.emit_core_max);
+        }
     }
 
     #[test]

@@ -973,12 +973,12 @@ mod tests {
     }
 
     #[test]
-    fn budget_request_cache_recomputes_geometry_reps_on_coords_dirty() {
+    fn budget_request_cache_reuses_geometry_reps_on_coords_dirty() {
         let cartoon = catalog::entry(RepKind::Cartoon).expect("cartoon catalog entry");
         let surface = catalog::entry(RepKind::Surface).expect("surface catalog entry");
 
-        assert!(!should_reuse_budget_request(cartoon, DirtyFlags::COORDS));
-        assert!(!should_reuse_budget_request(surface, DirtyFlags::COORDS));
+        assert!(should_reuse_budget_request(cartoon, DirtyFlags::COORDS));
+        assert!(should_reuse_budget_request(surface, DirtyFlags::COORDS));
     }
 
     #[test]

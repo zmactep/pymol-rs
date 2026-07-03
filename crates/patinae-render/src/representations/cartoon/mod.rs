@@ -75,6 +75,49 @@ fn oversized_cartoon_storage_buffer(
     buffers.iter().copied().find(|(_, bytes)| *bytes > limit)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CartoonEstimateBufferBytes {
+    extrude_points: u64,
+    runs: u64,
+    vertices: u64,
+    capacity: u64,
+}
+
+fn cartoon_estimate_buffer_bytes(
+    backbone_len: usize,
+    sampling_rate: u32,
+    quality_factor: u32,
+) -> CartoonEstimateBufferBytes {
+    if backbone_len < 2 {
+        return CartoonEstimateBufferBytes {
+            extrude_points: 0,
+            runs: 0,
+            vertices: 0,
+            capacity: CartoonParams::SIZE,
+        };
+    }
+
+    let sample_count = (backbone_len as u64).saturating_mul(u64::from(sampling_rate.max(1)));
+    let quality = u64::from(quality_factor.max(4));
+    let vertex_count = sample_count.saturating_mul(quality).saturating_mul(6);
+    let extrude_points = sample_count.saturating_mul(ExtrudePointGpu::SIZE);
+    let runs = sample_count.saturating_mul(std::mem::size_of::<RunDescriptor>() as u64);
+    let vertices = vertex_count.saturating_mul(24);
+    let capacity = CartoonParams::SIZE
+        .saturating_add(ExtrudeParams::SIZE)
+        .saturating_add(extrude_points)
+        .saturating_add(runs)
+        .saturating_add(vertices.max(24))
+        .saturating_add(16);
+
+    CartoonEstimateBufferBytes {
+        extrude_points,
+        runs,
+        vertices,
+        capacity,
+    }
+}
+
 /// Lazy-allocated GPU resources for one rebuild. Buffers are reused
 /// across rebuilds when capacity permits.
 struct CartoonResources {
@@ -367,6 +410,33 @@ mod tests {
             Some(("runs", 129))
         );
         assert_eq!(oversized_cartoon_storage_buffer(256, &buffers), None);
+    }
+
+    #[test]
+    fn cartoon_estimate_buffer_bytes_is_monotonic() {
+        let base = cartoon_estimate_buffer_bytes(100, 7, 32);
+        assert!(cartoon_estimate_buffer_bytes(101, 7, 32).capacity >= base.capacity);
+        assert!(cartoon_estimate_buffer_bytes(100, 8, 32).capacity >= base.capacity);
+        assert!(cartoon_estimate_buffer_bytes(100, 7, 33).capacity >= base.capacity);
+    }
+
+    #[test]
+    fn cartoon_estimate_buffer_bytes_bounds_pipeline_output() {
+        let resolved = ResolvedSettings::resolve(&Settings::default(), None);
+        let (pipeline, geom) = from_resolved_settings(&resolved, SceneLod::High);
+        let segments: Vec<_> = (0..4).map(|id| synthetic_segment(id, 12)).collect();
+        let backbone_len = segments.iter().map(BackboneSegment::len).sum::<usize>();
+        let output = process_cartoon_segments(segments, backbone_len, &pipeline, &geom);
+        let estimate = cartoon_estimate_buffer_bytes(backbone_len, pipeline.sampling, geom.quality);
+
+        assert!(
+            estimate.extrude_points >= output.extrude_points.len() as u64 * ExtrudePointGpu::SIZE
+        );
+        assert!(
+            estimate.runs
+                >= output.runs.len() as u64 * std::mem::size_of::<RunDescriptor>() as u64
+        );
+        assert!(estimate.vertices >= output.total_vertices as u64 * 24);
     }
 }
 
@@ -898,24 +968,19 @@ fn cartoon_estimate(
             0.3
         };
     }
-    let segments = segments_from_backbone_atoms(&bb);
-    let output = process_cartoon_segments(segments, bb.len(), &pipeline_settings, &geom_settings);
-    let extrude_points_bytes =
-        (output.extrude_points.len() as u64).saturating_mul(ExtrudePointGpu::SIZE);
-    let runs_bytes =
-        (output.runs.len() as u64).saturating_mul(std::mem::size_of::<RunDescriptor>() as u64);
-    let vertex_bytes = (output.total_vertices as u64).saturating_mul(24);
-    let capacity_bytes = CartoonParams::SIZE
-        .saturating_add(ExtrudeParams::SIZE)
-        .saturating_add(extrude_points_bytes)
-        .saturating_add(runs_bytes)
-        .saturating_add(vertex_bytes.max(24))
-        .saturating_add(16);
+    let buffers = cartoon_estimate_buffer_bytes(
+        bb.len(),
+        pipeline_settings.sampling,
+        geom_settings.quality,
+    );
 
     RepMemoryEstimate {
-        required_bytes: extrude_points_bytes.max(runs_bytes).max(vertex_bytes),
+        required_bytes: buffers
+            .extrude_points
+            .max(buffers.runs)
+            .max(buffers.vertices),
         scratch_bytes: 0,
-        capacity_bytes,
+        capacity_bytes: buffers.capacity,
         quality: RepQualityLevel::Full,
         can_chunk: false,
         can_skip: true,
