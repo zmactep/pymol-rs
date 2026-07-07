@@ -1734,7 +1734,7 @@ mod tests {
                 .iter()
                 .map(|&capacity| capacity as u64)
                 .sum::<u64>()
-            > MAX_VERTICES as u64
+                > MAX_VERTICES as u64
         );
     }
 

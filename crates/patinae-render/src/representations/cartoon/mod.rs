@@ -433,8 +433,7 @@ mod tests {
             estimate.extrude_points >= output.extrude_points.len() as u64 * ExtrudePointGpu::SIZE
         );
         assert!(
-            estimate.runs
-                >= output.runs.len() as u64 * std::mem::size_of::<RunDescriptor>() as u64
+            estimate.runs >= output.runs.len() as u64 * std::mem::size_of::<RunDescriptor>() as u64
         );
         assert!(estimate.vertices >= output.total_vertices as u64 * 24);
     }
@@ -968,11 +967,8 @@ fn cartoon_estimate(
             0.3
         };
     }
-    let buffers = cartoon_estimate_buffer_bytes(
-        bb.len(),
-        pipeline_settings.sampling,
-        geom_settings.quality,
-    );
+    let buffers =
+        cartoon_estimate_buffer_bytes(bb.len(), pipeline_settings.sampling, geom_settings.quality);
 
     RepMemoryEstimate {
         required_bytes: buffers
