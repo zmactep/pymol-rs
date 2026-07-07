@@ -277,13 +277,6 @@ impl App {
         invalid
     }
 
-    fn consume_display_recovery_redraw(&self) -> bool {
-        let mut recovery = self.display_recovery.get();
-        let should_redraw = recovery.consume_redraw_request();
-        self.display_recovery.set(recovery);
-        should_redraw
-    }
-
     pub(crate) fn submit_repl_command(&mut self, cmd: String, app: &AppWindow) {
         self.kernel.command_line.input = cmd;
         let viewport_size = Self::viewport_size(app);
@@ -639,9 +632,6 @@ impl App {
 
         self.capture_pending_recent_thumbnail(app);
         self.run_startup_actions(app, (vw, vh));
-        if self.consume_display_recovery_redraw() {
-            request_display_recovery_redraw(app.window());
-        }
     }
 
     fn poll_plugins(&mut self, viewport_size: (u32, u32)) {
@@ -1771,10 +1761,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app_rc = app.clone();
     let window_weak = window.as_weak();
 
+    #[cfg(target_os = "macos")]
+    let display_link_heartbeat: Rc<
+        RefCell<Option<crate::cv_display_link::DisplayLinkHeartbeat>>,
+    > = Rc::new(RefCell::new(None));
+
     let timing_callbacks = std::env::var("PATINAE_TIMING").is_ok();
     let before_end: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> =
         std::rc::Rc::new(std::cell::Cell::new(None));
     let before_end_clone = before_end.clone();
+    #[cfg(target_os = "macos")]
+    let display_link_heartbeat_for_notifier = display_link_heartbeat.clone();
     window
         .window()
         .set_rendering_notifier(move |rs, api| match rs {
@@ -1783,6 +1780,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     app_rc.borrow_mut().setup_renderer(api, &w);
                     log_window_event(w.window(), "rendering-setup", format_args!("wgpu-ready"));
                     request_display_recovery_redraw(w.window());
+                    #[cfg(target_os = "macos")]
+                    start_display_link_heartbeat(
+                        w.as_weak(),
+                        display_link_heartbeat_for_notifier.clone(),
+                    );
                 }
             }
             slint::RenderingState::BeforeRendering => {
@@ -1802,6 +1804,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             slint::RenderingState::RenderingTeardown => {
+                #[cfg(target_os = "macos")]
+                display_link_heartbeat_for_notifier.borrow_mut().take();
                 app_rc.borrow_mut().teardown_renderer();
             }
             _ => {}
@@ -1809,6 +1813,40 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     window.run()?;
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn start_display_link_heartbeat(
+    window: slint::Weak<AppWindow>,
+    heartbeat: Rc<RefCell<Option<crate::cv_display_link::DisplayLinkHeartbeat>>>,
+) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    if heartbeat.borrow().is_some() {
+        return;
+    }
+
+    if let Err(err) = slint::spawn_local(async move {
+        let Some(app_window) = window.upgrade() else {
+            return;
+        };
+        match app_window.window().winit_window().await {
+            Ok(window) => match crate::cv_display_link::DisplayLinkHeartbeat::start(window) {
+                Ok(link) => {
+                    *heartbeat.borrow_mut() = Some(link);
+                    log::info!("Started macOS CVDisplayLink render heartbeat");
+                }
+                Err(err) => {
+                    log::warn!("Failed to start macOS CVDisplayLink render heartbeat: {err}");
+                }
+            },
+            Err(err) => {
+                log::warn!("Failed to resolve winit window for CVDisplayLink heartbeat: {err}");
+            }
+        }
+    }) {
+        log::warn!("Failed to schedule CVDisplayLink heartbeat startup: {err}");
+    }
 }
 
 const STARTUP_RENDERER_ALERT_TITLE: &str = "Patinae Renderer Unavailable";

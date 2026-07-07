@@ -1,35 +1,19 @@
 use std::cell::Cell;
 
-// A few direct redraws give macOS display-link / monitor transitions time to
-// re-enter the normal continuous render loop after clamshell or scale changes.
-pub(crate) const DISPLAY_RECOVERY_REDRAW_FRAMES: u8 = 3;
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct DisplayRecovery {
     live_textures_invalid: bool,
-    redraw_frames_remaining: u8,
 }
 
 impl DisplayRecovery {
     pub(crate) fn mark_transition(&mut self) {
         self.live_textures_invalid = true;
-        self.redraw_frames_remaining = self
-            .redraw_frames_remaining
-            .max(DISPLAY_RECOVERY_REDRAW_FRAMES);
     }
 
     pub(crate) fn take_live_texture_invalidation(&mut self) -> bool {
         let invalid = self.live_textures_invalid;
         self.live_textures_invalid = false;
         invalid
-    }
-
-    pub(crate) fn consume_redraw_request(&mut self) -> bool {
-        if self.redraw_frames_remaining == 0 {
-            return false;
-        }
-        self.redraw_frames_remaining -= 1;
-        true
     }
 }
 
@@ -131,7 +115,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn display_recovery_coalesces_repeated_transitions() {
+    fn display_recovery_coalesces_repeated_texture_invalidations() {
         let mut recovery = DisplayRecovery::default();
 
         recovery.mark_transition();
@@ -139,26 +123,5 @@ mod tests {
 
         assert!(recovery.take_live_texture_invalidation());
         assert!(!recovery.take_live_texture_invalidation());
-        let mut redraws = 0;
-        while recovery.consume_redraw_request() {
-            redraws += 1;
-        }
-        assert_eq!(redraws, DISPLAY_RECOVERY_REDRAW_FRAMES);
-        assert!(!recovery.consume_redraw_request());
-    }
-
-    #[test]
-    fn display_recovery_refreshes_redraw_burst_on_new_transition() {
-        let mut recovery = DisplayRecovery::default();
-
-        recovery.mark_transition();
-        assert!(recovery.consume_redraw_request());
-        recovery.mark_transition();
-
-        let mut redraws = 0;
-        while recovery.consume_redraw_request() {
-            redraws += 1;
-        }
-        assert_eq!(redraws, DISPLAY_RECOVERY_REDRAW_FRAMES);
     }
 }
