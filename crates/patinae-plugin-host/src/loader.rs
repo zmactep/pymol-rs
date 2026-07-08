@@ -2504,9 +2504,10 @@ impl<'a> HostCommandRuntimeState<'a> {
                 .iter()
                 .map(|handle| self.gpu_handles.bind_group_layout(*handle))
                 .collect::<Result<Vec<_>, _>>()?;
+            let bind_group_layouts: Vec<_> = layouts.iter().map(|layout| Some(*layout)).collect();
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: descriptor.label.as_deref(),
-                bind_group_layouts: &layouts,
+                bind_group_layouts: &bind_group_layouts,
                 immediate_size: 0,
             })
         };
@@ -2662,9 +2663,11 @@ impl<'a> HostCommandRuntimeState<'a> {
                     .iter()
                     .map(|handle| self.gpu_handles.bind_group_layout(*handle))
                     .collect::<Result<Vec<_>, _>>()?;
+                let bind_group_layouts: Vec<_> =
+                    layouts.iter().map(|layout| Some(*layout)).collect();
                 device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: descriptor.label.as_deref(),
-                    bind_group_layouts: &layouts,
+                    bind_group_layouts: &bind_group_layouts,
                     immediate_size: 0,
                 })
             };
@@ -4330,7 +4333,7 @@ fn gpu_device_limits_from_viewer(viewer: &dyn ViewerLike) -> Result<GpuDeviceLim
     let features = device.features();
     Ok(GpuDeviceLimits {
         max_buffer_size: limits.max_buffer_size,
-        max_storage_buffer_binding_size: u64::from(limits.max_storage_buffer_binding_size),
+        max_storage_buffer_binding_size: limits.max_storage_buffer_binding_size,
         max_compute_workgroups_per_dimension: limits.max_compute_workgroups_per_dimension,
         max_compute_invocations_per_workgroup: limits.max_compute_invocations_per_workgroup,
         max_compute_workgroup_size_x: limits.max_compute_workgroup_size_x,
@@ -5004,8 +5007,8 @@ fn wgpu_color_write_mask(mask: GpuColorWriteMask) -> Result<wgpu::ColorWrites, S
 fn wgpu_depth_stencil_state(state: GpuDepthStencilState) -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
         format: wgpu_texture_format(state.format),
-        depth_write_enabled: state.depth_write_enabled,
-        depth_compare: wgpu_compare_function(state.depth_compare),
+        depth_write_enabled: Some(state.depth_write_enabled),
+        depth_compare: Some(wgpu_compare_function(state.depth_compare)),
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     }

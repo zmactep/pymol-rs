@@ -10,11 +10,13 @@ use std::str::FromStr;
 use crate::byte_units::{gib_to_bytes, mib_to_bytes, BYTES_PER_MIB};
 
 const LITE_BUFFER_THRESHOLD: u64 = gib_to_bytes(1);
-const LITE_STORAGE_BINDING_THRESHOLD: u32 = mib_to_bytes(512) as u32;
+const LITE_STORAGE_BINDING_THRESHOLD: u64 = mib_to_bytes(512);
 /// Desired single-buffer target for capable native adapters.
 pub const PERFORMANCE_MAX_BUFFER_SIZE: u64 = gib_to_bytes(4);
 /// Desired single storage-buffer binding target for capable adapters.
-pub const PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE: u32 = (gib_to_bytes(2) - 1) as u32;
+pub const PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE: u64 = gib_to_bytes(2) - 1;
+/// Maximum storage-buffer bindings used by the current compute pipeline layouts.
+pub const RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE: u32 = 10;
 
 const DEFAULT_PICKING_SCALE: f32 = 0.5;
 const LITE_PICKING_SCALE: f32 = 0.25;
@@ -466,7 +468,7 @@ pub struct RenderMemorySelectionInput {
     /// Adapter maximum buffer size.
     pub max_buffer_size: u64,
     /// Adapter maximum storage-buffer binding size.
-    pub max_storage_buffer_binding_size: u32,
+    pub max_storage_buffer_binding_size: u64,
     /// Adapter maximum two-dimensional texture dimension.
     pub max_texture_dimension_2d: u32,
     /// Whether this is a browser-hosted renderer.
@@ -553,6 +555,8 @@ pub fn required_limits_for_memory_policy(
         max_buffer_size: PERFORMANCE_MAX_BUFFER_SIZE.min(adapter_limits.max_buffer_size),
         max_storage_buffer_binding_size: PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
             .min(adapter_limits.max_storage_buffer_binding_size),
+        max_storage_buffers_per_shader_stage: RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE
+            .min(adapter_limits.max_storage_buffers_per_shader_stage),
         ..wgpu::Limits::default()
     }
     .using_resolution(adapter_limits.clone())
@@ -563,10 +567,11 @@ mod tests {
     use super::*;
     use crate::byte_units::{gib_to_bytes, mib_to_bytes};
 
-    fn limits(max_buffer_size: u64, max_storage_buffer_binding_size: u32) -> wgpu::Limits {
+    fn limits(max_buffer_size: u64, max_storage_buffer_binding_size: u64) -> wgpu::Limits {
         wgpu::Limits {
             max_buffer_size,
             max_storage_buffer_binding_size,
+            max_storage_buffers_per_shader_stage: 32,
             max_texture_dimension_2d: 16_384,
             ..wgpu::Limits::default()
         }
@@ -575,7 +580,7 @@ mod tests {
     fn input(
         adapter_type: RenderAdapterType,
         max_buffer_size: u64,
-        max_storage_buffer_binding_size: u32,
+        max_storage_buffer_binding_size: u64,
     ) -> RenderMemorySelectionInput {
         RenderMemorySelectionInput {
             adapter_type,
@@ -633,7 +638,7 @@ mod tests {
     #[test]
     fn high_end_adapter_selects_performance() {
         let policy = select_render_memory_policy(
-            input(RenderAdapterType::IntegratedGpu, gib_to_bytes(8), u32::MAX),
+            input(RenderAdapterType::IntegratedGpu, gib_to_bytes(8), u64::MAX),
             None,
         );
 
@@ -649,7 +654,7 @@ mod tests {
             input(
                 RenderAdapterType::IntegratedGpu,
                 gib_to_bytes(2),
-                gib_to_bytes(1) as u32,
+                gib_to_bytes(1),
             ),
             None,
         );
@@ -666,7 +671,7 @@ mod tests {
             input(
                 RenderAdapterType::IntegratedGpu,
                 mib_to_bytes(512),
-                mib_to_bytes(256) as u32,
+                mib_to_bytes(256),
             ),
             None,
         );
@@ -682,7 +687,7 @@ mod tests {
     #[test]
     fn forced_lite_changes_policy_without_weak_hardware() {
         let policy = select_render_memory_policy(
-            input(RenderAdapterType::DiscreteGpu, gib_to_bytes(8), u32::MAX),
+            input(RenderAdapterType::DiscreteGpu, gib_to_bytes(8), u64::MAX),
             Some(RenderMemoryProfile::Lite),
         );
 
@@ -766,19 +771,23 @@ mod tests {
 
     #[test]
     fn required_limits_never_exceed_adapter_limits() {
-        let adapter = limits(mib_to_bytes(512), mib_to_bytes(384) as u32);
+        let adapter = limits(mib_to_bytes(512), mib_to_bytes(384));
         let required = required_limits_for_memory_policy(&adapter, RenderMemoryPolicy::lite());
 
         assert!(required.max_buffer_size <= adapter.max_buffer_size);
         assert!(
             required.max_storage_buffer_binding_size <= adapter.max_storage_buffer_binding_size
         );
+        assert!(
+            required.max_storage_buffers_per_shader_stage
+                <= adapter.max_storage_buffers_per_shader_stage
+        );
         assert_eq!(required.max_texture_dimension_2d, 16_384);
     }
 
     #[test]
     fn required_limits_preserve_performance_targets_on_capable_adapter() {
-        let adapter = limits(gib_to_bytes(8), u32::MAX);
+        let adapter = limits(gib_to_bytes(8), u64::MAX);
         let required =
             required_limits_for_memory_policy(&adapter, RenderMemoryPolicy::performance());
 
@@ -787,6 +796,38 @@ mod tests {
             required.max_storage_buffer_binding_size,
             PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE
         );
+        assert_eq!(
+            required.max_storage_buffers_per_shader_stage,
+            RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE
+        );
+    }
+
+    #[test]
+    fn required_limits_raise_compute_storage_buffer_binding_count() {
+        let adapter = limits(gib_to_bytes(8), u64::MAX);
+
+        let required =
+            required_limits_for_memory_policy(&adapter, RenderMemoryPolicy::performance());
+
+        assert_eq!(
+            required.max_storage_buffers_per_shader_stage,
+            RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE
+        );
+        assert!(
+            required.max_storage_buffers_per_shader_stage
+                > wgpu::Limits::default().max_storage_buffers_per_shader_stage
+        );
+    }
+
+    #[test]
+    fn required_limits_clamp_compute_storage_buffer_binding_count() {
+        let mut adapter = limits(gib_to_bytes(8), u64::MAX);
+        adapter.max_storage_buffers_per_shader_stage = 9;
+
+        let required =
+            required_limits_for_memory_policy(&adapter, RenderMemoryPolicy::performance());
+
+        assert_eq!(required.max_storage_buffers_per_shader_stage, 9);
     }
 
     #[test]

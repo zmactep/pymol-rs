@@ -114,7 +114,7 @@ impl SurfaceVdwSdfCompute {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.surface_vdw_sdf.pl"),
-            bind_group_layouts: &[&scene_layout.bind_group_layout, &build_layout],
+            bind_group_layouts: &[Some(&scene_layout.bind_group_layout), Some(&build_layout)],
             immediate_size: 0,
         });
 

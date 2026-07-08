@@ -2,9 +2,10 @@
 
 use std::ffi::{c_int, c_void};
 use std::ptr;
-use std::sync::Arc;
 
-use slint::winit_030::winit::window::Window;
+use slint::ComponentHandle;
+
+use crate::AppWindow;
 
 type CVReturn = i32;
 type CVOptionFlags = u64;
@@ -62,8 +63,9 @@ extern "C" {
 /// Requests redraws from a CoreVideo display-link callback.
 ///
 /// macOS can stop delivering Slint/winit redraws in clamshell external-display
-/// transitions. This heartbeat stays vsync-aligned and only asks winit for a
-/// redraw, so Patinae still renders through Slint's normal render notifier.
+/// transitions. This heartbeat stays vsync-aligned and queues redraw requests
+/// onto Slint's event loop so Patinae still renders through Slint's normal
+/// render notifier.
 pub struct DisplayLinkHeartbeat {
     display_link: CVDisplayLinkRef,
     state: *mut HeartbeatState,
@@ -71,12 +73,12 @@ pub struct DisplayLinkHeartbeat {
 }
 
 struct HeartbeatState {
-    window: Arc<Window>,
+    window: slint::Weak<AppWindow>,
 }
 
 impl DisplayLinkHeartbeat {
-    /// Starts a display-link heartbeat for a winit window.
-    pub fn start(window: Arc<Window>) -> Result<Self, String> {
+    /// Starts a display-link heartbeat for a Slint window.
+    pub fn start(window: slint::Weak<AppWindow>) -> Result<Self, String> {
         let mut display_link = ptr::null_mut();
         let create_status = unsafe {
             // SAFETY: `display_link` points to writable storage for the
@@ -205,5 +207,8 @@ fn request_redraw(context: *mut c_void) {
         // stopped/unregistered in `Drop`.
         &*(context.cast::<HeartbeatState>())
     };
-    state.window.request_redraw();
+    let window = state.window.clone();
+    let _ = window.upgrade_in_event_loop(|app| {
+        app.window().request_redraw();
+    });
 }

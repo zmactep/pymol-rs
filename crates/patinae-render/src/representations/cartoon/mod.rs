@@ -65,7 +65,7 @@ const LARGE_CARTOON_SEGMENT_THRESHOLD: usize = 64;
 fn cartoon_storage_buffer_limit(limits: wgpu::Limits) -> u64 {
     limits
         .max_buffer_size
-        .min(u64::from(limits.max_storage_buffer_binding_size))
+        .min(limits.max_storage_buffer_binding_size)
 }
 
 fn oversized_cartoon_storage_buffer(
@@ -394,7 +394,7 @@ mod tests {
     fn cartoon_storage_buffer_limit_uses_lower_device_limit() {
         let limits = wgpu::Limits {
             max_buffer_size: gib_to_bytes(2),
-            max_storage_buffer_binding_size: mib_to_bytes(512) as u32,
+            max_storage_buffer_binding_size: mib_to_bytes(512),
             ..wgpu::Limits::default()
         };
 

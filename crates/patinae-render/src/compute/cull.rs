@@ -156,7 +156,7 @@ impl CullPipeline {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.cull.pipeline_layout"),
-            bind_group_layouts: &[&rep_layout],
+            bind_group_layouts: &[Some(&rep_layout)],
             immediate_size: 0,
         });
 

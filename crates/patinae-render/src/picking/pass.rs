@@ -102,10 +102,10 @@ impl PickingPass {
         let sphere_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.picking.sphere.pipeline_layout"),
             bind_group_layouts: &[
-                &ctx.frame.bind_group_layout,
-                &ctx.lighting.bind_group_layout,
-                &params_layout,
-                &scene_layout.bind_group_layout,
+                Some(&ctx.frame.bind_group_layout),
+                Some(&ctx.lighting.bind_group_layout),
+                Some(&params_layout),
+                Some(&scene_layout.bind_group_layout),
             ],
             immediate_size: 0,
         });
@@ -143,9 +143,9 @@ impl PickingPass {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.picking.pipeline_layout"),
             bind_group_layouts: &[
-                &ctx.frame.bind_group_layout,
-                &ctx.lighting.bind_group_layout,
-                &params_layout,
+                Some(&ctx.frame.bind_group_layout),
+                Some(&ctx.lighting.bind_group_layout),
+                Some(&params_layout),
             ],
             immediate_size: 0,
         });
@@ -225,10 +225,10 @@ impl PickingPass {
         let dot_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.picking.dot.pipeline_layout"),
             bind_group_layouts: &[
-                &ctx.frame.bind_group_layout,
-                &ctx.lighting.bind_group_layout,
-                &params_layout,
-                &dot_layout.bind_group_layout,
+                Some(&ctx.frame.bind_group_layout),
+                Some(&ctx.lighting.bind_group_layout),
+                Some(&params_layout),
+                Some(&dot_layout.bind_group_layout),
             ],
             immediate_size: 0,
         });
@@ -402,8 +402,8 @@ impl PickingPass {
 fn picking_depth_state() -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
         format: DEPTH_FORMAT,
-        depth_write_enabled: true,
-        depth_compare: wgpu::CompareFunction::Less,
+        depth_write_enabled: Some(true),
+        depth_compare: Some(wgpu::CompareFunction::Less),
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     }

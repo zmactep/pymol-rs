@@ -116,7 +116,10 @@ impl EllipsoidBuildPipeline {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.ellipsoid_build.pipeline_layout"),
-            bind_group_layouts: &[&scene_layout.object_coords_bind_group_layout, &build_layout],
+            bind_group_layouts: &[
+                Some(&scene_layout.object_coords_bind_group_layout),
+                Some(&build_layout),
+            ],
             immediate_size: 0,
         });
 

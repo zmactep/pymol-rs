@@ -385,7 +385,7 @@ fn bench_memory_override() -> Option<RenderMemoryProfile> {
 }
 
 fn request_device() -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, RenderMemoryPolicy) {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         force_fallback_adapter: false,
@@ -425,7 +425,7 @@ fn request_device() -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, RenderMemoryPolicy)
         "limits: max_storage_buffer_binding_size={} ({:.2} GiB)  max_buffer_size={} ({:.2} GiB)  \
          max_compute_workgroups_per_dim={}",
         lim.max_storage_buffer_binding_size,
-        bytes_to_gib(u64::from(lim.max_storage_buffer_binding_size)),
+        bytes_to_gib(lim.max_storage_buffer_binding_size),
         lim.max_buffer_size,
         bytes_to_gib(lim.max_buffer_size),
         lim.max_compute_workgroups_per_dimension,

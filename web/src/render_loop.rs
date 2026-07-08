@@ -22,13 +22,22 @@ pub struct WebRenderTimings {
     pub sync_detail: RenderSyncTimings,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum WebSurfaceStatus {
+    Lost,
+    Outdated,
+    Timeout,
+    Occluded,
+    Validation,
+}
+
 /// Render one frame to the canvas surface.
 ///
 pub fn render_frame(
     gpu: &mut GpuState,
     session: &mut Session,
     render_scene: &mut CachedRenderScene,
-) -> Result<WebRenderTimings, wgpu::SurfaceError> {
+) -> Result<WebRenderTimings, WebSurfaceStatus> {
     let mut timings = WebRenderTimings::default();
     let width = gpu.surface_config.width;
     let height = gpu.surface_config.height;
@@ -87,7 +96,15 @@ pub fn render_frame(
 
     // Acquire surface texture and run the FrameGraph.
     let t0 = performance_now_ms();
-    let output = gpu.surface.get_current_texture()?;
+    let output = match gpu.surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(output)
+        | wgpu::CurrentSurfaceTexture::Suboptimal(output) => output,
+        wgpu::CurrentSurfaceTexture::Timeout => return Err(WebSurfaceStatus::Timeout),
+        wgpu::CurrentSurfaceTexture::Occluded => return Err(WebSurfaceStatus::Occluded),
+        wgpu::CurrentSurfaceTexture::Outdated => return Err(WebSurfaceStatus::Outdated),
+        wgpu::CurrentSurfaceTexture::Lost => return Err(WebSurfaceStatus::Lost),
+        wgpu::CurrentSurfaceTexture::Validation => return Err(WebSurfaceStatus::Validation),
+    };
     let output_view = output
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());

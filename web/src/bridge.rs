@@ -10,7 +10,7 @@ use patinae_cmd::{CommandAction, CommandExecutor, MessageKind};
 use patinae_render::picking::readback::{PendingPick, PickReadbackTarget};
 use patinae_render::{
     render_memory_policy_from_settings, FrameStatsHistory, PickingMode, RenderConfig,
-    RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryRecoveryAction, RenderMemoryRecoveryStage,
+    RenderMemoryPolicy, RenderMemoryProfile, RenderMemoryRecoveryStage,
 };
 use patinae_scene::bridge::{resolve_pick, CachedRenderScene};
 use patinae_scene::{
@@ -326,13 +326,7 @@ impl WebViewer {
         picking_enabled: bool,
         selection_overlay_enabled: bool,
     ) -> Result<WebViewer, JsValue> {
-        create_web_viewer(
-            canvas_id,
-            picking_enabled,
-            selection_overlay_enabled,
-            None,
-        )
-        .await
+        create_web_viewer(canvas_id, picking_enabled, selection_overlay_enabled, None).await
     }
 
     /// Create a WebViewer with an explicit renderer memory profile.
@@ -385,17 +379,17 @@ impl WebViewer {
             Err(e) => {
                 log::warn!("Render error: {:?}", e);
                 match e {
-                    wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated => {
+                    render_loop::WebSurfaceStatus::Lost
+                    | render_loop::WebSurfaceStatus::Outdated => {
                         if let Some(gpu) = &mut self.gpu {
                             gpu.resize(self.width, self.height);
                         }
                         self.needs_redraw = true;
                     }
-                    wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other => {
+                    render_loop::WebSurfaceStatus::Timeout
+                    | render_loop::WebSurfaceStatus::Occluded
+                    | render_loop::WebSurfaceStatus::Validation => {
                         self.needs_redraw = true;
-                    }
-                    wgpu::SurfaceError::OutOfMemory => {
-                        self.handle_surface_oom();
                     }
                 }
                 self.drain_memory_warnings();
@@ -478,42 +472,6 @@ impl WebViewer {
             "WebGPU memory recovery reset after scene generation changed; baseline profile={}",
             base_profile
         );
-    }
-
-    fn handle_surface_oom(&mut self) {
-        self.clear_pending_gpu_picks();
-        match self.recovery.advance_after_oom() {
-            RenderMemoryRecoveryAction::RetryAfterDefrag { profile } => {
-                if let Some(gpu) = &mut self.gpu {
-                    gpu.prepare_oom_retry();
-                }
-                self.session.registry.mark_all_dirty();
-                self.needs_redraw = true;
-                log::warn!(
-                    "WebGPU OOM under profile {}; compacted SceneStore and retrying once",
-                    profile
-                );
-            }
-            RenderMemoryRecoveryAction::SwitchProfile { effective_profile } => {
-                if let Some(gpu) = &mut self.gpu {
-                    gpu.rebuild_with_memory_profile(effective_profile);
-                    gpu.resize(self.width, self.height);
-                }
-                self.session.registry.mark_all_dirty();
-                self.needs_redraw = true;
-                log::warn!(
-                    "WebGPU memory profile switched to {} after confirmed GPU memory pressure",
-                    effective_profile
-                );
-            }
-            RenderMemoryRecoveryAction::Blocked { last_profile } => {
-                self.needs_redraw = false;
-                log::warn!(
-                    "WebGPU rendering stopped after repeated OOM in {} profile",
-                    last_profile
-                );
-            }
-        }
     }
 
     fn clear_pending_gpu_picks(&mut self) {
@@ -899,12 +857,9 @@ impl WebViewer {
     }
 
     fn hover_throttle_active(&self) -> bool {
-        self.gpu
-            .as_ref()
-            .is_some_and(|gpu| {
-                gpu.state.sphere_lod_diagnostics().active
-                    || gpu.state.stick_lod_diagnostics().active
-            })
+        self.gpu.as_ref().is_some_and(|gpu| {
+            gpu.state.sphere_lod_diagnostics().active || gpu.state.stick_lod_diagnostics().active
+        })
     }
 
     fn hover_pick_due(&self, now_ms: f64) -> bool {

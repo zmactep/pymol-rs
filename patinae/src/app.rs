@@ -14,7 +14,7 @@ use patinae_framework::topics::{self, SaveFileRequest, SAVE_FILE_REQUEST_TOPIC};
 use patinae_plugin_host::PluginHost;
 use patinae_render::{
     bytes_to_mib, required_limits_for_memory_policy, FrameStatsHistory, RenderMemoryPolicy,
-    RenderMemoryProfile,
+    RenderMemoryProfile, RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE,
 };
 use patinae_scene::{
     expand_pick_to_selection, pick_expression_for_hit, CaptureRenderer, KeyBinding, ViewportImage,
@@ -1313,45 +1313,49 @@ fn apply_standard_panel_preset(layout: &LayoutState) {
 
 #[cfg(any(not(target_os = "windows"), test))]
 fn patinae_wgpu_required_limits(
-    adapter_limits: &slint::wgpu_28::wgpu::Limits,
+    adapter_limits: &slint::wgpu_29::wgpu::Limits,
     memory_policy: RenderMemoryPolicy,
-) -> slint::wgpu_28::wgpu::Limits {
+) -> slint::wgpu_29::wgpu::Limits {
     required_limits_for_memory_policy(adapter_limits, memory_policy)
 }
 
 fn patinae_wgpu_backends(
-    env_backends: Option<slint::wgpu_28::wgpu::Backends>,
+    env_backends: Option<slint::wgpu_29::wgpu::Backends>,
     is_windows: bool,
-) -> slint::wgpu_28::wgpu::Backends {
+) -> slint::wgpu_29::wgpu::Backends {
     let backends = if is_windows {
-        env_backends.unwrap_or(slint::wgpu_28::wgpu::Backends::DX12)
+        env_backends.unwrap_or(slint::wgpu_29::wgpu::Backends::DX12)
     } else {
         env_backends.unwrap_or_default()
     };
-    backends & !slint::wgpu_28::wgpu::Backends::GL
+    backends & !slint::wgpu_29::wgpu::Backends::GL
 }
 
-fn patinae_wgpu_settings() -> slint::wgpu_28::WGPUSettings {
-    let mut settings = slint::wgpu_28::WGPUSettings::default();
-    settings.power_preference = slint::wgpu_28::wgpu::PowerPreference::HighPerformance;
+fn patinae_wgpu_settings() -> slint::wgpu_29::WGPUSettings {
+    let mut settings = slint::wgpu_29::WGPUSettings::default();
+    settings.power_preference = slint::wgpu_29::wgpu::PowerPreference::HighPerformance;
     settings.backends = patinae_wgpu_backends(
-        slint::wgpu_28::wgpu::Backends::from_env(),
+        slint::wgpu_29::wgpu::Backends::from_env(),
         cfg!(target_os = "windows"),
     );
+    settings
+        .device_required_limits
+        .max_storage_buffers_per_shader_stage = RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE;
     settings
 }
 
 fn patinae_wgpu_instance(
-    settings: &slint::wgpu_28::WGPUSettings,
-) -> slint::wgpu_28::wgpu::Instance {
+    settings: &slint::wgpu_29::WGPUSettings,
+) -> slint::wgpu_29::wgpu::Instance {
     pollster::block_on(
-        slint::wgpu_28::wgpu::util::new_instance_with_webgpu_detection(
-            &slint::wgpu_28::wgpu::InstanceDescriptor {
+        slint::wgpu_29::wgpu::util::new_instance_with_webgpu_detection(
+            slint::wgpu_29::wgpu::InstanceDescriptor {
                 // Match Slint's femtovg-wgpu automatic path, which avoids GL.
                 backends: settings.backends,
                 flags: settings.instance_flags,
                 backend_options: settings.backend_options.clone(),
                 memory_budget_thresholds: settings.instance_memory_budget_thresholds,
+                display: None,
             },
         ),
     )
@@ -1359,13 +1363,12 @@ fn patinae_wgpu_instance(
 
 #[cfg(target_os = "windows")]
 fn patinae_wgpu_configuration(
-) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
+) -> Result<slint::wgpu_29::WGPUConfiguration, Box<dyn std::error::Error>> {
     let mut settings = patinae_wgpu_settings();
     // Slint's automatic path selects the adapter after creating the window
     // surface. On Windows this avoids choosing a headless-incompatible adapter
     // before winit has a surface, while still giving Patinae native compute and
     // storage-buffer limits.
-    settings.device_required_limits = slint::wgpu_28::wgpu::Limits::default();
     log_windows_wgpu_limits("wgpu Windows configuration", &settings);
 
     if std::env::var_os("SLINT_WGPU_CPU").is_some() {
@@ -1377,23 +1380,27 @@ fn patinae_wgpu_configuration(
     }
 
     log::info!("wgpu Windows automatic configuration: hardware adapter preflight succeeded");
-    Ok(slint::wgpu_28::WGPUConfiguration::Automatic(settings))
+    Ok(slint::wgpu_29::WGPUConfiguration::Automatic(settings))
 }
 
 #[cfg(target_os = "windows")]
-fn log_windows_wgpu_limits(prefix: &str, settings: &slint::wgpu_28::WGPUSettings) {
+fn log_windows_wgpu_limits(prefix: &str, settings: &slint::wgpu_29::WGPUSettings) {
     log::info!(
-        "{prefix}: backends={:?} requested max_storage_buffer_binding_size={} max_buffer_size={}",
+        "{prefix}: backends={:?} requested max_storage_buffer_binding_size={} \
+         max_buffer_size={} max_storage_buffers_per_shader_stage={}",
         settings.backends,
         settings
             .device_required_limits
             .max_storage_buffer_binding_size,
         settings.device_required_limits.max_buffer_size,
+        settings
+            .device_required_limits
+            .max_storage_buffers_per_shader_stage,
     );
 }
 
 #[cfg(target_os = "windows")]
-fn patinae_windows_has_hardware_adapter(settings: &slint::wgpu_28::WGPUSettings) -> bool {
+fn patinae_windows_has_hardware_adapter(settings: &slint::wgpu_29::WGPUSettings) -> bool {
     let instance = patinae_wgpu_instance(settings);
     let adapters = pollster::block_on(instance.enumerate_adapters(settings.backends));
     if adapters.is_empty() {
@@ -1413,24 +1420,24 @@ fn patinae_windows_has_hardware_adapter(settings: &slint::wgpu_28::WGPUSettings)
             info.backend,
             info.device_type
         );
-        has_hardware |= info.device_type != slint::wgpu_28::wgpu::DeviceType::Cpu;
+        has_hardware |= info.device_type != slint::wgpu_29::wgpu::DeviceType::Cpu;
     }
     has_hardware
 }
 
 #[cfg(not(target_os = "windows"))]
 fn patinae_wgpu_configuration(
-) -> Result<slint::wgpu_28::WGPUConfiguration, Box<dyn std::error::Error>> {
+) -> Result<slint::wgpu_29::WGPUConfiguration, Box<dyn std::error::Error>> {
     let mut settings = patinae_wgpu_settings();
 
     let instance = patinae_wgpu_instance(&settings);
 
     let adapter = pollster::block_on(async {
-        match slint::wgpu_28::wgpu::util::initialize_adapter_from_env(&instance, None).await {
+        match slint::wgpu_29::wgpu::util::initialize_adapter_from_env(&instance, None).await {
             Ok(adapter) => Ok(adapter),
             Err(_) => {
                 instance
-                    .request_adapter(&slint::wgpu_28::wgpu::RequestAdapterOptions {
+                    .request_adapter(&slint::wgpu_29::wgpu::RequestAdapterOptions {
                         power_preference: settings.power_preference,
                         force_fallback_adapter: false,
                         compatible_surface: None,
@@ -1443,7 +1450,7 @@ fn patinae_wgpu_configuration(
     let adapter_limits = adapter.limits();
     let adapter_features = adapter.features();
     let adapter_info = adapter.get_info();
-    if adapter_info.device_type == slint::wgpu_28::wgpu::DeviceType::Cpu {
+    if adapter_info.device_type == slint::wgpu_29::wgpu::DeviceType::Cpu {
         return Err(no_hardware_wgpu_adapter_error(settings.backends, Some(&adapter_info)).into());
     }
     log_selected_gpu(&adapter_info);
@@ -1454,29 +1461,31 @@ fn patinae_wgpu_configuration(
         false,
     );
     settings.device_memory_hints = memory_policy.wgpu_memory_hints();
-    let binding_array_features = slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY
-        | slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY;
+    let binding_array_features = slint::wgpu_29::wgpu::Features::BUFFER_BINDING_ARRAY
+        | slint::wgpu_29::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY;
     let requested_binding_array_features = adapter_features & binding_array_features;
     let requested_timestamp_query_feature =
-        adapter_features & slint::wgpu_28::wgpu::Features::TIMESTAMP_QUERY;
+        adapter_features & slint::wgpu_29::wgpu::Features::TIMESTAMP_QUERY;
     settings.device_required_features |=
         requested_binding_array_features | requested_timestamp_query_feature;
     let required_limits = patinae_wgpu_required_limits(&adapter_limits, memory_policy);
     log::info!(
         "wgpu limits: adapter max_storage_buffer_binding_size={} max_buffer_size={}; \
-         requested max_storage_buffer_binding_size={} max_buffer_size={}",
+         requested max_storage_buffer_binding_size={} max_buffer_size={} \
+         max_storage_buffers_per_shader_stage={}",
         adapter_limits.max_storage_buffer_binding_size,
         adapter_limits.max_buffer_size,
         required_limits.max_storage_buffer_binding_size,
         required_limits.max_buffer_size,
+        required_limits.max_storage_buffers_per_shader_stage,
     );
     log::info!(
         "wgpu optional features: buffer_binding_array={} storage_resource_binding_array={} timestamp_query={}",
         requested_binding_array_features
-            .contains(slint::wgpu_28::wgpu::Features::BUFFER_BINDING_ARRAY),
+            .contains(slint::wgpu_29::wgpu::Features::BUFFER_BINDING_ARRAY),
         requested_binding_array_features
-            .contains(slint::wgpu_28::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY),
-        requested_timestamp_query_feature.contains(slint::wgpu_28::wgpu::Features::TIMESTAMP_QUERY),
+            .contains(slint::wgpu_29::wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY),
+        requested_timestamp_query_feature.contains(slint::wgpu_29::wgpu::Features::TIMESTAMP_QUERY),
     );
     log::info!(
         "render memory profile: profile={} budget={:?} memory_hints={:?}",
@@ -1486,17 +1495,17 @@ fn patinae_wgpu_configuration(
     );
 
     let (device, queue) = pollster::block_on(adapter.request_device(
-        &slint::wgpu_28::wgpu::DeviceDescriptor {
+        &slint::wgpu_29::wgpu::DeviceDescriptor {
             label: settings.device_label.as_deref(),
             required_features: settings.device_required_features,
             required_limits,
             experimental_features: settings.device_experimental_features,
             memory_hints: settings.device_memory_hints,
-            trace: slint::wgpu_28::wgpu::Trace::default(),
+            trace: slint::wgpu_29::wgpu::Trace::default(),
         },
     ))?;
 
-    Ok(slint::wgpu_28::WGPUConfiguration::Manual {
+    Ok(slint::wgpu_29::WGPUConfiguration::Manual {
         instance,
         adapter,
         device,
@@ -1513,7 +1522,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Ok(configuration) => configuration,
         Err(err) => return abort_startup_for_renderer_error(err),
     };
-    let selector = slint::BackendSelector::new().require_wgpu_28(wgpu_configuration);
+    let selector = slint::BackendSelector::new().require_wgpu_29(wgpu_configuration);
 
     #[cfg(target_os = "macos")]
     let selector = selector.with_winit_window_attributes_hook(|attrs| {
@@ -1535,6 +1544,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Ok(window) => window,
         Err(err) => return abort_startup_for_renderer_error(err),
     };
+
+    #[cfg(target_os = "macos")]
+    let display_link_heartbeat: Rc<
+        RefCell<Option<crate::cv_display_link::DisplayLinkHeartbeat>>,
+    > = Rc::new(RefCell::new(None));
+
+    {
+        #[cfg(target_os = "macos")]
+        let display_link_heartbeat_for_close = display_link_heartbeat.clone();
+        window.window().on_close_requested(move || {
+            #[cfg(target_os = "macos")]
+            display_link_heartbeat_for_close.borrow_mut().take();
+            request_event_loop_quit(slint::quit_event_loop);
+            slint::CloseRequestResponse::HideWindow
+        });
+    }
 
     #[cfg(not(target_os = "macos"))]
     window.global::<LayoutState>().set_mod_key("Ctrl".into());
@@ -1761,11 +1786,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app_rc = app.clone();
     let window_weak = window.as_weak();
 
-    #[cfg(target_os = "macos")]
-    let display_link_heartbeat: Rc<
-        RefCell<Option<crate::cv_display_link::DisplayLinkHeartbeat>>,
-    > = Rc::new(RefCell::new(None));
-
     let timing_callbacks = std::env::var("PATINAE_TIMING").is_ok();
     let before_end: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> =
         std::rc::Rc::new(std::cell::Cell::new(None));
@@ -1820,32 +1840,18 @@ fn start_display_link_heartbeat(
     window: slint::Weak<AppWindow>,
     heartbeat: Rc<RefCell<Option<crate::cv_display_link::DisplayLinkHeartbeat>>>,
 ) {
-    use slint::winit_030::WinitWindowAccessor;
-
     if heartbeat.borrow().is_some() {
         return;
     }
 
-    if let Err(err) = slint::spawn_local(async move {
-        let Some(app_window) = window.upgrade() else {
-            return;
-        };
-        match app_window.window().winit_window().await {
-            Ok(window) => match crate::cv_display_link::DisplayLinkHeartbeat::start(window) {
-                Ok(link) => {
-                    *heartbeat.borrow_mut() = Some(link);
-                    log::info!("Started macOS CVDisplayLink render heartbeat");
-                }
-                Err(err) => {
-                    log::warn!("Failed to start macOS CVDisplayLink render heartbeat: {err}");
-                }
-            },
-            Err(err) => {
-                log::warn!("Failed to resolve winit window for CVDisplayLink heartbeat: {err}");
-            }
+    match crate::cv_display_link::DisplayLinkHeartbeat::start(window) {
+        Ok(link) => {
+            *heartbeat.borrow_mut() = Some(link);
+            log::info!("Started macOS CVDisplayLink render heartbeat");
         }
-    }) {
-        log::warn!("Failed to schedule CVDisplayLink heartbeat startup: {err}");
+        Err(err) => {
+            log::warn!("Failed to start macOS CVDisplayLink render heartbeat: {err}");
+        }
     }
 }
 
@@ -1869,8 +1875,8 @@ fn startup_renderer_error_message(reason: &str) -> String {
 }
 
 fn no_hardware_wgpu_adapter_error(
-    backends: slint::wgpu_28::wgpu::Backends,
-    selected_cpu_adapter: Option<&slint::wgpu_28::wgpu::AdapterInfo>,
+    backends: slint::wgpu_29::wgpu::Backends,
+    selected_cpu_adapter: Option<&slint::wgpu_29::wgpu::AdapterInfo>,
 ) -> std::io::Error {
     let selected = selected_cpu_adapter
         .map(|info| format!("; selected adapter was {} ({:?})", info.name, info.backend))
@@ -2025,11 +2031,15 @@ fn dispatch_lifecycle_messages(
         return false;
     }
 
+    request_event_loop_quit(&mut quit_event_loop);
+
+    true
+}
+
+fn request_event_loop_quit(mut quit_event_loop: impl FnMut() -> Result<(), slint::EventLoopError>) {
     if let Err(err) = quit_event_loop() {
         log::warn!("Failed to quit Slint event loop: {err}");
     }
-
-    true
 }
 
 fn normalized_slint_shortcut_text(
@@ -2151,15 +2161,15 @@ mod tests {
 
     fn adapter_limits(
         max_buffer_size: u64,
-        max_storage_buffer_binding_size: u32,
-    ) -> slint::wgpu_28::wgpu::Limits {
-        slint::wgpu_28::wgpu::Limits {
+        max_storage_buffer_binding_size: u64,
+    ) -> slint::wgpu_29::wgpu::Limits {
+        slint::wgpu_29::wgpu::Limits {
             max_buffer_size,
             max_storage_buffer_binding_size,
             max_texture_dimension_1d: 16_384,
             max_texture_dimension_2d: 32_768,
             max_texture_dimension_3d: 2_048,
-            ..slint::wgpu_28::wgpu::Limits::default()
+            ..slint::wgpu_29::wgpu::Limits::default()
         }
     }
 
@@ -2179,8 +2189,7 @@ mod tests {
 
     #[test]
     fn wgpu_required_limits_clamp_to_intel_storage_limit() {
-        let adapter_limits =
-            adapter_limits(PERFORMANCE_MAX_BUFFER_SIZE, gib_to_bytes(1) as u32 - 4);
+        let adapter_limits = adapter_limits(PERFORMANCE_MAX_BUFFER_SIZE, gib_to_bytes(1) - 4);
 
         let required =
             patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::performance());
@@ -2194,7 +2203,7 @@ mod tests {
 
     #[test]
     fn wgpu_required_limits_preserve_high_end_target() {
-        let adapter_limits = adapter_limits(gib_to_bytes(8), u32::MAX);
+        let adapter_limits = adapter_limits(gib_to_bytes(8), u64::MAX);
 
         let required =
             patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::performance());
@@ -2209,7 +2218,7 @@ mod tests {
     #[test]
     fn wgpu_required_limits_use_adapter_resolution_limits() {
         let adapter_buffer_size = mib_to_bytes(512);
-        let adapter_storage_binding_size = mib_to_bytes(512) as u32;
+        let adapter_storage_binding_size = mib_to_bytes(512);
         let adapter_limits = adapter_limits(adapter_buffer_size, adapter_storage_binding_size);
 
         let required = patinae_wgpu_required_limits(&adapter_limits, RenderMemoryPolicy::lite());
@@ -2228,17 +2237,17 @@ mod tests {
     fn wgpu_windows_default_backend_prefers_dx12() {
         let backends = patinae_wgpu_backends(None, true);
 
-        assert_eq!(backends, slint::wgpu_28::wgpu::Backends::DX12);
+        assert_eq!(backends, slint::wgpu_29::wgpu::Backends::DX12);
     }
 
     #[test]
     fn wgpu_windows_backend_env_is_respected_without_gl() {
         let backends = patinae_wgpu_backends(
-            Some(slint::wgpu_28::wgpu::Backends::VULKAN | slint::wgpu_28::wgpu::Backends::GL),
+            Some(slint::wgpu_29::wgpu::Backends::VULKAN | slint::wgpu_29::wgpu::Backends::GL),
             true,
         );
 
-        assert_eq!(backends, slint::wgpu_28::wgpu::Backends::VULKAN);
+        assert_eq!(backends, slint::wgpu_29::wgpu::Backends::VULKAN);
     }
 
     #[test]
@@ -2247,7 +2256,7 @@ mod tests {
 
         assert_eq!(
             backends,
-            slint::wgpu_28::wgpu::Backends::default() & !slint::wgpu_28::wgpu::Backends::GL
+            slint::wgpu_29::wgpu::Backends::default() & !slint::wgpu_29::wgpu::Backends::GL
         );
     }
 
@@ -2263,7 +2272,7 @@ mod tests {
 
     #[test]
     fn wgpu_no_hardware_adapter_error_disables_cpu_fallbacks() {
-        let err = no_hardware_wgpu_adapter_error(slint::wgpu_28::wgpu::Backends::DX12, None);
+        let err = no_hardware_wgpu_adapter_error(slint::wgpu_29::wgpu::Backends::DX12, None);
         let message = err.to_string();
 
         assert!(message.contains("No hardware-accelerated WGPU adapter"));
@@ -2329,6 +2338,18 @@ mod tests {
 
         assert!(!quit_requested);
         assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn request_event_loop_quit_calls_delegate_once() {
+        let mut calls = 0;
+
+        request_event_loop_quit(|| {
+            calls += 1;
+            Ok(())
+        });
+
+        assert_eq!(calls, 1);
     }
 
     #[test]

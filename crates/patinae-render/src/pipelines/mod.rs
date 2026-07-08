@@ -68,10 +68,11 @@ pub(crate) fn build_draw_pair(
         label: Some(&format!("{label_prefix}.shader")),
         source: wgpu::ShaderSource::Wgsl(shader_source::expand(wgsl).into()),
     });
+    let bind_group_layouts: Vec<_> = bgls.iter().map(|layout| Some(*layout)).collect();
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{label_prefix}.pipeline_layout")),
-        bind_group_layouts: bgls,
+        bind_group_layouts: &bind_group_layouts,
         immediate_size: 0,
     });
 
@@ -94,8 +95,8 @@ pub(crate) fn build_draw_pair(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
@@ -127,8 +128,8 @@ pub(crate) fn build_draw_pair(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
@@ -164,9 +165,10 @@ pub(crate) fn build_fast_overlay_pipeline(
         label: Some(&format!("{label_prefix}.shader")),
         source: wgpu::ShaderSource::Wgsl(shader_source::expand(wgsl).into()),
     });
+    let bind_group_layouts: Vec<_> = bgls.iter().map(|layout| Some(*layout)).collect();
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{label_prefix}.pipeline_layout")),
-        bind_group_layouts: bgls,
+        bind_group_layouts: &bind_group_layouts,
         immediate_size: 0,
     });
     let vertex_buffers = [vertex_layout];
@@ -187,8 +189,8 @@ pub(crate) fn build_fast_overlay_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::LessEqual,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

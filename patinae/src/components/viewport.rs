@@ -175,7 +175,7 @@ impl ViewportRenderer {
     /// Create from a Slint graphics API handle. Returns the renderer and
     /// optional adapter info (for HUD display).
     pub fn setup(api: &slint::GraphicsAPI) -> Option<(Self, Option<AdapterInfo>)> {
-        let slint::GraphicsAPI::WGPU28 {
+        let slint::GraphicsAPI::WGPU29 {
             instance,
             device,
             queue,

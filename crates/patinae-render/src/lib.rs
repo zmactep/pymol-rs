@@ -65,10 +65,10 @@ pub use memory_policy::{
     RenderMemoryProfileParseError, RenderMemorySelectionInput, RepresentationBudgetPolicy,
     SceneStoreCompactionPolicy, SceneStoreGrowthPolicy, SceneStoreMemoryPolicy, ShadowPolicy,
     PERFORMANCE_MAX_BUFFER_SIZE, PERFORMANCE_MAX_STORAGE_BUFFER_BINDING_SIZE,
+    RENDER_COMPUTE_STORAGE_BUFFERS_PER_STAGE,
 };
 pub use memory_recovery::{
-    is_surface_oom, is_wgpu_oom, next_oom_fallback, RenderMemoryRecoveryAction,
-    RenderMemoryRecoveryStage,
+    is_wgpu_oom, next_oom_fallback, RenderMemoryRecoveryAction, RenderMemoryRecoveryStage,
 };
 pub use picking::{ObjectId, PackedId, PickHit, PickingMode, RenderConfig, RepKind};
 pub use render_artifacts::{

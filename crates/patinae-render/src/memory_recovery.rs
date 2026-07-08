@@ -138,11 +138,6 @@ pub const fn is_wgpu_oom(error: &wgpu::Error) -> bool {
     matches!(error, wgpu::Error::OutOfMemory { .. })
 }
 
-/// Returns `true` when a surface error is a confirmed out-of-memory signal.
-pub const fn is_surface_oom(error: wgpu::SurfaceError) -> bool {
-    matches!(error, wgpu::SurfaceError::OutOfMemory)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,14 +298,5 @@ mod tests {
         assert!(is_wgpu_oom(&oom));
         assert!(!is_wgpu_oom(&validation));
         assert!(!is_wgpu_oom(&internal));
-    }
-
-    #[test]
-    fn surface_classifier_only_accepts_out_of_memory() {
-        assert!(is_surface_oom(wgpu::SurfaceError::OutOfMemory));
-        assert!(!is_surface_oom(wgpu::SurfaceError::Lost));
-        assert!(!is_surface_oom(wgpu::SurfaceError::Outdated));
-        assert!(!is_surface_oom(wgpu::SurfaceError::Timeout));
-        assert!(!is_surface_oom(wgpu::SurfaceError::Other));
     }
 }

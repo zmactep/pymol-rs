@@ -48,7 +48,7 @@ impl SphereLodCountPipeline {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.sphere_lod_count.pipeline_layout"),
-            bind_group_layouts: &[&scene_layout.bind_group_layout, &count_layout],
+            bind_group_layouts: &[Some(&scene_layout.bind_group_layout), Some(&count_layout)],
             immediate_size: 0,
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {

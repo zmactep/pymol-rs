@@ -259,7 +259,7 @@ fn budget_bytes_for_policy(policy: RenderMemoryPolicy) -> Option<u64> {
 }
 
 fn device_skip_reason(estimate: RepMemoryEstimate, limits: &wgpu::Limits) -> Option<RepSkipReason> {
-    let storage_limit = u64::from(limits.max_storage_buffer_binding_size);
+    let storage_limit = limits.max_storage_buffer_binding_size;
     let single_buffer_limit = limits.max_buffer_size.min(storage_limit);
     (estimate.required_bytes > single_buffer_limit).then_some(RepSkipReason::DeviceLimitExceeded)
 }
@@ -313,7 +313,7 @@ mod tests {
     fn limits() -> wgpu::Limits {
         wgpu::Limits {
             max_buffer_size: gib_to_bytes(4),
-            max_storage_buffer_binding_size: gib_to_bytes(2) as u32,
+            max_storage_buffer_binding_size: gib_to_bytes(2),
             ..wgpu::Limits::default()
         }
     }
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn planner_reports_device_limit_before_budget_pressure() {
         let mut limits = limits();
-        limits.max_storage_buffer_binding_size = mib_to_bytes(64) as u32;
+        limits.max_storage_buffer_binding_size = mib_to_bytes(64);
         let requests = [request(
             RepKind::Dot,
             vec![estimate(128, RepQualityLevel::Full)],

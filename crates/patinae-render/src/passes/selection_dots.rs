@@ -102,10 +102,10 @@ impl SelectionDotsPass {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("patinae.selection_dots.pipeline_layout"),
             bind_group_layouts: &[
-                &ctx.frame.bind_group_layout,
-                &ctx.lighting.bind_group_layout,
-                &scene_layout.bind_group_layout,
-                &bind_group_layout,
+                Some(&ctx.frame.bind_group_layout),
+                Some(&ctx.lighting.bind_group_layout),
+                Some(&scene_layout.bind_group_layout),
+                Some(&bind_group_layout),
             ],
             immediate_size: 0,
         });
@@ -130,8 +130,8 @@ impl SelectionDotsPass {
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),

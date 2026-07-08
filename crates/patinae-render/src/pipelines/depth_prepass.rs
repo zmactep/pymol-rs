@@ -242,9 +242,10 @@ fn make_layout(
     label: &str,
     bgls: &[&wgpu::BindGroupLayout],
 ) -> wgpu::PipelineLayout {
+    let bind_group_layouts: Vec<_> = bgls.iter().map(|layout| Some(*layout)).collect();
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(label),
-        bind_group_layouts: bgls,
+        bind_group_layouts: &bind_group_layouts,
         immediate_size: 0,
     })
 }
@@ -277,8 +278,8 @@ fn build_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

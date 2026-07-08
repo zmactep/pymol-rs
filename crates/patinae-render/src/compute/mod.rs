@@ -131,7 +131,7 @@ pub(crate) fn make_compute_build_pipeline(
 ) -> ComputeBuildPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{label_prefix}.pipeline_layout")),
-        bind_group_layouts: &[&scene_layout.bind_group_layout, &build_layout],
+        bind_group_layouts: &[Some(&scene_layout.bind_group_layout), Some(&build_layout)],
         immediate_size: 0,
     });
 

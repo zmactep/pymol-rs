@@ -41,9 +41,8 @@ impl GpuState {
         let element = document
             .get_element_by_id(canvas_id)
             .ok_or_else(|| format!("Canvas '{}' not found", canvas_id))?;
-        let canvas: HtmlCanvasElement = element
-            .dyn_into()
-            .map_err(|_| "Element is not a canvas")?;
+        let canvas: HtmlCanvasElement =
+            element.dyn_into().map_err(|_| "Element is not a canvas")?;
 
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -56,102 +55,96 @@ impl GpuState {
 
         #[cfg(target_arch = "wasm32")]
         {
-        let mut config = config;
-        // Create wgpu instance with WebGPU backend
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::BROWSER_WEBGPU,
-            ..Default::default()
-        });
+            let mut config = config;
+            // Create wgpu instance with WebGPU backend.
+            let mut instance_descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+            instance_descriptor.backends = wgpu::Backends::BROWSER_WEBGPU;
+            let instance = wgpu::Instance::new(instance_descriptor);
 
-        // Create surface from canvas (wasm-only API)
-        let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .map_err(|e| format!("Failed to create surface: {}", e))?;
+            // Create surface from canvas (wasm-only API)
+            let surface = instance
+                .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+                .map_err(|e| format!("Failed to create surface: {}", e))?;
 
-        // Request adapter
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
+            // Request adapter
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: Some(&surface),
+                    force_fallback_adapter: false,
+                })
+                .await
+                .map_err(|e| format!("No suitable GPU adapter: {}", e))?;
+
+            let adapter_info = adapter.get_info();
+            log::info!("GPU adapter: {}", adapter_info.name);
+            let adapter_limits = adapter.limits();
+            let memory_policy = select_render_memory_policy(
+                RenderMemorySelectionInput::from_wgpu(&adapter_info, &adapter_limits, true),
+                memory_profile_override,
+            );
+            config.memory = memory_policy;
+            log::info!(
+                "render memory profile: profile={} budget={:?}",
+                memory_policy.profile,
+                memory_policy.budget_bytes
+            );
+
+            // Request device
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor {
+                    label: Some("patinae-web"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: required_limits_for_memory_policy(
+                        &adapter_limits,
+                        memory_policy,
+                    ),
+                    memory_hints: memory_policy.wgpu_memory_hints(),
+                    experimental_features: wgpu::ExperimentalFeatures::default(),
+                    trace: wgpu::Trace::Off,
+                })
+                .await
+                .map_err(|e| format!("Failed to create device: {}", e))?;
+
+            // Configure surface
+            let caps = surface.get_capabilities(&adapter);
+            let format = caps
+                .formats
+                .iter()
+                .find(|f| **f == wgpu::TextureFormat::Bgra8Unorm)
+                .or_else(|| {
+                    caps.formats
+                        .iter()
+                        .find(|f| **f == wgpu::TextureFormat::Rgba8Unorm)
+                })
+                .copied()
+                .unwrap_or(caps.formats[0]);
+
+            let surface_config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                width,
+                height,
+                present_mode: wgpu::PresentMode::AutoVsync,
+                alpha_mode: caps.alpha_modes[0],
+                view_formats: vec![],
+                desired_maximum_frame_latency: 2,
+            };
+            surface.configure(&device, &surface_config);
+
+            // patinae-render takes Arc<Device>/Arc<Queue>; wrap the wgpu handles
+            // (which are themselves Arc-backed internally — clone is cheap).
+            let device_arc = Arc::new(device);
+            let queue_arc = Arc::new(queue);
+            let state =
+                RenderState::with_config(device_arc, queue_arc, format, (width, height), config);
+
+            Ok(Self {
+                state,
+                surface,
+                surface_config,
+                config,
             })
-            .await
-            .map_err(|e| format!("No suitable GPU adapter: {}", e))?;
-
-        let adapter_info = adapter.get_info();
-        log::info!("GPU adapter: {}", adapter_info.name);
-        let adapter_limits = adapter.limits();
-        let memory_policy = select_render_memory_policy(
-            RenderMemorySelectionInput::from_wgpu(&adapter_info, &adapter_limits, true),
-            memory_profile_override,
-        );
-        config.memory = memory_policy;
-        log::info!(
-            "render memory profile: profile={} budget={:?}",
-            memory_policy.profile,
-            memory_policy.budget_bytes
-        );
-
-        // Request device
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("patinae-web"),
-                required_features: wgpu::Features::empty(),
-                required_limits: required_limits_for_memory_policy(
-                    &adapter_limits,
-                    memory_policy,
-                ),
-                memory_hints: memory_policy.wgpu_memory_hints(),
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-                trace: wgpu::Trace::Off,
-            })
-            .await
-            .map_err(|e| format!("Failed to create device: {}", e))?;
-
-        // Configure surface
-        let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .find(|f| **f == wgpu::TextureFormat::Bgra8Unorm)
-            .or_else(|| {
-                caps.formats
-                    .iter()
-                    .find(|f| **f == wgpu::TextureFormat::Rgba8Unorm)
-            })
-            .copied()
-            .unwrap_or(caps.formats[0]);
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &surface_config);
-
-        // patinae-render takes Arc<Device>/Arc<Queue>; wrap the wgpu handles
-        // (which are themselves Arc-backed internally — clone is cheap).
-        let device_arc = Arc::new(device);
-        let queue_arc = Arc::new(queue);
-        let state = RenderState::with_config(
-            device_arc,
-            queue_arc,
-            format,
-            (width, height),
-            config,
-        );
-
-        Ok(Self {
-            state,
-            surface,
-            surface_config,
-            config,
-        })
         }
     }
 
@@ -169,12 +162,6 @@ impl GpuState {
         self.surface
             .configure(&self.state.ctx.device, &self.surface_config);
         self.state.resize((width, height));
-    }
-
-    /// Drop optional targets and compact SceneStore before an OOM retry.
-    pub fn prepare_oom_retry(&mut self) {
-        self.state.force_scene_store_compaction();
-        self.state.drop_unused_optional_targets();
     }
 
     /// Rebuild the render state with a lower effective memory profile.

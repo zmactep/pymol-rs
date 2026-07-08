@@ -82,7 +82,7 @@ fn env_flag(name: &str) -> bool {
 }
 
 fn request_device() -> (wgpu::Device, wgpu::Queue) {
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         force_fallback_adapter: false,
@@ -105,7 +105,7 @@ fn request_device() -> (wgpu::Device, wgpu::Queue) {
         "adapter: {} ({:?}); storage_limit={:.2} MiB max_buffer={:.2} MiB",
         info.name,
         info.backend,
-        bytes_to_mib(u64::from(limits.max_storage_buffer_binding_size)),
+        bytes_to_mib(limits.max_storage_buffer_binding_size),
         bytes_to_mib(limits.max_buffer_size)
     );
 

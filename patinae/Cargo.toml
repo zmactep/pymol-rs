@@ -42,7 +42,7 @@ objc2-foundation = "0.2"
 raw-window-handle = "0.6"
 
 [build-dependencies]
-slint-build = "1.16"
+slint-build = "1.17.1"
 
 [lints]
 workspace = true

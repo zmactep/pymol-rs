@@ -25,7 +25,7 @@ enum SceneErrorKind {
     AnimationError(String),
     WindowError(String),
     RenderError(String),
-    SurfaceError(wgpu::SurfaceError),
+    SurfaceError(String),
     DeviceError(wgpu::RequestDeviceError),
     IoError(std::io::Error),
 }
@@ -110,9 +110,9 @@ impl SceneError {
         Self::new(SceneErrorKind::RenderError(message.into()))
     }
 
-    /// Create a `wgpu` surface error.
-    pub fn surface_error(error: wgpu::SurfaceError) -> Self {
-        Self::new(SceneErrorKind::SurfaceError(error))
+    /// Create a surface error.
+    pub fn surface_error(error: impl fmt::Display) -> Self {
+        Self::new(SceneErrorKind::SurfaceError(error.to_string()))
     }
 
     /// Create a `wgpu` device-request error.
@@ -133,7 +133,6 @@ impl SceneError {
     /// Return the upstream source error, if available.
     pub fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match &self.kind {
-            SceneErrorKind::SurfaceError(error) => Some(error),
             SceneErrorKind::DeviceError(error) => Some(error),
             SceneErrorKind::IoError(error) => Some(error),
             _ => None,
@@ -327,12 +326,6 @@ impl fmt::Display for SceneError {
 impl StdError for SceneError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         SceneError::source(self)
-    }
-}
-
-impl From<wgpu::SurfaceError> for SceneError {
-    fn from(error: wgpu::SurfaceError) -> Self {
-        Self::surface_error(error)
     }
 }
 
