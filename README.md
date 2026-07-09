@@ -58,7 +58,7 @@ stack.
 ### Pre-built binaries
 
 Download the latest release for your platform from
-[Releases](https://github.com/zmactep/pymol-rs/releases/latest).
+[Releases](https://github.com/zmactep/patinae/releases/latest).
 
 Standalone executable:
 
@@ -81,8 +81,8 @@ Prerequisites:
 - [Node.js](https://nodejs.org/) for the web viewer and notebook widget assets.
 
 ```bash
-git clone https://github.com/zmactep/pymol-rs
-cd pymol-rs
+git clone https://github.com/zmactep/patinae
+cd patinae
 make patinae
 ./target/release/patinae
 ```

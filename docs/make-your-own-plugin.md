@@ -67,7 +67,7 @@ license = "BSD-3-Clause"
 crate-type = ["cdylib"]
 
 [dependencies]
-patinae-plugin = { git = "https://github.com/zmactep/pymol-rs", tag = "v0.4.0" }
+patinae-plugin = { git = "https://github.com/zmactep/patinae", tag = "v0.4.0" }
 ```
 
 If the SDK crates are published for your target release, the equivalent
@@ -391,8 +391,8 @@ same SDK source as `patinae-plugin`:
 
 ```toml
 [dependencies]
-patinae-plugin = { git = "https://github.com/zmactep/pymol-rs", tag = "v0.4.0" }
-patinae-render = { git = "https://github.com/zmactep/pymol-rs", tag = "v0.4.0" }
+patinae-plugin = { git = "https://github.com/zmactep/patinae", tag = "v0.4.0" }
+patinae-render = { git = "https://github.com/zmactep/patinae", tag = "v0.4.0" }
 ```
 
 Or, if using crates.io SDK crates:
@@ -686,8 +686,8 @@ If you name `ViewportImage` through `patinae_scene`, add a matching
 
 ```toml
 [dependencies]
-patinae-plugin = { git = "https://github.com/zmactep/pymol-rs", tag = "v0.4.0" }
-patinae-scene = { git = "https://github.com/zmactep/pymol-rs", tag = "v0.4.0" }
+patinae-plugin = { git = "https://github.com/zmactep/patinae", tag = "v0.4.0" }
+patinae-scene = { git = "https://github.com/zmactep/patinae", tag = "v0.4.0" }
 ```
 
 ```rust
