@@ -120,13 +120,25 @@ impl GpuState {
                 .copied()
                 .unwrap_or(caps.formats[0]);
 
+            // Prefer an opaque surface. On some browsers `caps.alpha_modes[0]` is
+            // PreMultiplied/PostMultiplied, so the compositor blends the surface over the page
+            // and the canvas renders black even though the scene draws correctly. Opaque removes
+            // the compositor alpha path; fall back to the first advertised mode if unsupported.
+            let alpha_mode = if caps
+                .alpha_modes
+                .contains(&wgpu::CompositeAlphaMode::Opaque)
+            {
+                wgpu::CompositeAlphaMode::Opaque
+            } else {
+                caps.alpha_modes[0]
+            };
             let surface_config = wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 format,
                 width,
                 height,
                 present_mode: wgpu::PresentMode::AutoVsync,
-                alpha_mode: caps.alpha_modes[0],
+                alpha_mode,
                 view_formats: vec![],
                 desired_maximum_frame_latency: 2,
             };
