@@ -21,12 +21,19 @@ use crate::shader_source;
 
 pub const WORKGROUP: u32 = 64;
 
-/// Mirrors `ExtrudeParams` in `cartoon_extrude.wgsl`. 16 B.
+/// Mirrors `ExtrudeParams` in `cartoon_extrude.wgsl`. 48 B (three 16 B chunks).
 ///
 /// `quality` is the number of segments per tube profile (Loop / Oval). It
 /// MUST match `geom.quality` used by `compute_run_vertex_layout` on the
 /// CPU side — otherwise the per-vertex `local_vidx → (pair, k)` decode
 /// diverges from the slot allocation and the ribbon develops holes.
+///
+/// The six cross-section fields (`helix_width` .. `arrow_tip_scale`) mirror
+/// the values previously baked into `cartoon_extrude.wgsl` as WGSL `const`s.
+/// They are populated by `CartoonRep::build` from `GeomSettings`, which
+/// itself reads user-configurable `cartoon_oval_width` /
+/// `cartoon_oval_length` / `cartoon_rect_width` / `cartoon_rect_length` /
+/// `cartoon_loop_radius` / `cartoon_arrow_tip_scale` settings.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct ExtrudeParams {
@@ -34,6 +41,24 @@ pub struct ExtrudeParams {
     pub n_samples: u32,
     pub n_atoms: u32,
     pub quality: u32,
+    /// Helix oval **narrow** half-axis (along the normal).
+    pub helix_width: f32,
+    /// Helix oval **wide** half-axis (along the binormal / helix axis).
+    pub helix_height: f32,
+    /// Sheet rectangle full thickness (halved to obtain the binormal
+    /// half-extent in the shader).
+    pub sheet_width: f32,
+    /// Sheet rectangle wide half-extent (along the normal).
+    pub sheet_height: f32,
+    /// Loop / coil tube radius (also the uniform-tube radius in Ribbon
+    /// mode; the host writes `ribbon_radius` into this slot for Ribbon).
+    pub loop_radius: f32,
+    /// Multiplier on `sheet_height` for the arrow-head barb width.
+    pub arrow_tip_scale: f32,
+    /// Padding to keep `size_of::<ExtrudeParams>()` a multiple of 16 B
+    /// (WGSL uniform buffer requirement).
+    pub _pad0: u32,
+    pub _pad1: u32,
 }
 
 impl ExtrudeParams {

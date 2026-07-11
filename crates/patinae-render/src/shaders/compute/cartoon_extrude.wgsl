@@ -27,13 +27,11 @@ const SS_NUCLEIC_RECT: u32 = 4u; // CartoonType::NucleicRect (matches Rust enum)
 
 const TWO_SIDED_FLAG: u32 = 1u << 0u;
 
-// Profile constants for cartoon cross-sections.
-const HELIX_WIDTH: f32 = 0.25;
-const HELIX_HEIGHT: f32 = 1.35;
-const SHEET_WIDTH: f32 = 0.4;     // full thickness; half-thick = 0.2
-const SHEET_HEIGHT: f32 = 1.4;    // wide half-extent
-const LOOP_RADIUS: f32 = 0.2;
-const ARROW_TIP_SCALE: f32 = 1.5;
+// Profile cross-section values used to live here as WGSL `const`s. They now
+// arrive from the host through `ExtrudeParams` so users can override them
+// via `set cartoon_oval_length`, `set cartoon_rect_length`, etc. See
+// `crates/patinae-render/src/compute/cartoon_extrude.rs::ExtrudeParams` and
+// `crates/patinae-settings/src/groups/cartoon.rs`.
 
 struct ExtrudeParams {
     n_runs: u32,
@@ -44,6 +42,14 @@ struct ExtrudeParams {
     // `local_vidx → (pair, k)` decode below drifts vs. the vertex-slot
     // allocation and the tube develops gaps.
     quality: u32,
+    helix_width: f32,
+    helix_height: f32,
+    sheet_width: f32,
+    sheet_height: f32,
+    loop_radius: f32,
+    arrow_tip_scale: f32,
+    _pad0: u32,
+    _pad1: u32,
 };
 
 struct ExtrudePoint {
@@ -330,9 +336,9 @@ fn emit_tube_vertex(
 fn profile_for_run(k: u32, segments: u32, is_oval: bool) -> ProfileVert {
     let kk = k % segments;
     if (is_oval) {
-        return profile_ellipse(kk, segments, HELIX_WIDTH, HELIX_HEIGHT);
+        return profile_ellipse(kk, segments, params.helix_width, params.helix_height);
     }
-    return profile_circle(kk, segments, LOOP_RADIUS);
+    return profile_circle(kk, segments, params.loop_radius);
 }
 
 // ============================================================================
@@ -366,8 +372,8 @@ fn emit_sheet_body_vertex(
     let s1 = s0 + 1u;
     let f0 = frame_at(s0, run.sample_start, run.sample_end);
     let f1 = frame_at(s1, run.sample_start, run.sample_end);
-    let half_width = SHEET_HEIGHT;        // wide half-extent along NORMAL
-    let half_thick = SHEET_WIDTH * 0.5;   // thin half-extent along BINORMAL
+    let half_width = params.sheet_height;        // wide half-extent along NORMAL
+    let half_thick = params.sheet_width * 0.5;   // thin half-extent along BINORMAL
     let c0 = sheet_corners(f0.position, f0.normal, f0.binormal, half_width, half_thick);
     let c1 = sheet_corners(f1.position, f1.normal, f1.binormal, half_width, half_thick);
     let id0 = extrude_points[s0].atom_idx;
@@ -434,8 +440,8 @@ fn emit_sheet_cap_vertex(
 ) {
     let s = select(run.sample_end, run.sample_start, is_back);
     let f = frame_at(s, run.sample_start, run.sample_end);
-    let half_width = SHEET_HEIGHT;
-    let half_thick = SHEET_WIDTH * 0.5;
+    let half_width = params.sheet_height;
+    let half_thick = params.sheet_width * 0.5;
     let c = sheet_corners(f.position, f.normal, f.binormal, half_width, half_thick);
     let cap_n = select(f.tangent, -f.tangent, is_back);
     let id = extrude_points[s].atom_idx;
@@ -565,8 +571,8 @@ fn emit_arrow_segment_vertex(
     let base_f = frame_at(base_s, run.sample_start, run.sample_end);
     let n = base_f.normal;
     let b = base_f.binormal;
-    let half_thick = SHEET_WIDTH * 0.5;
-    let arrow_width = SHEET_HEIGHT * ARROW_TIP_SCALE;
+    let half_thick = params.sheet_width * 0.5;
+    let arrow_width = params.sheet_height * params.arrow_tip_scale;
     let start_pos = base_f.position;
     let end_pos = extrude_points[tip_s].position;
     let t0 = f32(seg_idx) / f32(arrow_pairs);
@@ -640,9 +646,9 @@ fn emit_shoulder_cap_vertex(
     let f = frame_at(base_s, run.sample_start, run.sample_end);
     let n = f.normal;
     let b = f.binormal;
-    let half_width = SHEET_HEIGHT;
-    let half_thick = SHEET_WIDTH * 0.5;
-    let arrow_width = half_width * ARROW_TIP_SCALE;
+    let half_width = params.sheet_height;
+    let half_thick = params.sheet_width * 0.5;
+    let arrow_width = half_width * params.arrow_tip_scale;
     let p = f.position;
     let body_tl = p + n * half_width + b * half_thick;
     let body_tr = p - n * half_width + b * half_thick;

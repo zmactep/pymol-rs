@@ -58,5 +58,32 @@ define_settings_group! {
             name = "cartoon_transparency",
             min = 0.0, max = 1.0,
             side_effects = [ColorRebuild];
+        // Cross-section dimensions. `0.0` = "auto" — fall back to the LOD-picked
+        // default so users who don't touch these still get the same look.
+        // Non-zero overrides the default and drives GPU extrusion directly.
+        oval_width: f32 = 0.0,
+            name = "cartoon_oval_width",
+            min = 0.0, max = 5.0,
+            side_effects = [RepresentationRebuild];
+        oval_length: f32 = 0.0,
+            name = "cartoon_oval_length",
+            min = 0.0, max = 5.0,
+            side_effects = [RepresentationRebuild];
+        rect_width: f32 = 0.0,
+            name = "cartoon_rect_width",
+            min = 0.0, max = 5.0,
+            side_effects = [RepresentationRebuild];
+        rect_length: f32 = 0.0,
+            name = "cartoon_rect_length",
+            min = 0.0, max = 5.0,
+            side_effects = [RepresentationRebuild];
+        loop_radius: f32 = 0.0,
+            name = "cartoon_loop_radius",
+            min = 0.0, max = 5.0,
+            side_effects = [RepresentationRebuild];
+        arrow_tip_scale: f32 = 0.0,
+            name = "cartoon_arrow_tip_scale",
+            min = 0.0, max = 5.0,
+            side_effects = [RepresentationRebuild];
     }
 }
