@@ -34,7 +34,6 @@
 
 pub mod backbone;
 pub mod frame;
-pub mod params;
 pub mod tessellation;
 pub mod utils;
 
