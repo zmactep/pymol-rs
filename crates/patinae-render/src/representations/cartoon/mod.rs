@@ -725,6 +725,20 @@ impl Representation for CartoonRep {
             n_samples: extrude_points_gpu.len() as u32,
             n_atoms,
             quality: geom_settings.quality,
+            // Cross-section dimensions used to live in `cartoon_extrude.wgsl`
+            // as `const` literals. They now travel through this uniform so
+            // `set cartoon_oval_length`, `set cartoon_rect_length`, etc. take
+            // effect. `geom_settings` already applied the `0.0 = auto` fallback
+            // in `tessellation::from_resolved_settings`; the Ribbon override
+            // above additionally forced `loop_radius = ribbon.radius`.
+            helix_width: geom_settings.helix_width,
+            helix_height: geom_settings.helix_height,
+            sheet_width: geom_settings.sheet_width,
+            sheet_height: geom_settings.sheet_height,
+            loop_radius: geom_settings.loop_radius,
+            arrow_tip_scale: geom_settings.arrow_tip_scale,
+            _pad0: 0,
+            _pad1: 0,
         };
         let total_vertices = output.total_vertices;
         let vertex_bytes = (total_vertices as u64) * 24;

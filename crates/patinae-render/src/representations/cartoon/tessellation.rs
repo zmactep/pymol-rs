@@ -194,7 +194,7 @@ pub fn from_resolved_settings(
     settings: &ResolvedSettings,
     lod: SceneLod,
 ) -> (PipelineSettings, GeomSettings) {
-    let (mut p, g) = from_lod(lod);
+    let (mut p, mut g) = from_lod(lod);
     let c = &settings.cartoon;
 
     if c.sampling > 0 {
@@ -213,6 +213,28 @@ pub fn from_resolved_settings(
 
     let raw_refine = c.refine.max(0) as u32;
     p.refine = raw_refine + (raw_refine & 1);
+
+    // Cross-section overrides. `0.0` keeps the LOD-picked default; any
+    // positive value replaces it. Mirrors the `ribbon_radius = 0.0 → auto`
+    // convention used elsewhere in the cartoon path.
+    if c.oval_width > 0.0 {
+        g.helix_width = c.oval_width;
+    }
+    if c.oval_length > 0.0 {
+        g.helix_height = c.oval_length;
+    }
+    if c.rect_width > 0.0 {
+        g.sheet_width = c.rect_width;
+    }
+    if c.rect_length > 0.0 {
+        g.sheet_height = c.rect_length;
+    }
+    if c.loop_radius > 0.0 {
+        g.loop_radius = c.loop_radius;
+    }
+    if c.arrow_tip_scale > 0.0 {
+        g.arrow_tip_scale = c.arrow_tip_scale;
+    }
 
     (p, g)
 }
