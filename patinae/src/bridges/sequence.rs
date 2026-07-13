@@ -96,11 +96,8 @@ impl GlyphAtlas {
     fn glyph_md(&mut self, c: char) -> Option<&Glyph> {
         let scale = self.md_scale;
         if !self.md.contains_key(&c) {
-            if let Some(g) = rasterise(&self.font, scale, c) {
-                self.md.insert(c, g);
-            } else {
-                return None;
-            }
+            let glyph = rasterise(&self.font, scale, c)?;
+            self.md.insert(c, glyph);
         }
         self.md.get(&c)
     }
@@ -108,11 +105,8 @@ impl GlyphAtlas {
     fn glyph_xs(&mut self, c: char) -> Option<&Glyph> {
         let scale = self.xs_scale;
         if !self.xs.contains_key(&c) {
-            if let Some(g) = rasterise(&self.font, scale, c) {
-                self.xs.insert(c, g);
-            } else {
-                return None;
-            }
+            let glyph = rasterise(&self.font, scale, c)?;
+            self.xs.insert(c, glyph);
         }
         self.xs.get(&c)
     }
