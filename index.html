@@ -3,10 +3,10 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PyMOL-RS — Molecular Visualization, Rewritten in Rust</title>
+        <title>Patinae — A Fast, Programmable Molecular Viewer</title>
         <meta
             name="description"
-            content="A modern molecular visualization system written in Rust. GPU-accelerated, memory-safe, cross-platform."
+            content="An independent, GPU-first molecular viewer for research, scripting, and the web. WebGPU-accelerated, memory-safe, cross-platform — compatible with the PyMOL commands you already know."
         />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -22,10 +22,10 @@
             <div class="nav-inner">
                 <a href="#" class="nav-logo"
                     ><img
-                        src="assets/images/pymol-rs.png"
-                        alt="PyMOL-RS logo"
+                        src="assets/images/patinae.png"
+                        alt="Patinae logo"
                         class="nav-logo-img"
-                    /><span>PyMOL<span>-RS</span></span></a
+                    /><span>Patinae</span></a
                 >
                 <ul class="nav-links">
                     <li><a href="#features">Features</a></li>
@@ -33,7 +33,7 @@
                     <li><a href="docs.html">Docs</a></li>
                     <li>
                         <a
-                            href="https://github.com/zmactep/pymol-rs"
+                            href="https://github.com/zmactep/patinae"
                             class="btn-nav"
                             >GitHub ↗</a
                         >
@@ -52,17 +52,19 @@
                 <div class="hero-text">
                     <div class="hero-badge">
                         <span class="dot"></span>
-                        v0.3.3 · BSD 3-Clause
+                        v0.4.4 · BSD 3-Clause
                     </div>
-                    <h1>Molecular visualization, <em>rewritten</em></h1>
+                    <h1>Molecular visualization, <em>reimagined</em></h1>
                     <p class="hero-sub">
-                        A complete Rust reimplementation of PyMOL.
-                        GPU-accelerated via WebGPU. Memory-safe. Same commands
-                        you already know — entirely new engine underneath.
+                        An independent, GPU-first molecular viewer for research,
+                        scripting, and the web. Accelerated via WebGPU.
+                        Memory-safe. Compatible with the PyMOL commands and
+                        selections you already know — an entirely new engine
+                        underneath.
                     </p>
                     <div class="hero-actions">
                         <a
-                            href="https://github.com/zmactep/pymol-rs"
+                            href="https://github.com/zmactep/patinae"
                             class="btn-primary"
                         >
                             <svg
@@ -86,7 +88,7 @@
                     <div class="hero-render">
                         <img
                             src="assets/images/9DC3-HD.png"
-                            alt="Molecular complex rendered in PyMOL-RS — cartoon representation with transparent surface, colored by chain"
+                            alt="Molecular complex rendered in Patinae — cartoon representation with transparent surface, colored by chain"
                             style="display: block"
                         />
                     </div>
@@ -123,7 +125,7 @@
                 </p>
                 <div class="install-cards">
                     <a
-                        href="https://github.com/zmactep/pymol-rs/releases/download/v0.3.3/PyMOL-RS.dmg"
+                        href="https://github.com/zmactep/patinae/releases/download/v0.4.4/Patinae.dmg"
                         class="install-card"
                     >
                         <svg
@@ -140,7 +142,7 @@
                         <span class="install-card-format">.dmg</span>
                     </a>
                     <a
-                        href="https://github.com/zmactep/pymol-rs/releases/download/v0.3.3/pymol-rs-bundle-windows-x86_64.zip"
+                        href="https://github.com/zmactep/patinae/releases/download/v0.4.4/patinae-bundle-windows-x86_64.zip"
                         class="install-card"
                     >
                         <svg
@@ -157,7 +159,7 @@
                         <span class="install-card-format">.zip</span>
                     </a>
                     <a
-                        href="https://github.com/zmactep/pymol-rs/releases/download/v0.3.3/pymol-rs-bundle-windows-arm64.zip"
+                        href="https://github.com/zmactep/patinae/releases/download/v0.4.4/patinae-bundle-windows-arm64.zip"
                         class="install-card"
                     >
                         <svg
@@ -176,10 +178,10 @@
                 </div>
                 <p class="install-note">
                     macOS may block the app on first launch. To fix, run:
-                    <code>xattr -cr /Applications/PyMOL-RS.app</code>
+                    <code>xattr -cr /Applications/Patinae.app</code>
                 </p>
                 <a
-                    href="https://github.com/zmactep/pymol-rs/releases"
+                    href="https://github.com/zmactep/patinae/releases"
                     class="install-all-link"
                 >
                     All releases & source →
@@ -267,11 +269,12 @@
         <section class="features" id="features">
             <div class="section-inner">
                 <div class="reveal">
-                    <div class="section-label">Why PyMOL-RS</div>
+                    <div class="section-label">Why Patinae</div>
                     <div class="section-title">Built for the next 25 years</div>
                     <p class="section-subtitle">
-                        Not a wrapper. Not a port. A ground-up reimplementation
-                        in a language designed for performance and safety.
+                        Its roots are in PyMOL, but Patinae has grown into an
+                        independent engine of its own — built in a language
+                        designed for performance and safety.
                     </p>
                 </div>
                 <div class="features-grid reveal">
@@ -352,9 +355,39 @@
                         <div class="feature-icon orange">🖥️</div>
                         <div class="feature-title">Cross-platform</div>
                         <div class="feature-desc">
-                            macOS, Linux, Windows. Single
-                            <code>cargo build</code>. egui-based GUI that looks
-                            native everywhere.
+                            macOS, Linux, Windows. A native Slint desktop app
+                            with docked panels, sequence and movie views, and
+                            REPL — that looks native everywhere.
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon green">🧪</div>
+                        <div class="feature-title">Molecular mechanics</div>
+                        <div class="feature-desc">
+                            A dedicated <code>patinae-mm</code> engine: GROMACS
+                            force fields (Amber19SB, CHARMM27, OPLS-AA), energy
+                            evaluation, minimization, hydrogens, mutations,
+                            rotamers, and scoring.
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon blue">💎</div>
+                        <div class="feature-title">GPU-native ray tracing</div>
+                        <div class="feature-desc">
+                            The <code>ray</code> command traces renderer-owned
+                            GPU artifacts with the BVH built on the GPU. Large
+                            scenes stay resident instead of streaming through the
+                            CPU.
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon magenta">📊</div>
+                        <div class="feature-title">Renderer memory profiles</div>
+                        <div class="feature-desc">
+                            Auto, performance, balanced, lite, and
+                            <code>manual:&lt;MiB&gt;</code> policies with
+                            budget-aware planning — so constrained and integrated
+                            GPUs scale down deliberately, not mysteriously.
                         </div>
                     </div>
                 </div>
@@ -370,37 +403,37 @@
                             <div class="dots">
                                 <span></span><span></span><span></span>
                             </div>
-                            pymol-rs
+                            patinae
                         </div>
                         <pre
                             class="code-body"
                         ><span class="comment"># Load a structure from PDB</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">fetch</span> <span class="str">1alk</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">fetch</span> <span class="str">1alk</span>
 
 <span class="comment"># Show cartoon and color by chain</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">show</span> <span class="arg">cartoon</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">color</span> <span class="arg">chain</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">show</span> <span class="arg">cartoon</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">color</span> <span class="arg">chain</span>
 
 <span class="comment"># Add transparent surface</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">show</span> <span class="arg">surface</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">set</span> <span class="arg">transparency</span>, <span class="num">0.7</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">show</span> <span class="arg">surface</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">set</span> <span class="arg">transparency</span>, <span class="num">0.7</span>
 
 <span class="comment"># Select active site residues</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">select</span> <span class="str">site</span>, <span class="arg">byres</span> <span class="str">near_to</span> <span class="num">5</span> <span class="str">of resn ZN</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">show</span> <span class="arg">sticks</span>, <span class="str">site</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">set</span> <span class="arg">stick_color</span>, <span class="str">atomic</span>, <span class="str">site</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">select</span> <span class="str">site</span>, <span class="arg">byres</span> <span class="str">near_to</span> <span class="num">5</span> <span class="str">of resn ZN</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">show</span> <span class="arg">sticks</span>, <span class="str">site</span>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">set</span> <span class="arg">stick_color</span>, <span class="str">atomic</span>, <span class="str">site</span>
 
 <span class="comment"># Save the session</span>
-<span class="prompt-sym">PyMOL-RS&gt; </span><span class="cmd">save</span> <span class="str">my_session.prs</span></pre>
+<span class="prompt-sym">Patinae&gt; </span><span class="cmd">save</span> <span class="str">my_session.prs</span></pre>
                     </div>
                     <div class="code-side">
                         <div class="section-label">Command language</div>
                         <h3>Feels like home</h3>
                         <p>
-                            If you know PyMOL, you know PyMOL-RS. The same
+                            If you know PyMOL, you know Patinae. The same
                             command syntax, the same selection algebra, the same
-                            muscle memory. We reimplemented the language, not
-                            just the renderer.
+                            muscle memory — an independent engine that speaks the
+                            language you already use.
                         </p>
                         <ul class="code-features-list">
                             <li>
@@ -447,7 +480,7 @@
                     <div class="plugin-video">
                         <img
                             src="assets/video/DOOM.webp"
-                            alt="DOOM running inside PyMOL-RS as a plugin demo"
+                            alt="DOOM running inside Patinae as a plugin demo"
                         />
                     </div>
                 </div>
@@ -485,80 +518,82 @@
                 <div class="arch-grid reveal">
                     <div class="arch-layer-label">Application layer</div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-gui</div>
-                        <div class="arch-crate-desc">GUI (egui)</div>
+                        <div class="arch-crate-name">patinae</div>
+                        <div class="arch-crate-desc">
+                            Native desktop app (Slint)
+                        </div>
                     </div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-cmd</div>
+                        <div class="arch-crate-name">patinae-cmd</div>
                         <div class="arch-crate-desc">
                             Command parser & executor
                         </div>
                     </div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-plugin</div>
-                        <div class="arch-crate-desc">Plugin system</div>
+                        <div class="arch-crate-name">patinae-plugin</div>
+                        <div class="arch-crate-desc">Plugin SDK & host</div>
                     </div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-framework</div>
+                        <div class="arch-crate-name">patinae-framework</div>
                         <div class="arch-crate-desc">
                             Messaging & core components
                         </div>
                     </div>
                     <div class="arch-layer-label">Rendering layer</div>
                     <div class="arch-crate span-6">
-                        <div class="arch-crate-name">pymol-scene</div>
+                        <div class="arch-crate-name">patinae-scene</div>
                         <div class="arch-crate-desc">
                             Viewer, camera, scene graph
                         </div>
                     </div>
                     <div class="arch-crate span-6">
-                        <div class="arch-crate-name">pymol-render</div>
-                        <div class="arch-crate-desc">wgpu rendering engine</div>
+                        <div class="arch-crate-name">patinae-render</div>
+                        <div class="arch-crate-desc">
+                            WebGPU rendering engine
+                        </div>
                     </div>
                     <div class="arch-layer-label">Domain layer</div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-mol</div>
+                        <div class="arch-crate-name">patinae-mol</div>
                         <div class="arch-crate-desc">
                             Core data: Atom, Bond, Molecule
                         </div>
                     </div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-io</div>
+                        <div class="arch-crate-name">patinae-io</div>
                         <div class="arch-crate-desc">
                             Format parsers & writers
                         </div>
                     </div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-session</div>
+                        <div class="arch-crate-name">patinae-session</div>
                         <div class="arch-crate-desc">Sessions save & load</div>
                     </div>
                     <div class="arch-crate">
-                        <div class="arch-crate-name">pymol-select</div>
-                        <div class="arch-crate-desc">Selection language</div>
+                        <div class="arch-crate-name">patinae-mm</div>
+                        <div class="arch-crate-desc">
+                            Molecular-mechanics engine
+                        </div>
                     </div>
                     <div class="arch-layer-label">Foundation</div>
                     <div class="arch-crate span-4">
-                        <div class="arch-crate-name">pymol-settings</div>
-                        <div class="arch-crate-desc">Configuration system</div>
+                        <div class="arch-crate-name">patinae-select</div>
+                        <div class="arch-crate-desc">Selection language</div>
                     </div>
                     <div class="arch-crate span-4">
-                        <div class="arch-crate-name">pymol-color</div>
+                        <div class="arch-crate-name">patinae-color</div>
                         <div class="arch-crate-desc">
                             Colors, schemes, ramps
                         </div>
                     </div>
                     <div class="arch-crate span-4">
-                        <div class="arch-crate-name">pymol-algos</div>
-                        <div class="arch-crate-desc">Molecular algorithms</div>
+                        <div class="arch-crate-name">patinae-settings</div>
+                        <div class="arch-crate-desc">Configuration system</div>
                     </div>
                     <div class="arch-layer-label">Plugins</div>
                     <div class="arch-crate">
                         <div class="arch-crate-name">raytracer</div>
                         <div class="arch-crate-desc">GPU ray tracing</div>
-                    </div>
-                    <div class="arch-crate">
-                        <div class="arch-crate-name">toolbar</div>
-                        <div class="arch-crate-desc">Quick-action buttons</div>
                     </div>
                     <div class="arch-crate">
                         <div class="arch-crate-name">python</div>
@@ -568,7 +603,11 @@
                     </div>
                     <div class="arch-crate">
                         <div class="arch-crate-name">ipc</div>
-                        <div class="arch-crate-desc">Unix socket control</div>
+                        <div class="arch-crate-desc">Socket control</div>
+                    </div>
+                    <div class="arch-crate">
+                        <div class="arch-crate-name">hello</div>
+                        <div class="arch-crate-desc">Minimal example</div>
                     </div>
                 </div>
             </div>
@@ -584,7 +623,7 @@
                     <span class="tribute-years">1972–2009</span>
                 </div>
                 <div class="tribute-text">
-                    PyMOL-RS exists because Warren DeLano created PyMOL — and
+                    Patinae exists because Warren DeLano created PyMOL — and
                     made it open-source at a time when publication-quality
                     molecular visualization was largely limited to expensive
                     commercial tools. That decision gave an entire generation of
@@ -601,18 +640,18 @@
             <div class="reveal">
                 <h2>Ready to try it?</h2>
                 <p>
-                    PyMOL-RS is free, open-source, and ready for your
+                    Patinae is free, open-source, and ready for your
                     structures.
                 </p>
                 <p class="cta-hint">
                     By the way — you're already using it. Scroll back up to the
                     Skripkin example and try to rotate or zoom. That's not an
-                    image, it's the web version of PyMOL-RS running live in your
+                    image, it's the web version of Patinae running live in your
                     browser.
                 </p>
                 <div class="cta-actions">
                     <a
-                        href="https://github.com/zmactep/pymol-rs"
+                        href="https://github.com/zmactep/patinae"
                         class="btn-primary"
                     >
                         <svg
@@ -625,7 +664,7 @@
                                 d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
                             />
                         </svg>
-                        Get PyMOL-RS
+                        Get Patinae
                     </a>
                     <span class="btn-secondary disabled"
                         >Docs — Coming soon</span
@@ -638,23 +677,23 @@
         <footer>
             <div class="footer-inner">
                 <div class="footer-left">
-                    PyMOL-RS © 2026 ·
+                    Patinae © 2026 ·
                     <a href="https://github.com/zmactep">Pavel Yakovlev</a> ·
                     BSD 3-Clause
                     <div class="footer-trademark">
                         PyMOL® is a registered trademark of Schrödinger, LLC.
-                        This project is an independent open-source
-                        reimplementation and is not affiliated with, endorsed
-                        by, or connected to Schrödinger, Inc. in any way.
+                        This is an independent open-source project and is not
+                        affiliated with, endorsed by, or connected to
+                        Schrödinger, Inc. in any way.
                     </div>
                 </div>
                 <ul class="footer-links">
                     <li>
-                        <a href="https://github.com/zmactep/pymol-rs">GitHub</a>
+                        <a href="https://github.com/zmactep/patinae">GitHub</a>
                     </li>
                     <li><a href="docs.html">Docs</a></li>
                     <li>
-                        <a href="https://github.com/zmactep/pymol-rs/releases"
+                        <a href="https://github.com/zmactep/patinae/releases"
                             >Releases</a
                         >
                     </li>
@@ -663,9 +702,9 @@
         </footer>
 
         <script type="module">
-            import { PyMolRSViewer } from "./js/pymol-rs-viewer.js";
+            import { PatinaeViewer } from "./js/patinae-viewer.js";
 
-            const viewer = new PyMolRSViewer(
+            const viewer = new PatinaeViewer(
                 document.getElementById("skripkin-viewer"),
                 { defer: true },
             );

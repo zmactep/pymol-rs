@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Structural Biology 101 — PyMOL-RS Docs</title>
+        <title>Structural Biology 101 — Patinae Docs</title>
         <meta
             name="description"
             content="Interactive introduction to structural biology: amino acids, nucleic acids, PDB format, and structure databases — with a live 3D viewer."
@@ -23,10 +23,10 @@
             <div class="nav-inner">
                 <a href="../index.html" class="nav-logo"
                     ><img
-                        src="../assets/images/pymol-rs.png"
-                        alt="PyMOL-RS logo"
+                        src="../assets/images/patinae.png"
+                        alt="Patinae logo"
                         class="nav-logo-img"
-                    /><span>PyMOL<span>-RS</span></span></a
+                    /><span>Patinae</span></a
                 >
                 <ul class="nav-links">
                     <li><a href="../index.html#features">Features</a></li>
@@ -36,7 +36,7 @@
                     <li><a href="../docs.html">Docs</a></li>
                     <li>
                         <a
-                            href="https://github.com/zmactep/pymol-rs"
+                            href="https://github.com/zmactep/patinae"
                             class="btn-nav"
                             >GitHub ↗</a
                         >
@@ -1356,24 +1356,24 @@
         <footer>
             <div class="footer-inner">
                 <div class="footer-left">
-                    PyMOL-RS &copy; 2026 &middot;
+                    Patinae &copy; 2026 &middot;
                     <a href="https://github.com/zmactep">Pavel Yakovlev</a>
                     &middot; BSD 3-Clause
                     <div class="footer-trademark">
                         PyMOL&reg; is a registered trademark of
-                        Schr&ouml;dinger, LLC. This project is an independent
-                        open-source reimplementation and is not affiliated with,
+                        Schr&ouml;dinger, LLC. This is an independent
+                        open-source project and is not affiliated with,
                         endorsed by, or connected to Schr&ouml;dinger, Inc. in
                         any way.
                     </div>
                 </div>
                 <ul class="footer-links">
                     <li>
-                        <a href="https://github.com/zmactep/pymol-rs">GitHub</a>
+                        <a href="https://github.com/zmactep/patinae">GitHub</a>
                     </li>
                     <li><a href="../docs.html">Docs</a></li>
                     <li>
-                        <a href="https://github.com/zmactep/pymol-rs/releases"
+                        <a href="https://github.com/zmactep/patinae/releases"
                             >Releases</a
                         >
                     </li>
@@ -1382,10 +1382,10 @@
         </footer>
 
         <script type="module">
-            import { PyMolRSViewer } from "../js/pymol-rs-viewer.js";
+            import { PatinaeViewer } from "../js/patinae-viewer.js";
             import { initDocPages } from "../js/docs-interactive.js";
 
-            const viewer = new PyMolRSViewer(
+            const viewer = new PatinaeViewer(
                 document.getElementById("viewer-container"),
                 {
                     layout: [{ name: "repl", slot: "repl" }],
